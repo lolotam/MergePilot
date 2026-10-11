@@ -9,6 +9,12 @@
   },
   "dependencies": {
     "@mergepilot/engine": "workspace:*",
-    "@mergepilot/github": "workspace:*"
+    "@mergepilot/github": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/pg": "^8.23.1"
   }
 }
