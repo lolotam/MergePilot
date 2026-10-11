@@ -5,6 +5,7 @@ import { LlmFailure } from '../../llm/failure.js';
 import type { TokenUsage } from '../../llm/types.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from '../../review/model.js';
 import { redactSecrets } from '../../security/index.js';
+import { resolveClaudeLaunch, type ResolvedClaudeLaunch } from './resolve-binary.js';
 
 // ---------------------------------------------------------------------------
 // Public SpawnLike type — injected in tests
@@ -101,13 +102,19 @@ export interface ClaudeCodeRunnerOptions {
    * Injected spawn function — defaults to Node's `child_process.spawn`.
    * Tests supply a fake that never touches the network.
    */
-  spawn?: SpawnLike;
+  spawn?: SpawnLike | undefined;
   /** Path or name of the Claude CLI binary. Defaults to `'claude'`. */
-  binary?: string;
+  binary?: string | undefined;
   /** Maximum wall-clock milliseconds before the child is killed. Defaults to 600 000. */
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
   /** Model identifier forwarded to the CLI via `--model`. Omitted when absent. */
-  model?: string;
+  model?: string | undefined;
+  /** Operating system platform. Defaults to `process.platform`. */
+  platform?: NodeJS.Platform | undefined;
+  /** File existence check function (injected for tests). */
+  fileExists?: ((path: string) => boolean) | undefined;
+  /** File reading function (injected for tests). */
+  readFile?: ((path: string) => string) | undefined;
 }
 
 /**
@@ -125,6 +132,10 @@ export class ClaudeCodeRunner implements ReviewModel {
   readonly #binary: string;
   readonly #timeoutMs: number;
   readonly #model: string | undefined;
+  readonly #platform: NodeJS.Platform;
+  readonly #fileExists: ((path: string) => boolean) | undefined;
+  readonly #readFile: ((path: string) => string) | undefined;
+  #resolvedLaunch: ResolvedClaudeLaunch | undefined;
 
   constructor(options: ClaudeCodeRunnerOptions) {
     this.#token = options.token;
@@ -133,14 +144,27 @@ export class ClaudeCodeRunner implements ReviewModel {
     this.#binary = options.binary ?? 'claude';
     this.#timeoutMs = options.timeoutMs ?? 600_000;
     this.#model = options.model;
+    this.#platform = options.platform ?? process.platform;
+    this.#fileExists = options.fileExists;
+    this.#readFile = options.readFile;
   }
 
   async generate(request: ReviewModelRequest): Promise<ReviewModelResponse> {
-    const args = this.#buildArgs(request);
+    if (!this.#resolvedLaunch) {
+      this.#resolvedLaunch = resolveClaudeLaunch({
+        binary: this.#binary,
+        platform: this.#platform,
+        fileExists: this.#fileExists,
+        readFile: this.#readFile,
+      });
+    }
+
+    const { command, prefixArgs } = this.#resolvedLaunch;
+    const args = [...prefixArgs, ...this.#buildArgs(request)];
     const env = buildEnv(this.#token);
     const stdinText = this.#buildStdin(request);
 
-    const child = this.#spawn(this.#binary, args, {
+    const child = this.#spawn(command, args, {
       cwd: this.#cwd,
       env,
       shell: false,
