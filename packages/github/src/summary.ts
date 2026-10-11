@@ -20,9 +20,159 @@ export interface ReviewSummaryInput {
 }
 
 /**
+ * Model and author text is untrusted: it must not forge our idempotency marker, close the
+ * RTL wrapper, or @-mention (and so notify) real people or teams.
+ */
+function neutralize(text: string): string {
+  return text
+    .replaceAll('<!--', '&lt;!--')
+    .replace(/<\/div/gi, '&lt;/div')
+    .replace(/(^|[^\w`])@(?=[A-Za-z0-9-])/g, '$1@\u200b');
+}
+
+function renderHeader(outcome: ReviewSummaryInput['outcome'], isArabic: boolean): string {
+  if (outcome === 'completed') {
+    return isArabic ? '## مراجعة MergePilot' : '## MergePilot review';
+  }
+  if (outcome === 'skipped-budget') {
+    return isArabic
+      ? '## مراجعة MergePilot — تم التخطي (تجاوز الميزانية)'
+      : '## MergePilot review — skipped (budget limit reached)';
+  }
+  return isArabic
+    ? '## مراجعة MergePilot — فشلت المراجعة'
+    : '## MergePilot review — failed';
+}
+
+function getDefaultReason(outcome: ReviewSummaryInput['outcome'], isArabic: boolean): string {
+  if (outcome === 'skipped-budget') {
+    return isArabic ? 'تم تجاوز الحد الأقصى للميزانية.' : 'Budget limit reached.';
+  }
+  return isArabic ? 'حدث خطأ أثناء تشغيل المراجعة.' : 'Review execution failed.';
+}
+
+function renderNotCompletedNotice(
+  outcome: ReviewSummaryInput['outcome'],
+  reason: string | undefined,
+  isArabic: boolean,
+): string {
+  const defaultReason = getDefaultReason(outcome, isArabic);
+  const effectiveReason = neutralize((reason && reason.trim()) || defaultReason);
+  if (isArabic) {
+    return `> **السبب:** ${effectiveReason}\n>\n> لم تتم مراجعة أي كود.`;
+  }
+  return `> **Reason:** ${effectiveReason}\n>\n> No code was reviewed.`;
+}
+
+function renderFindingsOutsideDiff(findings: Finding[], isArabic: boolean): string {
+  const heading = isArabic ? '### ملاحظات خارج التغييرات' : '### Findings outside the diff';
+  const detailsLabel = isArabic ? 'التفاصيل' : 'Details';
+
+  const items = findings.map((f) => {
+    const title = neutralize(f.title.trim());
+    const body = neutralize(f.body.trim());
+    return `**${f.severity}** · \`${f.path}:${f.line}\` — ${title}\n<details>\n<summary>${detailsLabel}</summary>\n\n${body}\n</details>`;
+  });
+
+  return `${heading}\n\n${items.join('\n\n')}`;
+}
+
+function renderCountsLine(inlineCount: number, summaryOnlyCount: number, isArabic: boolean): string {
+  if (isArabic) {
+    return `تعليقات مضمنة: ${inlineCount} · خارج التغييرات: ${summaryOnlyCount}`;
+  }
+  return `Inline comments: ${inlineCount} · Outside diff: ${summaryOnlyCount}`;
+}
+
+function renderIncompleteWarning(reasons: string[], isArabic: boolean): string {
+  const heading = isArabic ? '### ⚠️ تحذير: مراجعة غير مكتملة' : '### ⚠️ Warning: Incomplete review';
+  if (reasons.length === 0) {
+    const fallback = isArabic
+      ? '- تعذر فحص كامل التغييرات في هذا الطلب.'
+      : '- The review could not inspect the entire changeset.';
+    return `${heading}\n\n${fallback}`;
+  }
+  const list = reasons.map((r) => `- ${neutralize(r.trim())}`).join('\n');
+  return `${heading}\n\n${list}`;
+}
+
+function renderFooter(input: ReviewSummaryInput, isArabic: boolean): string {
+  const modelText = isArabic
+    ? `النموذج: \`${input.modelLabel}\``
+    : `Model: \`${input.modelLabel}\``;
+
+  const parts: string[] = [modelText];
+
+  const hasCost = typeof input.costUsd === 'number';
+  const hasTokens = typeof input.inputTokens === 'number' || typeof input.outputTokens === 'number';
+
+  if (hasCost && hasTokens) {
+    const costStr = `$${input.costUsd!.toFixed(4)}`;
+    const inTokens = (input.inputTokens ?? 0).toLocaleString('en-US');
+    const outTokens = (input.outputTokens ?? 0).toLocaleString('en-US');
+    if (isArabic) {
+      parts.push(`التكلفة: ${costStr} (${inTokens} مدخلات / ${outTokens} مخرجات)`);
+    } else {
+      parts.push(`Cost: ${costStr} (${inTokens} in / ${outTokens} out)`);
+    }
+  } else if (hasCost) {
+    const costStr = `$${input.costUsd!.toFixed(4)}`;
+    parts.push(isArabic ? `التكلفة: ${costStr}` : `Cost: ${costStr}`);
+  } else if (hasTokens) {
+    const inTokens = (input.inputTokens ?? 0).toLocaleString('en-US');
+    const outTokens = (input.outputTokens ?? 0).toLocaleString('en-US');
+    if (isArabic) {
+      parts.push(`التوكنات: ${inTokens} مدخلات / ${outTokens} مخرجات`);
+    } else {
+      parts.push(`Tokens: ${inTokens} in / ${outTokens} out`);
+    }
+  }
+
+  const modelLine = parts.join(' · ');
+  const disclaimer = isArabic
+    ? '`MergePilot` يكتفي بالتعليق فقط ولا يوافق على الدمج أو يمنعه.'
+    : 'MergePilot only comments and never approves or blocks merging.';
+
+  return `---\n${modelLine}\n${disclaimer}`;
+}
+
+/**
  * Renders the review body posted above the inline comments (task C4 owns the full design).
  * The hidden idempotency marker is appended separately by `publishReview`.
  */
 export function renderReviewSummary(input: ReviewSummaryInput): string {
-  return input.summary || input.reason || '';
+  const isArabic = input.language === 'ar';
+  const sections: string[] = [];
+
+  sections.push(renderHeader(input.outcome, isArabic));
+
+  if (input.outcome !== 'completed') {
+    sections.push(renderNotCompletedNotice(input.outcome, input.reason, isArabic));
+  }
+
+  if (input.summary && input.summary.trim().length > 0) {
+    sections.push(neutralize(input.summary.trim()));
+  }
+
+  if (!input.complete) {
+    sections.push(renderIncompleteWarning(input.incompleteReasons, isArabic));
+  }
+
+  if (input.summaryOnly && input.summaryOnly.length > 0) {
+    sections.push(renderFindingsOutsideDiff(input.summaryOnly, isArabic));
+  }
+
+  if (input.outcome === 'completed' || input.inlineCount > 0 || input.summaryOnly.length > 0) {
+    sections.push(renderCountsLine(input.inlineCount, input.summaryOnly?.length ?? 0, isArabic));
+  }
+
+  sections.push(renderFooter(input, isArabic));
+
+  const content = sections.join('\n\n');
+
+  if (isArabic) {
+    return `<div dir="rtl">\n\n${content}\n\n</div>`;
+  }
+
+  return content;
 }
