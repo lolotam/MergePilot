@@ -1,0 +1,36 @@
+# Dependencies
+**/node_modules/
+
+# Build outputs and typescript caches
+**/dist/
+!dist/action/
+**/*.tsbuildinfo
+
+# Git
+.git/
+.gitignore
+
+# Reference repos and study material
+reference/
+
+# Test coverage and scratch files
+coverage/
+scratch/
+
+# Local secrets and env files
+.env
+.env.*
+!.env.example
+*.pem
+
+# IDE and OS metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Repository deployment docs and configs outside image scope
+.github/
+deploy/
+docs/
+*.md
