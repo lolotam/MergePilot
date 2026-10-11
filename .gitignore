@@ -5,6 +5,9 @@ reference/
 # Dependencies and build output
 node_modules/
 dist/
+!/dist/
+/dist/*
+!dist/action/
 coverage/
 .turbo/
 
