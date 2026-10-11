@@ -468,6 +468,7 @@ describe('ClaudeCodeRunner', () => {
       expect(capturedCwd).toBe('/my/project');
     });
   });
+});
 
 describe('ClaudeCodeRunner token format', () => {
   it('rejects an Anthropic API key with a message that names the fix, without spawning', async () => {
