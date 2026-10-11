@@ -70487,7 +70487,8 @@ var TOKEN_PATTERNS = [
     kind: "pem",
     priority: 60
   },
-  { regex: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]+(?![A-Za-z0-9_-])/g, kind: "anthropic", priority: 50 },
+  // Real keys carry a long random body; a bare prefix such as `sk-ant-oat01-` in docs is not a secret.
+  { regex: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "anthropic", priority: 50 },
   { regex: /(?<![A-Za-z0-9_-])sk-proj-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "openai", priority: 50 },
   { regex: /(?<![A-Za-z0-9_-])sk-(?!ant-|proj-)[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "openai", priority: 50 },
   { regex: /(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])/g, kind: "google", priority: 50 },
