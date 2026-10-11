@@ -40,6 +40,15 @@ importers:
         specifier: ^0.28.2
         version: 0.28.2
 
+  apps/app:
+    dependencies:
+      '@mergepilot/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+      '@mergepilot/github':
+        specifier: workspace:*
+        version: link:../../packages/github
+
   packages/engine:
     dependencies:
       '@anthropic-ai/sdk':

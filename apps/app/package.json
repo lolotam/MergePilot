@@ -1,0 +1,14 @@
+{
+  "name": "@mergepilot/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -b",
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@mergepilot/engine": "workspace:*",
+    "@mergepilot/github": "workspace:*"
+  }
+}

@@ -1,0 +1,120 @@
+import type { MergePilotConfig, ReviewModel, CredentialStore } from '@mergepilot/engine';
+
+/** Workspace roles (ADR-0007). Order matters: each role includes everything below it. */
+export const ROLES = ['member', 'admin', 'owner'] as const;
+export type Role = (typeof ROLES)[number];
+
+export function roleAtLeast(actual: Role, required: Role): boolean {
+  return ROLES.indexOf(actual) >= ROLES.indexOf(required);
+}
+
+export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
+
+export interface Installation {
+  /** GitHub installation id. */
+  id: number;
+  workspaceId: string;
+  accountLogin: string;
+  accountType: 'User' | 'Organization';
+  repositorySelection: 'all' | 'selected';
+  suspended: boolean;
+}
+
+export interface WorkspaceSettings {
+  workspaceId: string;
+  provider: ApiProvider;
+  model: string;
+  language: 'ar' | 'en';
+  monthlyBudgetUsd: number | null;
+}
+
+export interface StoredCredential {
+  id: string;
+  workspaceId: string;
+  provider: ApiProvider;
+  /** Envelope-encrypted secret (see Vault). Never the plaintext. */
+  ciphertext: string;
+  keyVersion: number;
+  /** Last 4 characters, for display only. */
+  last4: string;
+  createdBy: string;
+  createdAt: Date;
+}
+
+export type ReviewRunStatus = 'queued' | 'running' | 'completed' | 'skipped' | 'failed';
+
+export interface ReviewRun {
+  id: string;
+  workspaceId: string;
+  installationId: number;
+  repoFullName: string;
+  pullNumber: number;
+  headSha: string;
+  status: ReviewRunStatus;
+  costUsd: number | null;
+  detail: string | null;
+  createdAt: Date;
+  finishedAt: Date | null;
+}
+
+/** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
+export interface AppStore {
+  /** Returns false when this delivery id was already recorded (duplicate webhook). */
+  recordDelivery(deliveryId: string, event: string): Promise<boolean>;
+
+  upsertInstallation(installation: Installation): Promise<void>;
+  /** Installation created on GitHub but not yet linked to a workspace. */
+  upsertPendingInstallation(installation: Omit<Installation, 'workspaceId'>): Promise<void>;
+  linkInstallation(installationId: number, workspaceId: string): Promise<void>;
+  getInstallation(installationId: number): Promise<Installation | null>;
+  listInstallations(workspaceId: string): Promise<Installation[]>;
+  deleteInstallation(installationId: number): Promise<void>;
+  setInstallationSuspended(installationId: number, suspended: boolean): Promise<void>;
+
+  getSettings(workspaceId: string): Promise<WorkspaceSettings | null>;
+  saveSettings(settings: WorkspaceSettings): Promise<void>;
+
+  saveCredential(credential: StoredCredential): Promise<void>;
+  getCredential(workspaceId: string, provider: ApiProvider): Promise<StoredCredential | null>;
+  listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>>;
+  deleteCredential(workspaceId: string, provider: ApiProvider): Promise<void>;
+
+  createReviewRun(run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>): Promise<ReviewRun>;
+  finishReviewRun(
+    workspaceId: string,
+    id: string,
+    result: { status: ReviewRunStatus; costUsd: number | null; detail: string | null },
+  ): Promise<void>;
+  listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
+  monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;
+}
+
+/** Envelope encryption of customer secrets (ADR-0007). */
+export interface Vault {
+  readonly keyVersion: number;
+  encrypt(plaintext: string, context: { workspaceId: string; provider: ApiProvider }): Promise<string>;
+  decrypt(ciphertext: string, context: { workspaceId: string; provider: ApiProvider }): Promise<string>;
+}
+
+export interface ReviewJob {
+  deliveryId: string;
+  installationId: number;
+  repoFullName: string;
+  pullNumber: number;
+  headSha: string;
+  baseSha: string;
+}
+
+export interface ReviewQueue {
+  enqueue(job: ReviewJob): Promise<void>;
+}
+
+/** The authenticated caller of a dashboard request. */
+export interface AuthContext {
+  userId: string;
+  email: string;
+  workspaceId: string;
+  role: Role;
+}
+
+export type { MergePilotConfig, ReviewModel, CredentialStore };
