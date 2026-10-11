@@ -69,7 +69,7 @@ const FORBIDDEN_VARS: readonly string[] = [
   'GITHUB_TOKEN',
 ];
 
-function buildEnv(token: Secret): NodeJS.ProcessEnv {
+function buildEnv(token: Secret, configDir?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
 
   for (const key of ENV_ALLOWLIST) {
@@ -86,6 +86,9 @@ function buildEnv(token: Secret): NodeJS.ProcessEnv {
   }
 
   env['CLAUDE_CODE_OAUTH_TOKEN'] = token.reveal();
+  if (configDir !== undefined) {
+    env['CLAUDE_CONFIG_DIR'] = configDir;
+  }
   return env;
 }
 
@@ -115,6 +118,8 @@ export interface ClaudeCodeRunnerOptions {
   fileExists?: ((path: string) => boolean) | undefined;
   /** File reading function (injected for tests). */
   readFile?: ((path: string) => string) | undefined;
+  /** Optional Claude configuration directory (sets CLAUDE_CONFIG_DIR). */
+  configDir?: string | undefined;
 }
 
 /**
@@ -135,6 +140,7 @@ export class ClaudeCodeRunner implements ReviewModel {
   readonly #platform: NodeJS.Platform;
   readonly #fileExists: ((path: string) => boolean) | undefined;
   readonly #readFile: ((path: string) => string) | undefined;
+  readonly #configDir: string | undefined;
   #resolvedLaunch: ResolvedClaudeLaunch | undefined;
 
   constructor(options: ClaudeCodeRunnerOptions) {
@@ -147,6 +153,7 @@ export class ClaudeCodeRunner implements ReviewModel {
     this.#platform = options.platform ?? process.platform;
     this.#fileExists = options.fileExists;
     this.#readFile = options.readFile;
+    this.#configDir = options.configDir;
   }
 
   async generate(request: ReviewModelRequest): Promise<ReviewModelResponse> {
@@ -161,7 +168,7 @@ export class ClaudeCodeRunner implements ReviewModel {
 
     const { command, prefixArgs } = this.#resolvedLaunch;
     const args = [...prefixArgs, ...this.#buildArgs(request)];
-    const env = buildEnv(this.#token);
+    const env = buildEnv(this.#token, this.#configDir);
     const stdinText = this.#buildStdin(request);
 
     const child = this.#spawn(command, args, {

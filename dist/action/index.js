@@ -14574,10 +14574,10 @@ async function setupSkills(ctx) {
   for (const skill of session.agent.skills) {
     try {
       const version2 = await client.beta.skills.versions.retrieve(skill.version, { skill_id: skill.skill_id });
-      let dirname2 = path3.basename(version2.name.trim());
-      if (dirname2 === "" || dirname2 === "." || dirname2 === "..")
-        dirname2 = skill.skill_id;
-      const dest = path3.resolve(skillsRoot, dirname2);
+      let dirname3 = path3.basename(version2.name.trim());
+      if (dirname3 === "" || dirname3 === "." || dirname3 === "..")
+        dirname3 = skill.skill_id;
+      const dest = path3.resolve(skillsRoot, dirname3);
       if (dest !== skillsRoot && !dest.startsWith(skillsRoot + path3.sep)) {
         log.warn("skill name escapes the skills dir; skipping", {
           component: "agent-tool-context",
@@ -50297,7 +50297,14 @@ async function runAudit(deps) {
 
 // src/pull-request.ts
 import { createHash } from "node:crypto";
-import { readFile as fsReadFile } from "node:fs/promises";
+import {
+  mkdtemp as fsMkdtemp2,
+  readFile as fsReadFile,
+  readdir as fsReaddir2,
+  rm as fsRm2
+} from "node:fs/promises";
+import { tmpdir as tmpdir2 } from "node:os";
+import { join as join3 } from "node:path";
 
 var REDACTED_MARKER = "[REDACTED]";
 var Secret = class {
@@ -71477,7 +71484,7 @@ var FORBIDDEN_VARS = [
   "GEMINI_API_KEY",
   "GITHUB_TOKEN"
 ];
-function buildEnv(token) {
+function buildEnv(token, configDir) {
   const env2 = {};
   for (const key of ENV_ALLOWLIST) {
     const value = process.env[key];
@@ -71489,6 +71496,9 @@ function buildEnv(token) {
     delete env2[key];
   }
   env2["CLAUDE_CODE_OAUTH_TOKEN"] = token.reveal();
+  if (configDir !== void 0) {
+    env2["CLAUDE_CONFIG_DIR"] = configDir;
+  }
   return env2;
 }
 var ClaudeCodeRunner = class {
@@ -71502,6 +71512,7 @@ var ClaudeCodeRunner = class {
   #platform;
   #fileExists;
   #readFile;
+  #configDir;
   #resolvedLaunch;
   constructor(options) {
     this.#token = options.token;
@@ -71513,6 +71524,7 @@ var ClaudeCodeRunner = class {
     this.#platform = options.platform ?? process.platform;
     this.#fileExists = options.fileExists;
     this.#readFile = options.readFile;
+    this.#configDir = options.configDir;
   }
   async generate(request2) {
     if (!this.#resolvedLaunch) {
@@ -71525,7 +71537,7 @@ var ClaudeCodeRunner = class {
     }
     const { command, prefixArgs } = this.#resolvedLaunch;
     const args = [...prefixArgs, ...this.#buildArgs(request2)];
-    const env2 = buildEnv(this.#token);
+    const env2 = buildEnv(this.#token, this.#configDir);
     const stdinText = this.#buildStdin(request2);
     const child = this.#spawn(command, args, {
       cwd: this.#cwd,
@@ -122390,6 +122402,104 @@ ${content}
   return content;
 }
 
+// src/sandbox.ts
+import {
+  copyFile as fsCopyFile,
+  lstat as fsLstat,
+  mkdir as fsMkdir,
+  mkdtemp as fsMkdtemp,
+  readdir as fsReaddir,
+  rm as fsRm
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname as dirname2, isAbsolute as isAbsolute2, join as join2, relative } from "node:path";
+function isExcludedFile(relPath) {
+  const normalized = relPath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\//, "");
+  const segments = normalized.split("/");
+  const filename = segments[segments.length - 1] ?? "";
+  const lowerFilename = filename.toLowerCase();
+  if (lowerFilename === "claude.md" || lowerFilename === "claude.local.md" || lowerFilename === "agents.md" || lowerFilename === ".mcp.json") {
+    return true;
+  }
+  for (const seg of segments) {
+    const lowerSeg = seg.toLowerCase();
+    if (lowerSeg === ".claude" || lowerSeg === ".cursor" || lowerSeg === ".git" || lowerSeg === "node_modules") {
+      return true;
+    }
+  }
+  if (lowerFilename === "copilot-instructions.md") {
+    const parentDir = segments[segments.length - 2]?.toLowerCase();
+    if (parentDir === ".github") {
+      return true;
+    }
+  }
+  if (isSensitivePath(normalized) || isSensitivePath(filename)) {
+    return true;
+  }
+  return false;
+}
+async function walkDirectory(dir, baseDir) {
+  const entries = await fsReaddir(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      const lowerName = entry.name.toLowerCase();
+      if (lowerName === ".git" || lowerName === "node_modules" || lowerName === ".claude" || lowerName === ".cursor") {
+        continue;
+      }
+      const subFiles = await walkDirectory(join2(dir, entry.name), baseDir);
+      files.push(...subFiles);
+    } else if (entry.isFile()) {
+      const fullPath = join2(dir, entry.name);
+      const relPath = relative(baseDir, fullPath);
+      files.push(relPath);
+    }
+  }
+  return files;
+}
+async function createSanitizedWorkspace(options) {
+  const { sourceDir } = options;
+  const mkdtempFn = options.mkdtemp ?? ((prefix) => fsMkdtemp(prefix));
+  const defaultPrefix = join2(tmpdir(), "mergepilot-sandbox-");
+  const targetDir = await mkdtempFn(defaultPrefix);
+  const copyFileFn = options.copyFile ?? (async (src, dest) => {
+    await fsMkdir(dirname2(dest), { recursive: true });
+    await fsCopyFile(src, dest);
+  });
+  const rmFn = options.rm ?? (async (dir) => {
+    await fsRm(dir, { recursive: true, force: true });
+  });
+  const rawFiles = options.listFiles ? await options.listFiles(sourceDir) : await walkDirectory(sourceDir, sourceDir);
+  for (const file2 of rawFiles) {
+    const relPath = isAbsolute2(file2) ? relative(sourceDir, file2) : file2;
+    if (relPath.startsWith("..") || isAbsolute2(relPath)) {
+      continue;
+    }
+    if (isExcludedFile(relPath)) {
+      continue;
+    }
+    const srcPath = isAbsolute2(file2) ? file2 : join2(sourceDir, relPath);
+    try {
+      const stat4 = await fsLstat(srcPath);
+      if (stat4.isSymbolicLink()) {
+        continue;
+      }
+    } catch {
+    }
+    const destPath = join2(targetDir, relPath);
+    await copyFileFn(srcPath, destPath);
+  }
+  return {
+    dir: targetDir,
+    cleanup: async () => {
+      await rmFn(targetDir);
+    }
+  };
+}
+
 // src/pull-request.ts
 var PROVIDER_ENV_MAP2 = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -122397,11 +122507,23 @@ var PROVIDER_ENV_MAP2 = {
   gemini: "GEMINI_API_KEY",
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
 };
+var defaultCreateModel = async (config2, store, opts) => {
+  if (config2.provider === "claude-code") {
+    const token = await store.resolve({ provider: "claude-code" }, "review");
+    return new ClaudeCodeRunner({
+      token,
+      cwd: opts.cwd,
+      ...opts.configDir ? { configDir: opts.configDir } : {},
+      ...config2.model ? { model: config2.model } : {}
+    });
+  }
+  return createReviewModel(config2, store, opts);
+};
 async function runPullRequestReview(deps) {
   const env2 = deps?.env ?? process.env;
   const readFile2 = deps?.readFile ?? ((p) => fsReadFile(p, "utf8"));
   const createClient = deps?.createClient ?? createOctokitClient;
-  const createModel = deps?.createModel ?? createReviewModel;
+  const createModel = deps?.createModel ?? defaultCreateModel;
   const log = deps?.log ?? ((msg) => process.stdout.write(msg + "\n"));
   const cwd = deps?.cwd ? deps.cwd() : env2.GITHUB_WORKSPACE ?? process.cwd();
   const eventName = env2.GITHUB_EVENT_NAME;
@@ -122486,89 +122608,133 @@ ${parseResult.errors.join("\n")}`);
   const store = new EnvCredentialStore(env2);
   const providerSecret = await store.resolve({ provider: config2.provider }, "review");
   const githubSecret = new Secret(githubToken);
-  const model = await createModel(config2, store, { cwd });
-  log(`Created review model: ${model.label}`);
-  log("Running review...");
-  const reviewResult = await runReview({
-    config: config2,
-    pr: {
-      title: pr.title ?? "",
-      body: pr.body ?? ""
-    },
-    files: prFiles,
-    rulesFiles,
-    model,
-    knownSecrets: [providerSecret, githubSecret]
-  });
-  log(`Review completed with status: ${reviewResult.status}`);
-  const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";
-  let summaryMarkdown;
-  let inlineFindings;
-  if (reviewResult.status === "completed") {
-    inlineFindings = reviewResult.inline;
-    summaryMarkdown = renderReviewSummary({
-      language: config2.language,
-      summary: reviewResult.summary,
-      summaryOnly: reviewResult.summaryOnly,
-      inlineCount: reviewResult.inline.length,
-      complete: reviewResult.complete,
-      incompleteReasons: reviewResult.result.incompleteReasons,
-      modelLabel: model.label,
-      outcome: "completed",
-      ...reviewResult.usage?.inputTokens !== void 0 ? { inputTokens: reviewResult.usage.inputTokens } : {},
-      ...reviewResult.usage?.outputTokens !== void 0 ? { outputTokens: reviewResult.usage.outputTokens } : {}
-    });
-  } else if (reviewResult.status === "skipped-budget") {
-    inlineFindings = [];
-    summaryMarkdown = renderReviewSummary({
-      language: config2.language,
-      summary: "",
-      summaryOnly: [],
-      inlineCount: 0,
-      complete: false,
-      incompleteReasons: [reviewResult.reason],
-      modelLabel: model.label,
-      outcome: "skipped-budget",
-      reason: reviewResult.reason
-    });
-  } else {
-    inlineFindings = [];
-    let reason;
-    if (reviewResult.reason === "INVALID_CREDENTIAL") {
-      reason = `Review failed: invalid credential for provider "${config2.provider}". Please check the ${envVar} secret.`;
-    } else if (reviewResult.reason === "QUOTA") {
-      reason = `Review failed: quota exceeded for provider "${config2.provider}". Please check quota and billing for ${envVar}.`;
-    } else {
-      reason = `Review failed: ${reviewResult.reason}`;
+  let sandbox;
+  let tempConfigDir;
+  try {
+    let effectiveCwd = cwd;
+    if (config2.provider === "claude-code") {
+      const workspaceDir = env2.GITHUB_WORKSPACE ?? cwd;
+      const listFilesFn = deps?.listFiles;
+      let existingFiles;
+      if (listFilesFn) {
+        existingFiles = await listFilesFn(workspaceDir);
+      } else {
+        try {
+          existingFiles = await fsReaddir2(workspaceDir);
+        } catch {
+          existingFiles = [];
+        }
+      }
+      if (existingFiles.length === 0) {
+        throw new Error(
+          `GITHUB_WORKSPACE has no checkout (no files found in "${workspaceDir}"). Please add the "actions/checkout" step to your workflow before running MergePilot.`
+        );
+      }
+      const createSanitizedWorkspaceFn = deps?.createSanitizedWorkspace ?? createSanitizedWorkspace;
+      sandbox = await createSanitizedWorkspaceFn({
+        sourceDir: workspaceDir,
+        ...listFilesFn ? { listFiles: listFilesFn } : {}
+      });
+      const mkdtempFn = deps?.mkdtemp ?? ((prefix) => fsMkdtemp2(prefix));
+      tempConfigDir = await mkdtempFn(join3(tmpdir2(), "mergepilot-claude-config-"));
+      effectiveCwd = sandbox.dir;
     }
-    summaryMarkdown = renderReviewSummary({
-      language: config2.language,
-      summary: "",
-      summaryOnly: [],
-      inlineCount: 0,
-      complete: false,
-      incompleteReasons: [reason],
-      modelLabel: model.label,
-      outcome: "failed",
-      reason
+    const model = await createModel(config2, store, {
+      cwd: effectiveCwd,
+      ...tempConfigDir ? { configDir: tempConfigDir } : {}
     });
+    log(`Created review model: ${model.label}`);
+    log("Running review...");
+    const reviewResult = await runReview({
+      config: config2,
+      pr: {
+        title: pr.title ?? "",
+        body: pr.body ?? ""
+      },
+      files: prFiles,
+      rulesFiles,
+      model,
+      knownSecrets: [providerSecret, githubSecret]
+    });
+    log(`Review completed with status: ${reviewResult.status}`);
+    const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";
+    let summaryMarkdown;
+    let inlineFindings;
+    if (reviewResult.status === "completed") {
+      inlineFindings = reviewResult.inline;
+      summaryMarkdown = renderReviewSummary({
+        language: config2.language,
+        summary: reviewResult.summary,
+        summaryOnly: reviewResult.summaryOnly,
+        inlineCount: reviewResult.inline.length,
+        complete: reviewResult.complete,
+        incompleteReasons: reviewResult.result.incompleteReasons,
+        modelLabel: model.label,
+        outcome: "completed",
+        ...reviewResult.costUsd !== void 0 ? { costUsd: reviewResult.costUsd } : {},
+        ...reviewResult.usage?.inputTokens !== void 0 ? { inputTokens: reviewResult.usage.inputTokens } : {},
+        ...reviewResult.usage?.outputTokens !== void 0 ? { outputTokens: reviewResult.usage.outputTokens } : {}
+      });
+    } else if (reviewResult.status === "skipped-budget") {
+      inlineFindings = [];
+      summaryMarkdown = renderReviewSummary({
+        language: config2.language,
+        summary: "",
+        summaryOnly: [],
+        inlineCount: 0,
+        complete: false,
+        incompleteReasons: [reviewResult.reason],
+        modelLabel: model.label,
+        outcome: "skipped-budget",
+        reason: reviewResult.reason
+      });
+    } else {
+      inlineFindings = [];
+      let reason;
+      if (reviewResult.reason === "INVALID_CREDENTIAL") {
+        reason = `Review failed: invalid credential for provider "${config2.provider}". Please check the ${envVar} secret.`;
+      } else if (reviewResult.reason === "QUOTA") {
+        reason = `Review failed: quota exceeded for provider "${config2.provider}". Please check quota and billing for ${envVar}.`;
+      } else {
+        reason = `Review failed: ${reviewResult.reason}`;
+      }
+      summaryMarkdown = renderReviewSummary({
+        language: config2.language,
+        summary: "",
+        summaryOnly: [],
+        inlineCount: 0,
+        complete: false,
+        incompleteReasons: [reason],
+        modelLabel: model.label,
+        outcome: "failed",
+        reason
+      });
+    }
+    const configHash = createHash("sha256").update(configFile.content).digest("hex").slice(0, 12);
+    const publisherLogin = env2["INPUT_PUBLISHER-LOGIN"] || env2.INPUT_PUBLISHER_LOGIN || "github-actions[bot]";
+    log(`Publishing review as ${publisherLogin}...`);
+    const pubResult = await publishReview(client, {
+      owner,
+      repo,
+      pull_number: pr.number,
+      expectedHeadSha: headSha,
+      summaryMarkdown,
+      inline: inlineFindings,
+      configHash,
+      language: config2.language,
+      suggestionsAsCode: false,
+      publisherLogin
+    });
+    log(`Review publication outcome: ${pubResult.status}`);
+  } finally {
+    if (sandbox) {
+      await sandbox.cleanup();
+    }
+    if (tempConfigDir) {
+      await fsRm2(tempConfigDir, { recursive: true, force: true }).catch(() => {
+      });
+    }
   }
-  const configHash = createHash("sha256").update(configFile.content).digest("hex").slice(0, 12);
-  const publisherLogin = env2["INPUT_PUBLISHER-LOGIN"] || env2.INPUT_PUBLISHER_LOGIN || "github-actions[bot]";
-  log(`Publishing review as ${publisherLogin}...`);
-  const pubResult = await publishReview(client, {
-    owner,
-    repo,
-    pull_number: pr.number,
-    expectedHeadSha: headSha,
-    summaryMarkdown,
-    inline: inlineFindings,
-    configHash,
-    language: config2.language,
-    suggestionsAsCode: false,
-    publisherLogin
-  });
-  log(`Review publication outcome: ${pubResult.status}`);
 }
 
 // src/main.ts

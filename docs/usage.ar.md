@@ -104,6 +104,14 @@ review:
   minSeverity: medium
   rulesFiles:
     - CLAUDE.md
+
+budget:
+  perReviewUsd: 1.0
+  # جدول الأسعار (اختياري لحساب التكلفة التقديرية بالدولار):
+  # ملاحظة هامة: الأسعار هي مسؤولية صاحب المشروع لتعبئتها من صفحة أسعار المزود المعتمد لديه.
+  pricing:
+    inputPerMTok: 3.0
+    outputPerMTok: 15.0
 ```
 
 ---
@@ -112,6 +120,9 @@ review:
 
 أنشئ ملفًا في مستودعك بالمسار التالي:
 `.github/workflows/mergepilot.yml`
+
+#### أ) إذا كنت تستخدم وضع الـ API (مثل Anthropic أو OpenAI أو Gemini):
+لا حاجة لنسخ ملفات المستودع في هذا الوضع، حيث يعتمد المحرك على diff الـ PR مباشرة من واجهة برمجة GitHub:
 
 ```yaml
 name: MergePilot
@@ -140,8 +151,62 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
+
+#### ب) إذا كنت تستخدم وضع الاشتراك عبر أداة Claude Code (`claude-code`):
+يحتاج وضع الاشتراك إلى توفر ملفات الـ PR وأداة Claude Code على جهاز التشغيل (Runner)، لذا يتطلب الخطوات الإضافية التالية:
+
+```yaml
+name: MergePilot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: mergepilot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 15
+    steps:
+      # 1. نسخ كود الـ PR مع الـ head commit وبدون حفظ الـ credentials
+      - name: Checkout pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      # 2. إعداد بيئة Node.js 22
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 3. تثبيت أداة Claude Code الرسمية
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # 4. تشغيل MergePilot مع تمرير توكن الاشتراك
+      - name: Review Pull Request
+        uses: lolotam/MergePilot@main
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+> [!IMPORTANT]
+> **لماذا يتم تنظيف وتطهير مجلد العمل (Sanitized Workspace) في وضع Claude Code؟**
+> - أداة Claude Code الرسمية تقوم تلقائيًا بقراءة ملفات الإعدادات والتعليمات من مجلد العمل (`cwd`)، مثل `CLAUDE.md` و`CLAUDE.local.md` ومجلد `.claude/` (الإعدادات والـ hooks والأوامر) وملفات `.mcp.json` و`AGENTS.md` و`.cursor/` و`.github/copilot-instructions.md`.
+> - بما أن كود الـ PR غير موثوق، فقد يحاول صاحب الـ PR حقن تعليمات خبيثة أو hooks للتأثير على المراجعة.
+> - لذلك، يقوم MergePilot بنسخ ملفات المستودع إلى مجلد مؤقت نظيف مع **استبعاد تام** لجميع هذه الملفات على أي عمق، واستبعاد الملفات الحساسة (مثل `.env` والمفاتيح)، وتجاهل الروابط الرمزية (symlinks) تمامًا.
+> - قواعد المراجعة يتم تمريرها فقط وبشكل حصري من الفرع الأساسي (Base branch) عبر الـ prompt الموجه للأداة، كما يتم ضبط `CLAUDE_CONFIG_DIR` إلى مجلد مؤقت فارغ لمنع قراءة أي إعدادات للمستخدم على جهاز الـ runner.
 
 ---
 
@@ -178,6 +243,7 @@ jobs:
 | `review.pathInstructions` | `object[]` | `[]` | تعليمات مخصصة لمسارات معينة (كل عنصر يحتوي على `path` و`instructions`). |
 | `budget.perReviewUsd` | `number` | `0.5` | الحد الأقصى التقديري للتكلفة بالدولار للمراجعة الواحدة قبل استدعاء النموذج. |
 | `budget.maxInputTokens` | `number` | `200000` | الحد الأقصى لتوكنات الإدخال المسموح بها في المراجعة. |
+| `budget.pricing` | `object` | *(اختياري)* | جدول أسعار التوكنات لكل مليون توكن (`inputPerMTok` و `outputPerMTok`). مسؤولية صاحب المشروع ملؤها من صفحة أسعار مزوده لحساب التكلفة الفعلية بالدولار. |
 | `audit.enabled` | `boolean` | `false` | تفعيل وضع الفحص الكامل للمستودع دوريًا. |
 | `audit.schedule` | `string` | *(اختياري)* | تعبير Cron لجدولة الفحص الكامل الدوري. |
 
