@@ -8,6 +8,14 @@ export function roleAtLeast(actual: Role, required: Role): boolean {
   return ROLES.indexOf(actual) >= ROLES.indexOf(required);
 }
 
+/** Thrown by AppStore.linkInstallation when another workspace already owns the installation. */
+export class InstallationAlreadyLinkedError extends Error {
+  constructor(installationId: number) {
+    super(`installation ${installationId} is already linked to another workspace`);
+    this.name = 'InstallationAlreadyLinkedError';
+  }
+}
+
 export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
 
 export interface Installation {

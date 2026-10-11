@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { InstallationAlreadyLinkedError } from './types.js';
 import type {
   ApiProvider,
   AppStore,
@@ -35,6 +36,8 @@ export class MemoryStore implements AppStore {
   async linkInstallation(installationId: number, workspaceId: string): Promise<void> {
     const existing = this.installations.get(installationId);
     if (!existing) throw new Error(`installation ${installationId} not found`);
+    const current = 'workspaceId' in existing ? existing.workspaceId : undefined;
+    if (current && current !== workspaceId) throw new InstallationAlreadyLinkedError(installationId);
     this.installations.set(installationId, { ...existing, workspaceId });
   }
 
