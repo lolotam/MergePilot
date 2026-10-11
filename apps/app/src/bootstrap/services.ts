@@ -1,6 +1,4 @@
-import { PGlite } from '@electric-sql/pglite';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { createAuth, type Auth } from '../auth/index.js';
 import type { AppConfig } from '../core/config.js';
@@ -82,6 +80,11 @@ export async function buildServices(
   let closeDb: () => Promise<void>;
 
   if (config.databaseUrl.startsWith('memory:') || config.databaseUrl === 'memory:') {
+    // Local-dev only: load PGlite lazily so production (which ships without dev dependencies)
+    // never imports it.
+    const pgliteModule = '@electric-sql/pglite';
+    const { PGlite } = (await import(pgliteModule)) as typeof import('@electric-sql/pglite');
+    const { drizzle: drizzlePglite } = await import('drizzle-orm/pglite');
     const client = new PGlite();
     if (options?.migrationsDir) {
       await runMigrations(client, { migrationsDir: options.migrationsDir });
