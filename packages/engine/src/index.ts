@@ -16,3 +16,4 @@ export * from './providers/openai/index.js';
 export * from './providers/anthropic/index.js';
 export * from './providers/gemini/index.js';
 export * from './providers/factory.js';
+export * from './context/libraries.js';
