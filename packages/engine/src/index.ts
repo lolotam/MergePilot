@@ -13,3 +13,4 @@ export * from './validate/index.js';
 export * from './providers/claude-code/index.js';
 export * from './providers/openai/index.js';
 export * from './providers/anthropic/index.js';
+export * from './providers/gemini/index.js';
