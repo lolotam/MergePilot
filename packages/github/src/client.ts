@@ -72,12 +72,27 @@ export interface GetFileContentParams {
   ref: string;
 }
 
+export type CompareCommitsStatus = 'ahead' | 'behind' | 'identical' | 'diverged';
+
+export interface CompareCommitsParams {
+  owner: string;
+  repo: string;
+  base: string;
+  head: string;
+}
+
+export interface CompareCommitsResult {
+  status: CompareCommitsStatus;
+  files: GitHubPullRequestFile[];
+}
+
 export interface GitHubClient {
   listPullRequestFilesPage(params: ListFilesPageParams): Promise<GitHubPullRequestFile[]>;
   getPullRequest(params: GetPullRequestParams): Promise<GitHubPullRequest>;
   listReviewsPage(params: ListReviewsPageParams): Promise<GitHubReview[]>;
   createReview(params: CreateReviewParams): Promise<GitHubCreatedReview>;
   getFileContent(params: GetFileContentParams): Promise<string | null>;
+  compareCommits(params: CompareCommitsParams): Promise<CompareCommitsResult | null>;
 }
 
 function redactToken(str: string, token: string): string {
@@ -199,6 +214,49 @@ export function createOctokitClient(token: string): GitHubClient {
             return Buffer.from(item.content, 'base64').toString('utf8');
           }
           return item.content;
+        } catch (error: unknown) {
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'status' in error &&
+            (error as { status: unknown }).status === 404
+          ) {
+            return null;
+          }
+          sanitizeError(error, token);
+        }
+      },
+
+      async compareCommits(params: CompareCommitsParams): Promise<CompareCommitsResult | null> {
+        try {
+          const PAGE_SIZE = 100;
+          let page = 1;
+          let status: CompareCommitsStatus = 'identical';
+          const allFiles: GitHubPullRequestFile[] = [];
+
+          while (true) {
+            const response = await octokit.rest.repos.compareCommitsWithBasehead({
+              owner: params.owner,
+              repo: params.repo,
+              basehead: `${params.base}...${params.head}`,
+              page,
+              per_page: PAGE_SIZE,
+            });
+
+            status = response.data.status as CompareCommitsStatus;
+            const pageFiles = (response.data.files ?? []) as GitHubPullRequestFile[];
+            allFiles.push(...pageFiles);
+
+            if (pageFiles.length < PAGE_SIZE) {
+              break;
+            }
+            page++;
+          }
+
+          return {
+            status,
+            files: allFiles,
+          };
         } catch (error: unknown) {
           if (
             typeof error === 'object' &&

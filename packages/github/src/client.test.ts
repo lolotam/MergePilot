@@ -7,6 +7,7 @@ const mockGet = vi.fn();
 const mockListReviews = vi.fn();
 const mockCreateReview = vi.fn();
 const mockGetContent = vi.fn();
+const mockCompareCommitsWithBasehead = vi.fn();
 
 vi.mock('@octokit/rest', () => {
   return {
@@ -20,6 +21,7 @@ vi.mock('@octokit/rest', () => {
         },
         repos: {
           getContent: mockGetContent,
+          compareCommitsWithBasehead: mockCompareCommitsWithBasehead,
         },
       };
     },
@@ -249,6 +251,92 @@ describe('createOctokitClient', () => {
         path: 'src/main.ts',
         ref: 'main',
       });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const msg = (caught as Error).message;
+    expect(msg).not.toContain(secretToken);
+    expect(msg).toContain('[REDACTED]');
+  });
+
+  it('delegates compareCommits to octokit.rest.repos.compareCommitsWithBasehead', async () => {
+    const fakeFiles = [
+      { filename: 'src/main.ts', status: 'modified', additions: 3, deletions: 1, changes: 4, patch: '@@ -1 +1 @@' },
+    ];
+    mockCompareCommitsWithBasehead.mockResolvedValueOnce({ data: { status: 'ahead', files: fakeFiles } });
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.compareCommits({ owner: 'org', repo: 'repo', base: 'sha-base', head: 'sha-head' });
+
+    expect(result).toEqual({ status: 'ahead', files: fakeFiles });
+    expect(mockCompareCommitsWithBasehead).toHaveBeenCalledWith({
+      owner: 'org',
+      repo: 'repo',
+      basehead: 'sha-base...sha-head',
+      page: 1,
+      per_page: 100,
+    });
+  });
+
+  it('paginates compareCommits when first page has 100 files', async () => {
+    const page1Files = Array.from({ length: 100 }, (_, i) => ({
+      filename: `src/file-${i}.ts`,
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      changes: 1,
+    }));
+    const page2Files = [
+      { filename: 'src/file-100.ts', status: 'added', additions: 10, deletions: 0, changes: 10 },
+    ];
+
+    mockCompareCommitsWithBasehead
+      .mockResolvedValueOnce({ data: { status: 'ahead', files: page1Files } })
+      .mockResolvedValueOnce({ data: { status: 'ahead', files: page2Files } });
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.compareCommits({ owner: 'org', repo: 'repo', base: 'sha-base', head: 'sha-head' });
+
+    expect(result).toEqual({ status: 'ahead', files: [...page1Files, ...page2Files] });
+    expect(mockCompareCommitsWithBasehead).toHaveBeenCalledTimes(2);
+    expect(mockCompareCommitsWithBasehead).toHaveBeenNthCalledWith(1, {
+      owner: 'org',
+      repo: 'repo',
+      basehead: 'sha-base...sha-head',
+      page: 1,
+      per_page: 100,
+    });
+    expect(mockCompareCommitsWithBasehead).toHaveBeenNthCalledWith(2, {
+      owner: 'org',
+      repo: 'repo',
+      basehead: 'sha-base...sha-head',
+      page: 2,
+      per_page: 100,
+    });
+  });
+
+  it('returns null when compareCommits encounters a 404', async () => {
+    const notFoundError = new Error('Not Found');
+    (notFoundError as unknown as { status: number }).status = 404;
+    mockCompareCommitsWithBasehead.mockRejectedValueOnce(notFoundError);
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.compareCommits({ owner: 'org', repo: 'repo', base: 'force-pushed-base', head: 'sha-head' });
+
+    expect(result).toBeNull();
+  });
+
+  it('redacts token when compareCommits throws a non-404 error', async () => {
+    const serverError = new Error(`Server error with token ${secretToken}`);
+    (serverError as unknown as { status: number }).status = 500;
+    mockCompareCommitsWithBasehead.mockRejectedValueOnce(serverError);
+
+    const client = createOctokitClient(secretToken);
+    let caught: unknown;
+    try {
+      await client.compareCommits({ owner: 'org', repo: 'repo', base: 'sha-base', head: 'sha-head' });
     } catch (err) {
       caught = err;
     }
