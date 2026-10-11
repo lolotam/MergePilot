@@ -12,3 +12,4 @@ export * from './security/index.js';
 export * from './validate/index.js';
 export * from './providers/claude-code/index.js';
 export * from './providers/openai/index.js';
+export * from './providers/anthropic/index.js';
