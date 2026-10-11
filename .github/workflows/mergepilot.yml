@@ -17,24 +17,35 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 15
+    env:
+      # Skip quietly (instead of failing every PR) until the owner adds the secret.
+      HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
     steps:
+      - name: Token not configured
+        if: env.HAS_TOKEN != 'true'
+        run: echo "CLAUDE_CODE_OAUTH_TOKEN is not set; skipping the MergePilot self-review."
+
       - name: Checkout pull request head
+        if: env.HAS_TOKEN == 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
       - name: Setup Node.js
+        if: env.HAS_TOKEN == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Install Claude Code CLI
+        if: env.HAS_TOKEN == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
       # Always the reviewed, merged Action from main — never `./`: the PR's own copy of the
       # Action would run with the subscription token and could exfiltrate it.
       - name: Review Pull Request
+        if: env.HAS_TOKEN == 'true'
         uses: lolotam/MergePilot@main
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
