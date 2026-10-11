@@ -1,12 +1,23 @@
 import { createHash } from 'node:crypto';
-import { readFile as fsReadFile } from 'node:fs/promises';
 import {
+  mkdtemp as fsMkdtemp,
+  readFile as fsReadFile,
+  readdir as fsReaddir,
+  rm as fsRm,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  ClaudeCodeRunner,
   createReviewModel,
   EnvCredentialStore,
   parseConfig,
   runReview,
   Secret,
+  type CredentialStore,
   type Finding,
+  type MergePilotConfig,
+  type ReviewModel,
 } from '@mergepilot/engine';
 import {
   createOctokitClient,
@@ -16,7 +27,23 @@ import {
   renderReviewSummary,
 } from '@mergepilot/github';
 import type { ActionDeps } from './deps.js';
+import {
+  createSanitizedWorkspace,
+  type SanitizedWorkspace,
+} from './sandbox.js';
 
+export interface PullRequestReviewDeps extends Omit<ActionDeps, 'createModel'> {
+  createModel?:
+    | ((
+        config: MergePilotConfig,
+        store: CredentialStore,
+        opts: { cwd: string; configDir?: string },
+      ) => Promise<ReviewModel>)
+    | undefined;
+  createSanitizedWorkspace?: typeof createSanitizedWorkspace | undefined;
+  listFiles?: ((dir: string) => Promise<string[]> | string[]) | undefined;
+  mkdtemp?: ((prefix: string) => Promise<string> | string) | undefined;
+}
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -25,15 +52,32 @@ const PROVIDER_ENV_MAP: Record<string, string> = {
   'claude-code': 'CLAUDE_CODE_OAUTH_TOKEN',
 };
 
+const defaultCreateModel = async (
+  config: MergePilotConfig,
+  store: CredentialStore,
+  opts: { cwd: string; configDir?: string },
+): Promise<ReviewModel> => {
+  if (config.provider === 'claude-code') {
+    const token = await store.resolve({ provider: 'claude-code' }, 'review');
+    return new ClaudeCodeRunner({
+      token,
+      cwd: opts.cwd,
+      ...(opts.configDir ? { configDir: opts.configDir } : {}),
+      ...(config.model ? { model: config.model } : {}),
+    });
+  }
+  return createReviewModel(config, store, opts);
+};
+
 /**
  * Pull-request review: loads .mergepilot.yml and rules files from the base branch, runs the
  * review engine, and publishes one COMMENT review.
  */
-export async function runPullRequestReview(deps?: ActionDeps): Promise<void> {
+export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promise<void> {
   const env = deps?.env ?? process.env;
   const readFile = deps?.readFile ?? ((p: string) => fsReadFile(p, 'utf8'));
   const createClient = deps?.createClient ?? createOctokitClient;
-  const createModel = deps?.createModel ?? createReviewModel;
+  const createModel = deps?.createModel ?? defaultCreateModel;
   const log = deps?.log ?? ((msg: string) => process.stdout.write(msg + '\n'));
   const cwd = deps?.cwd ? deps.cwd() : (env.GITHUB_WORKSPACE ?? process.cwd());
 
@@ -145,104 +189,155 @@ export async function runPullRequestReview(deps?: ActionDeps): Promise<void> {
   const store = new EnvCredentialStore(env);
   const providerSecret = await store.resolve({ provider: config.provider }, 'review');
   const githubSecret = new Secret(githubToken);
-  const model = await createModel(config, store, { cwd });
-  log(`Created review model: ${model.label}`);
 
-  log('Running review...');
-  const reviewResult = await runReview({
-    config,
-    pr: {
-      title: pr.title ?? '',
-      body: pr.body ?? '',
-    },
-    files: prFiles,
-    rulesFiles,
-    model,
-    knownSecrets: [providerSecret, githubSecret],
-  });
-  log(`Review completed with status: ${reviewResult.status}`);
+  let sandbox: SanitizedWorkspace | undefined;
+  let tempConfigDir: string | undefined;
 
-  const envVar = PROVIDER_ENV_MAP[config.provider] ?? 'API key';
-  let summaryMarkdown: string;
-  let inlineFindings: Finding[];
+  try {
+    let effectiveCwd = cwd;
+    if (config.provider === 'claude-code') {
+      const workspaceDir = env.GITHUB_WORKSPACE ?? cwd;
+      const listFilesFn = deps?.listFiles;
+      let existingFiles: string[];
+      if (listFilesFn) {
+        existingFiles = await listFilesFn(workspaceDir);
+      } else {
+        try {
+          existingFiles = await fsReaddir(workspaceDir);
+        } catch {
+          existingFiles = [];
+        }
+      }
 
-  if (reviewResult.status === 'completed') {
-    inlineFindings = reviewResult.inline;
-    summaryMarkdown = renderReviewSummary({
-      language: config.language,
-      summary: reviewResult.summary,
-      summaryOnly: reviewResult.summaryOnly,
-      inlineCount: reviewResult.inline.length,
-      complete: reviewResult.complete,
-      incompleteReasons: reviewResult.result.incompleteReasons,
-      modelLabel: model.label,
-      outcome: 'completed',
-      ...(reviewResult.usage?.inputTokens !== undefined
-        ? { inputTokens: reviewResult.usage.inputTokens }
-        : {}),
-      ...(reviewResult.usage?.outputTokens !== undefined
-        ? { outputTokens: reviewResult.usage.outputTokens }
-        : {}),
-    });
-  } else if (reviewResult.status === 'skipped-budget') {
-    inlineFindings = [];
-    summaryMarkdown = renderReviewSummary({
-      language: config.language,
-      summary: '',
-      summaryOnly: [],
-      inlineCount: 0,
-      complete: false,
-      incompleteReasons: [reviewResult.reason],
-      modelLabel: model.label,
-      outcome: 'skipped-budget',
-      reason: reviewResult.reason,
-    });
-  } else {
-    // reviewResult.status === 'failed'
-    inlineFindings = [];
-    let reason: string;
-    if (reviewResult.reason === 'INVALID_CREDENTIAL') {
-      reason = `Review failed: invalid credential for provider "${config.provider}". Please check the ${envVar} secret.`;
-    } else if (reviewResult.reason === 'QUOTA') {
-      reason = `Review failed: quota exceeded for provider "${config.provider}". Please check quota and billing for ${envVar}.`;
-    } else {
-      reason = `Review failed: ${reviewResult.reason}`;
+      if (existingFiles.length === 0) {
+        throw new Error(
+          `GITHUB_WORKSPACE has no checkout (no files found in "${workspaceDir}"). Please add the "actions/checkout" step to your workflow before running MergePilot.`,
+        );
+      }
+
+      const createSanitizedWorkspaceFn =
+        deps?.createSanitizedWorkspace ?? createSanitizedWorkspace;
+      sandbox = await createSanitizedWorkspaceFn({
+        sourceDir: workspaceDir,
+        ...(listFilesFn ? { listFiles: listFilesFn } : {}),
+      });
+
+      const mkdtempFn = deps?.mkdtemp ?? ((prefix: string) => fsMkdtemp(prefix));
+      tempConfigDir = await mkdtempFn(join(tmpdir(), 'mergepilot-claude-config-'));
+
+      effectiveCwd = sandbox.dir;
     }
-    summaryMarkdown = renderReviewSummary({
-      language: config.language,
-      summary: '',
-      summaryOnly: [],
-      inlineCount: 0,
-      complete: false,
-      incompleteReasons: [reason],
-      modelLabel: model.label,
-      outcome: 'failed',
-      reason,
+
+    const model = await createModel(config, store, {
+      cwd: effectiveCwd,
+      ...(tempConfigDir ? { configDir: tempConfigDir } : {}),
     });
+    log(`Created review model: ${model.label}`);
+
+    log('Running review...');
+    const reviewResult = await runReview({
+      config,
+      pr: {
+        title: pr.title ?? '',
+        body: pr.body ?? '',
+      },
+      files: prFiles,
+      rulesFiles,
+      model,
+      knownSecrets: [providerSecret, githubSecret],
+    });
+    log(`Review completed with status: ${reviewResult.status}`);
+
+    const envVar = PROVIDER_ENV_MAP[config.provider] ?? 'API key';
+    let summaryMarkdown: string;
+    let inlineFindings: Finding[];
+
+    if (reviewResult.status === 'completed') {
+      inlineFindings = reviewResult.inline;
+      summaryMarkdown = renderReviewSummary({
+        language: config.language,
+        summary: reviewResult.summary,
+        summaryOnly: reviewResult.summaryOnly,
+        inlineCount: reviewResult.inline.length,
+        complete: reviewResult.complete,
+        incompleteReasons: reviewResult.result.incompleteReasons,
+        modelLabel: model.label,
+        outcome: 'completed',
+        ...(reviewResult.costUsd !== undefined ? { costUsd: reviewResult.costUsd } : {}),
+        ...(reviewResult.usage?.inputTokens !== undefined
+          ? { inputTokens: reviewResult.usage.inputTokens }
+          : {}),
+        ...(reviewResult.usage?.outputTokens !== undefined
+          ? { outputTokens: reviewResult.usage.outputTokens }
+          : {}),
+      });
+    } else if (reviewResult.status === 'skipped-budget') {
+      inlineFindings = [];
+      summaryMarkdown = renderReviewSummary({
+        language: config.language,
+        summary: '',
+        summaryOnly: [],
+        inlineCount: 0,
+        complete: false,
+        incompleteReasons: [reviewResult.reason],
+        modelLabel: model.label,
+        outcome: 'skipped-budget',
+        reason: reviewResult.reason,
+      });
+    } else {
+      // reviewResult.status === 'failed'
+      inlineFindings = [];
+      let reason: string;
+      if (reviewResult.reason === 'INVALID_CREDENTIAL') {
+        reason = `Review failed: invalid credential for provider "${config.provider}". Please check the ${envVar} secret.`;
+      } else if (reviewResult.reason === 'QUOTA') {
+        reason = `Review failed: quota exceeded for provider "${config.provider}". Please check quota and billing for ${envVar}.`;
+      } else {
+        reason = `Review failed: ${reviewResult.reason}`;
+      }
+      summaryMarkdown = renderReviewSummary({
+        language: config.language,
+        summary: '',
+        summaryOnly: [],
+        inlineCount: 0,
+        complete: false,
+        incompleteReasons: [reason],
+        modelLabel: model.label,
+        outcome: 'failed',
+        reason,
+      });
+    }
+
+    const configHash = createHash('sha256')
+      .update(configFile.content)
+      .digest('hex')
+      .slice(0, 12);
+
+    const publisherLogin =
+      env['INPUT_PUBLISHER-LOGIN'] ||
+      env.INPUT_PUBLISHER_LOGIN ||
+      'github-actions[bot]';
+
+    log(`Publishing review as ${publisherLogin}...`);
+    const pubResult = await publishReview(client, {
+      owner,
+      repo,
+      pull_number: pr.number,
+      expectedHeadSha: headSha,
+      summaryMarkdown,
+      inline: inlineFindings,
+      configHash,
+      language: config.language,
+      suggestionsAsCode: false,
+      publisherLogin,
+    });
+    log(`Review publication outcome: ${pubResult.status}`);
+  } finally {
+    if (sandbox) {
+      await sandbox.cleanup();
+    }
+    if (tempConfigDir) {
+      await fsRm(tempConfigDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
-
-  const configHash = createHash('sha256')
-    .update(configFile.content)
-    .digest('hex')
-    .slice(0, 12);
-
-  const publisherLogin =
-    env['INPUT_PUBLISHER-LOGIN'] ||
-    env.INPUT_PUBLISHER_LOGIN ||
-    'github-actions[bot]';
-
-  log(`Publishing review as ${publisherLogin}...`);
-  const pubResult = await publishReview(client, {
-    owner,
-    repo,
-    pull_number: pr.number,
-    expectedHeadSha: headSha,
-    summaryMarkdown,
-    inline: inlineFindings,
-    configHash,
-    language: config.language,
-    suggestionsAsCode: false,
-    publisherLogin,
-  });
-  log(`Review publication outcome: ${pubResult.status}`);
 }

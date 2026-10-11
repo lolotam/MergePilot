@@ -220,6 +220,28 @@ describe('ClaudeCodeRunner', () => {
 
       expect(capturedEnvs[0] ?? {}).not.toHaveProperty('GITHUB_TOKEN');
     });
+
+    it('sets CLAUDE_CONFIG_DIR when configDir option is provided', async () => {
+      const { spawn, capturedEnvs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
+      const runner = new ClaudeCodeRunner({
+        platform: 'linux',
+        token,
+        cwd: '/repo',
+        spawn,
+        configDir: '/tmp/claude-config-dir',
+      });
+      await runner.generate(REQUEST);
+
+      expect((capturedEnvs[0] ?? {})['CLAUDE_CONFIG_DIR']).toBe('/tmp/claude-config-dir');
+    });
+
+    it('does NOT set CLAUDE_CONFIG_DIR when configDir option is not provided', async () => {
+      const { spawn, capturedEnvs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
+      await runner.generate(REQUEST);
+
+      expect(capturedEnvs[0] ?? {}).not.toHaveProperty('CLAUDE_CONFIG_DIR');
+    });
   });
 
   describe('stdin receives the prompt', () => {
