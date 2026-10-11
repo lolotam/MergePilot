@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredCredential, WorkspaceSettings } from '../core/types.js';
-import { createTestDb } from './index.js';
+import { createTestDb } from './test-db.js';
 import { describeStoreContract } from './store-contract.js';
 
 // 1. Shared AppStore contract tests against PgStore
