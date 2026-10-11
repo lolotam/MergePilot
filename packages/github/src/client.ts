@@ -65,11 +65,19 @@ export interface GitHubCreatedReview {
   id: number;
 }
 
+export interface GetFileContentParams {
+  owner: string;
+  repo: string;
+  path: string;
+  ref: string;
+}
+
 export interface GitHubClient {
   listPullRequestFilesPage(params: ListFilesPageParams): Promise<GitHubPullRequestFile[]>;
   getPullRequest(params: GetPullRequestParams): Promise<GitHubPullRequest>;
   listReviewsPage(params: ListReviewsPageParams): Promise<GitHubReview[]>;
   createReview(params: CreateReviewParams): Promise<GitHubCreatedReview>;
+  getFileContent(params: GetFileContentParams): Promise<string | null>;
 }
 
 function redactToken(str: string, token: string): string {
@@ -166,6 +174,40 @@ export function createOctokitClient(token: string): GitHubClient {
           });
           return { id: response.data.id };
         } catch (error) {
+          sanitizeError(error, token);
+        }
+      },
+
+      async getFileContent(params: GetFileContentParams): Promise<string | null> {
+        try {
+          const response = await octokit.rest.repos.getContent({
+            owner: params.owner,
+            repo: params.repo,
+            path: params.path,
+            ref: params.ref,
+          });
+          const data = response.data;
+          if (Array.isArray(data) || !data || typeof data !== 'object') {
+            return null;
+          }
+          const item = data as { type?: string; content?: string; encoding?: string };
+          if (item.type !== 'file' || typeof item.content !== 'string') {
+            return null;
+          }
+          const encoding = item.encoding ?? 'base64';
+          if (encoding === 'base64') {
+            return Buffer.from(item.content, 'base64').toString('utf8');
+          }
+          return item.content;
+        } catch (error: unknown) {
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'status' in error &&
+            (error as { status: unknown }).status === 404
+          ) {
+            return null;
+          }
           sanitizeError(error, token);
         }
       },

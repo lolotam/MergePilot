@@ -8,6 +8,7 @@ export {
   type GitHubReview,
   type CreateReviewParams,
   type GetPullRequestParams,
+  type GetFileContentParams,
   type ListFilesPageParams,
   type ListReviewsPageParams,
 } from './client.js';
@@ -35,4 +36,10 @@ export {
   type PublishReviewParams,
   type PublishReviewResult,
 } from './publish.js';
+export {
+  readFilesAtRef,
+  capFileContent,
+  type FileContent,
+  type ReadFilesAtRefParams,
+} from './contents.js';
 export * from './summary.js';
