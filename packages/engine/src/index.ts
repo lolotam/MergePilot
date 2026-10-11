@@ -1,6 +1,7 @@
 export * from './credentials/index.js';
 export * from './config/index.js';
 export * from './diff/index.js';
+export * from './review/model.js';
 export * from './review/types.js';
 export * from './llm/index.js';
 export * from './security/index.js';
