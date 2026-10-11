@@ -24,6 +24,12 @@ import { costUsd, estimateCostUsd } from '../budget/cost.js';
 import type { ReviewModel } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
+import {
+  applyVerdicts,
+  buildVerifyPrompt,
+  parseVerifyAnswer,
+  VerifyAnswerSchema,
+} from './verify.js';
 
 // ---------------------------------------------------------------------------
 // Input types
@@ -67,6 +73,7 @@ export type ReviewRunResult =
       costUsd?: number | undefined;
       droppedInvalid: number;
       complete: boolean;
+      verification?: { checked: number; rejected: number } | undefined;
     }
   | { status: 'skipped-budget'; reason: string }
   | { status: 'failed'; reason: string };
@@ -129,6 +136,19 @@ function buildPatchLineToNewLineMap(patch: string): Map<number, number> {
     patchLineNum++;
   }
   return result;
+}
+
+/** Combines token usage from multiple model calls into a single TokenUsage. */
+function combineUsage(u1?: TokenUsage, u2?: TokenUsage): TokenUsage | undefined {
+  if (!u1 && !u2) return undefined;
+  if (!u1) return u2;
+  if (!u2) return u1;
+  return {
+    inputTokens: u1.inputTokens + u2.inputTokens,
+    outputTokens: u1.outputTokens + u2.outputTokens,
+    cacheReadTokens: u1.cacheReadTokens + u2.cacheReadTokens,
+    cacheWriteTokens: u1.cacheWriteTokens + u2.cacheWriteTokens,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -258,8 +278,54 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     return { status: 'failed', reason: parseResult.error };
   }
 
+  // ── Step e2: verification pass ─────────────────────────────────────────
+  let modelFindings = parseResult.findings;
+  let verification: { checked: number; rejected: number } | undefined;
+  let totalUsage = modelResponse.usage;
+
+  if (reviewCfg.verify && modelFindings.length > 0) {
+    const verifyPrompt = buildVerifyPrompt({
+      language: config.language,
+      findings: modelFindings,
+      files: redactedReviewableFiles,
+    });
+
+    try {
+      const verifyResponse = await model.generate({
+        system: verifyPrompt.system,
+        user: verifyPrompt.user,
+        maxOutputTokens: 2048,
+        responseSchema: z.toJSONSchema(VerifyAnswerSchema) as Record<string, unknown>,
+        ...(signal ? { signal } : {}),
+      });
+
+      if (verifyResponse.usage) {
+        totalUsage = combineUsage(totalUsage, verifyResponse.usage);
+      }
+
+      const verifyParsed = parseVerifyAnswer(verifyResponse.text);
+      if (!verifyParsed.ok) {
+        incompleteReasons.push(`verification skipped: ${verifyParsed.error}`);
+      } else {
+        const { kept, rejected } = applyVerdicts(modelFindings, verifyParsed.verdicts);
+        modelFindings = kept;
+        verification = {
+          checked: parseResult.findings.length,
+          rejected: rejected.length,
+        };
+      }
+    } catch (err) {
+      const failure = err as LlmFailure;
+      const errCode =
+        failure && typeof failure === 'object' && 'code' in failure && typeof failure.code === 'string'
+          ? failure.code
+          : (err instanceof Error ? err.message : String(err));
+      incompleteReasons.push(`verification skipped: ${errCode}`);
+    }
+  }
+
   // ── Step f: select + anchor ────────────────────────────────────────────
-  const allFindings = [...securityFindings, ...parseResult.findings];
+  const allFindings = [...securityFindings, ...modelFindings];
 
   const selected = selectFindings(allFindings, {
     maxFindings: reviewCfg.maxFindings,
@@ -287,8 +353,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   let reviewCostUsd: number | undefined;
   if (budgetCfg.pricing) {
-    reviewCostUsd = modelResponse.usage
-      ? costUsd(modelResponse.usage, budgetCfg.pricing)
+    reviewCostUsd = totalUsage
+      ? costUsd(totalUsage, budgetCfg.pricing)
       : (estimatedCostUsd ??
         estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing));
   }
@@ -299,9 +365,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     inline,
     summaryOnly,
     result,
-    usage: modelResponse.usage,
+    usage: totalUsage,
     ...(reviewCostUsd !== undefined ? { costUsd: reviewCostUsd } : {}),
     droppedInvalid: parseResult.droppedInvalid,
     complete,
+    ...(verification !== undefined ? { verification } : {}),
   };
 }
