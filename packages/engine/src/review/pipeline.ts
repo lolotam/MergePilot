@@ -138,6 +138,8 @@ function buildPatchLineToNewLineMap(patch: string): Map<number, number> {
   return result;
 }
 
+const VERIFY_MAX_OUTPUT_TOKENS = 2048;
+
 /** Combines token usage from multiple model calls into a single TokenUsage. */
 function combineUsage(u1?: TokenUsage, u2?: TokenUsage): TokenUsage | undefined {
   if (!u1 && !u2) return undefined;
@@ -246,6 +248,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       { inputTokens: promptTokens, maxOutputTokens },
       budgetCfg.pricing,
     );
+    if (reviewCfg.verify) {
+      // Worst case for the verification call: its hunks are a subset of the review prompt.
+      estimatedCostUsd += estimateCostUsd(
+        { inputTokens: promptTokens, maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS },
+        budgetCfg.pricing,
+      );
+    }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return {
         status: 'skipped-budget',
@@ -294,7 +303,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       const verifyResponse = await model.generate({
         system: verifyPrompt.system,
         user: verifyPrompt.user,
-        maxOutputTokens: 2048,
+        maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
         responseSchema: z.toJSONSchema(VerifyAnswerSchema) as Record<string, unknown>,
         ...(signal ? { signal } : {}),
       });

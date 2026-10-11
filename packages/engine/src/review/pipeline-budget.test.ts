@@ -179,4 +179,31 @@ describe('runReview - USD budget and pricing', () => {
       expect(result.costUsd).toBeUndefined();
     }
   });
+
+  it('counts the verification call in the pre-call USD estimate', async () => {
+    const generateMock = vi.fn();
+    const model: ReviewModel = { label: 'fake:spy', generate: generateMock };
+    const budget = {
+      // Review call alone ≈ $0.45–0.49 at $100/MTok; with verification ≈ $0.69–0.78.
+      perReviewUsd: 0.6,
+      maxInputTokens: 200000,
+      pricing: { inputPerMTok: 100, outputPerMTok: 100 },
+    };
+    const input = (verify: boolean) => ({
+      config: makeConfig({ review: { ...makeConfig().review, verify }, budget }),
+      pr: { title: 'PR', body: '' },
+      files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }],
+      rulesFiles: [],
+      model,
+      knownSecrets: [],
+    });
+
+    const withVerify = await runReview(input(true));
+    expect(withVerify.status).toBe('skipped-budget');
+    expect(generateMock).not.toHaveBeenCalled();
+
+    generateMock.mockResolvedValue({ text: makeAnswerJson([]), finishReason: 'stop' });
+    const withoutVerify = await runReview(input(false));
+    expect(withoutVerify.status).toBe('completed');
+  });
 });

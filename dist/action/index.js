@@ -71092,6 +71092,7 @@ function buildPatchLineToNewLineMap(patch) {
   }
   return result;
 }
+var VERIFY_MAX_OUTPUT_TOKENS = 2048;
 function combineUsage(u1, u2) {
   if (!u1 && !u2)
     return void 0;
@@ -71165,6 +71166,9 @@ async function runReview(input2) {
   let estimatedCostUsd;
   if (budgetCfg.pricing) {
     estimatedCostUsd = estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing);
+    if (reviewCfg.verify) {
+      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS }, budgetCfg.pricing);
+    }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return {
         status: "skipped-budget",
@@ -71205,7 +71209,7 @@ async function runReview(input2) {
       const verifyResponse = await model.generate({
         system: verifyPrompt.system,
         user: verifyPrompt.user,
-        maxOutputTokens: 2048,
+        maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
         responseSchema: external_exports.toJSONSchema(VerifyAnswerSchema),
         ...signal ? { signal } : {}
       });
