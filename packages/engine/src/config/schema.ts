@@ -17,9 +17,26 @@ const ReviewSettingsSchema = z.strictObject({
   pathInstructions: z.array(PathInstructionSchema).default([]),
 });
 
+export const ModelPricingSchema = z
+  .strictObject({
+    inputPerMTok: z.number().min(0),
+    outputPerMTok: z.number().min(0),
+    cacheReadPerMTok: z.number().min(0).optional(),
+    cacheWritePerMTok: z.number().min(0).optional(),
+  })
+  .transform((val) => ({
+    inputPerMTok: val.inputPerMTok,
+    outputPerMTok: val.outputPerMTok,
+    cacheReadPerMTok: val.cacheReadPerMTok ?? val.inputPerMTok,
+    cacheWritePerMTok: val.cacheWritePerMTok ?? val.inputPerMTok,
+  }));
+
+export type ModelPricing = z.infer<typeof ModelPricingSchema>;
+
 const BudgetSchema = z.strictObject({
   perReviewUsd: z.number().positive().default(0.5),
   maxInputTokens: z.number().int().positive().default(200000),
+  pricing: ModelPricingSchema.optional(),
 });
 
 const AuditSchema = z.strictObject({

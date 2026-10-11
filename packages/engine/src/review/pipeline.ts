@@ -20,6 +20,7 @@ import { selectFindings } from '../validate/select.js';
 import { parseReviewAnswer } from './answer.js';
 import { ReviewAnswerSchema } from './answer.js';
 import { checkBudget, estimateTokens } from './budget.js';
+import { costUsd, estimateCostUsd } from '../budget/cost.js';
 import type { ReviewModel } from './model.js';
 import { buildReviewPrompt } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
@@ -62,6 +63,7 @@ export type ReviewRunResult =
       summaryOnly: Finding[];
       result: ReviewResult;
       usage?: TokenUsage | undefined;
+      costUsd?: number | undefined;
       droppedInvalid: number;
       complete: boolean;
     }
@@ -215,13 +217,28 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     return { status: 'skipped-budget', reason: budgetResult.reason };
   }
 
+  const maxOutputTokens = 4096;
+  let estimatedCostUsd: number | undefined;
+  if (budgetCfg.pricing) {
+    estimatedCostUsd = estimateCostUsd(
+      { inputTokens: promptTokens, maxOutputTokens },
+      budgetCfg.pricing,
+    );
+    if (estimatedCostUsd > budgetCfg.perReviewUsd) {
+      return {
+        status: 'skipped-budget',
+        reason: `estimated $${estimatedCostUsd.toFixed(2)} > limit $${budgetCfg.perReviewUsd.toFixed(2)}`,
+      };
+    }
+  }
+
   // ── Step d: call the model ─────────────────────────────────────────────
   let modelResponse: Awaited<ReturnType<typeof model.generate>>;
   try {
     modelResponse = await model.generate({
       system: prompt.system,
       user: prompt.user,
-      maxOutputTokens: 4096,
+      maxOutputTokens,
       responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
       ...(signal ? { signal } : {}),
     });
@@ -266,6 +283,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     incompleteReasons,
   };
 
+  let reviewCostUsd: number | undefined;
+  if (budgetCfg.pricing) {
+    reviewCostUsd = modelResponse.usage
+      ? costUsd(modelResponse.usage, budgetCfg.pricing)
+      : (estimatedCostUsd ??
+        estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing));
+  }
+
   return {
     status: 'completed',
     summary: parseResult.summary,
@@ -273,6 +298,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     summaryOnly,
     result,
     usage: modelResponse.usage,
+    ...(reviewCostUsd !== undefined ? { costUsd: reviewCostUsd } : {}),
     droppedInvalid: parseResult.droppedInvalid,
     complete,
   };
