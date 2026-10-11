@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { InstallationAlreadyLinkedError } from '../core/types.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
@@ -86,14 +87,23 @@ export class PgStore implements AppStore {
   }
 
   async linkInstallation(installationId: number, workspaceId: string): Promise<void> {
+    // Atomic: only claim an installation that is unlinked or already ours, so two workspaces
+    // linking the same pending installation at once cannot both succeed.
     const result = await this.db
       .update(installations)
       .set({ workspaceId, updatedAt: new Date() })
-      .where(eq(installations.id, installationId))
+      .where(
+        and(
+          eq(installations.id, installationId),
+          sql`(${installations.workspaceId} IS NULL OR ${installations.workspaceId} = ${workspaceId})`,
+        ),
+      )
       .returning();
-    if (result.length === 0) {
-      throw new Error(`installation ${installationId} not found`);
-    }
+    if (result.length > 0) return;
+    const exists = await this.db.select({ id: installations.id }).from(installations).where(eq(installations.id, installationId));
+    throw exists.length > 0
+      ? new InstallationAlreadyLinkedError(installationId)
+      : new Error(`installation ${installationId} not found`);
   }
 
   async getInstallation(installationId: number): Promise<Installation | null> {
