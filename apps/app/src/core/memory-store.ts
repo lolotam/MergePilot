@@ -1,0 +1,115 @@
+import { randomUUID } from 'node:crypto';
+import type {
+  ApiProvider,
+  AppStore,
+  Installation,
+  ReviewRun,
+  ReviewRunStatus,
+  StoredCredential,
+  WorkspaceSettings,
+} from './types.js';
+
+/** In-memory AppStore for tests and local development. Same contract as the Postgres store. */
+export class MemoryStore implements AppStore {
+  readonly deliveries = new Set<string>();
+  readonly installations = new Map<number, Installation | Omit<Installation, 'workspaceId'>>();
+  readonly settings = new Map<string, WorkspaceSettings>();
+  readonly credentials = new Map<string, StoredCredential>();
+  readonly runs = new Map<string, ReviewRun>();
+
+  async recordDelivery(deliveryId: string): Promise<boolean> {
+    if (this.deliveries.has(deliveryId)) return false;
+    this.deliveries.add(deliveryId);
+    return true;
+  }
+
+  async upsertInstallation(installation: Installation): Promise<void> {
+    this.installations.set(installation.id, { ...installation });
+  }
+
+  async upsertPendingInstallation(installation: Omit<Installation, 'workspaceId'>): Promise<void> {
+    const existing = this.installations.get(installation.id);
+    this.installations.set(installation.id, { ...existing, ...installation });
+  }
+
+  async linkInstallation(installationId: number, workspaceId: string): Promise<void> {
+    const existing = this.installations.get(installationId);
+    if (!existing) throw new Error(`installation ${installationId} not found`);
+    this.installations.set(installationId, { ...existing, workspaceId });
+  }
+
+  async getInstallation(installationId: number): Promise<Installation | null> {
+    const found = this.installations.get(installationId);
+    return found && 'workspaceId' in found && found.workspaceId ? (found as Installation) : null;
+  }
+
+  async listInstallations(workspaceId: string): Promise<Installation[]> {
+    return [...this.installations.values()].filter(
+      (i): i is Installation => 'workspaceId' in i && i.workspaceId === workspaceId,
+    );
+  }
+
+  async deleteInstallation(installationId: number): Promise<void> {
+    this.installations.delete(installationId);
+  }
+
+  async setInstallationSuspended(installationId: number, suspended: boolean): Promise<void> {
+    const existing = this.installations.get(installationId);
+    if (existing) this.installations.set(installationId, { ...existing, suspended });
+  }
+
+  async getSettings(workspaceId: string): Promise<WorkspaceSettings | null> {
+    return this.settings.get(workspaceId) ?? null;
+  }
+
+  async saveSettings(settings: WorkspaceSettings): Promise<void> {
+    this.settings.set(settings.workspaceId, { ...settings });
+  }
+
+  async saveCredential(credential: StoredCredential): Promise<void> {
+    this.credentials.set(`${credential.workspaceId}:${credential.provider}`, { ...credential });
+  }
+
+  async getCredential(workspaceId: string, provider: ApiProvider): Promise<StoredCredential | null> {
+    return this.credentials.get(`${workspaceId}:${provider}`) ?? null;
+  }
+
+  async listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>> {
+    return [...this.credentials.values()]
+      .filter((c) => c.workspaceId === workspaceId)
+      .map(({ ciphertext: _ciphertext, ...rest }) => rest);
+  }
+
+  async deleteCredential(workspaceId: string, provider: ApiProvider): Promise<void> {
+    this.credentials.delete(`${workspaceId}:${provider}`);
+  }
+
+  async createReviewRun(run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>): Promise<ReviewRun> {
+    const created: ReviewRun = { ...run, id: randomUUID(), createdAt: new Date(), finishedAt: null };
+    this.runs.set(created.id, created);
+    return created;
+  }
+
+  async finishReviewRun(
+    workspaceId: string,
+    id: string,
+    result: { status: ReviewRunStatus; costUsd: number | null; detail: string | null },
+  ): Promise<void> {
+    const run = this.runs.get(id);
+    if (!run || run.workspaceId !== workspaceId) return;
+    this.runs.set(id, { ...run, ...result, finishedAt: new Date() });
+  }
+
+  async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]> {
+    return [...this.runs.values()]
+      .filter((r) => r.workspaceId === workspaceId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit);
+  }
+
+  async monthCostUsd(workspaceId: string, monthStart: Date): Promise<number> {
+    return [...this.runs.values()]
+      .filter((r) => r.workspaceId === workspaceId && r.createdAt >= monthStart)
+      .reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  }
+}
