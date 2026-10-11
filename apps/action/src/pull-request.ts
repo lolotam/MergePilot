@@ -295,6 +295,10 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
       } else {
         reason = `Review failed: ${reviewResult.reason}`;
       }
+      if (reviewResult.detail) {
+        log(`Provider error detail: ${reviewResult.detail}`);
+        reason += ` — ${reviewResult.detail}`;
+      }
       summaryMarkdown = renderReviewSummary({
         language: config.language,
         summary: '',

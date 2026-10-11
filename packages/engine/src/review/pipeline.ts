@@ -76,7 +76,12 @@ export type ReviewRunResult =
       verification?: { checked: number; rejected: number } | undefined;
     }
   | { status: 'skipped-budget'; reason: string }
-  | { status: 'failed'; reason: string };
+  | {
+      status: 'failed';
+      reason: string;
+      /** Provider message, already secret-redacted by the adapter; for logs and the summary. */
+      detail?: string | undefined;
+    };
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -276,7 +281,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   } catch (err) {
     const failure = err as LlmFailure;
     if (failure && typeof failure === 'object' && 'code' in failure) {
-      return { status: 'failed', reason: failure.code as string };
+      const detail = redactSecrets(String(failure.message ?? ''), knownSecrets).text.slice(0, 500);
+      return { status: 'failed', reason: failure.code as string, ...(detail ? { detail } : {}) };
     }
     return { status: 'failed', reason: String(err) };
   }
