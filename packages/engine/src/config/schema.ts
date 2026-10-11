@@ -15,6 +15,16 @@ const ReviewSettingsSchema = z.strictObject({
   exclude: z.array(z.string()).default(['**/*.lock', '**/dist/**', '**/*.min.*', '**/*.snap']),
   rulesFiles: z.array(z.string()).default(['CLAUDE.md', 'AGENTS.md']),
   pathInstructions: z.array(PathInstructionSchema).default([]),
+  /** Second model pass that re-checks every finding against the code before publishing. */
+  verify: z.boolean().default(true),
+  libraryDocs: z
+    .strictObject({
+      /** npm = README of the exact installed version; context7 = opt-in third-party service. */
+      source: z.enum(['npm', 'context7', 'none']).default('npm'),
+      maxCharsPerLibrary: z.number().int().min(500).max(50000).default(8000),
+      maxLibraries: z.number().int().min(0).max(20).default(5),
+    })
+    .prefault({}),
 });
 
 export const ModelPricingSchema = z
