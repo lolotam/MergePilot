@@ -1,0 +1,92 @@
+import { randomUUID } from 'node:crypto';
+import { Secret } from '@mergepilot/engine';
+import type { ApiProvider, AppStore, StoredCredential, Vault } from '../core/types.js';
+
+export type ValidateApiKeyFn = (provider: ApiProvider, apiKey: string) => Promise<boolean | void>;
+
+export interface CredentialServiceOptions {
+  store: AppStore;
+  vault: Vault;
+  validate?: ValidateApiKeyFn | undefined;
+}
+
+export interface SaveKeyParams {
+  workspaceId: string;
+  provider: ApiProvider;
+  apiKey: string;
+  userId: string;
+}
+
+export type KeyMetadata = Omit<StoredCredential, 'ciphertext'>;
+
+export class CredentialService {
+  readonly #store: AppStore;
+  readonly #vault: Vault;
+  readonly #validate: ValidateApiKeyFn | undefined;
+
+  constructor(options: CredentialServiceOptions) {
+    this.#store = options.store;
+    this.#vault = options.vault;
+    this.#validate = options.validate;
+  }
+
+  async saveKey(params: SaveKeyParams): Promise<KeyMetadata> {
+    const trimmed = params.apiKey.trim();
+    if (trimmed.length === 0) {
+      throw new Error('API key cannot be empty');
+    }
+
+    if (trimmed.startsWith('sk-ant-oat')) {
+      throw new Error(
+        'Claude subscription tokens (sk-ant-oat...) are not supported in the SaaS. An Anthropic API key is required.',
+      );
+    }
+
+    if (this.#validate) {
+      const valid = await this.#validate(params.provider, trimmed);
+      if (valid === false) {
+        throw new Error(`API key validation failed for provider: ${params.provider}`);
+      }
+    }
+
+    const ciphertext = await this.#vault.encrypt(trimmed, {
+      workspaceId: params.workspaceId,
+      provider: params.provider,
+    });
+
+    const credential: StoredCredential = {
+      id: randomUUID(),
+      workspaceId: params.workspaceId,
+      provider: params.provider,
+      ciphertext,
+      keyVersion: this.#vault.keyVersion,
+      last4: trimmed.slice(-4),
+      createdBy: params.userId,
+      createdAt: new Date(),
+    };
+
+    await this.#store.saveCredential(credential);
+
+    const { ciphertext: _c, ...metadata } = credential;
+    return metadata;
+  }
+
+  async listKeys(workspaceId: string): Promise<KeyMetadata[]> {
+    const items = await this.#store.listCredentials(workspaceId);
+    return items.map((item) => ({ ...item }));
+  }
+
+  async deleteKey(workspaceId: string, provider: ApiProvider): Promise<void> {
+    await this.#store.deleteCredential(workspaceId, provider);
+  }
+
+  async resolve(workspaceId: string, provider: ApiProvider): Promise<Secret> {
+    const cred = await this.#store.getCredential(workspaceId, provider);
+    if (!cred) {
+      throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
+    }
+
+    const plaintext = await this.#vault.decrypt(cred.ciphertext, { workspaceId, provider });
+    return new Secret(plaintext);
+  }
+}
