@@ -6,3 +6,4 @@ export * from './review/types.js';
 export * from './llm/index.js';
 export * from './security/index.js';
 export * from './validate/index.js';
+export * from './providers/claude-code/index.js';
