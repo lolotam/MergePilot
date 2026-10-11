@@ -1,0 +1,21 @@
+# Third-party reference repos — read-only study material, never committed
+reference/
+*.zip
+
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+.turbo/
+
+# Local secrets and state
+.env
+.env.*
+!.env.example
+*.pem
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
