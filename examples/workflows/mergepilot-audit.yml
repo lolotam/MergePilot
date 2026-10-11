@@ -1,0 +1,35 @@
+name: MergePilot Audit
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 3 * * 1' # Weekly on Monday at 03:00 UTC
+
+permissions:
+  contents: read
+  # issues: write # Needed only when audit.output is set to 'issue'
+
+concurrency:
+  group: mergepilot-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run MergePilot Audit
+        uses: lolotam/MergePilot@main
+        env:
+          # Anthropic (Claude API)
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # OpenAI (GPT models)
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Google Gemini
+          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Claude Code CLI (official subscription token via `claude setup-token`).
+          # CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

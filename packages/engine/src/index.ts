@@ -18,3 +18,4 @@ export * from './providers/anthropic/index.js';
 export * from './providers/gemini/index.js';
 export * from './providers/factory.js';
 export * from './context/libraries.js';
+export * from './audit/index.js';

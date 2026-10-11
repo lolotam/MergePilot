@@ -10,6 +10,8 @@ import { OpenAIAdapter } from './openai/adapter.js';
 
 export interface CreateReviewModelOptions {
   cwd: string;
+  /** claude-code only: isolated CLAUDE_CONFIG_DIR so no runner-level settings or hooks apply. */
+  configDir?: string;
 }
 
 /**
@@ -27,6 +29,7 @@ export async function createReviewModel(
       token,
       cwd: opts.cwd,
       ...(config.model ? { model: config.model } : {}),
+      ...(opts.configDir ? { configDir: opts.configDir } : {}),
     });
   }
 

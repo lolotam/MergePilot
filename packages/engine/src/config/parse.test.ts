@@ -28,7 +28,13 @@ describe('parseConfig', () => {
           libraryDocs: { source: 'npm', maxCharsPerLibrary: 8000, maxLibraries: 5 },
         },
         budget: { perReviewUsd: 0.5, maxInputTokens: 200000 },
-        audit: { enabled: false },
+        audit: {
+          enabled: false,
+          output: 'summary',
+          maxFiles: 200,
+          include: ['**/*'],
+          exclude: ['**/*.lock', '**/dist/**', '**/*.min.*', '**/*.snap', 'docs/**'],
+        },
       },
     });
   });
@@ -100,7 +106,14 @@ describe('parseConfig', () => {
     expect(result.config.review.pathInstructions).toEqual([
       { path: 'src/money/**', instructions: 'Never use floats for money.' },
     ]);
-    expect(result.config.audit).toEqual({ enabled: true, schedule: '0 3 * * 1' });
+    expect(result.config.audit).toEqual({
+      enabled: true,
+      schedule: '0 3 * * 1',
+      output: 'summary',
+      maxFiles: 200,
+      include: ['**/*'],
+      exclude: ['**/*.lock', '**/dist/**', '**/*.min.*', '**/*.snap', 'docs/**'],
+    });
   });
 
   it('parses budget.pricing and defaults cache prices to inputPerMTok', () => {

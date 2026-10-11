@@ -49,10 +49,18 @@ const BudgetSchema = z.strictObject({
   pricing: ModelPricingSchema.optional(),
 });
 
-const AuditSchema = z.strictObject({
+export const AuditSchema = z.strictObject({
   enabled: z.boolean().default(false),
   schedule: z.string().min(1).optional(),
+  output: z.enum(['summary', 'issue']).default('summary'),
+  maxFiles: z.number().int().positive().default(200),
+  include: z.array(z.string()).default(['**/*']),
+  exclude: z
+    .array(z.string())
+    .default(['**/*.lock', '**/dist/**', '**/*.min.*', '**/*.snap', 'docs/**']),
 });
+
+export type AuditConfig = z.infer<typeof AuditSchema>;
 
 /**
  * `.mergepilot.yml`. Strict at every level so a typo surfaces as an error instead of

@@ -86,6 +86,19 @@ export interface CompareCommitsResult {
   files: GitHubPullRequestFile[];
 }
 
+export interface CreateIssueParams {
+  owner: string;
+  repo: string;
+  title: string;
+  body: string;
+}
+
+export interface GitHubCreatedIssue {
+  id: number;
+  number: number;
+  html_url?: string;
+}
+
 export interface GitHubClient {
   listPullRequestFilesPage(params: ListFilesPageParams): Promise<GitHubPullRequestFile[]>;
   getPullRequest(params: GetPullRequestParams): Promise<GitHubPullRequest>;
@@ -93,6 +106,7 @@ export interface GitHubClient {
   createReview(params: CreateReviewParams): Promise<GitHubCreatedReview>;
   getFileContent(params: GetFileContentParams): Promise<string | null>;
   compareCommits(params: CompareCommitsParams): Promise<CompareCommitsResult | null>;
+  createIssue?(params: CreateIssueParams): Promise<GitHubCreatedIssue>;
 }
 
 function redactToken(str: string, token: string): string {
@@ -266,6 +280,24 @@ export function createOctokitClient(token: string): GitHubClient {
           ) {
             return null;
           }
+          sanitizeError(error, token);
+        }
+      },
+
+      async createIssue(params: CreateIssueParams): Promise<GitHubCreatedIssue> {
+        try {
+          const response = await octokit.rest.issues.create({
+            owner: params.owner,
+            repo: params.repo,
+            title: params.title,
+            body: params.body,
+          });
+          return {
+            id: response.data.id,
+            number: response.data.number,
+            html_url: response.data.html_url,
+          };
+        } catch (error) {
           sanitizeError(error, token);
         }
       },
