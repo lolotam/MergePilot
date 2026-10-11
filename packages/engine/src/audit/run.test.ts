@@ -88,7 +88,7 @@ describe('runAudit', () => {
   it('redacts secrets before prompt and turns them into security findings', async () => {
     const knownSecret = new Secret('super-secret-token-12345');
     const fileContents: Record<string, string> = {
-      'src/config.ts': 'const token = "super-secret-token-12345";\nconst key = "sk-ant-1234567890123456";',
+      'src/config.ts': 'const token = "super-secret-token-12345";\nconst key = "sk-ant-api03-1234567890123456abcdef";',
     };
 
     let receivedUserPrompt = '';

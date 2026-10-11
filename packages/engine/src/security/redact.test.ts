@@ -184,4 +184,11 @@ describe('redactSecrets', () => {
     expect(result.text).toBe(input);
     expect(result.found).toEqual([]);
   });
+
+  it('does not redact bare Anthropic key prefixes mentioned in documentation', () => {
+    const input = 'The right token starts with `sk-ant-oat01-`; an API key starts with `sk-ant-api03-`.';
+    const result = redactSecrets(input);
+    expect(result.text).toBe(input);
+    expect(result.found).toHaveLength(0);
+  });
 });
