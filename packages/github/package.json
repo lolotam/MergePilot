@@ -10,10 +10,11 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "tsc -p tsconfig.json"
+    "typecheck": "tsc -b",
+    "build": "tsc -b"
   },
   "dependencies": {
-    "@mergepilot/engine": "workspace:*"
+    "@mergepilot/engine": "workspace:*",
+    "@octokit/rest": "^22.0.1"
   }
 }

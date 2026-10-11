@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "pnpm -r --parallel typecheck",
+    "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "test": "vitest run",
     "build": "pnpm -r build",
