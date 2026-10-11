@@ -8,6 +8,7 @@ export * from './review/model.js';
 export * from './review/pipeline.js';
 export * from './review/prompt.js';
 export * from './review/types.js';
+export * from './review/verify.js';
 export * from './llm/index.js';
 export * from './security/index.js';
 export * from './validate/index.js';
