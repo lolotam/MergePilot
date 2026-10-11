@@ -76,7 +76,12 @@ export type ReviewRunResult =
       verification?: { checked: number; rejected: number } | undefined;
     }
   | { status: 'skipped-budget'; reason: string }
-  | { status: 'failed'; reason: string };
+  | {
+      status: 'failed';
+      reason: string;
+      /** Provider message, already secret-redacted by the adapter; for logs and the summary. */
+      detail?: string | undefined;
+    };
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -137,6 +142,8 @@ function buildPatchLineToNewLineMap(patch: string): Map<number, number> {
   }
   return result;
 }
+
+const VERIFY_MAX_OUTPUT_TOKENS = 2048;
 
 /** Combines token usage from multiple model calls into a single TokenUsage. */
 function combineUsage(u1?: TokenUsage, u2?: TokenUsage): TokenUsage | undefined {
@@ -246,6 +253,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       { inputTokens: promptTokens, maxOutputTokens },
       budgetCfg.pricing,
     );
+    if (reviewCfg.verify) {
+      // Worst case for the verification call: its hunks are a subset of the review prompt.
+      estimatedCostUsd += estimateCostUsd(
+        { inputTokens: promptTokens, maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS },
+        budgetCfg.pricing,
+      );
+    }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return {
         status: 'skipped-budget',
@@ -267,7 +281,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   } catch (err) {
     const failure = err as LlmFailure;
     if (failure && typeof failure === 'object' && 'code' in failure) {
-      return { status: 'failed', reason: failure.code as string };
+      const detail = redactSecrets(String(failure.message ?? ''), knownSecrets).text.slice(0, 500);
+      return { status: 'failed', reason: failure.code as string, ...(detail ? { detail } : {}) };
     }
     return { status: 'failed', reason: String(err) };
   }
@@ -294,7 +309,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       const verifyResponse = await model.generate({
         system: verifyPrompt.system,
         user: verifyPrompt.user,
-        maxOutputTokens: 2048,
+        maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
         responseSchema: z.toJSONSchema(VerifyAnswerSchema) as Record<string, unknown>,
         ...(signal ? { signal } : {}),
       });

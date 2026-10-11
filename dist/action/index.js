@@ -71092,6 +71092,7 @@ function buildPatchLineToNewLineMap(patch) {
   }
   return result;
 }
+var VERIFY_MAX_OUTPUT_TOKENS = 2048;
 function combineUsage(u1, u2) {
   if (!u1 && !u2)
     return void 0;
@@ -71165,6 +71166,9 @@ async function runReview(input2) {
   let estimatedCostUsd;
   if (budgetCfg.pricing) {
     estimatedCostUsd = estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing);
+    if (reviewCfg.verify) {
+      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS }, budgetCfg.pricing);
+    }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return {
         status: "skipped-budget",
@@ -71184,7 +71188,8 @@ async function runReview(input2) {
   } catch (err) {
     const failure2 = err;
     if (failure2 && typeof failure2 === "object" && "code" in failure2) {
-      return { status: "failed", reason: failure2.code };
+      const detail = redactSecrets(String(failure2.message ?? ""), knownSecrets).text.slice(0, 500);
+      return { status: "failed", reason: failure2.code, ...detail ? { detail } : {} };
     }
     return { status: "failed", reason: String(err) };
   }
@@ -71205,7 +71210,7 @@ async function runReview(input2) {
       const verifyResponse = await model.generate({
         system: verifyPrompt.system,
         user: verifyPrompt.user,
-        maxOutputTokens: 2048,
+        maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
         responseSchema: external_exports.toJSONSchema(VerifyAnswerSchema),
         ...signal ? { signal } : {}
       });
@@ -123288,6 +123293,10 @@ ${parseResult.errors.join("\n")}`);
         reason = `Review failed: quota exceeded for provider "${config2.provider}". Please check quota and billing for ${envVar}.`;
       } else {
         reason = `Review failed: ${reviewResult.reason}`;
+      }
+      if (reviewResult.detail) {
+        log(`Provider error detail: ${reviewResult.detail}`);
+        reason += ` \u2014 ${reviewResult.detail}`;
       }
       summaryMarkdown = renderReviewSummary({
         language: config2.language,
