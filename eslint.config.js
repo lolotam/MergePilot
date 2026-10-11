@@ -8,6 +8,7 @@ export default tseslint.config(
   {
     rules: {
       'no-warning-comments': ['error', { terms: ['fixme', 'hack', 'xxx'], location: 'anywhere' }],
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],
     },
   },
