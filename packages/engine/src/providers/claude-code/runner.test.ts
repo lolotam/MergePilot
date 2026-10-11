@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Secret } from '../../credentials/secret.js';
 import { LlmFailure } from '../../llm/failure.js';
 import { ClaudeCodeRunner, type SpawnLike } from './runner.js';
@@ -467,5 +467,21 @@ describe('ClaudeCodeRunner', () => {
 
       expect(capturedCwd).toBe('/my/project');
     });
+  });
+
+describe('ClaudeCodeRunner token format', () => {
+  it('rejects an Anthropic API key with a message that names the fix, without spawning', async () => {
+    const spawn = vi.fn();
+    const runner = new ClaudeCodeRunner({
+      token: new Secret('sk-ant-api03-test-000'),
+      cwd: '/repo',
+      spawn: spawn as never,
+      platform: 'linux',
+    });
+    await expect(runner.generate({ system: 's', user: 'u', maxOutputTokens: 10 })).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIAL',
+      message: expect.stringContaining('claude setup-token'),
+    });
+    expect(spawn).not.toHaveBeenCalled();
   });
 });
