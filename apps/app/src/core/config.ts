@@ -14,6 +14,8 @@ export interface AppConfig {
     webhookSecret: string;
     clientId: string;
     clientSecret: string;
+    /** Public slug of the GitHub App, used for the install link and the bot login. */
+    appSlug: string;
   };
   google: { clientId: string; clientSecret: string };
   authSecret: string;
@@ -53,6 +55,7 @@ export function loadAppConfig(env: Record<string, string | undefined>): AppConfi
       webhookSecret: get('GITHUB_WEBHOOK_SECRET'),
       clientId: get('GITHUB_CLIENT_ID'),
       clientSecret: get('GITHUB_CLIENT_SECRET'),
+      appSlug: (env.GITHUB_APP_SLUG ?? 'mergepilot').trim(),
     },
     google: { clientId: get('GOOGLE_CLIENT_ID'), clientSecret: get('GOOGLE_CLIENT_SECRET') },
     authSecret: get('BETTER_AUTH_SECRET'),
