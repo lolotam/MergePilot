@@ -100,4 +100,90 @@ describe('parseConfig', () => {
     ]);
     expect(result.config.audit).toEqual({ enabled: true, schedule: '0 3 * * 1' });
   });
+
+  it('parses budget.pricing and defaults cache prices to inputPerMTok', () => {
+    const result = parseConfig(
+      [
+        'provider: anthropic',
+        'model: claude-sonnet',
+        'budget:',
+        '  pricing:',
+        '    inputPerMTok: 3.0',
+        '    outputPerMTok: 15.0',
+      ].join('\n'),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.budget.pricing).toEqual({
+      inputPerMTok: 3.0,
+      outputPerMTok: 15.0,
+      cacheReadPerMTok: 3.0,
+      cacheWritePerMTok: 3.0,
+    });
+  });
+
+  it('accepts explicit cacheReadPerMTok and cacheWritePerMTok in budget.pricing', () => {
+    const result = parseConfig(
+      [
+        'provider: anthropic',
+        'model: claude-sonnet',
+        'budget:',
+        '  pricing:',
+        '    inputPerMTok: 3.0',
+        '    outputPerMTok: 15.0',
+        '    cacheReadPerMTok: 0.3',
+        '    cacheWritePerMTok: 3.75',
+      ].join('\n'),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.budget.pricing).toEqual({
+      inputPerMTok: 3.0,
+      outputPerMTok: 15.0,
+      cacheReadPerMTok: 0.3,
+      cacheWritePerMTok: 3.75,
+    });
+  });
+
+  it('rejects negative pricing values', () => {
+    const errors = expectErrors(
+      [
+        'provider: anthropic',
+        'model: claude-sonnet',
+        'budget:',
+        '  pricing:',
+        '    inputPerMTok: -1',
+        '    outputPerMTok: 15.0',
+      ].join('\n'),
+    );
+    expect(errors.some((e) => e.startsWith('budget.pricing.inputPerMTok'))).toBe(true);
+  });
+
+  it('rejects unknown pricing keys', () => {
+    const errors = expectErrors(
+      [
+        'provider: anthropic',
+        'model: claude-sonnet',
+        'budget:',
+        '  pricing:',
+        '    inputPerMTok: 3.0',
+        '    outputPerMTok: 15.0',
+        '    unknownKey: 10',
+      ].join('\n'),
+    );
+    expect(errors.some((e) => e.startsWith('budget.pricing') && e.includes('unknownKey'))).toBe(true);
+  });
+
+  it('requires outputPerMTok when pricing is provided', () => {
+    const errors = expectErrors(
+      [
+        'provider: anthropic',
+        'model: claude-sonnet',
+        'budget:',
+        '  pricing:',
+        '    inputPerMTok: 3.0',
+      ].join('\n'),
+    );
+    expect(errors.some((e) => e.startsWith('budget.pricing.outputPerMTok'))).toBe(true);
+  });
 });
