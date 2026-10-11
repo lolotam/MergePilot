@@ -122868,6 +122868,151 @@ ${content}
   return content;
 }
 
+async function loadRepoConfig(client, params) {
+  const configFiles = await readFilesAtRef(client, {
+    owner: params.owner,
+    repo: params.repo,
+    ref: params.baseSha,
+    paths: [".mergepilot.yml"]
+  });
+  const configFile = configFiles[0];
+  if (!configFile) {
+    return { missing: true };
+  }
+  const parseResult = parseConfig(configFile.content);
+  if (!parseResult.ok) {
+    return { errors: parseResult.errors };
+  }
+  const config2 = parseResult.config;
+  const rulesFiles = await readFilesAtRef(client, {
+    owner: params.owner,
+    repo: params.repo,
+    ref: params.baseSha,
+    paths: config2.review.rulesFiles
+  });
+  return {
+    configText: configFile.content,
+    config: config2,
+    rulesFiles
+  };
+}
+var PROVIDER_ENV_MAP2 = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  gemini: "GEMINI_API_KEY",
+  "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
+};
+async function reviewPullRequest(ctx) {
+  const { client, owner, repo, pullNumber, headSha, prTitle, prBody, config: config2, configHash, rulesFiles, model, knownSecrets = [], publisherLogin = "github-actions[bot]", log } = ctx;
+  log?.(`Listing files for pull request #${pullNumber}...`);
+  const { files: prFiles } = await listPullRequestFiles(client, {
+    owner,
+    repo,
+    pull_number: pullNumber
+  });
+  log?.(`Found ${prFiles.length} files in PR diff`);
+  log?.("Running review...");
+  const reviewResult = await runReview({
+    config: config2,
+    pr: {
+      title: prTitle,
+      body: prBody
+    },
+    files: prFiles,
+    rulesFiles,
+    model,
+    knownSecrets
+  });
+  log?.(`Review completed with status: ${reviewResult.status}`);
+  const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";
+  let summaryMarkdown;
+  let inlineFindings;
+  let outcome;
+  let costUsd2;
+  let detail;
+  if (reviewResult.status === "completed") {
+    outcome = "completed";
+    costUsd2 = reviewResult.costUsd;
+    inlineFindings = reviewResult.inline;
+    summaryMarkdown = renderReviewSummary({
+      language: config2.language,
+      summary: reviewResult.summary,
+      summaryOnly: reviewResult.summaryOnly,
+      inlineCount: reviewResult.inline.length,
+      complete: reviewResult.complete,
+      incompleteReasons: reviewResult.result.incompleteReasons,
+      modelLabel: model.label,
+      outcome: "completed",
+      ...reviewResult.costUsd !== void 0 ? { costUsd: reviewResult.costUsd } : {},
+      ...reviewResult.usage?.inputTokens !== void 0 ? { inputTokens: reviewResult.usage.inputTokens } : {},
+      ...reviewResult.usage?.outputTokens !== void 0 ? { outputTokens: reviewResult.usage.outputTokens } : {}
+    });
+  } else if (reviewResult.status === "skipped-budget") {
+    outcome = "skipped-budget";
+    detail = reviewResult.reason;
+    inlineFindings = [];
+    summaryMarkdown = renderReviewSummary({
+      language: config2.language,
+      summary: "",
+      summaryOnly: [],
+      inlineCount: 0,
+      complete: false,
+      incompleteReasons: [reviewResult.reason],
+      modelLabel: model.label,
+      outcome: "skipped-budget",
+      reason: reviewResult.reason
+    });
+  } else {
+    outcome = "failed";
+    inlineFindings = [];
+    let reason;
+    if (reviewResult.reason === "INVALID_CREDENTIAL") {
+      reason = `Review failed: invalid credential for provider "${config2.provider}". Please check the ${envVar} secret.`;
+    } else if (reviewResult.reason === "QUOTA") {
+      reason = `Review failed: quota exceeded for provider "${config2.provider}". Please check quota and billing for ${envVar}.`;
+    } else {
+      reason = `Review failed: ${reviewResult.reason}`;
+    }
+    if (reviewResult.detail) {
+      log?.(`Provider error detail: ${redactSecrets(reviewResult.detail, knownSecrets).text}`);
+      reason += ` \u2014 ${reviewResult.detail}`;
+    }
+    reason = redactSecrets(reason, knownSecrets).text;
+    detail = redactSecrets(reviewResult.detail ?? reviewResult.reason, knownSecrets).text;
+    summaryMarkdown = renderReviewSummary({
+      language: config2.language,
+      summary: "",
+      summaryOnly: [],
+      inlineCount: 0,
+      complete: false,
+      incompleteReasons: [reason],
+      modelLabel: model.label,
+      outcome: "failed",
+      reason
+    });
+  }
+  log?.(`Publishing review as ${publisherLogin}...`);
+  const publish = await publishReview(client, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    expectedHeadSha: headSha,
+    summaryMarkdown,
+    inline: inlineFindings,
+    configHash,
+    language: config2.language,
+    suggestionsAsCode: false,
+    publisherLogin
+  });
+  log?.(`Review publication outcome: ${publish.status}`);
+  return {
+    outcome,
+    costUsd: costUsd2,
+    detail,
+    publish
+  };
+}
+
 // src/audit.ts
 async function defaultWalk(dir, baseDir = dir) {
   const entries = await readdir2(dir, { withFileTypes: true });
@@ -123105,12 +123250,6 @@ async function createSanitizedWorkspace(options) {
 }
 
 // src/pull-request.ts
-var PROVIDER_ENV_MAP2 = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  gemini: "GEMINI_API_KEY",
-  "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
-};
 var defaultCreateModel = async (config2, store, opts) => {
   if (config2.provider === "claude-code") {
     const token = await store.resolve({ provider: "claude-code" }, "review");
@@ -123177,38 +123316,17 @@ async function runPullRequestReview(deps) {
   }
   const client = createClient(githubToken);
   log(`Reading .mergepilot.yml from base ref: ${baseSha}`);
-  const configFiles = await readFilesAtRef(client, {
-    owner,
-    repo,
-    ref: baseSha,
-    paths: [".mergepilot.yml"]
-  });
-  const configFile = configFiles[0];
-  if (!configFile) {
+  const configResult = await loadRepoConfig(client, { owner, repo, baseSha });
+  if ("missing" in configResult) {
     log("MergePilot skipped: .mergepilot.yml not found on base branch (not configured)");
     return;
   }
-  const parseResult = parseConfig(configFile.content);
-  if (!parseResult.ok) {
+  if ("errors" in configResult) {
     throw new Error(`Invalid .mergepilot.yml:
-${parseResult.errors.join("\n")}`);
+${configResult.errors.join("\n")}`);
   }
-  const config2 = parseResult.config;
+  const { config: config2, configText, rulesFiles } = configResult;
   log(`Loaded configuration for provider: ${config2.provider}`);
-  log(`Reading rules files from base ref: ${baseSha}`);
-  const rulesFiles = await readFilesAtRef(client, {
-    owner,
-    repo,
-    ref: baseSha,
-    paths: config2.review.rulesFiles
-  });
-  log(`Listing files for pull request #${pr.number}...`);
-  const { files: prFiles } = await listPullRequestFiles(client, {
-    owner,
-    repo,
-    pull_number: pr.number
-  });
-  log(`Found ${prFiles.length} files in PR diff`);
   const store = new EnvCredentialStore(env2);
   const providerSecret = await store.resolve({ provider: config2.provider }, "review");
   const githubSecret = new Secret(githubToken);
@@ -123248,92 +123366,25 @@ ${parseResult.errors.join("\n")}`);
       ...tempConfigDir ? { configDir: tempConfigDir } : {}
     });
     log(`Created review model: ${model.label}`);
-    log("Running review...");
-    const reviewResult = await runReview({
-      config: config2,
-      pr: {
-        title: pr.title ?? "",
-        body: pr.body ?? ""
-      },
-      files: prFiles,
-      rulesFiles,
-      model,
-      knownSecrets: [providerSecret, githubSecret]
-    });
-    log(`Review completed with status: ${reviewResult.status}`);
-    const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";
-    let summaryMarkdown;
-    let inlineFindings;
-    if (reviewResult.status === "completed") {
-      inlineFindings = reviewResult.inline;
-      summaryMarkdown = renderReviewSummary({
-        language: config2.language,
-        summary: reviewResult.summary,
-        summaryOnly: reviewResult.summaryOnly,
-        inlineCount: reviewResult.inline.length,
-        complete: reviewResult.complete,
-        incompleteReasons: reviewResult.result.incompleteReasons,
-        modelLabel: model.label,
-        outcome: "completed",
-        ...reviewResult.costUsd !== void 0 ? { costUsd: reviewResult.costUsd } : {},
-        ...reviewResult.usage?.inputTokens !== void 0 ? { inputTokens: reviewResult.usage.inputTokens } : {},
-        ...reviewResult.usage?.outputTokens !== void 0 ? { outputTokens: reviewResult.usage.outputTokens } : {}
-      });
-    } else if (reviewResult.status === "skipped-budget") {
-      inlineFindings = [];
-      summaryMarkdown = renderReviewSummary({
-        language: config2.language,
-        summary: "",
-        summaryOnly: [],
-        inlineCount: 0,
-        complete: false,
-        incompleteReasons: [reviewResult.reason],
-        modelLabel: model.label,
-        outcome: "skipped-budget",
-        reason: reviewResult.reason
-      });
-    } else {
-      inlineFindings = [];
-      let reason;
-      if (reviewResult.reason === "INVALID_CREDENTIAL") {
-        reason = `Review failed: invalid credential for provider "${config2.provider}". Please check the ${envVar} secret.`;
-      } else if (reviewResult.reason === "QUOTA") {
-        reason = `Review failed: quota exceeded for provider "${config2.provider}". Please check quota and billing for ${envVar}.`;
-      } else {
-        reason = `Review failed: ${reviewResult.reason}`;
-      }
-      if (reviewResult.detail) {
-        log(`Provider error detail: ${reviewResult.detail}`);
-        reason += ` \u2014 ${reviewResult.detail}`;
-      }
-      summaryMarkdown = renderReviewSummary({
-        language: config2.language,
-        summary: "",
-        summaryOnly: [],
-        inlineCount: 0,
-        complete: false,
-        incompleteReasons: [reason],
-        modelLabel: model.label,
-        outcome: "failed",
-        reason
-      });
-    }
-    const configHash = createHash("sha256").update(configFile.content).digest("hex").slice(0, 12);
+    const configHash = createHash("sha256").update(configText).digest("hex").slice(0, 12);
     const publisherLogin = env2["INPUT_PUBLISHER-LOGIN"] || env2.INPUT_PUBLISHER_LOGIN || "github-actions[bot]";
-    log(`Publishing review as ${publisherLogin}...`);
-    const pubResult = await publishReview(client, {
+    await reviewPullRequest({
+      client,
       owner,
       repo,
-      pull_number: pr.number,
-      expectedHeadSha: headSha,
-      summaryMarkdown,
-      inline: inlineFindings,
+      pullNumber: pr.number,
+      headSha,
+      baseSha,
+      prTitle: pr.title ?? "",
+      prBody: pr.body ?? "",
+      config: config2,
       configHash,
-      language: config2.language,
-      suggestionsAsCode: false,
-      publisherLogin
+      rulesFiles,
+      model,
+      knownSecrets: [providerSecret, githubSecret],
+      publisherLogin,
+      log
     });
-    log(`Review publication outcome: ${pubResult.status}`);
   } finally {
     if (sandbox) {
       await sandbox.cleanup();

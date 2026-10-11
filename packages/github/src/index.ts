@@ -53,3 +53,10 @@ export {
   type SelectIncrementalFilesResult,
 } from './incremental.js';
 export * from './summary.js';
+export {
+  loadRepoConfig,
+  type LoadRepoConfigResult,
+  reviewPullRequest,
+  type ReviewPullRequestContext,
+  type ReviewPullRequestResult,
+} from './review-pull-request.js';
