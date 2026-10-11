@@ -22,7 +22,7 @@ import { ReviewAnswerSchema } from './answer.js';
 import { checkBudget, estimateTokens } from './budget.js';
 import { costUsd, estimateCostUsd } from '../budget/cost.js';
 import type { ReviewModel } from './model.js';
-import { buildReviewPrompt } from './prompt.js';
+import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -48,6 +48,7 @@ export interface RunReviewInput {
   rulesFiles: RulesFile[];
   model: ReviewModel;
   knownSecrets: Secret[];
+  libraryDocs?: LibraryDoc[] | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -205,6 +206,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     rulesFiles: redactedRulesFiles,
     pathInstructions: reviewCfg.pathInstructions,
     files: redactedReviewableFiles,
+    ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
   });
 
   const promptTokens = estimateTokens(prompt.system + prompt.user);

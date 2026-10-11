@@ -33,6 +33,15 @@ export interface PromptInput {
   rulesFiles: Array<{ path: string; content: string }>;
   pathInstructions: PathInstruction[];
   files: ReviewableFile[];
+  /** Third-party reference text: untrusted, informs the review but never instructs it. */
+  libraryDocs?: LibraryDoc[];
+}
+
+export interface LibraryDoc {
+  name: string;
+  version: string;
+  source: 'npm' | 'context7';
+  content: string;
 }
 
 export interface BuiltPrompt {
@@ -197,6 +206,10 @@ function buildUserPrompt(input: PromptInput): string {
   const matched = matchingPathInstructions(input.pathInstructions, filePaths);
   for (const pi of matched) {
     parts.push(wrapCriteria(`PATH_INSTRUCTIONS:${pi.path}`, pi.instructions));
+  }
+
+  for (const doc of input.libraryDocs ?? []) {
+    parts.push(wrapUntrusted(`LIBRARY_DOCS:${doc.name}@${doc.version}`, doc.content));
   }
 
   // Each reviewable file with annotated patch

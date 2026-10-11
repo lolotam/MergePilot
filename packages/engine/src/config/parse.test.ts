@@ -24,6 +24,8 @@ describe('parseConfig', () => {
           exclude: ['**/*.lock', '**/dist/**', '**/*.min.*', '**/*.snap'],
           rulesFiles: ['CLAUDE.md', 'AGENTS.md'],
           pathInstructions: [],
+          verify: true,
+          libraryDocs: { source: 'npm', maxCharsPerLibrary: 8000, maxLibraries: 5 },
         },
         budget: { perReviewUsd: 0.5, maxInputTokens: 200000 },
         audit: { enabled: false },

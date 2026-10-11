@@ -50288,7 +50288,14 @@ var require_websocket_server = __commonJS({
   }
 });
 
-// src/main.ts
+// src/audit.ts
+async function runAudit(deps) {
+  const log = deps?.log ?? ((msg) => process.stdout.write(`${msg}
+`));
+  log("MergePilot audit is not implemented yet");
+}
+
+// src/pull-request.ts
 import { createHash } from "node:crypto";
 import { readFile as fsReadFile } from "node:fs/promises";
 
@@ -69982,7 +69989,15 @@ var ReviewSettingsSchema = external_exports.strictObject({
   minSeverity: SeveritySchema.default("medium"),
   exclude: external_exports.array(external_exports.string()).default(["**/*.lock", "**/dist/**", "**/*.min.*", "**/*.snap"]),
   rulesFiles: external_exports.array(external_exports.string()).default(["CLAUDE.md", "AGENTS.md"]),
-  pathInstructions: external_exports.array(PathInstructionSchema).default([])
+  pathInstructions: external_exports.array(PathInstructionSchema).default([]),
+  /** Second model pass that re-checks every finding against the code before publishing. */
+  verify: external_exports.boolean().default(true),
+  libraryDocs: external_exports.strictObject({
+    /** npm = README of the exact installed version; context7 = opt-in third-party service. */
+    source: external_exports.enum(["npm", "context7", "none"]).default("npm"),
+    maxCharsPerLibrary: external_exports.number().int().min(500).max(5e4).default(8e3),
+    maxLibraries: external_exports.number().int().min(0).max(20).default(5)
+  }).prefault({})
 });
 var ModelPricingSchema = external_exports.strictObject({
   inputPerMTok: external_exports.number().min(0),
@@ -70780,6 +70795,9 @@ ${prBody}`;
   for (const pi of matched) {
     parts.push(wrapCriteria(`PATH_INSTRUCTIONS:${pi.path}`, pi.instructions));
   }
+  for (const doc of input2.libraryDocs ?? []) {
+    parts.push(wrapUntrusted(`LIBRARY_DOCS:${doc.name}@${doc.version}`, doc.content));
+  }
   for (const file2 of input2.files) {
     const annotated = annotatePatch(file2.patch);
     parts.push(`### ${file2.path}
@@ -70879,7 +70897,8 @@ async function runReview(input2) {
     pr: { title: redactedPrTitle, body: redactedPrBody },
     rulesFiles: redactedRulesFiles,
     pathInstructions: reviewCfg.pathInstructions,
-    files: redactedReviewableFiles
+    files: redactedReviewableFiles,
+    ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {}
   });
   const promptTokens = estimateTokens(prompt.system + prompt.user);
   const budgetResult = checkBudget({
@@ -122052,14 +122071,14 @@ ${content}
   return content;
 }
 
-// src/main.ts
+// src/pull-request.ts
 var PROVIDER_ENV_MAP2 = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   gemini: "GEMINI_API_KEY",
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
 };
-async function run(deps) {
+async function runPullRequestReview(deps) {
   const env2 = deps?.env ?? process.env;
   const readFile2 = deps?.readFile ?? ((p) => fsReadFile(p, "utf8"));
   const createClient = deps?.createClient ?? createOctokitClient;
@@ -122231,6 +122250,17 @@ ${parseResult.errors.join("\n")}`);
     publisherLogin
   });
   log(`Review publication outcome: ${pubResult.status}`);
+}
+
+// src/main.ts
+async function run(deps) {
+  const env2 = deps?.env ?? process.env;
+  const log = deps?.log ?? ((msg) => process.stdout.write(`${msg}
+`));
+  const eventName = env2.GITHUB_EVENT_NAME;
+  if (eventName === "pull_request") return runPullRequestReview(deps);
+  if (eventName === "workflow_dispatch" || eventName === "schedule") return runAudit(deps);
+  log(`MergePilot skipped: event "${eventName ?? ""}" is not pull_request`);
 }
 
 // src/index.ts
