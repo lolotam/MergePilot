@@ -71530,6 +71530,13 @@ var ClaudeCodeRunner = class {
     this.#configDir = options.configDir;
   }
   async generate(request2) {
+    if (this.#token.reveal().startsWith("sk-ant-api")) {
+      throw new LlmFailure({
+        code: "INVALID_CREDENTIAL",
+        provider: "claude-code",
+        message: "CLAUDE_CODE_OAUTH_TOKEN contains an Anthropic API key (sk-ant-api\u2026), not a subscription token. Run `claude setup-token` and store its sk-ant-oat\u2026 output, or use provider: anthropic with ANTHROPIC_API_KEY."
+      });
+    }
     if (!this.#resolvedLaunch) {
       this.#resolvedLaunch = resolveClaudeLaunch({
         binary: this.#binary,

@@ -157,6 +157,17 @@ export class ClaudeCodeRunner implements ReviewModel {
   }
 
   async generate(request: ReviewModelRequest): Promise<ReviewModelResponse> {
+    // An Anthropic API key placed in CLAUDE_CODE_OAUTH_TOKEN makes the CLI report only
+    // "Not logged in"; name the real mistake instead.
+    if (this.#token.reveal().startsWith('sk-ant-api')) {
+      throw new LlmFailure({
+        code: 'INVALID_CREDENTIAL',
+        provider: 'claude-code',
+        message:
+          'CLAUDE_CODE_OAUTH_TOKEN contains an Anthropic API key (sk-ant-api…), not a subscription token. ' +
+          'Run `claude setup-token` and store its sk-ant-oat… output, or use provider: anthropic with ANTHROPIC_API_KEY.',
+      });
+    }
     if (!this.#resolvedLaunch) {
       this.#resolvedLaunch = resolveClaudeLaunch({
         binary: this.#binary,
