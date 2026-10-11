@@ -38,6 +38,8 @@ MergePilot هو محرك مراجعة ذكي لطلبات السحب (Pull Reque
 >    claude setup-token
 >    ```
 > 3. انسخ التوكن اللي هيظهرلك، وضيفه كـ Secret في مستودعك باسم `CLAUDE_CODE_OAUTH_TOKEN`.
+>    - التوكن الصح **بيبدأ بـ `sk-ant-oat01-`**. لو اللي معاك بيبدأ بـ `sk-ant-api03-` فده مفتاح API مش توكن اشتراك: Claude Code هيرد بـ «Not logged in». استخدمه بدل كده مع `provider: anthropic` وsecret اسمه `ANTHROPIC_API_KEY`.
+>    - الزقه كامل، من غير مسافات ولا علامات تنصيص.
 > 4. MergePilot ما بيقراش التوكن ده ولا بيخزنه ولا بيجدده؛ هو فقط بيمرره للأداة الرسمية بصلاحيات قراءة فقط (وفق [ADR-0006](adr/0006-subscriptions-via-official-agent-clis.md)).
 
 ---
