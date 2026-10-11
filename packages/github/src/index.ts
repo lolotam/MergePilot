@@ -11,6 +11,9 @@ export {
   type GetFileContentParams,
   type ListFilesPageParams,
   type ListReviewsPageParams,
+  type CompareCommitsParams,
+  type CompareCommitsResult,
+  type CompareCommitsStatus,
 } from './client.js';
 
 export {
@@ -42,4 +45,11 @@ export {
   type FileContent,
   type ReadFilesAtRefParams,
 } from './contents.js';
+export {
+  findLastReviewedHead,
+  selectIncrementalFiles,
+  type FindLastReviewedHeadOptions,
+  type SelectIncrementalFilesOptions,
+  type SelectIncrementalFilesResult,
+} from './incremental.js';
 export * from './summary.js';

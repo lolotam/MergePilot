@@ -122029,6 +122029,39 @@ function createOctokitClient(token) {
           }
           sanitizeError(error62, token);
         }
+      },
+      async compareCommits(params) {
+        try {
+          const PAGE_SIZE2 = 100;
+          let page = 1;
+          let status = "identical";
+          const allFiles = [];
+          while (true) {
+            const response = await octokit.rest.repos.compareCommitsWithBasehead({
+              owner: params.owner,
+              repo: params.repo,
+              basehead: `${params.base}...${params.head}`,
+              page,
+              per_page: PAGE_SIZE2
+            });
+            status = response.data.status;
+            const pageFiles = response.data.files ?? [];
+            allFiles.push(...pageFiles);
+            if (pageFiles.length < PAGE_SIZE2) {
+              break;
+            }
+            page++;
+          }
+          return {
+            status,
+            files: allFiles
+          };
+        } catch (error62) {
+          if (typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404) {
+            return null;
+          }
+          sanitizeError(error62, token);
+        }
       }
     };
   } catch (error62) {
