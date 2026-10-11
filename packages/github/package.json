@@ -14,6 +14,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@mergepilot/engine": "workspace:*"
+    "@mergepilot/engine": "workspace:*",
+    "@octokit/rest": "^22.0.1"
   }
 }
