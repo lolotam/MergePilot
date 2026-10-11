@@ -39,7 +39,7 @@ describe('ClaudeCodeRunner', () => {
   describe('happy path — successful JSON result', () => {
     it('returns parsed text and usage from CLI output', async () => {
       const { spawn, stdinChunks } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/tmp/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/tmp/repo', spawn });
 
       const response = await runner.generate(REQUEST);
 
@@ -55,13 +55,13 @@ describe('ClaudeCodeRunner', () => {
     });
 
     it('label is "claude-code"', () => {
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn: makeSpawn({}).spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn: makeSpawn({}).spawn });
       expect(runner.label).toBe('claude-code');
     });
 
     it('uses system prompt as --append-system-prompt arg', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       const args = capturedArgs[0] ?? [];
@@ -72,7 +72,7 @@ describe('ClaudeCodeRunner', () => {
 
     it('passes --model when model option is set', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn, model: 'claude-opus-4-5' });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn, model: 'claude-opus-4-5' });
       await runner.generate(REQUEST);
 
       const args = capturedArgs[0] ?? [];
@@ -83,7 +83,7 @@ describe('ClaudeCodeRunner', () => {
 
     it('omits --model when model option is not set', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       expect(capturedArgs[0] ?? []).not.toContain('--model');
@@ -91,7 +91,7 @@ describe('ClaudeCodeRunner', () => {
 
     it('uses custom binary name when specified', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn, binary: '/usr/local/bin/claude' });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn, binary: '/usr/local/bin/claude' });
       await runner.generate(REQUEST);
 
       expect((capturedArgs[0] ?? [])[0]).toBe('/usr/local/bin/claude');
@@ -100,7 +100,7 @@ describe('ClaudeCodeRunner', () => {
     it('omits usage field when CLI omits it', async () => {
       const noUsage = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'ok' });
       const { spawn } = makeSpawn({ stdout: noUsage });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       const response = await runner.generate(REQUEST);
 
       expect(response.usage).toBeUndefined();
@@ -110,7 +110,7 @@ describe('ClaudeCodeRunner', () => {
   describe('CLI args — read-only tool flags', () => {
     it('includes all required read-only flags', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       const args = capturedArgs[0] ?? [];
@@ -125,7 +125,7 @@ describe('ClaudeCodeRunner', () => {
 
     it('allowed tools include Read, Grep, Glob', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       const args = capturedArgs[0] ?? [];
@@ -138,7 +138,7 @@ describe('ClaudeCodeRunner', () => {
 
     it('disallowed tools include Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       const args = capturedArgs[0] ?? [];
@@ -155,7 +155,7 @@ describe('ClaudeCodeRunner', () => {
 
     it('prompt text is NOT in CLI args', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       const argsStr = JSON.stringify(capturedArgs[0] ?? []);
@@ -164,7 +164,7 @@ describe('ClaudeCodeRunner', () => {
 
     it('token is NOT in CLI args', async () => {
       const { spawn, capturedArgs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       const argsStr = JSON.stringify(capturedArgs[0] ?? []);
@@ -175,7 +175,7 @@ describe('ClaudeCodeRunner', () => {
   describe('environment variables', () => {
     it('env contains CLAUDE_CODE_OAUTH_TOKEN with the token value', async () => {
       const { spawn, capturedEnvs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       expect((capturedEnvs[0] ?? {})['CLAUDE_CODE_OAUTH_TOKEN']).toBe(TOKEN_VALUE);
@@ -184,7 +184,7 @@ describe('ClaudeCodeRunner', () => {
     it('env does NOT contain ANTHROPIC_API_KEY', async () => {
       process.env['ANTHROPIC_API_KEY'] = 'sk-ant-test-000';
       const { spawn, capturedEnvs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
       delete process.env['ANTHROPIC_API_KEY'];
 
@@ -194,7 +194,7 @@ describe('ClaudeCodeRunner', () => {
     it('env does NOT contain OPENAI_API_KEY', async () => {
       process.env['OPENAI_API_KEY'] = 'sk-test-000';
       const { spawn, capturedEnvs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
       delete process.env['OPENAI_API_KEY'];
 
@@ -204,7 +204,7 @@ describe('ClaudeCodeRunner', () => {
     it('env does NOT contain GEMINI_API_KEY', async () => {
       process.env['GEMINI_API_KEY'] = 'AIza-test-000';
       const { spawn, capturedEnvs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
       delete process.env['GEMINI_API_KEY'];
 
@@ -214,7 +214,7 @@ describe('ClaudeCodeRunner', () => {
     it('env does NOT contain GITHUB_TOKEN', async () => {
       process.env['GITHUB_TOKEN'] = 'ghs_test000';
       const { spawn, capturedEnvs } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
       delete process.env['GITHUB_TOKEN'];
 
@@ -225,7 +225,7 @@ describe('ClaudeCodeRunner', () => {
   describe('stdin receives the prompt', () => {
     it('writes user prompt to stdin', async () => {
       const { spawn, stdinChunks } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       expect(stdinChunks.join('')).toContain(REQUEST.user);
@@ -233,7 +233,7 @@ describe('ClaudeCodeRunner', () => {
 
     it('includes JSON schema instruction in stdin when responseSchema is set', async () => {
       const { spawn, stdinChunks } = makeSpawn({ stdout: SUCCESS_PAYLOAD });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       const schema = { type: 'object', properties: { findings: { type: 'array' } } };
       await runner.generate({ ...REQUEST, responseSchema: schema });
 
@@ -252,7 +252,7 @@ describe('ClaudeCodeRunner', () => {
         result: 'Authentication failed: invalid login token',
       });
       const { spawn } = makeSpawn({ stdout: payload });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       await expect(runner.generate(REQUEST)).rejects.toSatisfy(
         (e: unknown) => e instanceof LlmFailure && e.code === 'INVALID_CREDENTIAL',
@@ -265,7 +265,7 @@ describe('ClaudeCodeRunner', () => {
         result: 'Request is unauthorized',
       });
       const { spawn } = makeSpawn({ stdout: payload });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       await expect(runner.generate(REQUEST)).rejects.toSatisfy(
         (e: unknown) => e instanceof LlmFailure && e.code === 'INVALID_CREDENTIAL',
@@ -280,7 +280,7 @@ describe('ClaudeCodeRunner', () => {
         result: 'You have exceeded your usage limit for today',
       });
       const { spawn } = makeSpawn({ stdout: payload });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       await expect(runner.generate(REQUEST)).rejects.toSatisfy(
         (e: unknown) => e instanceof LlmFailure && e.code === 'QUOTA',
@@ -293,7 +293,7 @@ describe('ClaudeCodeRunner', () => {
         result: 'Your subscription quota has been exhausted',
       });
       const { spawn } = makeSpawn({ stdout: payload });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       await expect(runner.generate(REQUEST)).rejects.toSatisfy(
         (e: unknown) => e instanceof LlmFailure && e.code === 'QUOTA',
@@ -304,7 +304,7 @@ describe('ClaudeCodeRunner', () => {
   describe('error handling — non-zero exit code', () => {
     it('throws LlmFailure on non-zero exit with unknown wording', async () => {
       const { spawn } = makeSpawn({ exitCode: 1, stderr: 'Something went wrong internally' });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       await expect(runner.generate(REQUEST)).rejects.toSatisfy(
         (e: unknown) => e instanceof LlmFailure && e.code === 'UNKNOWN',
@@ -315,7 +315,7 @@ describe('ClaudeCodeRunner', () => {
   describe('error handling — non-JSON stdout', () => {
     it('maps non-JSON stdout to UNKNOWN', async () => {
       const { spawn } = makeSpawn({ stdout: 'this is not JSON at all' });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       await expect(runner.generate(REQUEST)).rejects.toSatisfy(
         (e: unknown) => e instanceof LlmFailure && e.code === 'UNKNOWN',
@@ -327,7 +327,7 @@ describe('ClaudeCodeRunner', () => {
     it('maps ENOENT spawn error to BAD_REQUEST with "not found" message', async () => {
       const err = Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' });
       const { spawn } = makeSpawn({ spawnError: err as NodeJS.ErrnoException });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       await expect(runner.generate(REQUEST)).rejects.toSatisfy(
         (e: unknown) =>
@@ -354,7 +354,7 @@ describe('ClaudeCodeRunner', () => {
         return child;
       };
 
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn, timeoutMs: 50 });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn, timeoutMs: 50 });
 
       await expect(runner.generate(REQUEST)).rejects.toSatisfy(
         (e: unknown) => e instanceof LlmFailure && e.code === 'TIMEOUT',
@@ -380,7 +380,7 @@ describe('ClaudeCodeRunner', () => {
       };
 
       const ac = new AbortController();
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn, timeoutMs: 60_000 });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn, timeoutMs: 60_000 });
 
       setImmediate(() => ac.abort());
 
@@ -395,7 +395,7 @@ describe('ClaudeCodeRunner', () => {
     it('token value never appears in a thrown error message', async () => {
       const stderrWithToken = `Error: bad auth token=${TOKEN_VALUE}`;
       const { spawn } = makeSpawn({ exitCode: 1, stderr: stderrWithToken });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       let caught: unknown;
       try { await runner.generate(REQUEST); } catch (e) { caught = e; }
@@ -410,7 +410,7 @@ describe('ClaudeCodeRunner', () => {
         result: `Review ok. Your token is ${TOKEN_VALUE}`,
       });
       const { spawn } = makeSpawn({ stdout: payload });
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
 
       const response = await runner.generate(REQUEST);
       expect(response.text).not.toContain(TOKEN_VALUE);
@@ -426,7 +426,7 @@ describe('ClaudeCodeRunner', () => {
         return child as ReturnType<SpawnLike>;
       };
 
-      const runner = new ClaudeCodeRunner({ token, cwd: '/repo', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/repo', spawn });
       await runner.generate(REQUEST);
 
       expect(capturedShell).toBe(false);
@@ -440,7 +440,7 @@ describe('ClaudeCodeRunner', () => {
         return child as ReturnType<SpawnLike>;
       };
 
-      const runner = new ClaudeCodeRunner({ token, cwd: '/my/project', spawn });
+      const runner = new ClaudeCodeRunner({ platform: 'linux', token, cwd: '/my/project', spawn });
       await runner.generate(REQUEST);
 
       expect(capturedCwd).toBe('/my/project');
