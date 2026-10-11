@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "composite": true, "rootDir": "src", "outDir": "dist" },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.fixtures.ts"],
+  "references": [{ "path": "../../packages/engine" }, { "path": "../../packages/github" }]
+}
