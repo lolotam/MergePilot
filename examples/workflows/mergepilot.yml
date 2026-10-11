@@ -1,0 +1,31 @@
+name: MergePilot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: mergepilot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Review Pull Request
+        uses: lolotam/MergePilot@main
+        env:
+          # Anthropic (Claude API)
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # OpenAI (GPT models)
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Google Gemini
+          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Claude Code CLI (official subscription token via `claude setup-token`).
+          # Subscription mode also needs the Claude Code CLI on the runner; see docs/usage.ar.md.
+          # CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

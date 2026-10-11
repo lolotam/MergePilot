@@ -1,0 +1,30 @@
+name: Bundle Check
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bundle-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm build
+      - name: bundle
+        run: pnpm bundle
+      - name: verify bundle is up to date
+        run: git diff --exit-code dist/action

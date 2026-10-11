@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -b",
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "bundle": "node build.mjs"
   },
   "dependencies": {
     "@mergepilot/engine": "workspace:*",
     "@mergepilot/github": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

@@ -1,0 +1,17 @@
+name: 'MergePilot'
+description: 'Multi-provider AI pull request review engine for GitHub'
+branding:
+  icon: 'git-pull-request'
+  color: 'purple'
+inputs:
+  github-token:
+    description: 'GitHub token for reading pull request changes and posting reviews'
+    required: false
+    default: '${{ github.token }}'
+  publisher-login:
+    description: 'Login handle of the review publisher used for idempotency checks'
+    required: false
+    default: 'github-actions[bot]'
+runs:
+  using: 'node24'
+  main: 'dist/action/index.js'
