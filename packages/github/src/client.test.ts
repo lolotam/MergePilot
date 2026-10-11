@@ -6,6 +6,7 @@ const mockListFiles = vi.fn();
 const mockGet = vi.fn();
 const mockListReviews = vi.fn();
 const mockCreateReview = vi.fn();
+const mockGetContent = vi.fn();
 
 vi.mock('@octokit/rest', () => {
   return {
@@ -16,6 +17,9 @@ vi.mock('@octokit/rest', () => {
           get: mockGet,
           listReviews: mockListReviews,
           createReview: mockCreateReview,
+        },
+        repos: {
+          getContent: mockGetContent,
         },
       };
     },
@@ -166,5 +170,92 @@ describe('createOctokitClient', () => {
       event: 'COMMENT',
       body: 'Review text',
     });
+  });
+
+  it('delegates getFileContent and decodes base64 content', async () => {
+    const rawText = 'provider: anthropic\nmodel: claude-3-5-sonnet';
+    const base64Text = Buffer.from(rawText, 'utf8').toString('base64');
+    mockGetContent.mockResolvedValueOnce({
+      data: {
+        type: 'file',
+        encoding: 'base64',
+        content: base64Text,
+      },
+    });
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.getFileContent({
+      owner: 'org',
+      repo: 'repo',
+      path: '.mergepilot.yml',
+      ref: 'main',
+    });
+
+    expect(result).toBe(rawText);
+    expect(mockGetContent).toHaveBeenCalledWith({
+      owner: 'org',
+      repo: 'repo',
+      path: '.mergepilot.yml',
+      ref: 'main',
+    });
+  });
+
+  it('returns null when getFileContent encounters a 404', async () => {
+    const notFoundError = new Error('Not Found');
+    (notFoundError as unknown as { status: number }).status = 404;
+    mockGetContent.mockRejectedValueOnce(notFoundError);
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.getFileContent({
+      owner: 'org',
+      repo: 'repo',
+      path: 'nonexistent.yml',
+      ref: 'main',
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when getFileContent points to a directory', async () => {
+    mockGetContent.mockResolvedValueOnce({
+      data: [
+        { name: 'file1.ts', type: 'file' },
+        { name: 'file2.ts', type: 'file' },
+      ],
+    });
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.getFileContent({
+      owner: 'org',
+      repo: 'repo',
+      path: 'src',
+      ref: 'main',
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('redacts token when getFileContent throws non-404 error', async () => {
+    const serverError = new Error(`Server error with token ${secretToken}`);
+    (serverError as unknown as { status: number }).status = 500;
+    mockGetContent.mockRejectedValueOnce(serverError);
+
+    const client = createOctokitClient(secretToken);
+    let caught: unknown;
+    try {
+      await client.getFileContent({
+        owner: 'org',
+        repo: 'repo',
+        path: 'src/main.ts',
+        ref: 'main',
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const msg = (caught as Error).message;
+    expect(msg).not.toContain(secretToken);
+    expect(msg).toContain('[REDACTED]');
   });
 });
