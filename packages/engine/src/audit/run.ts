@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import type { TokenUsage } from '../llm/types.js';
 import { parseReviewAnswer, ReviewAnswerSchema } from '../review/answer.js';
+import { estimateTokens } from '../review/budget.js';
 import { secretsToRedact } from '../review/model.js';
+import { needsTruncationRetry } from '../review/split.js';
+import { describeCallError, requestedOutputTokens, SpendTracker } from '../review/spend.js';
 import type { Finding } from '../review/types.js';
 import { redactSecrets } from '../security/redact.js';
 import { selectFindings } from '../validate/select.js';
@@ -13,6 +16,17 @@ import type {
   FailedChunk,
   RunAuditInput,
 } from './types.js';
+
+const AUDIT_MAX_OUTPUT_TOKENS = 4096;
+const AUDIT_RETRY_OUTPUT_TOKENS = AUDIT_MAX_OUTPUT_TOKENS * 2;
+
+function addUsage(total: TokenUsage, usage: TokenUsage | undefined): void {
+  if (!usage) return;
+  total.inputTokens += usage.inputTokens;
+  total.outputTokens += usage.outputTokens;
+  total.cacheReadTokens += usage.cacheReadTokens ?? 0;
+  total.cacheWriteTokens += usage.cacheWriteTokens ?? 0;
+}
 
 export async function runAudit(input: RunAuditInput): Promise<AuditResult> {
   const {
@@ -61,6 +75,11 @@ export async function runAudit(input: RunAuditInput): Promise<AuditResult> {
   const parsedFindings: Finding[] = [];
   const summaryByChunk: ChunkSummary[] = [];
 
+  const responseSchema = z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>;
+  // Output tokens each call really requests: answer budget + the model's thinking headroom.
+  const firstRequested = requestedOutputTokens(model, AUDIT_MAX_OUTPUT_TOKENS);
+  const retryRequested = requestedOutputTokens(model, AUDIT_RETRY_OUTPUT_TOKENS);
+
   for (let i = 0; i < plan.chunks.length; i++) {
     const chunkPaths = plan.chunks[i]!;
 
@@ -94,51 +113,51 @@ export async function runAudit(input: RunAuditInput): Promise<AuditResult> {
         files: chunkFiles,
       });
 
+      const promptTokens = estimateTokens(prompt.system + prompt.user);
+      // Each chunk is one review-sized unit: its calls together stay within perReviewUsd.
+      const spend = new SpendTracker(config.budget?.pricing, config.budget?.perReviewUsd ?? Infinity);
       const modelResponse = await model.generate({
         system: prompt.system,
         user: prompt.user,
-        maxOutputTokens: 4096,
-        responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
+        maxOutputTokens: AUDIT_MAX_OUTPUT_TOKENS,
+        responseSchema,
         ...(signal ? { signal } : {}),
       });
-
-      if (modelResponse.usage) {
-        totalUsage.inputTokens += modelResponse.usage.inputTokens;
-        totalUsage.outputTokens += modelResponse.usage.outputTokens;
-        totalUsage.cacheReadTokens += modelResponse.usage.cacheReadTokens ?? 0;
-        totalUsage.cacheWriteTokens += modelResponse.usage.cacheWriteTokens ?? 0;
-      }
+      spend.record(promptTokens, firstRequested, modelResponse.usage);
+      addUsage(totalUsage, modelResponse.usage);
 
       let parseResult = parseReviewAnswer(modelResponse.text, {
         finishReason: modelResponse.finishReason,
         outputTokens: modelResponse.usage?.outputTokens,
       });
+      const retryNotes: string[] = [];
 
-      if (!parseResult.ok && (parseResult.code === 'truncated' || modelResponse.finishReason === 'max-tokens')) {
-        try {
-          const retryResponse = await model.generate({
-            system: prompt.system,
-            user: prompt.user,
-            maxOutputTokens: 8192,
-            responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
-            ...(signal ? { signal } : {}),
-          });
-          if (retryResponse.usage) {
-            totalUsage.inputTokens += retryResponse.usage.inputTokens;
-            totalUsage.outputTokens += retryResponse.usage.outputTokens;
-            totalUsage.cacheReadTokens += retryResponse.usage.cacheReadTokens ?? 0;
-            totalUsage.cacheWriteTokens += retryResponse.usage.cacheWriteTokens ?? 0;
+      if (needsTruncationRetry(parseResult, modelResponse.finishReason)) {
+        if (!spend.canAfford(promptTokens, retryRequested)) {
+          retryNotes.push('truncation retry skipped: budget limit reached');
+        } else {
+          try {
+            const retryResponse = await model.generate({
+              system: prompt.system,
+              user: prompt.user,
+              maxOutputTokens: AUDIT_RETRY_OUTPUT_TOKENS,
+              responseSchema,
+              ...(signal ? { signal } : {}),
+            });
+            spend.record(promptTokens, retryRequested, retryResponse.usage);
+            addUsage(totalUsage, retryResponse.usage);
+            parseResult = parseReviewAnswer(retryResponse.text, {
+              finishReason: retryResponse.finishReason,
+              outputTokens: retryResponse.usage?.outputTokens,
+            });
+          } catch (err) {
+            retryNotes.push(`truncation retry failed: ${describeCallError(err, knownSecrets)}`);
           }
-          const retryParse = parseReviewAnswer(retryResponse.text, {
-            finishReason: retryResponse.finishReason,
-            outputTokens: retryResponse.usage?.outputTokens,
-          });
-          if (retryParse.ok) {
-            parseResult = retryParse;
-          }
-        } catch {
-          // Retry failed, keep original parseResult
         }
+      }
+
+      if (!parseResult.ok && retryNotes.length > 0) {
+        parseResult = { ...parseResult, error: [parseResult.error, ...retryNotes].join('; ') };
       }
 
       if (!parseResult.ok) {
@@ -156,7 +175,7 @@ export async function runAudit(input: RunAuditInput): Promise<AuditResult> {
         parsedFindings.push(...parseResult.findings);
       }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
+      const errorMsg = describeCallError(err, knownSecrets);
       summaryByChunk.push({
         chunkIndex: i,
         paths: chunkPaths,

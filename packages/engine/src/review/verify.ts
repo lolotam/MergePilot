@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { extractCandidateObjects } from './answer.js';
+import { extractCandidateObjects, isTruncatedAnswer } from './answer.js';
 import type { Finding } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -259,10 +259,7 @@ export function parseVerifyAnswer(
   }
 
   if (!matchedAnswer) {
-    const isTruncated =
-      options?.finishReason === 'max-tokens' ||
-      options?.finishReason === 'length' ||
-      hasUnclosedObject;
+    const isTruncated = isTruncatedAnswer(options?.finishReason, hasUnclosedObject);
 
     if (isTruncated) {
       const finishDetail = options?.finishReason ? `finishReason: ${options.finishReason}` : 'unclosed JSON object';

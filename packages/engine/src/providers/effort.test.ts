@@ -129,6 +129,14 @@ describe('default thinking headroom (P0.1)', () => {
     expect(isCompatibleReasoningModel('openrouter', 'meta-llama/llama-3-70b')).toBe(false);
     expect(isCompatibleReasoningModel('zai', 'glm-4.6', 'glm')).toBe(true);
     expect(isCompatibleReasoningModel('zai-coding', 'glm-4.6', 'glm')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'nvidia/nemotron-3-super-120b-a12b')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'qwen/qwq-32b')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'deepseek-ai/deepseek-r1')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'some/model-reasoning')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'meta/llama-3.3-70b-instruct')).toBe(false);
+    expect(isCompatibleReasoningModel('openrouter', 'anthropic/claude-sonnet-5:thinking')).toBe(true);
+    expect(isCompatibleReasoningModel('openrouter', 'nvidia/llama-3.3-nemotron-super-49b')).toBe(true);
+    expect(isCompatibleReasoningModel('openrouter', 'qwen/qwq-32b')).toBe(true);
   });
 
   it('adds default thinking headroom to requestedOutputTokens when effort is undefined', async () => {

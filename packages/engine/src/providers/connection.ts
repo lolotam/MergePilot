@@ -71,9 +71,26 @@ function list(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(record) : [];
 }
 
+/** A leading `<think>…</think>` block (closed or cut off by the token limit) some NIM models put in `content`. */
+const LEADING_THINK_BLOCK = /^\s*<think>([\s\S]*?)(?:<\/think>|$)/i;
+
+/**
+ * The reply in `content`, without a leading think block. A reply that is ONLY a think block
+ * still proves the key, the model and the endpoint work, so its reasoning text is returned.
+ */
+export function contentReply(content: string): string {
+  const think = LEADING_THINK_BLOCK.exec(content);
+  if (!think) return content.trim();
+  const answer = content.slice(think[0].length).trim();
+  return answer || (think[1] ?? '').trim();
+}
+
 function chatReply(json: Record<string, unknown>): string {
   const message = record(list(json.choices)[0]?.message);
-  if (typeof message.content === 'string' && message.content.trim()) return message.content;
+  if (typeof message.content === 'string') {
+    const reply = contentReply(message.content);
+    if (reply) return reply;
+  }
   // Reasoning models (GLM, DeepSeek reasoner, OpenRouter reasoning) may spend the tiny budget on
   // thinking; reasoning text still proves the key, the model and the endpoint work.
   for (const field of ['reasoning_content', 'reasoning']) {

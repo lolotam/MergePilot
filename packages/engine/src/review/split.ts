@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import type { MergePilotConfig } from '../config/schema.js';
+import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
-import { costUsd, estimateCostUsd } from '../budget/cost.js';
 import { estimateTokens } from './budget.js';
 import { parseReviewAnswer, ReviewAnswerSchema } from './answer.js';
 import type { ReviewModel } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
+import { describeCallError, requestedOutputTokens, type SpendTracker } from './spend.js';
 import type { Finding } from './types.js';
 
 export interface ReviewableFileWithPatch {
@@ -107,69 +108,66 @@ export interface ExecuteBatchedReviewInput {
   model: ReviewModel;
   maxOutputTokens: number;
   retryOutputTokens: number;
+  /** Output tokens one batch call really requests (thinking headroom included). */
   reviewOutputTokens: number;
+  /** Shared per-review spend, so the batches together never exceed perReviewUsd. */
+  spend: SpendTracker;
+  knownSecrets?: readonly Secret[] | undefined;
   libraryDocs?: LibraryDoc[] | undefined;
   signal?: AbortSignal | undefined;
   initialUsage?: TokenUsage | undefined;
 }
 
 export interface ExecuteBatchedReviewResult {
-  summary: string;
-  findings: Finding[];
+  /** Merged answer, or null when no batch produced one. */
+  merged: { summary: string; findings: Finding[] } | null;
   totalUsage?: TokenUsage | undefined;
   incompleteReasons: string[];
 }
 
+const reviewJsonSchema = (): Record<string, unknown> =>
+  z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>;
+
+/** A parse failure worth a bigger-output retry: the answer was cut off, not merely wrong. */
+export function needsTruncationRetry(
+  parsed: { ok: true } | { ok: false; code: string },
+  finishReason: string | undefined,
+): boolean {
+  return !parsed.ok && (parsed.code === 'truncated' || finishReason === 'max-tokens');
+}
+
 /**
  * Reviews files in batches by size, merging findings (deduped by path+line+title)
- * and producing one summary. Each call is counted in usage/cost.
+ * and producing one summary. Each call is counted in usage and in the shared spend.
  */
 export async function executeBatchedReview(
   input: ExecuteBatchedReviewInput,
-): Promise<ExecuteBatchedReviewResult | null> {
-  const {
-    batches,
-    config,
-    pr,
-    rulesFiles,
-    model,
-    maxOutputTokens,
-    retryOutputTokens,
-    reviewOutputTokens,
-    libraryDocs,
-    signal,
-  } = input;
-
-  const budgetCfg = config.budget;
+): Promise<ExecuteBatchedReviewResult> {
+  const { batches, config, pr, rulesFiles, model, maxOutputTokens, retryOutputTokens } = input;
+  const { reviewOutputTokens, spend, libraryDocs, signal } = input;
   const reviewCfg = config.review;
   let totalUsage = input.initialUsage;
   const batchSummaries: string[] = [];
   const batchFindings: Finding[] = [];
   const incompleteReasons: string[] = [];
+  const retryRequested = requestedOutputTokens(model, retryOutputTokens);
 
   for (let bIdx = 0; bIdx < batches.length; bIdx++) {
-    const batchFiles = batches[bIdx]!;
+    const label = `batch ${bIdx + 1}`;
     const batchPrompt = buildReviewPrompt({
       language: config.language,
       maxFindings: reviewCfg.maxFindings,
       pr,
       rulesFiles,
       pathInstructions: reviewCfg.pathInstructions,
-      files: batchFiles,
+      files: batches[bIdx]!,
       ...(libraryDocs ? { libraryDocs } : {}),
     });
-
     const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
-    if (budgetCfg.pricing) {
-      const currentSpent = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : 0;
-      const bCost = estimateCostUsd(
-        { inputTokens: bPromptTokens, maxOutputTokens: reviewOutputTokens },
-        budgetCfg.pricing,
-      );
-      if (currentSpent + bCost > budgetCfg.perReviewUsd) {
-        incompleteReasons.push(`batch ${bIdx + 1}: budget limit reached`);
-        break;
-      }
+
+    if (!spend.canAfford(bPromptTokens, reviewOutputTokens)) {
+      incompleteReasons.push(`${label}: budget limit reached`);
+      break;
     }
 
     try {
@@ -177,9 +175,10 @@ export async function executeBatchedReview(
         system: batchPrompt.system,
         user: batchPrompt.user,
         maxOutputTokens,
-        responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
+        responseSchema: reviewJsonSchema(),
         ...(signal ? { signal } : {}),
       });
+      spend.record(bPromptTokens, reviewOutputTokens, bRes.usage);
       totalUsage = combineUsage(totalUsage, bRes.usage);
 
       let bParsed = parseReviewAnswer(bRes.text, {
@@ -187,57 +186,54 @@ export async function executeBatchedReview(
         outputTokens: bRes.usage?.outputTokens,
       });
 
-      if (!bParsed.ok && (bParsed.code === 'truncated' || bRes.finishReason === 'max-tokens')) {
-        const canRetry = !budgetCfg.pricing || (() => {
-          const currentSpent = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : 0;
-          const retryRequested = model.outputTokensFor ? model.outputTokensFor(retryOutputTokens) : retryOutputTokens;
-          const bRetryCost = estimateCostUsd(
-            { inputTokens: bPromptTokens, maxOutputTokens: retryRequested },
-            budgetCfg.pricing,
-          );
-          return currentSpent + bRetryCost <= budgetCfg.perReviewUsd;
-        })();
-
-        if (canRetry) {
-          const bRetryRes = await model.generate({
-            system: batchPrompt.system,
-            user: batchPrompt.user,
-            maxOutputTokens: retryOutputTokens,
-            responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
-            ...(signal ? { signal } : {}),
-          });
-          totalUsage = combineUsage(totalUsage, bRetryRes.usage);
-          bParsed = parseReviewAnswer(bRetryRes.text, {
-            finishReason: bRetryRes.finishReason,
-            outputTokens: bRetryRes.usage?.outputTokens,
-          });
+      if (needsTruncationRetry(bParsed, bRes.finishReason)) {
+        if (!spend.canAfford(bPromptTokens, retryRequested)) {
+          incompleteReasons.push(`${label}: truncation retry skipped: budget limit reached`);
+        } else {
+          try {
+            const bRetryRes = await model.generate({
+              system: batchPrompt.system,
+              user: batchPrompt.user,
+              maxOutputTokens: retryOutputTokens,
+              responseSchema: reviewJsonSchema(),
+              ...(signal ? { signal } : {}),
+            });
+            spend.record(bPromptTokens, retryRequested, bRetryRes.usage);
+            totalUsage = combineUsage(totalUsage, bRetryRes.usage);
+            bParsed = parseReviewAnswer(bRetryRes.text, {
+              finishReason: bRetryRes.finishReason,
+              outputTokens: bRetryRes.usage?.outputTokens,
+            });
+          } catch (err) {
+            spend.record(bPromptTokens, retryRequested, undefined);
+            incompleteReasons.push(
+              `${label}: truncation retry failed: ${describeCallError(err, input.knownSecrets)}`,
+            );
+          }
         }
       }
 
       if (bParsed.ok) {
-        if (bParsed.summary && bParsed.summary.trim().length > 0) {
-          batchSummaries.push(bParsed.summary.trim());
-        }
+        if (bParsed.summary.trim().length > 0) batchSummaries.push(bParsed.summary.trim());
         batchFindings.push(...bParsed.findings);
       } else {
-        incompleteReasons.push(`batch ${bIdx + 1}: ${bParsed.error}`);
+        incompleteReasons.push(`${label}: ${bParsed.error}`);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      incompleteReasons.push(`batch ${bIdx + 1}: ${msg}`);
+      // A failed call may still have been billed; charge its estimate so the cap stays hard.
+      spend.record(bPromptTokens, reviewOutputTokens, undefined);
+      incompleteReasons.push(`${label}: ${describeCallError(err, input.knownSecrets)}`);
     }
   }
 
-  if (batchSummaries.length === 0 && batchFindings.length === 0) {
-    return null;
-  }
-
-  return {
-    summary: batchSummaries.join('\n\n') || 'Review completed across file batches.',
-    findings: dedupeFindings(batchFindings),
-    totalUsage,
-    incompleteReasons,
-  };
+  const merged =
+    batchSummaries.length === 0 && batchFindings.length === 0
+      ? null
+      : {
+          summary: batchSummaries.join('\n\n') || 'Review completed across file batches.',
+          findings: dedupeFindings(batchFindings),
+        };
+  return { merged, totalUsage, incompleteReasons };
 }
 
 export interface RecoverReviewTruncationInput {
@@ -249,6 +245,9 @@ export interface RecoverReviewTruncationInput {
   reviewOutputTokens: number;
   model: ReviewModel;
   config: MergePilotConfig;
+  /** Shared per-review spend; the first review call must already be recorded in it. */
+  spend: SpendTracker;
+  knownSecrets?: readonly Secret[] | undefined;
   redactedPrTitle: string;
   redactedPrBody: string;
   redactedRulesFiles: RulesFileInput[];
@@ -265,57 +264,39 @@ export interface RecoverReviewTruncationResult {
 }
 
 /**
- * Recovers from truncated review answer:
- * 1. Retries once with 2x output allowance if budget permits.
+ * Recovers from a truncated review answer (never from a merely invalid one):
+ * 1. Retries once with 2x output allowance if the budget permits.
  * 2. If still truncated, splits the PR files into batches and merges findings.
+ * Every skipped or failed step is returned as a disclosed incomplete reason.
  */
 export async function recoverReviewTruncation(
   input: RecoverReviewTruncationInput,
 ): Promise<RecoverReviewTruncationResult> {
   let { parseResult, totalUsage } = input;
-  const {
-    modelResponse,
-    prompt,
-    promptTokens,
-    maxOutputTokens,
-    reviewOutputTokens,
-    model,
-    config,
-    redactedPrTitle,
-    redactedPrBody,
-    redactedRulesFiles,
-    redactedReviewableFiles,
-    libraryDocs,
-    signal,
-  } = input;
-
-  const budgetCfg = config.budget;
+  const { modelResponse, prompt, promptTokens, maxOutputTokens, reviewOutputTokens } = input;
+  const { model, config, spend, redactedReviewableFiles, libraryDocs, signal } = input;
   const incompleteReasons: string[] = [];
-  const isTruncated =
-    !parseResult.ok &&
-    (parseResult.code === 'truncated' || modelResponse.finishReason === 'max-tokens');
 
-  if (!isTruncated) {
+  if (!needsTruncationRetry(parseResult, modelResponse.finishReason)) {
     return { parseResult, totalUsage, incompleteReasons };
   }
 
   // 1. Retry once with 2x allowance if budget permits
   const retryOutputTokens = Math.min(maxOutputTokens * 2, 16384);
-  const retryRequested = model.outputTokensFor ? model.outputTokensFor(retryOutputTokens) : retryOutputTokens;
-  const currentCost = totalUsage && budgetCfg.pricing ? costUsd(totalUsage, budgetCfg.pricing) : 0;
-  const retryCost = budgetCfg.pricing
-    ? estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: retryRequested }, budgetCfg.pricing)
-    : 0;
+  const retryRequested = requestedOutputTokens(model, retryOutputTokens);
 
-  if (!budgetCfg.pricing || currentCost + retryCost <= budgetCfg.perReviewUsd) {
+  if (!spend.canAfford(promptTokens, retryRequested)) {
+    incompleteReasons.push('truncation retry skipped: budget limit reached');
+  } else {
     try {
       const retryResponse = await model.generate({
         system: prompt.system,
         user: prompt.user,
         maxOutputTokens: retryOutputTokens,
-        responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
+        responseSchema: reviewJsonSchema(),
         ...(signal ? { signal } : {}),
       });
+      spend.record(promptTokens, retryRequested, retryResponse.usage);
       totalUsage = combineUsage(totalUsage, retryResponse.usage);
       const retryParse = parseReviewAnswer(retryResponse.text, {
         finishReason: retryResponse.finishReason,
@@ -324,35 +305,37 @@ export async function recoverReviewTruncation(
       if (retryParse.ok) {
         parseResult = retryParse;
       }
-    } catch {
-      // Retry failed; fall back to splitting PR below
+    } catch (err) {
+      spend.record(promptTokens, retryRequested, undefined);
+      incompleteReasons.push(`truncation retry failed: ${describeCallError(err, input.knownSecrets)}`);
     }
   }
 
   // 2. If still truncated, fall back to splitting the PR into batches
   if (!parseResult.ok && redactedReviewableFiles.length > 1) {
-    const batches = batchFilesBySize(redactedReviewableFiles);
     const batchResult = await executeBatchedReview({
-      batches,
+      batches: batchFilesBySize(redactedReviewableFiles),
       config,
-      pr: { title: redactedPrTitle, body: redactedPrBody },
-      rulesFiles: redactedRulesFiles,
+      pr: { title: input.redactedPrTitle, body: input.redactedPrBody },
+      rulesFiles: input.redactedRulesFiles,
       model,
       maxOutputTokens,
       retryOutputTokens,
       reviewOutputTokens,
+      spend,
+      knownSecrets: input.knownSecrets,
       libraryDocs,
       signal,
       initialUsage: totalUsage,
     });
 
-    if (batchResult) {
-      totalUsage = batchResult.totalUsage;
-      incompleteReasons.push(...batchResult.incompleteReasons);
+    totalUsage = batchResult.totalUsage;
+    incompleteReasons.push(...batchResult.incompleteReasons);
+    if (batchResult.merged) {
       parseResult = {
         ok: true,
-        summary: batchResult.summary,
-        findings: batchResult.findings,
+        summary: batchResult.merged.summary,
+        findings: batchResult.merged.findings,
         droppedInvalid: 0,
       };
     }

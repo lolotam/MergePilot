@@ -163,8 +163,14 @@ export function isCompatibleReasoningModel(
   if (style === 'glm' || provider === 'zai' || provider === 'zai-coding') {
     return true;
   }
+  // NVIDIA NIM reasoning models (Nemotron, R1 / QwQ distills, `-reasoning` / `thinking` ids).
+  if (provider === 'nvidia' && /nemotron|-reasoning|thinking|r1|qwq|deepseek-r1/.test(lowerModel)) {
+    return true;
+  }
   if (provider === 'openrouter') {
     if (
+      lowerModel.includes(':thinking') ||
+      /nemotron|qwq|deepseek-r1/.test(lowerModel) ||
       lowerModel.includes('reasoner') ||
       lowerModel.includes('r1') ||
       lowerModel.includes('thinking') ||

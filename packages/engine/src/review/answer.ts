@@ -62,6 +62,52 @@ export interface ExtractedCandidates {
   hasUnclosedObject: boolean;
 }
 
+const MAX_SCAN_RESTARTS = 20;
+
+/**
+ * Walks `text` from `from`, emitting every balanced top-level `{…}` span. String state is
+ * tracked only INSIDE an object: quotes in surrounding prose (e.g. `it's "odd" {`) must not
+ * flip it, and it is reset whenever an object closes so one object cannot leak into the next.
+ * Returns the index of an object that opened and never closed, or -1.
+ */
+function scanBalancedObjects(text: string, from: number, emit: (slice: string) => void): number {
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escape = false;
+
+  for (let i = from; i < text.length; i++) {
+    const ch = text[i];
+    if (depth === 0) {
+      if (ch === '{') {
+        start = i;
+        depth = 1;
+        inString = false;
+        escape = false;
+      }
+      continue;
+    }
+    if (escape) {
+      escape = false;
+    } else if (inString) {
+      if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        emit(text.slice(start, i + 1));
+        start = -1;
+        inString = false;
+      }
+    }
+  }
+  return depth > 0 ? start : -1;
+}
+
 /**
  * Extracts candidate JSON object substrings from `text`, checking code fences
  * first and then walking balanced `{…}` spans.
@@ -81,55 +127,40 @@ export function extractCandidateObjects(text: string): ExtractedCandidates {
     }
   }
 
-  // 2. Character-by-character scan for balanced objects
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escape = false;
-  let hasStarted = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (escape) {
-      escape = false;
-      continue;
+  // 2. Balanced-object scan. A stray `{` in prose that never closes would swallow every
+  //    object after it, so the scan resumes just past an unclosed opener (bounded).
+  const push = (slice: string): void => {
+    if (!seen.has(slice)) {
+      seen.add(slice);
+      candidates.push(slice);
     }
-    if (inString) {
-      if (ch === '\\') {
-        escape = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === '{') {
-      if (depth === 0) {
-        start = i;
-        hasStarted = true;
-      }
-      depth++;
-    } else if (ch === '}') {
-      if (depth > 0) {
-        depth--;
-        if (depth === 0 && start !== -1) {
-          const slice = text.slice(start, i + 1);
-          if (!seen.has(slice)) {
-            seen.add(slice);
-            candidates.push(slice);
-          }
-          start = -1;
-        }
-      }
-    }
+  };
+  let from = 0;
+  let hasUnclosedObject = false;
+  for (let attempt = 0; attempt < MAX_SCAN_RESTARTS && from < text.length; attempt++) {
+    const unclosedAt = scanBalancedObjects(text, from, push);
+    if (unclosedAt < 0) break;
+    hasUnclosedObject = true;
+    from = unclosedAt + 1;
   }
 
-  const hasUnclosedObject = depth > 0 || (start !== -1 && hasStarted) || inString;
-
   return { candidates, hasUnclosedObject };
+}
+
+/**
+ * Whether an unparsable answer was cut off (worth a bigger-output retry) rather than wrong.
+ * The finish reason decides first: `max-tokens` / `length` mean truncated; `stop`, `end_turn`
+ * or any other explicit reason mean the model finished, so the answer is `invalid-json` even
+ * when it contains an unclosed `{` (prose, a stray brace). Only a stream that ended WITHOUT a
+ * finish reason (absent, or `error`, which `collectText` reports for a stream with no finish
+ * chunk) falls back to the structural check (an object that opened and never closed).
+ */
+export function isTruncatedAnswer(finishReason: string | undefined, hasUnclosedObject: boolean): boolean {
+  if (finishReason === 'max-tokens' || finishReason === 'length') return true;
+  if (finishReason === undefined || finishReason === '' || finishReason === 'error') {
+    return hasUnclosedObject;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,10 +215,7 @@ export function parseReviewAnswer(
   }
 
   if (!matchedAnswer) {
-    const isTruncated =
-      options?.finishReason === 'max-tokens' ||
-      options?.finishReason === 'length' ||
-      hasUnclosedObject;
+    const isTruncated = isTruncatedAnswer(options?.finishReason, hasUnclosedObject);
 
     if (isTruncated) {
       const finishDetail = options?.finishReason ? `finishReason: ${options.finishReason}` : 'unclosed JSON object';

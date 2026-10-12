@@ -20,25 +20,18 @@ import { selectFindings } from '../validate/select.js';
 import { parseReviewAnswer } from './answer.js';
 import { ReviewAnswerSchema } from './answer.js';
 import { checkBudget, estimateTokens } from './budget.js';
-import { costUsd, estimateCostUsd } from '../budget/cost.js';
+import { estimateCostUsd } from '../budget/cost.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 import {
-  applyVerdicts,
-  buildVerifyPrompt,
-  parseVerifyAnswer,
-  VerifyAnswerSchema,
-} from './verify.js';
-import {
   makeRedactionFinding,
   buildPatchLineToNewLineMap,
 } from './patch-helpers.js';
-import {
-  combineUsage,
-  recoverReviewTruncation,
-} from './split.js';
+import { recoverReviewTruncation } from './split.js';
+import { SpendTracker } from './spend.js';
+import { runVerifyPass, VERIFY_MAX_OUTPUT_TOKENS } from './verify-pass.js';
 
 // ── Input types ──
 
@@ -89,8 +82,6 @@ export type ReviewRunResult =
       /** Provider message, already secret-redacted by the adapter; for logs and the summary. */
       detail?: string | undefined;
     } & Partial<FallbackDisclosure>);
-
-const VERIFY_MAX_OUTPUT_TOKENS = 2048;
 
 // ── Pipeline ──
 
@@ -209,6 +200,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     }
   }
 
+  // Real spend across every call of this review; usage-less calls count at their estimate.
+  const spend = new SpendTracker(budgetCfg.pricing, budgetCfg.perReviewUsd);
+
   // ── Step d: call the model ─────────────────────────────────────────────
   let totalUsage: TokenUsage | undefined;
   let modelResponse: Awaited<ReturnType<typeof model.generate>>;
@@ -221,6 +215,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       ...(signal ? { signal } : {}),
     });
     totalUsage = modelResponse.usage;
+    spend.record(promptTokens, reviewOutputTokens, modelResponse.usage);
   } catch (err) {
     const failure = err as LlmFailure;
     const disclosure = model.disclosure();
@@ -246,6 +241,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     reviewOutputTokens,
     model,
     config,
+    spend,
+    knownSecrets,
     redactedPrTitle,
     redactedPrBody,
     redactedRulesFiles,
@@ -259,7 +256,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   incompleteReasons.push(...recovery.incompleteReasons);
 
   if (!parseResult.ok) {
-    return { status: 'failed', reason: parseResult.error };
+    // Skipped or failed recovery steps are disclosed alongside the parse error.
+    const detail = recovery.incompleteReasons.join('; ');
+    return { status: 'failed', reason: parseResult.error, ...(detail ? { detail } : {}), ...model.disclosure() };
   }
 
   // ── Step e2: verification pass ─────────────────────────────────────────
@@ -267,70 +266,20 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   let verification: { checked: number; rejected: number } | undefined;
 
   if (reviewCfg.verify && modelFindings.length > 0) {
-    const verifyPrompt = buildVerifyPrompt({
+    const verified = await runVerifyPass({
       language: config.language,
       findings: modelFindings,
       files: redactedReviewableFiles,
+      model,
+      spend,
+      knownSecrets,
+      totalUsage,
+      signal,
     });
-
-    try {
-      const verifyResponse = await model.generate({
-        system: verifyPrompt.system,
-        user: verifyPrompt.user,
-        maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
-        responseSchema: z.toJSONSchema(VerifyAnswerSchema) as Record<string, unknown>,
-        ...(signal ? { signal } : {}),
-      });
-
-      if (verifyResponse.usage) {
-        totalUsage = combineUsage(totalUsage, verifyResponse.usage);
-      }
-
-      let verifyParsed = parseVerifyAnswer(verifyResponse.text, {
-        finishReason: verifyResponse.finishReason,
-        outputTokens: verifyResponse.usage?.outputTokens,
-      });
-
-      if (!verifyParsed.ok && (verifyParsed.code === 'truncated' || verifyResponse.finishReason === 'max-tokens')) {
-        const verifyRetryTokens = Math.min(VERIFY_MAX_OUTPUT_TOKENS * 2, 8192);
-        try {
-          const verifyRetryRes = await model.generate({
-            system: verifyPrompt.system,
-            user: verifyPrompt.user,
-            maxOutputTokens: verifyRetryTokens,
-            responseSchema: z.toJSONSchema(VerifyAnswerSchema) as Record<string, unknown>,
-            ...(signal ? { signal } : {}),
-          });
-          if (verifyRetryRes.usage) {
-            totalUsage = combineUsage(totalUsage, verifyRetryRes.usage);
-          }
-          verifyParsed = parseVerifyAnswer(verifyRetryRes.text, {
-            finishReason: verifyRetryRes.finishReason,
-            outputTokens: verifyRetryRes.usage?.outputTokens,
-          });
-        } catch {
-          // Verify retry failed
-        }
-      }
-
-      if (!verifyParsed.ok) {
-        incompleteReasons.push(`verification skipped: ${verifyParsed.error}`);
-      } else {
-        const { kept, rejected } = applyVerdicts(modelFindings, verifyParsed.verdicts);
-        modelFindings = kept;
-        verification = {
-          checked: parseResult.findings.length,
-          rejected: rejected.length,
-        };
-      }
-    } catch (err) {
-      const failure = err as LlmFailure;
-      const errCode =
-        failure && typeof failure === 'object' && 'code' in failure && typeof failure.code === 'string'
-          ? failure.code
-          : (err instanceof Error ? err.message : String(err));
-      incompleteReasons.push(`verification skipped: ${errCode}`);
-    }
+    modelFindings = verified.findings;
+    totalUsage = verified.totalUsage;
+    verification = verified.verification;
+    incompleteReasons.push(...verified.incompleteReasons);
   }
 
   // ── Step f: select + anchor ────────────────────────────────────────────
@@ -364,10 +313,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const disclosure = model.disclosure();
   let reviewCostUsd: number | undefined;
   if (budgetCfg.pricing && !disclosure.fallbackFrom) {
-    reviewCostUsd = totalUsage
-      ? costUsd(totalUsage, budgetCfg.pricing)
-      : (estimatedCostUsd ??
-        estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing));
+    // Real cost where usage was reported, the estimate for calls without usage (ADR-0011).
+    reviewCostUsd = spend.spentUsd;
   }
 
   return {
