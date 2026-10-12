@@ -47,7 +47,7 @@ export interface I18nProviderProps {
 export function I18nProvider({ children, initialLanguage }: I18nProviderProps) {
   const [language, setLanguageState] = useState<Language>(() => {
     if (initialLanguage) return initialLanguage;
-    return getStoredLanguage('ar');
+    return getStoredLanguage('en');
   });
 
   const dir: 'rtl' | 'ltr' = language === 'ar' ? 'rtl' : 'ltr';
