@@ -197,12 +197,29 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   }, STALE_SWEEP_INTERVAL_MS);
   sweepTimer.unref?.();
 
+  // Shutdown waits at most 5 s for a scheduler still starting (a hung Redis must not block SIGTERM);
+  // one that finishes starting later is closed as soon as it appears. Each scheduler closes once.
+  let stopping = false;
+  let started: MaintenanceScheduler | undefined;
+  const lateClose = maintenanceStart.then(async (scheduler) => {
+    started = scheduler;
+    if (stopping) await scheduler?.close();
+  });
+  const closeMaintenance = async (): Promise<void> => {
+    if (started) {
+      await started.close();
+      return;
+    }
+    await Promise.race([lateClose, new Promise<void>((resolve) => setTimeout(resolve, 5_000).unref?.())]);
+  };
+
   const stop = async () => {
+    stopping = true;
     clearInterval(sweepTimer);
     await Promise.allSettled([
       new Promise<void>((resolve) => healthServer.close(() => resolve())),
       worker.close(),
-      maintenanceStart.then((maintenance) => maintenance?.close()),
+      closeMaintenance(),
       services.close(),
     ]);
   };
