@@ -7,6 +7,8 @@ import type {
 } from '../core/types.js';
 import { defineDeleteWorkspaceContract } from './store-contract-delete.js';
 import { defineReviewRunLifecycleContract } from './store-contract-runs.js';
+import { defineRetryContract } from './store-contract-retry.js';
+import { defineActiveRunContract } from './store-contract-active-run.js';
 
 /** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
 export const STORE_CONTRACT_WORKSPACES = [
@@ -316,5 +318,7 @@ export function describeStoreContract(
 
     defineReviewRunLifecycleContract(createStore, cleanup);
     defineDeleteWorkspaceContract(createStore, cleanup);
+    defineRetryContract(createStore, cleanup);
+    defineActiveRunContract(createStore, cleanup);
   });
 }

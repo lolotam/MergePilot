@@ -13,8 +13,10 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
+  ActiveRunExistsError,
   REUSABLE_RUN_STATUSES,
   type FinishReviewRunOptions,
+  type LatestFailedRunsOptions,
   type ListReviewRunsOptions,
   type ListReviewRunsResult,
   type NewReviewRun,
@@ -211,7 +213,35 @@ function startingValues(run: NewReviewRun, now: Date) {
   };
 }
 
+/** Name of migration 0004's partial unique index (one queued/running run per head). */
+export const ACTIVE_RUN_INDEX = 'idx_review_runs_active_pr_head';
+
+/** True when `error` (or a driver error it wraps) is a unique violation of ACTIVE_RUN_INDEX. */
+export function isActiveRunConflict(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
+    const fields = current as Error & { code?: unknown; constraint?: unknown };
+    if (
+      fields.code === '23505' &&
+      (fields.constraint === ACTIVE_RUN_INDEX || fields.message.includes(ACTIVE_RUN_INDEX))
+    ) {
+      return true;
+    }
+    current = fields.cause;
+  }
+  return false;
+}
+
 export async function createPgReviewRun(db: AppDb, run: NewReviewRun): Promise<ReviewRun> {
+  try {
+    return await insertOrReusePgReviewRun(db, run);
+  } catch (error) {
+    if (isActiveRunConflict(error)) throw new ActiveRunExistsError(run.repoFullName, run.pullNumber);
+    throw error;
+  }
+}
+
+async function insertOrReusePgReviewRun(db: AppDb, run: NewReviewRun): Promise<ReviewRun> {
   return withLiveWorkspace(db, run.workspaceId, async (tx) => {
     const now = new Date();
     if (run.jobId) {
@@ -274,4 +304,84 @@ export async function finishPgReviewRun(
     .update(reviewRuns)
     .set(updateValues)
     .where(and(eq(reviewRuns.id, id), eq(reviewRuns.workspaceId, workspaceId)));
+}
+
+export async function findPgActiveReviewRun(
+  db: AppDb,
+  workspaceId: string,
+  repoFullName: string,
+  pullNumber: number,
+  headSha: string,
+): Promise<ReviewRun | null> {
+  const rows = await db
+    .select()
+    .from(reviewRuns)
+    .where(
+      and(
+        eq(reviewRuns.workspaceId, workspaceId),
+        eq(reviewRuns.repoFullName, repoFullName),
+        eq(reviewRuns.pullNumber, pullNumber),
+        eq(reviewRuns.headSha, headSha),
+        inArray(reviewRuns.status, ['queued', 'running']),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  return row ? mapReviewRunRow(row) : null;
+}
+
+export async function listPgLatestFailedRuns(
+  db: AppDb,
+  workspaceId: string,
+  options?: LatestFailedRunsOptions,
+): Promise<ReviewRun[]> {
+  const limit = options?.limit ?? 25;
+  // Rank ALL of a PR's runs (the repo filter only narrows whole partitions); the date window is
+  // applied to the latest row afterwards, so a PR that failed inside the window but later
+  // completed is not picked.
+  const conditions = [eq(reviewRuns.workspaceId, workspaceId)];
+  if (options?.repo && options.repo.length > 0) {
+    conditions.push(inArray(reviewRuns.repoFullName, options.repo));
+  }
+
+  const ranked = db
+    .select({
+      id: reviewRuns.id,
+      workspaceId: reviewRuns.workspaceId,
+      jobId: reviewRuns.jobId,
+      installationId: reviewRuns.installationId,
+      repoFullName: reviewRuns.repoFullName,
+      pullNumber: reviewRuns.pullNumber,
+      headSha: reviewRuns.headSha,
+      status: reviewRuns.status,
+      costUsd: reviewRuns.costUsd,
+      detail: reviewRuns.detail,
+      createdAt: reviewRuns.createdAt,
+      finishedAt: reviewRuns.finishedAt,
+      updatedAt: reviewRuns.updatedAt,
+      provider: reviewRuns.provider,
+      model: reviewRuns.model,
+      effort: reviewRuns.effort,
+      fallbackFrom: reviewRuns.fallbackFrom,
+      findingsCount: reviewRuns.findingsCount,
+      result: reviewRuns.result,
+      reviewUrl: reviewRuns.reviewUrl,
+      rn: sql<number>`row_number() over (partition by ${reviewRuns.repoFullName}, ${reviewRuns.pullNumber} order by ${reviewRuns.createdAt} desc, ${reviewRuns.id} desc)`.as('rn'),
+    })
+    .from(reviewRuns)
+    .where(and(...conditions))
+    .as('ranked');
+
+  const outer = [eq(ranked.rn, 1), eq(ranked.status, 'failed')];
+  if (options?.from) outer.push(gte(ranked.createdAt, options.from));
+  if (options?.to) outer.push(lte(ranked.createdAt, options.to));
+
+  const rows = await db
+    .select()
+    .from(ranked)
+    .where(and(...outer))
+    .orderBy(desc(ranked.createdAt), desc(ranked.id))
+    .limit(limit);
+
+  return rows.map((r) => mapReviewRunRow(r as typeof reviewRuns.$inferSelect));
 }

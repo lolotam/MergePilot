@@ -18,6 +18,7 @@ import {
   type FileContent,
 } from '@mergepilot/github';
 import {
+  ActiveRunExistsError,
   WorkspaceDeletedError,
   type ApiProvider,
   type ReviewJob,
@@ -32,6 +33,8 @@ import { guardWritesForWorkspace } from './workspace-guard.js';
 import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
 
 const WORKSPACE_DELETED = 'workspace_deleted';
+/** Another run for the same PR head is already queued/running (migration 0004); nothing is published. */
+const DUPLICATE = 'duplicate';
 
 class WorkspaceCredentialStore implements CredentialStore {
   constructor(
@@ -91,6 +94,10 @@ export async function processReviewJob(
         detail: null,
       });
     } catch (error) {
+      if (error instanceof ActiveRunExistsError) {
+        deps.log?.(`Skipping job ${job.deliveryId}: a run for this head is already active`);
+        return { status: 'skipped', detail: DUPLICATE };
+      }
       if (!(error instanceof WorkspaceDeletedError)) throw error;
       deps.log?.(`Skipping job ${job.deliveryId}: workspace ${workspaceId} was deleted`);
       return { status: 'skipped', detail: WORKSPACE_DELETED };
@@ -326,6 +333,11 @@ export async function processReviewJob(
       detail,
     };
   } catch (error) {
+    if (error instanceof ActiveRunExistsError && !run) {
+      // Thrown only by createReviewRun, before any GitHub call: end the job without publishing.
+      deps.log?.(`Skipping job ${job.deliveryId}: a run for this head is already active`);
+      return { status: 'skipped', detail: DUPLICATE };
+    }
     if (error instanceof WorkspaceDeletedError) {
       deps.log?.(`Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`);
       if (run) {

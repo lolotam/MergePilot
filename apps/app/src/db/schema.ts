@@ -115,6 +115,10 @@ export const reviewRuns = pgTable(
       .on(table.updatedAt)
       .where(sql`status IN ('queued', 'running')`),
     index('idx_review_runs_workspace_repo').on(table.workspaceId, table.repoFullName),
+    // Migration 0004: one queued/running run per workspace, repo, PR and head commit.
+    uniqueIndex('idx_review_runs_active_pr_head')
+      .on(table.workspaceId, table.repoFullName, table.pullNumber, table.headSha)
+      .where(sql`status IN ('queued', 'running')`),
   ],
 );
 

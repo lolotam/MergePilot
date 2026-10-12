@@ -10,8 +10,10 @@ import {
   CheckCircle2,
   AlertCircle,
   SkipForward,
+  RotateCcw,
 } from 'lucide-react';
-import { useRunDetailQuery } from '../api/hooks.js';
+import { useRunDetailQuery, useMeQuery } from '../api/hooks.js';
+import { useRetryRunMutation } from './useRunRetry.js';
 import { useI18n } from '../i18n/context.js';
 import type { I18nKey } from '../i18n/ar.js';
 import { RunProviderBadge, RunModelBadge } from './RunBadges.js';
@@ -22,6 +24,11 @@ export default function RunDetailPage() {
   const { workspaceId = '', runId = '' } = useParams();
   const { t, language } = useI18n();
   const { data, isLoading, error } = useRunDetailQuery(workspaceId, runId);
+  const meQuery = useMeQuery();
+  const meData = meQuery?.data;
+  const currentWorkspace = meData?.workspaces?.find((w) => w.id === workspaceId);
+  const isMember = currentWorkspace?.role === 'member';
+  const retryMutation = useRetryRunMutation(workspaceId);
 
   const run = data?.run;
   const isRtl = language === 'ar';
@@ -88,18 +95,37 @@ export default function RunDetailPage() {
           </div>
         </div>
 
-        {/* GitHub Review link */}
-        {run.reviewUrl && (
-          <a
-            href={run.reviewUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-md bg-ink-900 text-white dark:bg-ink-100 dark:text-ink-900 hover:bg-ink-800 dark:hover:bg-white shadow-xs transition-colors"
-          >
-            <span>{t('openReviewOnGitHub')}</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
-        )}
+        {/* Actions (Retry & GitHub Review link) */}
+        <div className="flex items-center gap-2.5">
+          {(run.status === 'failed' || run.status === 'skipped') && (
+            <button
+              type="button"
+              disabled={isMember || retryMutation.isPending}
+              onClick={() => retryMutation.mutate(run.id)}
+              title={isMember ? t('retryMemberDisabled') : t('retry')}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md transition-colors ${
+                isMember
+                  ? 'opacity-50 cursor-not-allowed bg-ink-100 dark:bg-ink-800 text-ink-400 dark:text-ink-500'
+                  : 'bg-brand-600 text-white hover:bg-brand-700 shadow-xs'
+              }`}
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${retryMutation.isPending ? 'animate-spin' : ''}`} />
+              <span>{retryMutation.isPending ? t('retrying') : t('retry')}</span>
+            </button>
+          )}
+
+          {run.reviewUrl && (
+            <a
+              href={run.reviewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-md bg-ink-900 text-white dark:bg-ink-100 dark:text-ink-900 hover:bg-ink-800 dark:hover:bg-white shadow-xs transition-colors"
+            >
+              <span>{t('openReviewOnGitHub')}</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Overview Metadata Cards */}

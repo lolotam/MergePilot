@@ -4,8 +4,9 @@ import { isUserPlatformAdmin } from '../admin/guard.js';
 import { requireRole } from '../auth/guard.js';
 import { listUserInstallations, type UserInstallation } from '../auth/github-installations.js';
 import type { AppConfig } from '../core/config.js';
-import { InstallationAlreadyLinkedError, type ApiProvider, type AppStore } from '../core/types.js';
+import { InstallationAlreadyLinkedError, type ApiProvider, type AppStore, type ReviewQueue } from '../core/types.js';
 import type { CredentialService } from '../credentials/service.js';
+import type { GitHubAppClientFactory } from '../worker/types.js';
 import { ApiProviderSchema, SettingsSchema, SaveKeyRequestSchema } from './contract.js';
 import { validateKey as defaultValidateKey } from './validate-key.js';
 import {
@@ -26,6 +27,8 @@ export interface DashboardApiDeps {
   githubFetch?: typeof fetch;
   config: AppConfig;
   now?: () => Date;
+  queue?: ReviewQueue;
+  githubAppFactory?: GitHubAppClientFactory;
 }
 
 export function registerDashboardApi(

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ExternalLink,
@@ -10,14 +10,18 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  RotateCcw,
 } from 'lucide-react';
-import { useRunsQuery, useRunReposQuery } from '../api/hooks.js';
+import { useRunsQuery, useRunReposQuery, useMeQuery } from '../api/hooks.js';
 import { useI18n } from '../i18n/context.js';
 import type { ReviewRun } from '../api/client.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { RunProviderBadge, RunModelBadge, RunSeverityChips } from '../runs/RunBadges.js';
 import { RunsFilterBar } from '../runs/RunsFilterBar.js';
 import { RunsPagination } from '../runs/RunsPagination.js';
+import { RunActionCell } from '../runs/RunActionCell.js';
+import { RetryAllFailedModal } from '../runs/RetryAllFailedModal.js';
+import { useRetryRunMutation, useRetryFailedRunsMutation } from '../runs/useRunRetry.js';
 
 const PAGE_SIZE = 25;
 
@@ -26,6 +30,16 @@ export function RunsPage() {
   const navigate = useNavigate();
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [retryModalOpen, setRetryModalOpen] = useState(false);
+
+  const meQuery = useMeQuery();
+  const meData = meQuery?.data;
+  const currentWorkspace = meData?.workspaces?.find((w) => w.id === workspaceId);
+  const isMember = currentWorkspace?.role === 'member';
+  const canRetry = currentWorkspace ? currentWorkspace.role === 'admin' || currentWorkspace.role === 'owner' : false;
+
+  const retryRunMutation = useRetryRunMutation(workspaceId);
+  const retryFailedMutation = useRetryFailedRunsMutation(workspaceId);
 
   // Read params from URL
   const selectedRepos = searchParams.getAll('repo');
@@ -211,7 +225,23 @@ export function RunsPage() {
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
-      <PageHeader title={t('runsTitle')} subtitle={t('runsDesc')} />
+      <PageHeader
+        title={t('runsTitle')}
+        subtitle={t('runsDesc')}
+        action={
+          canRetry ? (
+            <button
+              type="button"
+              onClick={() => setRetryModalOpen(true)}
+              disabled={retryFailedMutation.isPending}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md bg-brand-600 hover:bg-brand-700 text-white shadow-xs transition-colors disabled:opacity-50"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${retryFailedMutation.isPending ? 'animate-spin' : ''}`} />
+              <span>{t('retryAllFailed')}</span>
+            </button>
+          ) : null
+        }
+      />
 
       {/* Filter Bar */}
       <RunsFilterBar
@@ -250,6 +280,9 @@ export function RunsPage() {
                   {renderSortHeader(t('runResultCol'), 'findingsCount')}
                   {renderSortHeader(t('runCostCol'), 'costUsd')}
                   {renderSortHeader(t('runDateCol'), 'createdAt')}
+                  <th scope="col" className="py-3 px-4 text-center font-semibold">
+                    {t('actions')}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100 dark:divide-ink-800/60">
@@ -311,6 +344,14 @@ export function RunsPage() {
                     <td className="py-3 px-4 text-xs text-ink-500 dark:text-ink-400 whitespace-nowrap">
                       {new Date(run.createdAt).toLocaleString()}
                     </td>
+                    <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                      <RunActionCell
+                        run={run}
+                        isMember={isMember ?? false}
+                        onRetry={(runId) => retryRunMutation.mutate(runId)}
+                        isRetrying={retryRunMutation.isPending && retryRunMutation.variables === run.id}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -326,6 +367,22 @@ export function RunsPage() {
           onPageChange={handlePageChange}
         />
       </div>
+
+      <RetryAllFailedModal
+        isOpen={retryModalOpen}
+        workspaceId={workspaceId}
+        // Only the repo and date filters: the server retries failed runs, so status/search do not apply.
+        filters={{
+          repo: selectedRepos.length > 0 ? selectedRepos : undefined,
+          from: fromDate || undefined,
+          to: toDate || undefined,
+        }}
+        isLoading={retryFailedMutation.isPending}
+        onClose={() => setRetryModalOpen(false)}
+        onConfirm={(filters) => {
+          retryFailedMutation.mutate(filters, { onSettled: () => setRetryModalOpen(false) });
+        }}
+      />
     </div>
   );
 }
