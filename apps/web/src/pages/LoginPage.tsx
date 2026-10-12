@@ -15,14 +15,14 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-gray-50 dark:bg-ink-950 text-ink-800 dark:text-ink-100 font-sans">
+    <div className="min-h-screen flex flex-col justify-between bg-[#FBFBFA] dark:bg-ink-950 text-ink-800 dark:text-ink-100 font-sans">
       {/* Top bar with language toggle */}
       <header className="p-4 sm:px-6 flex justify-end">
         <button
           type="button"
           onClick={toggleLanguage}
           aria-label={t('languageToggle')}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-900 hover:bg-gray-100 dark:hover:bg-ink-800 transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-900 hover:bg-ink-50 dark:hover:bg-ink-800 transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
         >
           <Globe className="w-3.5 h-3.5" />
           <span>{t('languageToggle')}</span>
@@ -31,25 +31,25 @@ export function LoginPage() {
 
       {/* Main card */}
       <main className="flex-1 flex items-center justify-center p-4">
-        <div className="w-full max-w-md p-8 bg-white dark:bg-ink-900 rounded-2xl shadow-xl border border-gray-200 dark:border-ink-800 text-center">
+        <div className="w-full max-w-md p-8 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs text-center">
           {/* Brand Logo */}
           <div className="flex justify-center mb-6">
             <Logo size="lg" />
           </div>
 
-          <p className="text-sm text-gray-600 dark:text-gray-300 mb-8 max-w-sm mx-auto leading-relaxed">
+          <p className="text-sm text-ink-500 dark:text-ink-400 mb-8 max-w-sm mx-auto leading-relaxed font-sans">
             {t('appTagline')}
           </p>
 
-          {/* Auth Buttons */}
+          {/* Auth Buttons: Pill-shaped */}
           <div className="flex flex-col gap-3">
             <button
               type="button"
               onClick={() => handleSignIn('google')}
-              className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-800 hover:bg-gray-50 dark:hover:bg-ink-750 font-medium text-sm transition-colors shadow-xs focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="w-full flex items-center justify-center gap-3 py-2.5 px-5 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 hover:bg-ink-50 dark:hover:bg-ink-750 text-ink-800 dark:text-ink-100 font-medium text-sm transition-colors shadow-xs focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               {/* Google G icon */}
-              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                 <path
                   fill="#4285F4"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -73,10 +73,10 @@ export function LoginPage() {
             <button
               type="button"
               onClick={() => handleSignIn('github')}
-              className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl border border-gray-900 bg-gray-900 text-white hover:bg-gray-800 dark:border-ink-700 dark:bg-ink-800 dark:hover:bg-ink-750 font-medium text-sm transition-colors shadow-xs focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="w-full flex items-center justify-center gap-3 py-2.5 px-5 rounded-full border border-ink-800 bg-ink-900 text-white hover:bg-ink-800 dark:border-ink-700 dark:bg-ink-800 dark:hover:bg-ink-700 font-medium text-sm transition-colors shadow-xs focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               {/* GitHub Octocat icon */}
-              <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
                 <path
                   fillRule="evenodd"
                   clipRule="evenodd"

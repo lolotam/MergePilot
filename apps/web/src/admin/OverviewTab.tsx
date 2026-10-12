@@ -36,18 +36,18 @@ export function OverviewTab() {
         />
       </div>
 
-      <section className="bg-white dark:bg-ink-900 rounded-xl border border-gray-200 dark:border-ink-800 shadow-xs p-5">
-        <h2 className="text-sm font-semibold text-ink-900 dark:text-ink-100 mb-3">
+      <section className="bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs p-5">
+        <h2 className="text-xs font-bold text-ink-900 dark:text-ink-100 mb-3">
           {t('runsByStatusTitle')}
         </h2>
         {statuses.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">{t('noRunsYet')}</p>
+          <p className="text-xs text-ink-500 dark:text-ink-400">{t('noRunsYet')}</p>
         ) : (
           <ul className="flex flex-wrap gap-3">
             {statuses.map(([status, count]) => (
-              <li key={status} className="flex items-center gap-2 text-sm">
+              <li key={status} className="flex items-center gap-2 text-xs">
                 <StatusBadge status={status} />
-                <span className="font-semibold tabular-nums">{n(count)}</span>
+                <span className="font-semibold tabular-nums text-ink-900 dark:text-ink-100">{n(count)}</span>
               </li>
             ))}
           </ul>

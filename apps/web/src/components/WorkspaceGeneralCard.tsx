@@ -42,16 +42,22 @@ export function WorkspaceGeneralCard({ workspaceId, workspaceName, isMember }: W
   };
 
   return (
-    <div className="p-6 bg-white dark:bg-ink-900 rounded-xl border border-gray-200 dark:border-ink-800 shadow-xs">
-      <h2 className="text-base font-semibold flex items-center gap-2">
-        <Building2 className="w-5 h-5 text-brand-600 dark:text-brand-400" />
-        <span>{t('workspaceGeneralTitle')}</span>
-      </h2>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-4">{t('workspaceGeneralDesc')}</p>
-
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+    <div className="p-6 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 flex items-center justify-center shrink-0">
+          <Building2 className="w-4 h-4" />
+        </div>
         <div>
-          <label htmlFor="workspace-name" className="block text-sm font-medium mb-1">
+          <h2 className="text-base font-bold text-ink-900 dark:text-ink-100">
+            {t('workspaceGeneralTitle')}
+          </h2>
+          <p className="text-xs text-ink-500 dark:text-ink-400 mt-0.5">{t('workspaceGeneralDesc')}</p>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-4" noValidate>
+        <div>
+          <label htmlFor="workspace-name" className="block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300">
             {t('renameWorkspaceLabel')}
           </label>
           <input
@@ -64,13 +70,13 @@ export function WorkspaceGeneralCard({ workspaceId, workspaceName, isMember }: W
               if (nameError) setNameError('');
             }}
             placeholder={t('renameWorkspacePlaceholder')}
-            className={`w-full px-3 py-2 rounded-lg border text-sm focus:ring-2 focus:outline-hidden disabled:opacity-60 ${
+            className={`w-full px-3.5 py-2 rounded-full border text-sm focus:ring-2 focus:outline-hidden disabled:opacity-60 ${
               nameError
                 ? 'border-red-500 focus:ring-red-500'
-                : 'border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-800 focus:ring-brand-500'
+                : 'border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 focus:ring-brand-500'
             }`}
           />
-          {nameError && <p className="text-xs text-red-500 mt-1">{nameError}</p>}
+          {nameError && <p className="text-xs text-red-500 mt-1.5 ms-2">{nameError}</p>}
         </div>
 
         {!isMember && (
@@ -78,7 +84,7 @@ export function WorkspaceGeneralCard({ workspaceId, workspaceName, isMember }: W
             <button
               type="submit"
               disabled={renameMutation.isPending}
-              className="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-medium rounded-lg text-sm transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="px-5 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-medium rounded-full text-xs transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               {renameMutation.isPending ? t('renamingWorkspace') : t('renameWorkspaceButton')}
             </button>

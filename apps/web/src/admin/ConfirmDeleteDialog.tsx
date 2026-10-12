@@ -37,7 +37,7 @@ export function ConfirmDeleteDialog({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} description={description}>
       <form
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-4 mt-2"
         onSubmit={(e) => {
           e.preventDefault();
           if (canConfirm) onConfirm();
@@ -45,9 +45,9 @@ export function ConfirmDeleteDialog({
       >
         {requiredText !== undefined && (
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={inputId} className="text-sm font-medium text-ink-800 dark:text-ink-100">
+            <label htmlFor={inputId} className="text-xs font-semibold text-ink-800 dark:text-ink-100">
               {t('typeWorkspaceNameToConfirm')}
-              <span className="ms-1 font-mono text-red-600 dark:text-red-400">{requiredText}</span>
+              <span className="ms-1 font-mono font-bold text-red-600 dark:text-red-400">{requiredText}</span>
             </label>
             <input
               id={inputId}
@@ -55,22 +55,22 @@ export function ConfirmDeleteDialog({
               autoComplete="off"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
-              className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-950 focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="w-full px-3.5 py-2 text-xs rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-950 focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             />
           </div>
         )}
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2.5 mt-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium rounded-md border border-gray-300 dark:border-ink-700 hover:bg-gray-100 dark:hover:bg-ink-800 transition-colors"
+            className="px-4 py-2 text-xs font-medium rounded-full border border-ink-300 dark:border-ink-700 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-700 dark:text-ink-300 transition-colors"
           >
             {t('cancel')}
           </button>
           <button
             type="submit"
             disabled={!canConfirm}
-            className="px-4 py-2 text-sm font-semibold rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+            className="px-5 py-2 text-xs font-semibold rounded-full bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:pointer-events-none transition-colors"
           >
             {isPending ? t('loading') : confirmLabel}
           </button>
