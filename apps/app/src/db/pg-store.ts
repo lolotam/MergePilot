@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, sql } from 'drizzle-orm';
 import { InstallationAlreadyLinkedError } from '../core/types.js';
 import { deleteWorkspaceInTx, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -7,12 +6,23 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
   ApiProvider,
   AppStore,
+  FinishReviewRunOptions,
   Installation,
+  ListReviewRunsOptions,
+  ListReviewRunsResult,
+  NewReviewRun,
   ReviewRun,
-  ReviewRunStatus,
   StoredCredential,
   WorkspaceSettings,
 } from '../core/types.js';
+import {
+  createPgReviewRun,
+  failPgStaleRuns,
+  finishPgReviewRun,
+  mapReviewRunRow,
+  queryPgReviewRuns,
+  touchPgReviewRun,
+} from './pg-runs.js';
 import { installations, providerCredentials, reviewRuns, webhookDeliveries, workspaceSettings } from './schema.js';
 import type * as schema from './schema.js';
 
@@ -276,76 +286,54 @@ export class PgStore implements AppStore {
       );
   }
 
-  async createReviewRun(
-    run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>,
-  ): Promise<ReviewRun> {
-    const id = randomUUID();
-    const createdAt = new Date();
-    await withLiveWorkspace(this.db, run.workspaceId, async (tx) => {
-      await tx.insert(reviewRuns).values({
-        id,
-        workspaceId: run.workspaceId,
-        installationId: run.installationId,
-        repoFullName: run.repoFullName,
-        pullNumber: run.pullNumber,
-        headSha: run.headSha,
-        status: run.status,
-        costUsd: run.costUsd !== null ? String(run.costUsd) : null,
-        detail: run.detail,
-        createdAt,
-        finishedAt: null,
-      });
-    });
-    return {
-      ...run,
-      id,
-      costUsd: run.costUsd !== null ? Number(run.costUsd) : null,
-      createdAt,
-      finishedAt: null,
-    };
+  async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {
+    return createPgReviewRun(this.db, run);
+  }
+
+  async touchReviewRun(workspaceId: string, id: string): Promise<void> {
+    return touchPgReviewRun(this.db, workspaceId, id);
   }
 
   async finishReviewRun(
     workspaceId: string,
     id: string,
-    result: { status: ReviewRunStatus; costUsd: number | null; detail: string | null },
+    result: FinishReviewRunOptions,
   ): Promise<void> {
-    await this.db
-      .update(reviewRuns)
-      .set({
-        status: result.status,
-        costUsd: result.costUsd !== null ? String(result.costUsd) : null,
-        detail: result.detail,
-        finishedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(reviewRuns.id, id),
-          eq(reviewRuns.workspaceId, workspaceId),
-        ),
-      );
+    return finishPgReviewRun(this.db, workspaceId, id, result);
   }
 
-  async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]> {
+  async getReviewRun(workspaceId: string, id: string): Promise<ReviewRun | null> {
     const rows = await this.db
       .select()
       .from(reviewRuns)
+      .where(and(eq(reviewRuns.id, id), eq(reviewRuns.workspaceId, workspaceId)));
+    const row = rows[0];
+    return row ? mapReviewRunRow(row) : null;
+  }
+
+  async listReviewRunRepos(workspaceId: string): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ repo: reviewRuns.repoFullName })
+      .from(reviewRuns)
       .where(eq(reviewRuns.workspaceId, workspaceId))
-      .orderBy(desc(reviewRuns.createdAt))
-      .limit(limit);
-    return rows.map((row) => ({
-      id: row.id,
-      workspaceId: row.workspaceId,
-      installationId: Number(row.installationId),
-      repoFullName: row.repoFullName,
-      pullNumber: Number(row.pullNumber),
-      headSha: row.headSha,
-      status: row.status as ReviewRunStatus,
-      costUsd: row.costUsd !== null ? Number(row.costUsd) : null,
-      detail: row.detail,
-      createdAt: new Date(row.createdAt),
-      finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
-    }));
+      .orderBy(asc(reviewRuns.repoFullName));
+    return rows.map((r) => r.repo);
+  }
+
+  async failStaleRuns(heartbeatBefore: Date): Promise<number> {
+    return failPgStaleRuns(this.db, heartbeatBefore);
+  }
+
+  async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
+  async listReviewRuns(
+    workspaceId: string,
+    options: ListReviewRunsOptions,
+  ): Promise<ListReviewRunsResult>;
+  async listReviewRuns(
+    workspaceId: string,
+    limitOrOptions?: number | ListReviewRunsOptions,
+  ): Promise<ReviewRun[] | ListReviewRunsResult> {
+    return queryPgReviewRuns(this.db, workspaceId, limitOrOptions);
   }
 
   async monthCostUsd(workspaceId: string, monthStart: Date): Promise<number> {

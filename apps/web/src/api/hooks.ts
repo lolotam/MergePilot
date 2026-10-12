@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse, Settings } from '@mergepilot/app/contract';
-import { api, type ApiProvider } from './client.js';
+import { api, type ApiProvider, type GetRunsParams } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -114,10 +114,26 @@ export function useGitHubInstallationsQuery(enabled = true) {
   });
 }
 
-export function useRunsQuery(workspaceId: string, limit = 50) {
+export function useRunsQuery(workspaceId: string, params?: GetRunsParams | number) {
   return useQuery({
-    queryKey: ['workspaces', workspaceId, 'runs', limit],
-    queryFn: () => api.getRuns(workspaceId, limit),
+    queryKey: ['workspaces', workspaceId, 'runs', params],
+    queryFn: () => api.getRuns(workspaceId, params),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useRunDetailQuery(workspaceId: string, runId: string) {
+  return useQuery({
+    queryKey: ['workspaces', workspaceId, 'runs', runId, 'detail'],
+    queryFn: () => api.getRun(workspaceId, runId),
+    enabled: Boolean(workspaceId && runId),
+  });
+}
+
+export function useRunReposQuery(workspaceId: string) {
+  return useQuery({
+    queryKey: ['workspaces', workspaceId, 'runs', 'repos'],
+    queryFn: () => api.getRunRepos(workspaceId),
     enabled: Boolean(workspaceId),
   });
 }

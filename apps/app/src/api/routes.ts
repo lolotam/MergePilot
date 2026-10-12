@@ -16,6 +16,7 @@ import {
   fetchUserGitHubInstallations,
 } from './helpers.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
+import { registerRunsRoutes } from './runs-routes.js';
 
 export interface DashboardApiDeps {
   auth: Auth;
@@ -306,38 +307,8 @@ export function registerDashboardApi(
     return reply.status(200).send({ installations, installUrl });
   });
 
-  // 10. GET /api/workspaces/:workspaceId/runs
-  app.get(
-    '/api/workspaces/:workspaceId/runs',
-    { preHandler: [requireRole('member', deps.auth)] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      const query = request.query as { limit?: string };
-
-      let limit = 50;
-      if (query?.limit !== undefined) {
-        const parsed = parseInt(query.limit, 10);
-        if (!Number.isNaN(parsed) && parsed > 0) {
-          limit = Math.min(parsed, 200);
-        }
-      }
-
-      const runs = await deps.store.listReviewRuns(workspaceId, limit);
-      return reply.status(200).send({
-        runs: runs.map((r) => ({
-          id: r.id,
-          repoFullName: r.repoFullName,
-          pullNumber: r.pullNumber,
-          headSha: r.headSha,
-          status: r.status,
-          costUsd: r.costUsd,
-          detail: r.detail,
-          createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString(),
-          finishedAt: r.finishedAt ? (r.finishedAt instanceof Date ? r.finishedAt.toISOString() : new Date(r.finishedAt).toISOString()) : null,
-        })),
-      });
-    },
-  );
+  // 10. Runs routes (GET runs, GET runs/repos, GET runs/:runId)
+  registerRunsRoutes(app, deps);
 
   // 11. GET /api/workspaces/:workspaceId/usage
   app.get(

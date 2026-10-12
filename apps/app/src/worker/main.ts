@@ -10,6 +10,10 @@ import { wrapOctokit, type OctokitLike } from './octokit-client.js';
 import { processReviewJob } from './process-review.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
 
+/** A queued/running run with no heartbeat for this long is failed as `interrupted`. */
+export const STALE_RUN_HEARTBEAT_MS = 15 * 60 * 1000;
+const STALE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
 export interface ReviewWorkerOptions {
   connection?: ConnectionOptions;
   concurrency?: number;
@@ -164,7 +168,27 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   const healthPort = healthPortStr ? parseInt(healthPortStr, 10) : 3001;
   const healthServer = await startHealthServer(healthPort);
 
+  const sweepStale = async () => {
+    try {
+      // Stale = no heartbeat (updated_at) for STALE_RUN_HEARTBEAT_MS; a live review touches it every 60 s.
+      const heartbeatBefore = new Date(Date.now() - STALE_RUN_HEARTBEAT_MS);
+      const failedCount = await services.store.failStaleRuns(heartbeatBefore);
+      if (failedCount > 0) {
+        deps.log?.(`Marked ${failedCount} stale running/queued run(s) as failed (interrupted)`);
+      }
+    } catch (err) {
+      deps.log?.(`Failed to sweep stale runs: ${err instanceof Error ? err.name : 'unknown error'}`);
+    }
+  };
+
+  await sweepStale();
+  const sweepTimer = setInterval(() => {
+    void sweepStale();
+  }, STALE_SWEEP_INTERVAL_MS);
+  sweepTimer.unref?.();
+
   const stop = async () => {
+    clearInterval(sweepTimer);
     await Promise.allSettled([
       new Promise<void>((resolve) => healthServer.close(() => resolve())),
       worker.close(),

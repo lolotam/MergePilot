@@ -59,6 +59,34 @@ export interface StoredCredential {
 
 export type ReviewRunStatus = 'queued' | 'running' | 'completed' | 'skipped' | 'failed';
 
+export interface ReviewRunFinding {
+  path: string;
+  line?: number;
+  endLine?: number;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  category?: string;
+  title: string;
+  body: string;
+  suggestion?: string;
+  truncated?: boolean;
+}
+
+export interface ReviewRunResultPayload {
+  v: 1;
+  summary: string;
+  highlights: string[];
+  findings: ReviewRunFinding[];
+  outOfDiff?: ReviewRunFinding[];
+  language: 'ar' | 'en';
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+  verify?: {
+    dropped: number;
+  };
+}
+
 export interface ReviewRun {
   id: string;
   workspaceId: string;
@@ -71,6 +99,63 @@ export interface ReviewRun {
   detail: string | null;
   createdAt: Date;
   finishedAt: Date | null;
+  /** Heartbeat: set on create, on every status change, and periodically while the review runs. */
+  updatedAt: Date;
+  jobId?: string | null | undefined;
+  provider?: string | null | undefined;
+  model?: string | null | undefined;
+  effort?: string | null | undefined;
+  fallbackFrom?: string | null | undefined;
+  findingsCount?: number | null | undefined;
+  result?: ReviewRunResultPayload | null | undefined;
+  reviewUrl?: string | null | undefined;
+}
+
+/** A run as the worker records it; the store assigns id and timestamps. */
+export type NewReviewRun = Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt' | 'updatedAt'>;
+
+/** Only runs in these states may be reused by a retry of the same job id. */
+export const REUSABLE_RUN_STATUSES: readonly ReviewRunStatus[] = ['queued', 'running', 'failed'];
+
+export interface FinishReviewRunOptions {
+  status: ReviewRunStatus;
+  costUsd: number | null;
+  detail: string | null;
+  provider?: string | null | undefined;
+  model?: string | null | undefined;
+  effort?: string | null | undefined;
+  fallbackFrom?: string | null | undefined;
+  findingsCount?: number | null | undefined;
+  result?: ReviewRunResultPayload | null | undefined;
+  reviewUrl?: string | null | undefined;
+}
+
+export interface ListReviewRunsOptions {
+  limit?: number | undefined;
+  offset?: number | undefined;
+  repo?: string[] | undefined;
+  status?: ReviewRunStatus[] | undefined;
+  from?: Date | undefined;
+  to?: Date | undefined;
+  provider?: string | undefined;
+  q?: string | undefined;
+  sort?:
+    | 'createdAt'
+    | 'repo'
+    | 'pullNumber'
+    | 'status'
+    | 'provider'
+    | 'model'
+    | 'findingsCount'
+    | 'costUsd'
+    | 'duration'
+    | undefined;
+  dir?: 'asc' | 'desc' | undefined;
+}
+
+export interface ListReviewRunsResult {
+  runs: ReviewRun[];
+  total: number;
 }
 
 /** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
@@ -95,14 +180,29 @@ export interface AppStore {
   listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>>;
   deleteCredential(workspaceId: string, provider: ApiProvider): Promise<void>;
 
-  /** Throws WorkspaceDeletedError when the workspace is gone, so a late worker cannot write orphan rows. */
-  createReviewRun(run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>): Promise<ReviewRun>;
+  /**
+   * Throws WorkspaceDeletedError when the workspace is gone, so a late worker cannot write orphan rows.
+   * A run with a jobId reuses that job's queued/running/failed run; completed and skipped runs are
+   * never overwritten (a new run is created instead).
+   */
+  createReviewRun(run: NewReviewRun): Promise<ReviewRun>;
+  /** Refreshes the heartbeat of a queued/running run; finished runs are left untouched. */
+  touchReviewRun(workspaceId: string, id: string): Promise<void>;
   finishReviewRun(
     workspaceId: string,
     id: string,
-    result: { status: ReviewRunStatus; costUsd: number | null; detail: string | null },
+    result: FinishReviewRunOptions,
   ): Promise<void>;
+  getReviewRun(workspaceId: string, id: string): Promise<ReviewRun | null>;
   listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
+  listReviewRuns(workspaceId: string, options: ListReviewRunsOptions): Promise<ListReviewRunsResult>;
+  listReviewRuns(
+    workspaceId: string,
+    limitOrOptions?: number | ListReviewRunsOptions,
+  ): Promise<ReviewRun[] | ListReviewRunsResult>;
+  listReviewRunRepos(workspaceId: string): Promise<string[]>;
+  /** Fails queued/running runs whose heartbeat (updatedAt) is older than `heartbeatBefore`. */
+  failStaleRuns(heartbeatBefore: Date): Promise<number>;
   monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;
   /**
    * Deletes the workspace's credentials, settings and review runs and unlinks its installations.

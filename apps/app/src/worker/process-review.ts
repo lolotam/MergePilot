@@ -15,60 +15,23 @@ import {
   loadRepoConfig,
   publishReview,
   renderReviewSummary,
-  reviewPullRequest,
   type FileContent,
-  type GitHubClient,
 } from '@mergepilot/github';
 import {
   WorkspaceDeletedError,
   type ApiProvider,
-  type AppStore,
   type ReviewJob,
   type ReviewRun,
+  type ReviewRunResultPayload,
   type ReviewRunStatus,
 } from '../core/types.js';
+import { executeReview } from './execute-review.js';
+import { prepareRunResult } from './prepare-run-result.js';
+import { startRunHeartbeat } from './run-heartbeat.js';
+import { guardWritesForWorkspace } from './workspace-guard.js';
 import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
 
 const WORKSPACE_DELETED = 'workspace_deleted';
-
-/**
- * Wraps the GitHub client so every write (review, issue) first re-checks that the installation is
- * still linked to the workspace the job started with. A workspace deleted mid-review therefore
- * never gets a review published on its behalf.
- */
-function guardWritesForWorkspace(
-  client: GitHubClient,
-  store: AppStore,
-  installationId: number,
-  workspaceId: string,
-): GitHubClient {
-  const ensureStillLinked = async (): Promise<void> => {
-    const current = await store.getInstallation(installationId);
-    if (!current || current.workspaceId !== workspaceId) {
-      throw new WorkspaceDeletedError(workspaceId);
-    }
-  };
-  const createIssue = client.createIssue?.bind(client);
-  return {
-    listPullRequestFilesPage: (params) => client.listPullRequestFilesPage(params),
-    getPullRequest: (params) => client.getPullRequest(params),
-    listReviewsPage: (params) => client.listReviewsPage(params),
-    getFileContent: (params) => client.getFileContent(params),
-    compareCommits: (params) => client.compareCommits(params),
-    createReview: async (params) => {
-      await ensureStillLinked();
-      return client.createReview(params);
-    },
-    ...(createIssue
-      ? {
-          createIssue: async (params: Parameters<typeof createIssue>[0]) => {
-            await ensureStillLinked();
-            return createIssue(params);
-          },
-        }
-      : {}),
-  };
-}
 
 class WorkspaceCredentialStore implements CredentialStore {
   constructor(
@@ -118,6 +81,7 @@ export async function processReviewJob(
     try {
       run = await deps.store.createReviewRun({
         workspaceId,
+        jobId: job.deliveryId,
         installationId: job.installationId,
         repoFullName: job.repoFullName,
         pullNumber: job.pullNumber,
@@ -142,10 +106,12 @@ export async function processReviewJob(
 
   let run: ReviewRun | undefined;
   let secret: Secret | undefined;
+  let stopHeartbeat: (() => void) | undefined;
 
   try {
     run = await deps.store.createReviewRun({
       workspaceId,
+      jobId: job.deliveryId,
       installationId: job.installationId,
       repoFullName: job.repoFullName,
       pullNumber: job.pullNumber,
@@ -153,6 +119,12 @@ export async function processReviewJob(
       status: 'running',
       costUsd: null,
       detail: null,
+      provider: settings.provider,
+      model: settings.model,
+    });
+    stopHeartbeat = startRunHeartbeat(deps.store, workspaceId, run.id, {
+      intervalMs: deps.heartbeatIntervalMs,
+      log: deps.log,
     });
 
     const [owner, repo] = job.repoFullName.split('/');
@@ -234,7 +206,7 @@ export async function processReviewJob(
           reason: 'monthly budget reached',
         });
 
-        await publishReview(client, {
+        const publishResult = await publishReview(client, {
           owner,
           repo,
           pull_number: job.pullNumber,
@@ -247,10 +219,22 @@ export async function processReviewJob(
           publisherLogin,
         });
 
+        const budgetReviewUrl =
+          'reviewId' in publishResult && typeof publishResult.reviewId === 'number'
+            ? `https://github.com/${owner}/${repo}/pull/${job.pullNumber}#pullrequestreview-${publishResult.reviewId}`
+            : null;
+
         await deps.store.finishReviewRun(workspaceId, run.id, {
           status: 'skipped',
           costUsd: null,
           detail: 'monthly budget reached',
+          provider: effectiveConfig.provider,
+          model: effectiveConfig.model,
+          effort: ((effectiveConfig.review as Record<string, unknown>)?.effort as string) ?? null,
+          fallbackFrom: ((effectiveConfig as Record<string, unknown>)?.fallbackFrom as string) ?? null,
+          findingsCount: 0,
+          result: null,
+          reviewUrl: budgetReviewUrl,
         });
         deps.log?.(`Monthly budget reached for workspace ${workspaceId}; skipping`);
         return { status: 'skipped', detail: 'monthly budget reached' };
@@ -276,7 +260,7 @@ export async function processReviewJob(
       );
     }
 
-    const reviewResult = await reviewPullRequest({
+    const reviewResult = await executeReview({
       client,
       owner,
       repo,
@@ -304,10 +288,36 @@ export async function processReviewJob(
     const costUsd = reviewResult.costUsd ?? null;
     const detail = reviewResult.detail ?? null;
 
+    let payload: ReviewRunResultPayload | null = null;
+    let findingsCount: number | null = null;
+
+    if (reviewResult.runResult && reviewResult.runResult.status === 'completed') {
+      const rr = reviewResult.runResult;
+      payload = prepareRunResult({
+        summary: rr.summary,
+        inlineFindings: rr.inline,
+        summaryOnlyFindings: rr.summaryOnly,
+        language: effectiveConfig.language,
+        usage: rr.usage,
+        verification: rr.verification,
+        knownSecrets: [secret],
+      });
+      findingsCount = rr.inline.length + rr.summaryOnly.length;
+    } else if (status === 'skipped') {
+      findingsCount = 0;
+    }
+
     await deps.store.finishReviewRun(workspaceId, run.id, {
       status,
       costUsd,
       detail,
+      provider: effectiveConfig.provider,
+      model: effectiveConfig.model,
+      effort: ((effectiveConfig.review as Record<string, unknown>)?.effort as string) ?? null,
+      fallbackFrom: ((effectiveConfig as Record<string, unknown>)?.fallbackFrom as string) ?? null,
+      findingsCount,
+      result: payload,
+      reviewUrl: reviewResult.reviewUrl ?? null,
     });
 
     return {
@@ -339,6 +349,8 @@ export async function processReviewJob(
         status: 'failed',
         costUsd: null,
         detail: redactedDetail,
+        provider: settings?.provider ?? null,
+        model: settings?.model ?? null,
       });
     }
 
@@ -346,5 +358,7 @@ export async function processReviewJob(
       status: 'failed',
       detail: redactedDetail,
     };
+  } finally {
+    stopHeartbeat?.();
   }
 }
