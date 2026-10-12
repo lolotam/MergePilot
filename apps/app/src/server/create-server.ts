@@ -103,8 +103,8 @@ export function createServer({
       const workspaceId =
         request.logContext?.workspaceId ?? request.auth?.workspaceId ?? params?.workspaceId;
 
+      // `reqId` is already bound on request.log by Fastify (requestIdLogLabel).
       const fields = {
-        reqId: request.id,
         method: request.method,
         route: request.routeOptions?.url ?? path,
         path,
