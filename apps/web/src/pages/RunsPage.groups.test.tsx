@@ -176,4 +176,19 @@ describe('RunsPage grouped by PR', () => {
     expect(rows()[0]!.className).toContain('border-s-lime-500');
     expect(saved().repoColors).toEqual({ 'acme/web': 'lime' });
   });
+
+  it('shows the owner too when two repos on the page share a name', () => {
+    renderRunsPage({
+      groups: [
+        makeGroup([makeRun({ repoFullName: 'team-a/backend', pullNumber: 1 })]),
+        makeGroup([makeRun({ repoFullName: 'team-b/backend', pullNumber: 1 })]),
+        makeGroup([makeRun({ repoFullName: 'team-a/web', pullNumber: 2 })]),
+      ],
+    });
+    const texts = rows().map((r) => cellTexts(r)[2]);
+    expect(texts[0]).toContain('team-a/backend');
+    expect(texts[1]).toContain('team-b/backend');
+    expect(texts[2]).toContain('web');
+    expect(texts[2]).not.toContain('team-a/web');
+  });
 });

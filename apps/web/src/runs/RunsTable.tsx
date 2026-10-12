@@ -29,6 +29,13 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
   const { t } = useI18n();
   const pageIds = groups.flatMap((g) => g.runs.filter(isDeletable).map((r) => r.id));
   const pageSelected = pageIds.filter((id) => ctx.selected.has(id)).length;
+  // Repo chips show only the repo name, unless two owners on this page share that name.
+  const ownersByName = new Map<string, Set<string>>();
+  for (const g of groups) {
+    const name = g.repoFullName.slice(g.repoFullName.indexOf('/') + 1);
+    ownersByName.set(name, (ownersByName.get(name) ?? new Set()).add(g.repoFullName));
+  }
+  const shortRepo = (repo: string) => (ownersByName.get(repo.slice(repo.indexOf('/') + 1))?.size ?? 0) <= 1;
 
   const sortHeader = (labelKey: I18nKey, key: string) => {
     const isSorted = sort === key;
@@ -91,6 +98,7 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
                 group={group}
                 number={offset + index + 1}
                 color={repoColor(group.repoFullName, overrides)}
+                shortRepo={shortRepo(group.repoFullName)}
                 expanded={expanded.has(key)}
                 onToggle={() => onToggleExpand(key)}
                 {...ctx}

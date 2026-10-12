@@ -25,6 +25,8 @@ interface RunGroupRowsProps extends RunRowsContext {
   /** Continuous row number across pages (offset + index + 1). */
   number: number;
   color: RepoColor;
+  /** Show only the repo name (false when another owner on the page has a repo with that name). */
+  shortRepo: boolean;
   expanded: boolean;
   onToggle: () => void;
 }
@@ -99,7 +101,7 @@ function ClickableRow(props: { label: string; className: string; onActivate: () 
   );
 }
 
-export function RunGroupRows({ group, number, color, expanded, onToggle, ...ctx }: RunGroupRowsProps) {
+export function RunGroupRows({ group, number, color, shortRepo, expanded, onToggle, ...ctx }: RunGroupRowsProps) {
   const { t, dir } = useI18n();
   const latest = group.runs[0];
   if (!latest) return null;
@@ -131,7 +133,7 @@ export function RunGroupRows({ group, number, color, expanded, onToggle, ...ctx 
         )}
         {/* Repo on top, PR number (and run count) below: keeps the column narrow. */}
         <div className="flex flex-col items-start gap-1">
-          <RepoChip repo={group.repoFullName} color={color} short />
+          <RepoChip repo={group.repoFullName} color={color} short={shortRepo} />
           <div className="flex items-center gap-1.5">
             <PrLink run={latest} />
             {multi ? (
