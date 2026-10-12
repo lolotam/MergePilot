@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { InstallationAlreadyLinkedError, WorkspaceDeletedError } from './types.js';
+import {
+  InstallationAlreadyLinkedError,
+  REUSABLE_RUN_STATUSES,
+  WorkspaceDeletedError,
+} from './types.js';
 import type {
   ApiProvider,
   AppStore,
@@ -7,6 +11,7 @@ import type {
   Installation,
   ListReviewRunsOptions,
   ListReviewRunsResult,
+  NewReviewRun,
   ReviewRun,
   StoredCredential,
   WorkspaceSettings,
@@ -98,35 +103,46 @@ export class MemoryStore implements AppStore {
     this.credentials.delete(`${workspaceId}:${provider}`);
   }
 
-  async createReviewRun(
-    run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>,
-  ): Promise<ReviewRun> {
+  async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {
     this.assertLive(run.workspaceId);
+    const now = new Date();
+    const starting = {
+      finishedAt: null,
+      updatedAt: now,
+      costUsd: run.costUsd ?? null,
+      detail: run.detail ?? null,
+      provider: run.provider ?? null,
+      model: run.model ?? null,
+      effort: run.effort ?? null,
+      fallbackFrom: run.fallbackFrom ?? null,
+      findingsCount: run.findingsCount ?? null,
+      result: run.result ?? null,
+      reviewUrl: run.reviewUrl ?? null,
+    };
     if (run.jobId) {
+      // Only a queued/running/failed run of this job is reused; completed and skipped runs stay.
       for (const existing of this.runs.values()) {
-        if (existing.workspaceId === run.workspaceId && existing.jobId === run.jobId) {
-          const updated: ReviewRun = {
-            ...existing,
-            ...run,
-            status: run.status,
-            headSha: run.headSha,
-            costUsd: run.costUsd ?? null,
-            detail: run.detail ?? null,
-            finishedAt: null,
-          };
+        if (
+          existing.workspaceId === run.workspaceId &&
+          existing.jobId === run.jobId &&
+          REUSABLE_RUN_STATUSES.includes(existing.status)
+        ) {
+          const updated: ReviewRun = { ...existing, ...run, ...starting };
           this.runs.set(existing.id, updated);
-          return updated;
+          return { ...updated };
         }
       }
     }
-    const created: ReviewRun = {
-      ...run,
-      id: randomUUID(),
-      createdAt: new Date(),
-      finishedAt: null,
-    };
+    const created: ReviewRun = { ...run, ...starting, id: randomUUID(), createdAt: now };
     this.runs.set(created.id, created);
-    return created;
+    return { ...created };
+  }
+
+  async touchReviewRun(workspaceId: string, id: string): Promise<void> {
+    const run = this.runs.get(id);
+    if (!run || run.workspaceId !== workspaceId) return;
+    if (run.status !== 'queued' && run.status !== 'running') return;
+    this.runs.set(id, { ...run, updatedAt: new Date() });
   }
 
   async finishReviewRun(
@@ -136,10 +152,12 @@ export class MemoryStore implements AppStore {
   ): Promise<void> {
     const run = this.runs.get(id);
     if (!run || run.workspaceId !== workspaceId) return;
+    const now = new Date();
     this.runs.set(id, {
       ...run,
       ...result,
-      finishedAt: new Date(),
+      finishedAt: now,
+      updatedAt: now,
     });
   }
 
@@ -159,13 +177,13 @@ export class MemoryStore implements AppStore {
     return [...repos].sort();
   }
 
-  async failStaleRuns(olderThan: Date): Promise<number> {
+  async failStaleRuns(heartbeatBefore: Date): Promise<number> {
     let count = 0;
     const now = new Date();
     for (const [id, r] of this.runs.entries()) {
       if (
         (r.status === 'running' || r.status === 'queued') &&
-        r.createdAt < olderThan &&
+        r.updatedAt < heartbeatBefore &&
         !this.deletedWorkspaces.has(r.workspaceId)
       ) {
         this.runs.set(id, {
@@ -173,6 +191,7 @@ export class MemoryStore implements AppStore {
           status: 'failed',
           detail: 'interrupted',
           finishedAt: now,
+          updatedAt: now,
         });
         count++;
       }

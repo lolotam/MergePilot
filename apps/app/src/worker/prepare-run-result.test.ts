@@ -49,7 +49,7 @@ describe('prepareRunResult', () => {
     // Hard rule: no secret literal in tests! Build at runtime:
     const prefix = 'sk-';
     const bodyPart = 'proj-';
-    const rand = '1234567890abcdefghijklmnopqrstuvwxyz';
+    const rand = 'x'.repeat(32);
     const fakeKey = `${prefix}${bodyPart}${rand}`;
     const secret = new Secret(fakeKey);
 
@@ -73,6 +73,36 @@ describe('prepareRunResult', () => {
     expect(result.findings[0]?.title).not.toContain(fakeKey);
     expect(result.findings[0]?.body).not.toContain(fakeKey);
     expect(result.findings[0]?.suggestion).not.toContain(fakeKey);
+  });
+
+  it('redacts every stored text field: summary, highlights, out-of-diff findings and paths', () => {
+    const fakeKey = ['fake', 'k'.repeat(24)].join('-');
+    const secret = new Secret(fakeKey);
+    const leaky = (f: number): Finding =>
+      makeFinding(f, {
+        path: `config/${fakeKey}.ts`,
+        title: `t ${fakeKey}`,
+        body: `b ${fakeKey}`,
+        suggestion: `s ${fakeKey}`,
+      });
+
+    const result = prepareRunResult({
+      summary: `Header
+- Leaked ${fakeKey} in env
+- Second point`,
+      inlineFindings: [leaky(1)],
+      summaryOnlyFindings: [leaky(2)],
+      language: 'en',
+      knownSecrets: [secret],
+    });
+
+    const stored = JSON.stringify(result);
+    expect(stored).not.toContain(fakeKey);
+    expect(result.highlights[0]).toContain('[REDACTED:');
+    expect(result.highlights[1]).toBe('Second point');
+    expect(result.outOfDiff?.[0]?.title).toContain('[REDACTED:');
+    expect(result.outOfDiff?.[0]?.suggestion).toContain('[REDACTED:');
+    expect(result.findings[0]?.path).toContain('[REDACTED:');
   });
 
   it('caps at most 200 findings when input has more than 200', () => {

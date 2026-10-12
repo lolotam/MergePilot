@@ -34,15 +34,17 @@ function extractHighlights(summary: string): string[] {
   return highlights;
 }
 
+/** Every free-text field stored in `review_runs.result` goes through the engine redactor. */
 function mapFinding(f: Finding, secrets: Secret[]): ReviewRunFinding {
+  const redact = (text: string): string => redactSecrets(text, secrets).text;
   return {
-    path: f.path,
+    path: redact(f.path),
     line: f.line,
     severity: f.severity,
     category: f.category,
-    title: redactSecrets(f.title, secrets).text,
-    body: redactSecrets(f.body, secrets).text,
-    ...(f.suggestion ? { suggestion: redactSecrets(f.suggestion, secrets).text } : {}),
+    title: redact(f.title),
+    body: redact(f.body),
+    ...(f.suggestion ? { suggestion: redact(f.suggestion) } : {}),
   };
 }
 

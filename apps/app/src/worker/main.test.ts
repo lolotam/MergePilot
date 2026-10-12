@@ -236,7 +236,7 @@ describe('worker/main', { timeout: 20000 }, () => {
       expect(mockWorkerClose).toHaveBeenCalled();
     });
 
-    it('sweeps stale runs on worker startup', async () => {
+    it('sweeps runs with a stale heartbeat on worker startup', async () => {
       const store = new MemoryStore();
       const failStaleSpy = vi.spyOn(store, 'failStaleRuns');
 
@@ -248,13 +248,13 @@ describe('worker/main', { timeout: 20000 }, () => {
           REDIS_URL: 'memory:',
           MERGEPILOT_MASTER_KEY: masterKey,
           GITHUB_APP_ID: '12345',
-          GITHUB_APP_PRIVATE_KEY: 'fake-private-key',
-          GITHUB_WEBHOOK_SECRET: 'fake-webhook-secret',
+          GITHUB_APP_PRIVATE_KEY: 'pk',
+          GITHUB_WEBHOOK_SECRET: 'wh',
           GITHUB_CLIENT_ID: 'gh-id',
-          GITHUB_CLIENT_SECRET: 'gh-sec',
+          GITHUB_CLIENT_SECRET: 'gh-s',
           GOOGLE_CLIENT_ID: 'goog-id',
-          GOOGLE_CLIENT_SECRET: 'goog-sec',
-          BETTER_AUTH_SECRET: 'better-auth-secret-1234567890',
+          GOOGLE_CLIENT_SECRET: 'g-s',
+          BETTER_AUTH_SECRET: 'x'.repeat(32),
           WORKER_CONCURRENCY: '1',
           WORKER_HEALTH_PORT: '0',
         },
@@ -271,10 +271,10 @@ describe('worker/main', { timeout: 20000 }, () => {
         expect(failStaleSpy).toHaveBeenCalled();
         const calledArg = failStaleSpy.mock.calls[0]?.[0];
         expect(calledArg).toBeInstanceOf(Date);
-        // Should be approximately 30 minutes in the past
+        // Heartbeat cutoff: approximately 15 minutes in the past
         const diffMs = Date.now() - (calledArg as Date).getTime();
-        expect(diffMs).toBeGreaterThanOrEqual(29 * 60 * 1000);
-        expect(diffMs).toBeLessThanOrEqual(31 * 60 * 1000);
+        expect(diffMs).toBeGreaterThanOrEqual(14 * 60 * 1000);
+        expect(diffMs).toBeLessThanOrEqual(16 * 60 * 1000);
       } finally {
         await workerInstance.stop();
       }

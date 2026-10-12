@@ -46,7 +46,7 @@ describe('processReviewJob - details and metadata recording', () => {
       monthlyBudgetUsd: null,
     });
 
-    const secretValue = options?.secretValue ?? 'sk-test-fake-key-000';
+    const secretValue = options?.secretValue ?? ['fake', 'x'.repeat(16)].join('-');
     const credentials = {
       resolve: vi.fn(async (_wsId: string, _provider: ApiProvider) => {
         return new Secret(secretValue);
@@ -157,7 +157,7 @@ describe('processReviewJob - details and metadata recording', () => {
     // Runtime-built fake secret (no secret literal!)
     const p1 = 'sk-';
     const p2 = 'ant-';
-    const p3 = 'test-token-value-secret-1234567890';
+    const p3 = 'x'.repeat(32);
     const fakeSecret = `${p1}${p2}${p3}`;
 
     const { deps, job, store } = createSetup({
@@ -186,20 +186,65 @@ describe('processReviewJob - details and metadata recording', () => {
     expect(findingBody).toContain('[REDACTED:');
   });
 
-  it('reuses the existing review run when BullMQ retries the same job', async () => {
-    const { deps, job, store } = createSetup();
+  it('reuses a failed run when BullMQ retries the same job', async () => {
+    const { deps, job, store, fakeModel } = createSetup({ modelError: new Error('Rate limit exceeded') });
 
-    // First attempt creates row
+    // First attempt fails
     await processReviewJob(job, deps);
     const runsAfterFirst = await store.listReviewRuns(workspaceId, 10);
     expect(runsAfterFirst).toHaveLength(1);
+    expect(runsAfterFirst[0]?.status).toBe('failed');
     const firstRunId = runsAfterFirst[0]?.id;
 
-    // Second attempt (retry of same job deliveryId)
+    // Retry of the same job deliveryId succeeds on the same row
+    vi.mocked(fakeModel.generate).mockImplementation(async () => ({
+      text: JSON.stringify({ summary: 'Retry summary', findings: [] }),
+      finishReason: 'stop' as const,
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    }));
     await processReviewJob(job, deps);
     const runsAfterRetry = await store.listReviewRuns(workspaceId, 10);
     expect(runsAfterRetry).toHaveLength(1);
     expect(runsAfterRetry[0]?.id).toBe(firstRunId);
+    expect(runsAfterRetry[0]?.status).toBe('completed');
+  });
+
+  it('never overwrites a completed run when the same job id runs again', async () => {
+    const { deps, job, store } = createSetup();
+
+    await processReviewJob(job, deps);
+    const [first] = await store.listReviewRuns(workspaceId, 10);
+    expect(first?.status).toBe('completed');
+    const firstResult = first?.result;
+
+    await processReviewJob(job, deps);
+    const runs = await store.listReviewRuns(workspaceId, 10);
+    expect(runs).toHaveLength(2);
+    const kept = await store.getReviewRun(workspaceId, first?.id ?? '');
+    expect(kept?.status).toBe('completed');
+    expect(kept?.result).toEqual(firstResult);
+    expect(runs.filter((r) => r.id !== first?.id)[0]?.status).toBe('completed');
+  });
+
+  it('touches the run heartbeat while the review runs and stops when it finishes', async () => {
+    const { deps, job, store, fakeModel } = createSetup();
+    const touchSpy = vi.spyOn(store, 'touchReviewRun');
+    const original = vi.mocked(fakeModel.generate).getMockImplementation();
+    vi.mocked(fakeModel.generate).mockImplementation(async (...args) => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      if (!original) throw new Error('missing model implementation');
+      return original(...args);
+    });
+
+    const result = await processReviewJob(job, { ...deps, heartbeatIntervalMs: 10 });
+    expect(result.status).toBe('completed');
+    expect(touchSpy.mock.calls.length).toBeGreaterThan(0);
+    const [run] = await store.listReviewRuns(workspaceId, 10);
+    expect(touchSpy).toHaveBeenCalledWith(workspaceId, run?.id);
+
+    const callsAtFinish = touchSpy.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(touchSpy.mock.calls.length).toBe(callsAtFinish);
   });
 
   it('records provider and model for failed runs when known', async () => {

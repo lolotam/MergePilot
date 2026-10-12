@@ -6,6 +6,7 @@ import type {
   WorkspaceSettings,
 } from '../core/types.js';
 import { defineDeleteWorkspaceContract } from './store-contract-delete.js';
+import { defineReviewRunLifecycleContract } from './store-contract-runs.js';
 
 /** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
 export const STORE_CONTRACT_WORKSPACES = [
@@ -313,72 +314,7 @@ export function describeStoreContract(
       }
     });
 
-    it('reuses existing run when retrying job with the same jobId', async () => {
-      const store = await createStore();
-      try {
-        const first = await store.createReviewRun({
-          workspaceId: 'ws-runs-test',
-          installationId: 42,
-          repoFullName: 'org/retry-repo',
-          pullNumber: 7,
-          headSha: 'sha-first',
-          status: 'running',
-          costUsd: null,
-          detail: null,
-          jobId: 'job-unique-retry-key',
-        });
-
-        // Retry of same job
-        const retry = await store.createReviewRun({
-          workspaceId: 'ws-runs-test',
-          installationId: 42,
-          repoFullName: 'org/retry-repo',
-          pullNumber: 7,
-          headSha: 'sha-second',
-          status: 'running',
-          costUsd: null,
-          detail: null,
-          jobId: 'job-unique-retry-key',
-        });
-
-        expect(retry.id).toBe(first.id);
-
-        const list = await store.listReviewRuns('ws-runs-test', 10);
-        const retryRuns = list.filter((r) => r.jobId === 'job-unique-retry-key');
-        expect(retryRuns).toHaveLength(1);
-      } finally {
-        await cleanup?.();
-      }
-    });
-
-    it('manages stale runs and repository listing', async () => {
-      const store = await createStore();
-      try {
-        const reposBefore = await store.listReviewRunRepos('ws-runs-test');
-        expect(Array.isArray(reposBefore)).toBe(true);
-
-        const staleDate = new Date(Date.now() - 40 * 60 * 1000); // 40 mins ago
-        const staleRun = await store.createReviewRun({
-          workspaceId: 'ws-runs-test',
-          installationId: 42,
-          repoFullName: 'org/alpha-repo',
-          pullNumber: 1,
-          headSha: 'sha-stale',
-          status: 'running',
-          costUsd: null,
-          detail: null,
-        });
-
-        // Force stale createdAt
-        staleRun.createdAt = staleDate;
-
-        const count = await store.failStaleRuns(new Date(Date.now() - 30 * 60 * 1000));
-        expect(typeof count).toBe('number');
-      } finally {
-        await cleanup?.();
-      }
-    });
-
+    defineReviewRunLifecycleContract(createStore, cleanup);
     defineDeleteWorkspaceContract(createStore, cleanup);
   });
 }

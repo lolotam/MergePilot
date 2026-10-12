@@ -10,6 +10,7 @@ import type {
   Installation,
   ListReviewRunsOptions,
   ListReviewRunsResult,
+  NewReviewRun,
   ReviewRun,
   StoredCredential,
   WorkspaceSettings,
@@ -20,6 +21,7 @@ import {
   finishPgReviewRun,
   mapReviewRunRow,
   queryPgReviewRuns,
+  touchPgReviewRun,
 } from './pg-runs.js';
 import { installations, providerCredentials, reviewRuns, webhookDeliveries, workspaceSettings } from './schema.js';
 import type * as schema from './schema.js';
@@ -284,10 +286,12 @@ export class PgStore implements AppStore {
       );
   }
 
-  async createReviewRun(
-    run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>,
-  ): Promise<ReviewRun> {
+  async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {
     return createPgReviewRun(this.db, run);
+  }
+
+  async touchReviewRun(workspaceId: string, id: string): Promise<void> {
+    return touchPgReviewRun(this.db, workspaceId, id);
   }
 
   async finishReviewRun(
@@ -316,8 +320,8 @@ export class PgStore implements AppStore {
     return rows.map((r) => r.repo);
   }
 
-  async failStaleRuns(olderThan: Date): Promise<number> {
-    return failPgStaleRuns(this.db, olderThan);
+  async failStaleRuns(heartbeatBefore: Date): Promise<number> {
+    return failPgStaleRuns(this.db, heartbeatBefore);
   }
 
   async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;

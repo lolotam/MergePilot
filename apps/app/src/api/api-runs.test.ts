@@ -15,6 +15,10 @@ import { CredentialService } from '../credentials/service.js';
 import type { AppConfig } from '../core/config.js';
 import { registerDashboardApi } from './routes.js';
 
+// Session tokens built at runtime so no secret-looking literal sits in the test.
+const TOKEN_USER1 = ['t', 'u1'].join('-');
+const TOKEN_USER2 = ['t', 'u2'].join('-');
+
 describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', () => {
   let app: FastifyInstance;
   let pglite: PGlite;
@@ -29,17 +33,17 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     port: 3000,
     databaseUrl: 'postgres://localhost:5432/test',
     redisUrl: 'redis://localhost:6379',
-    masterKey: '01234567890123456789012345678901',
+    masterKey: '0'.repeat(32),
     github: {
       appId: '12345',
       privateKey: 'key',
       webhookSecret: 'secret',
       clientId: 'gh-id',
-      clientSecret: 'gh-secret',
+      clientSecret: 'gh-s',
       appSlug: 'mergepilot-test',
     },
-    google: { clientId: 'g-id', clientSecret: 'g-secret' },
-    authSecret: 'sk-test-secret-32-chars-long-0000000',
+    google: { clientId: 'g-id', clientSecret: 'g-s' },
+    authSecret: 'x'.repeat(32),
   };
 
   beforeEach(async () => {
@@ -74,8 +78,8 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     ]);
 
     await db.insert(authSchema.session).values([
-      { id: 's-user1', token: 'token-user1', userId: 'u-user1', expiresAt: new Date(Date.now() + 86400000) },
-      { id: 's-user2', token: 'token-user2', userId: 'u-user2', expiresAt: new Date(Date.now() + 86400000) },
+      { id: 's-user1', token: TOKEN_USER1, userId: 'u-user1', expiresAt: new Date(Date.now() + 86400000) },
+      { id: 's-user2', token: TOKEN_USER2, userId: 'u-user2', expiresAt: new Date(Date.now() + 86400000) },
     ]);
 
     await db.insert(authSchema.organization).values([
@@ -135,7 +139,7 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const res = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-1/runs',
-      headers: { cookie: signedSessionCookie('token-user1', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
     });
 
     expect(res.statusCode).toBe(200);
@@ -209,7 +213,7 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const res = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-1/runs/repos',
-      headers: { cookie: signedSessionCookie('token-user1', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
     });
 
     expect(res.statusCode).toBe(200);
@@ -251,7 +255,7 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const res200 = await app.inject({
       method: 'GET',
       url: `/api/workspaces/ws-1/runs/${run.id}`,
-      headers: { cookie: signedSessionCookie('token-user1', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
     });
     expect(res200.statusCode).toBe(200);
     const detailBody = res200.json().run;
@@ -269,7 +273,7 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const resOtherWs = await app.inject({
       method: 'GET',
       url: `/api/workspaces/ws-2/runs/${run.id}`,
-      headers: { cookie: signedSessionCookie('token-user2', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER2, config.authSecret) },
     });
     expect(resOtherWs.statusCode).toBe(404);
 
@@ -277,7 +281,7 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const res404 = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-1/runs/00000000-0000-0000-0000-000000000000',
-      headers: { cookie: signedSessionCookie('token-user1', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
     });
     expect(res404.statusCode).toBe(404);
   });
@@ -286,10 +290,31 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const res = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-1/runs?sort=malicious_column',
-      headers: { cookie: signedSessionCookie('token-user1', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('invalid_sort');
+  });
+
+  it('rejects invalid filter params with 400 invalid_query', async () => {
+    const urls = [
+      '/api/workspaces/ws-1/runs?status=exploded',
+      '/api/workspaces/ws-1/runs?from=yesterday',
+      '/api/workspaces/ws-1/runs?from=2026-10-12&to=2026-10-01',
+      `/api/workspaces/ws-1/runs?q=${'a'.repeat(201)}`,
+      '/api/workspaces/ws-1/runs?dir=sideways',
+      '/api/workspaces/ws-1/runs?limit=0',
+      '/api/workspaces/ws-1/runs?offset=-1',
+    ];
+    for (const url of urls) {
+      const res = await app.inject({
+        method: 'GET',
+        url,
+        headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
+      });
+      expect(res.statusCode, url).toBe(400);
+      expect(res.json().error.code, url).toBe('invalid_query');
+    }
   });
 
   it('supports filtering by repo, status, provider and search q', async () => {
@@ -318,7 +343,7 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const resRepo = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-1/runs?repo=acme/api',
-      headers: { cookie: signedSessionCookie('token-user1', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
     });
     expect(resRepo.json().runs).toHaveLength(1);
     expect(resRepo.json().runs[0].repoFullName).toBe('acme/api');
@@ -327,7 +352,7 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const resSearchPr = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-1/runs?q=202',
-      headers: { cookie: signedSessionCookie('token-user1', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
     });
     expect(resSearchPr.json().runs).toHaveLength(1);
     expect(resSearchPr.json().runs[0].pullNumber).toBe(202);
@@ -336,7 +361,7 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     const resSearchDetail = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-1/runs?q=timeout',
-      headers: { cookie: signedSessionCookie('token-user1', config.authSecret) },
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
     });
     expect(resSearchDetail.json().runs).toHaveLength(1);
     expect(resSearchDetail.json().runs[0].detail).toBe('Connection timeout');

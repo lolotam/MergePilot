@@ -16,12 +16,10 @@ import {
   publishReview,
   renderReviewSummary,
   type FileContent,
-  type GitHubClient,
 } from '@mergepilot/github';
 import {
   WorkspaceDeletedError,
   type ApiProvider,
-  type AppStore,
   type ReviewJob,
   type ReviewRun,
   type ReviewRunResultPayload,
@@ -29,48 +27,11 @@ import {
 } from '../core/types.js';
 import { executeReview } from './execute-review.js';
 import { prepareRunResult } from './prepare-run-result.js';
+import { startRunHeartbeat } from './run-heartbeat.js';
+import { guardWritesForWorkspace } from './workspace-guard.js';
 import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
 
 const WORKSPACE_DELETED = 'workspace_deleted';
-
-/**
- * Wraps the GitHub client so every write (review, issue) first re-checks that the installation is
- * still linked to the workspace the job started with. A workspace deleted mid-review therefore
- * never gets a review published on its behalf.
- */
-function guardWritesForWorkspace(
-  client: GitHubClient,
-  store: AppStore,
-  installationId: number,
-  workspaceId: string,
-): GitHubClient {
-  const ensureStillLinked = async (): Promise<void> => {
-    const current = await store.getInstallation(installationId);
-    if (!current || current.workspaceId !== workspaceId) {
-      throw new WorkspaceDeletedError(workspaceId);
-    }
-  };
-  const createIssue = client.createIssue?.bind(client);
-  return {
-    listPullRequestFilesPage: (params) => client.listPullRequestFilesPage(params),
-    getPullRequest: (params) => client.getPullRequest(params),
-    listReviewsPage: (params) => client.listReviewsPage(params),
-    getFileContent: (params) => client.getFileContent(params),
-    compareCommits: (params) => client.compareCommits(params),
-    createReview: async (params) => {
-      await ensureStillLinked();
-      return client.createReview(params);
-    },
-    ...(createIssue
-      ? {
-          createIssue: async (params: Parameters<typeof createIssue>[0]) => {
-            await ensureStillLinked();
-            return createIssue(params);
-          },
-        }
-      : {}),
-  };
-}
 
 class WorkspaceCredentialStore implements CredentialStore {
   constructor(
@@ -145,6 +106,7 @@ export async function processReviewJob(
 
   let run: ReviewRun | undefined;
   let secret: Secret | undefined;
+  let stopHeartbeat: (() => void) | undefined;
 
   try {
     run = await deps.store.createReviewRun({
@@ -159,6 +121,10 @@ export async function processReviewJob(
       detail: null,
       provider: settings.provider,
       model: settings.model,
+    });
+    stopHeartbeat = startRunHeartbeat(deps.store, workspaceId, run.id, {
+      intervalMs: deps.heartbeatIntervalMs,
+      log: deps.log,
     });
 
     const [owner, repo] = job.repoFullName.split('/');
@@ -392,5 +358,7 @@ export async function processReviewJob(
       status: 'failed',
       detail: redactedDetail,
     };
+  } finally {
+    stopHeartbeat?.();
   }
 }

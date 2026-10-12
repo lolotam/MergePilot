@@ -27,6 +27,8 @@ export interface ProcessReviewDeps {
   ) => Promise<ReviewModel> | ReviewModel;
   log?: (message: string) => void;
   now?: () => Date;
+  /** Heartbeat interval while a review runs (default RUN_HEARTBEAT_INTERVAL_MS, 60 s). */
+  heartbeatIntervalMs?: number | undefined;
 }
 
 export interface ProcessReviewResult {

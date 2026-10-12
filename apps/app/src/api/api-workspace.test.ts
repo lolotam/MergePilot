@@ -275,7 +275,7 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     await passValidateApp.close();
   });
 
-  it('GET /api/workspaces/:workspaceId/runs clamps limit to max 100, defaults to 50, returns total', async () => {
+  it('GET /api/workspaces/:workspaceId/runs rejects limit above 100, defaults to 50, returns total', async () => {
     // Seed 3 review runs
     for (let i = 1; i <= 3; i++) {
       await store.createReviewRun({
@@ -300,11 +300,18 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     expect(resDefault.json().runs).toHaveLength(3);
     expect(resDefault.json().total).toBe(3);
 
-    // Limit clamp to 100
+    // limit above 100 is rejected; 100 is passed through
     const spy = vi.spyOn(store, 'listReviewRuns');
-    await app.inject({
+    const resTooBig = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-A/runs?limit=300',
+      headers: { cookie: signedSessionCookie('token-member', config.authSecret) },
+    });
+    expect(resTooBig.statusCode).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+    await app.inject({
+      method: 'GET',
+      url: '/api/workspaces/ws-A/runs?limit=100',
       headers: { cookie: signedSessionCookie('token-member', config.authSecret) },
     });
     expect(spy).toHaveBeenCalledWith('ws-A', expect.objectContaining({ limit: 100 }));

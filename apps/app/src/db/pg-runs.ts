@@ -12,13 +12,15 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
-import type {
-  FinishReviewRunOptions,
-  ListReviewRunsOptions,
-  ListReviewRunsResult,
-  ReviewRun,
-  ReviewRunResultPayload,
-  ReviewRunStatus,
+import {
+  REUSABLE_RUN_STATUSES,
+  type FinishReviewRunOptions,
+  type ListReviewRunsOptions,
+  type ListReviewRunsResult,
+  type NewReviewRun,
+  type ReviewRun,
+  type ReviewRunResultPayload,
+  type ReviewRunStatus,
 } from '../core/types.js';
 import { reviewRuns } from './schema.js';
 import type { AppDb } from './pg-store.js';
@@ -38,6 +40,7 @@ export function mapReviewRunRow(row: typeof reviewRuns.$inferSelect): ReviewRun 
     detail: row.detail,
     createdAt: new Date(row.createdAt),
     finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
+    updatedAt: new Date(row.updatedAt),
     provider: row.provider ?? null,
     model: row.model ?? null,
     effort: row.effort ?? null,
@@ -158,87 +161,87 @@ export async function queryPgReviewRuns(
   };
 }
 
-export async function failPgStaleRuns(db: AppDb, olderThan: Date): Promise<number> {
+export async function failPgStaleRuns(db: AppDb, heartbeatBefore: Date): Promise<number> {
+  const now = new Date();
   const res = await db
     .update(reviewRuns)
-    .set({ status: 'failed', detail: 'interrupted', finishedAt: new Date() })
+    .set({ status: 'failed', detail: 'interrupted', finishedAt: now, updatedAt: now })
     .where(
       and(
-        or(eq(reviewRuns.status, 'running'), eq(reviewRuns.status, 'queued')),
-        lt(reviewRuns.createdAt, olderThan),
+        inArray(reviewRuns.status, ['running', 'queued']),
+        lt(reviewRuns.updatedAt, heartbeatBefore),
       ),
     )
     .returning();
   return res.length;
 }
 
-export async function createPgReviewRun(
-  db: AppDb,
-  run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>,
-): Promise<ReviewRun> {
+export async function touchPgReviewRun(db: AppDb, workspaceId: string, id: string): Promise<void> {
+  await db
+    .update(reviewRuns)
+    .set({ updatedAt: new Date() })
+    .where(
+      and(
+        eq(reviewRuns.id, id),
+        eq(reviewRuns.workspaceId, workspaceId),
+        inArray(reviewRuns.status, ['running', 'queued']),
+      ),
+    );
+}
+
+/** Columns a new run (or a retry reusing a queued/running/failed run of the same job) starts with. */
+function startingValues(run: NewReviewRun, now: Date) {
+  return {
+    headSha: run.headSha,
+    status: run.status,
+    costUsd: run.costUsd !== null ? String(run.costUsd) : null,
+    detail: run.detail,
+    finishedAt: null,
+    updatedAt: now,
+    provider: run.provider ?? null,
+    model: run.model ?? null,
+    effort: run.effort ?? null,
+    fallbackFrom: run.fallbackFrom ?? null,
+    findingsCount: run.findingsCount ?? null,
+    result: run.result ?? null,
+    reviewUrl: run.reviewUrl ?? null,
+  };
+}
+
+export async function createPgReviewRun(db: AppDb, run: NewReviewRun): Promise<ReviewRun> {
   return withLiveWorkspace(db, run.workspaceId, async (tx) => {
+    const now = new Date();
     if (run.jobId) {
-      const existing = await tx
-        .select()
-        .from(reviewRuns)
+      // Only a queued/running/failed run of this job is reused; completed and skipped runs stay.
+      const reused = await tx
+        .update(reviewRuns)
+        .set(startingValues(run, now))
         .where(
           and(
             eq(reviewRuns.workspaceId, run.workspaceId),
             eq(reviewRuns.jobId, run.jobId),
+            inArray(reviewRuns.status, [...REUSABLE_RUN_STATUSES]),
           ),
-        );
-      if (existing.length > 0 && existing[0]) {
-        const row = existing[0];
-        await tx
-          .update(reviewRuns)
-          .set({
-            status: run.status,
-            headSha: run.headSha,
-            costUsd: run.costUsd !== null ? String(run.costUsd) : null,
-            detail: run.detail,
-            finishedAt: null,
-          })
-          .where(eq(reviewRuns.id, row.id));
-        return mapReviewRunRow({
-          ...row,
-          status: run.status,
-          headSha: run.headSha,
-          costUsd: run.costUsd !== null ? String(run.costUsd) : null,
-          detail: run.detail,
-          finishedAt: null,
-        });
-      }
+        )
+        .returning();
+      if (reused[0]) return mapReviewRunRow(reused[0]);
     }
-    const id = randomUUID();
-    const createdAt = new Date();
-    await tx.insert(reviewRuns).values({
-      id,
-      workspaceId: run.workspaceId,
-      jobId: run.jobId ?? null,
-      installationId: run.installationId,
-      repoFullName: run.repoFullName,
-      pullNumber: run.pullNumber,
-      headSha: run.headSha,
-      status: run.status,
-      costUsd: run.costUsd !== null ? String(run.costUsd) : null,
-      detail: run.detail,
-      createdAt,
-      finishedAt: null,
-      provider: run.provider ?? null,
-      model: run.model ?? null,
-      effort: run.effort ?? null,
-      fallbackFrom: run.fallbackFrom ?? null,
-      findingsCount: run.findingsCount ?? null,
-      result: run.result ?? null,
-      reviewUrl: run.reviewUrl ?? null,
-    });
-    return {
-      ...run,
-      id,
-      costUsd: run.costUsd !== null ? Number(run.costUsd) : null,
-      createdAt,
-      finishedAt: null,
-    };
+    const inserted = await tx
+      .insert(reviewRuns)
+      .values({
+        ...startingValues(run, now),
+        id: randomUUID(),
+        workspaceId: run.workspaceId,
+        jobId: run.jobId ?? null,
+        installationId: run.installationId,
+        repoFullName: run.repoFullName,
+        pullNumber: run.pullNumber,
+        createdAt: now,
+      })
+      .returning();
+    const row = inserted[0];
+    if (!row) throw new Error('review run insert returned no row');
+    return mapReviewRunRow(row);
   });
 }
 
@@ -248,11 +251,13 @@ export async function finishPgReviewRun(
   id: string,
   result: FinishReviewRunOptions,
 ): Promise<void> {
-  const updateValues: Record<string, unknown> = {
+  const now = new Date();
+  const updateValues: Partial<typeof reviewRuns.$inferInsert> = {
     status: result.status,
     costUsd: result.costUsd !== null ? String(result.costUsd) : null,
     detail: result.detail,
-    finishedAt: new Date(),
+    finishedAt: now,
+    updatedAt: now,
   };
   if (result.provider !== undefined) updateValues.provider = result.provider;
   if (result.model !== undefined) updateValues.model = result.model;

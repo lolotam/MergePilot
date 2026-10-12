@@ -99,6 +99,8 @@ export interface ReviewRun {
   detail: string | null;
   createdAt: Date;
   finishedAt: Date | null;
+  /** Heartbeat: set on create, on every status change, and periodically while the review runs. */
+  updatedAt: Date;
   jobId?: string | null | undefined;
   provider?: string | null | undefined;
   model?: string | null | undefined;
@@ -108,6 +110,12 @@ export interface ReviewRun {
   result?: ReviewRunResultPayload | null | undefined;
   reviewUrl?: string | null | undefined;
 }
+
+/** A run as the worker records it; the store assigns id and timestamps. */
+export type NewReviewRun = Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt' | 'updatedAt'>;
+
+/** Only runs in these states may be reused by a retry of the same job id. */
+export const REUSABLE_RUN_STATUSES: readonly ReviewRunStatus[] = ['queued', 'running', 'failed'];
 
 export interface FinishReviewRunOptions {
   status: ReviewRunStatus;
@@ -172,8 +180,14 @@ export interface AppStore {
   listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>>;
   deleteCredential(workspaceId: string, provider: ApiProvider): Promise<void>;
 
-  /** Throws WorkspaceDeletedError when the workspace is gone, so a late worker cannot write orphan rows. */
-  createReviewRun(run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>): Promise<ReviewRun>;
+  /**
+   * Throws WorkspaceDeletedError when the workspace is gone, so a late worker cannot write orphan rows.
+   * A run with a jobId reuses that job's queued/running/failed run; completed and skipped runs are
+   * never overwritten (a new run is created instead).
+   */
+  createReviewRun(run: NewReviewRun): Promise<ReviewRun>;
+  /** Refreshes the heartbeat of a queued/running run; finished runs are left untouched. */
+  touchReviewRun(workspaceId: string, id: string): Promise<void>;
   finishReviewRun(
     workspaceId: string,
     id: string,
@@ -187,7 +201,8 @@ export interface AppStore {
     limitOrOptions?: number | ListReviewRunsOptions,
   ): Promise<ReviewRun[] | ListReviewRunsResult>;
   listReviewRunRepos(workspaceId: string): Promise<string[]>;
-  failStaleRuns(olderThan: Date): Promise<number>;
+  /** Fails queued/running runs whose heartbeat (updatedAt) is older than `heartbeatBefore`. */
+  failStaleRuns(heartbeatBefore: Date): Promise<number>;
   monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;
   /**
    * Deletes the workspace's credentials, settings and review runs and unlinks its installations.

@@ -122,7 +122,7 @@ export async function executeReview(
     });
   } else if (reviewResult.status === 'skipped-budget') {
     outcome = 'skipped-budget';
-    detail = reviewResult.reason;
+    detail = redactSecrets(reviewResult.reason, knownSecrets).text;
     inlineFindings = [];
     summaryMarkdown = renderReviewSummary({
       language: config.language,

@@ -113,6 +113,7 @@ export function RunsFilterBar({
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
+            maxLength={200}
             placeholder={t('searchRunsPlaceholder')}
             className="w-full ps-9 pe-3 py-1.5 text-xs bg-ink-50 dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-md text-ink-900 dark:text-ink-100 placeholder:text-ink-400 focus:outline-hidden focus:ring-1 focus:ring-brand-500"
           />
@@ -205,6 +206,7 @@ export function RunsFilterBar({
             type="date"
             aria-label={t('filterDateFrom')}
             value={fromDate}
+            max={toDate || undefined}
             onChange={(e) => onDateChange(e.target.value, toDate)}
             className="px-2.5 py-1.5 bg-ink-50 dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-md text-ink-800 dark:text-ink-200 text-xs focus:ring-1 focus:ring-brand-500"
           />
@@ -213,6 +215,7 @@ export function RunsFilterBar({
             type="date"
             aria-label={t('filterDateTo')}
             value={toDate}
+            min={fromDate || undefined}
             onChange={(e) => onDateChange(fromDate, e.target.value)}
             className="px-2.5 py-1.5 bg-ink-50 dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-md text-ink-800 dark:text-ink-200 text-xs focus:ring-1 focus:ring-brand-500"
           />

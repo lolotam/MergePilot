@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
@@ -89,6 +90,10 @@ export const reviewRuns = pgTable(
       .notNull()
       .defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+    /** Heartbeat: the stale-run sweep fails queued/running runs whose heartbeat is too old. */
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
     provider: text('provider'),
     model: text('model'),
     effort: text('effort'),
@@ -103,7 +108,12 @@ export const reviewRuns = pgTable(
       table.workspaceId,
       table.createdAt.desc(),
     ),
-    uniqueIndex('idx_review_runs_workspace_job_id').on(table.workspaceId, table.jobId),
+    uniqueIndex('idx_review_runs_workspace_job_id_active')
+      .on(table.workspaceId, table.jobId)
+      .where(sql`job_id IS NOT NULL AND status IN ('queued', 'running', 'failed')`),
+    index('idx_review_runs_active_updated_at')
+      .on(table.updatedAt)
+      .where(sql`status IN ('queued', 'running')`),
     index('idx_review_runs_workspace_repo').on(table.workspaceId, table.repoFullName),
   ],
 );
