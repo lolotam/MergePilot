@@ -26,6 +26,7 @@ import {
   type ReviewRunResultPayload,
   type ReviewRunStatus,
 } from '../core/types.js';
+import { workerLogger } from '../core/logger.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { executeReview } from './execute-review.js';
 import { changedLinesOf, chooseModel, fallbackChain, skippedFallbacksNote, customBaseUrlFor, usedModel, type ModelChoice } from './model-choice.js';
@@ -70,10 +71,17 @@ export async function processReviewJob(
   job: ReviewJob,
   deps: ProcessReviewDeps,
 ): Promise<ProcessReviewResult> {
+  const logger = deps.logger ?? workerLogger;
+  const startTime = performance.now();
+  const logSkip = (reason: string, message: string, fields: Record<string, unknown> = {}): void => {
+    deps.log?.(message);
+    logger.info({ event: 'job.skipped', jobId: job.deliveryId, reason, ...fields }, message);
+  };
+
   const installation = await deps.store.getInstallation(job.installationId);
   if (!installation || installation.suspended) {
     const detail = !installation ? 'unknown installation' : 'suspended installation';
-    deps.log?.(`Skipping job ${job.deliveryId}: installation ${job.installationId} is ${detail}`);
+    logSkip(detail, `Skipping job ${job.deliveryId}: installation ${job.installationId} is ${detail}`, { installationId: job.installationId });
     return { status: 'skipped', detail };
   }
 
@@ -95,11 +103,11 @@ export async function processReviewJob(
       });
     } catch (error) {
       if (error instanceof ActiveRunExistsError) {
-        deps.log?.(`Skipping job ${job.deliveryId}: a run for this head is already active`);
+        logSkip(DUPLICATE, `Skipping job ${job.deliveryId}: a run for this head is already active`);
         return { status: 'skipped', detail: DUPLICATE };
       }
       if (!(error instanceof WorkspaceDeletedError)) throw error;
-      deps.log?.(`Skipping job ${job.deliveryId}: workspace ${workspaceId} was deleted`);
+      logSkip(WORKSPACE_DELETED, `Skipping job ${job.deliveryId}: workspace ${workspaceId} was deleted`, { workspaceId });
       return { status: 'skipped', detail: WORKSPACE_DELETED };
     }
     await deps.store.finishReviewRun(workspaceId, run.id, {
@@ -107,7 +115,7 @@ export async function processReviewJob(
       costUsd: null,
       detail: 'workspace not configured',
     });
-    deps.log?.(`Skipping job ${job.deliveryId}: workspace ${workspaceId} not configured`);
+    logSkip('workspace not configured', `Skipping job ${job.deliveryId}: workspace ${workspaceId} not configured`, { runId: run.id, workspaceId });
     return { status: 'skipped', detail: 'workspace not configured' };
   }
 
@@ -135,7 +143,12 @@ export async function processReviewJob(
     stopHeartbeat = startRunHeartbeat(deps.store, workspaceId, run.id, {
       intervalMs: deps.heartbeatIntervalMs,
       log: deps.log,
+      logger,
     });
+    logger.info({
+      event: 'job.start', jobId: job.deliveryId, runId: run.id, workspace: workspaceId,
+      repo: job.repoFullName, pullNumber: job.pullNumber, headSha: job.headSha.slice(0, 7),
+    }, `Review job ${job.deliveryId} started for ${job.repoFullName}#${job.pullNumber}`);
 
     const [owner, repo] = job.repoFullName.split('/');
     if (!owner || !repo) throw new Error(`Invalid repoFullName: ${job.repoFullName}`);
@@ -263,7 +276,7 @@ export async function processReviewJob(
           result: null,
           reviewUrl: budgetReviewUrl,
         });
-        deps.log?.(`Monthly budget reached for workspace ${workspaceId}; skipping`);
+        logSkip('monthly budget reached', `Monthly budget reached for workspace ${workspaceId}; skipping`, { runId: run.id, workspaceId });
         return { status: 'skipped', detail: 'monthly budget reached' };
       }
     }
@@ -347,14 +360,21 @@ export async function processReviewJob(
       reviewUrl: reviewResult.reviewUrl ?? null,
     });
 
+    const usage = reviewResult.runResult?.status === 'completed' ? reviewResult.runResult.usage : undefined;
+    logger.info({
+      event: 'job.end', jobId: job.deliveryId, runId: run.id, status,
+      provider: used.provider, model: used.model, fallbackFrom: used.fallbackFrom ?? null,
+      findingsCount: findingsCount ?? 0, inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0,
+      cost: costUsd, durationMs: Math.round(performance.now() - startTime), reviewUrl: reviewResult.reviewUrl ?? null,
+    }, `Review job ${job.deliveryId} finished with status ${status}`);
     return { status, costUsd, detail };
   } catch (error) {
     if (error instanceof ActiveRunExistsError && !run) {
-      deps.log?.(`Skipping job ${job.deliveryId}: a run for this head is already active`);
+      logSkip(DUPLICATE, `Skipping job ${job.deliveryId}: a run for this head is already active`);
       return { status: 'skipped', detail: DUPLICATE };
     }
     if (error instanceof WorkspaceDeletedError) {
-      deps.log?.(`Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`);
+      logSkip(WORKSPACE_DELETED, `Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`, { workspaceId });
       if (run) {
         await deps.store.finishReviewRun(workspaceId, run.id, {
           status: 'skipped',
@@ -368,7 +388,14 @@ export async function processReviewJob(
     const known = credStore?.getKnownSecrets() ?? [];
     const redactedDetail = redactSecrets(rawMessage, known).text.slice(0, 500);
 
+    const code: unknown = error instanceof Error ? (error as { code?: unknown }).code : undefined;
+    const failureCode = typeof code === 'string' ? code : error instanceof Error ? error.name : 'UNKNOWN_ERROR';
+
     deps.log?.(`Review job ${job.deliveryId} failed: ${redactedDetail}`);
+    logger.error({
+      event: 'job.failed', jobId: job.deliveryId, runId: run?.id ?? null,
+      workspace: workspaceId, failureCode, message: redactedDetail,
+    }, `Review job ${job.deliveryId} failed: ${redactedDetail}`);
 
     if (run) {
       await deps.store.finishReviewRun(workspaceId, run.id, {

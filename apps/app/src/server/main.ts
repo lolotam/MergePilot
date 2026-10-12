@@ -5,6 +5,7 @@ import { registerAdminApi } from '../admin/index.js';
 import { registerAuthRoutes } from '../auth/index.js';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
+import { createLogger } from '../core/logger.js';
 import type { AppStore, ReviewQueue } from '../core/types.js';
 import { createServer, type ServerProbes } from './create-server.js';
 import { registerStatic } from './static.js';
@@ -95,7 +96,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
     config,
     store,
     queue,
-    log: options?.log ?? false,
+    log: typeof options?.log !== 'undefined' ? options.log : createLogger({ service: 'web' }),
     probes,
     extraRoutes: async (instance: FastifyInstance) => {
       // 1. @fastify/helmet with CSP

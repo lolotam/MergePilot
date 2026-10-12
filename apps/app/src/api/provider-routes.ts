@@ -114,6 +114,7 @@ function sendTargetError(reply: FastifyReply, result: Exclude<TargetResult, { ok
 }
 
 async function fetchModels(
+  request: FastifyRequest,
   reply: FastifyReply,
   provider: ApiProviderId,
   result: Extract<TargetResult, { ok: true }>,
@@ -121,16 +122,54 @@ async function fetchModels(
   cacheKey?: string,
 ): Promise<FastifyReply> {
   const { target } = result;
+  const start = Date.now();
   try {
     const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
+    const ms = Date.now() - start;
     if (cacheKey) cacheModels(cacheKey, models);
+    request.log.info(
+      {
+        event: 'provider.models_listed',
+        provider,
+        ok: true,
+        count: models.length,
+        ms,
+        cached: false,
+      },
+      'Provider models listed',
+    );
     return reply.status(200).send({ models });
   } catch (err) {
+    const ms = Date.now() - start;
     if (err instanceof LlmFailure) {
       const kind = failureKind(err.code);
+      request.log.info(
+        {
+          event: 'provider.models_listed',
+          provider,
+          ok: false,
+          code: kind,
+          count: 0,
+          ms,
+          cached: false,
+        },
+        'Provider models listing failed',
+      );
       return sendError(reply, statusFor(kind), kind, redact(err.message, target.apiKey));
     }
     const msg = err instanceof Error ? err.message : String(err);
+    request.log.info(
+      {
+        event: 'provider.models_listed',
+        provider,
+        ok: false,
+        code: 'models_fetch_failed',
+        count: 0,
+        ms,
+        cached: false,
+      },
+      'Provider models listing failed',
+    );
     return sendError(reply, 502, 'models_fetch_failed', redact(msg, target.apiKey));
   }
 }
@@ -148,12 +187,25 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const cacheKey = `${workspaceId}:${provider}`;
       if (refresh !== 'true' && refresh !== '1') {
         const cached = modelsCache.get(cacheKey);
-        if (cached && Date.now() < cached.expiresAt) return reply.status(200).send({ models: cached.models });
+        if (cached && Date.now() < cached.expiresAt) {
+          request.log.info(
+            {
+              event: 'provider.models_listed',
+              provider,
+              ok: true,
+              count: cached.models.length,
+              ms: 0,
+              cached: true,
+            },
+            'Provider models listed',
+          );
+          return reply.status(200).send({ models: cached.models });
+        }
       }
       const signal = routeSignal(reply);
       const result = await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(reply, provider, result, signal, cacheKey);
+      return fetchModels(request, reply, provider, result, signal, cacheKey);
     },
   );
 
@@ -173,7 +225,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const signal = routeSignal(reply);
       const result = await unsavedTarget(deps, provider, body.data.apiKey, body.data.baseUrl, signal);
       if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(reply, provider, result, signal);
+      return fetchModels(request, reply, provider, result, signal);
     },
   );
 
@@ -205,13 +257,37 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const effort = body.effort?.trim();
       const { target } = result;
 
+      const start = Date.now();
       try {
         const outcome = await testConnection(provider, target.apiKey, model, {
           ...engineOptions(target),
           timeoutMs: DASHBOARD_FETCH_LIMITS.timeoutMs,
           ...(effort ? { effort } : {}),
         });
-        if (outcome.ok) return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model });
+        if (outcome.ok) {
+          request.log.info(
+            {
+              event: 'provider.test_connection',
+              provider,
+              model: outcome.model ?? model,
+              ok: true,
+              ms: outcome.ms,
+            },
+            'Provider connection tested',
+          );
+          return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model });
+        }
+        request.log.info(
+          {
+            event: 'provider.test_connection',
+            provider,
+            model,
+            ok: false,
+            code: outcome.code,
+            ms: outcome.ms,
+          },
+          'Provider connection test failed',
+        );
         return reply.status(200).send({
           ok: false,
           code: outcome.code,
@@ -219,7 +295,19 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           ms: outcome.ms,
         });
       } catch (err) {
+        const ms = Date.now() - start;
         const msg = err instanceof Error ? err.message : String(err);
+        request.log.info(
+          {
+            event: 'provider.test_connection',
+            provider,
+            model,
+            ok: false,
+            code: 'network',
+            ms,
+          },
+          'Provider connection test failed',
+        );
         return reply.status(200).send({ ok: false, code: 'network', message: redact(msg, target.apiKey) });
       }
     },

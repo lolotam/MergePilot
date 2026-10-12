@@ -220,6 +220,16 @@ export function registerRunsRetryRoutes(app: FastifyInstance, deps: DashboardApi
         const error = SINGLE_RETRY_ERRORS[queued.reason];
         return sendError(reply, error.status, error.code, error.message);
       }
+      request.log.info(
+        {
+          event: 'runs.retry',
+          workspaceId,
+          runId: queued.runId,
+          sourceRunId: runId,
+          retriedCount: 1,
+        },
+        'Review run retried',
+      );
       return reply.status(202).send({ runId: queued.runId });
     },
   );
@@ -274,9 +284,29 @@ export function registerRunsRetryRoutes(app: FastifyInstance, deps: DashboardApi
       }
 
       if (dryRun) {
+        request.log.info(
+          {
+            event: 'runs.retry_all',
+            workspaceId,
+            dryRun: true,
+            wouldQueueCount: items.length,
+            skippedCount: skipped.length,
+          },
+          'Previewed retry of failed review runs',
+        );
         const preview: RetryFailedDryRunResponse = { wouldQueue: items.length, items, skipped };
         return reply.status(200).send(preview);
       }
+      request.log.info(
+        {
+          event: 'runs.retry_all',
+          workspaceId,
+          dryRun: false,
+          queuedCount: items.length,
+          skippedCount: skipped.length,
+        },
+        'Retried failed review runs',
+      );
       const result: RetryFailedResponse = { queued: items.length, skipped };
       return reply.status(200).send(result);
     },

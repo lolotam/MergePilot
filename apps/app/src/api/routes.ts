@@ -104,11 +104,25 @@ export function registerDashboardApi(
       }
 
       // A patch over the stored settings: fields left out keep their value, null clears them.
-      const merged = mergeSettings(workspaceId, await deps.store.getSettings(workspaceId), parsed.data);
+      const previous = await deps.store.getSettings(workspaceId);
+      const merged = mergeSettings(workspaceId, previous, parsed.data);
       const problem = await validateSettings(deps.store, workspaceId, merged);
       if (problem) return sendError(reply, 400, problem.code, problem.message);
 
       await deps.store.saveSettings(merged);
+      request.log.info(
+        {
+          event: 'settings.changed',
+          workspaceId,
+          // Only fields whose stored value really changed (forms resend unchanged values).
+          changedFields: Object.keys(parsed.data).filter(
+            (key) =>
+              JSON.stringify((previous as Record<string, unknown> | null)?.[key] ?? null) !==
+              JSON.stringify((merged as unknown as Record<string, unknown>)[key] ?? null),
+          ),
+        },
+        'Workspace settings updated',
+      );
       const { workspaceId: _ws, ...settings } = merged;
       return reply.status(200).send({ settings });
     },
@@ -191,6 +205,14 @@ export function registerDashboardApi(
           baseUrl,
         });
         invalidateModelsCache(workspaceId, provider);
+        request.log.info(
+          {
+            event: 'credential.key_saved',
+            workspaceId,
+            provider,
+          },
+          'Provider API key saved',
+        );
 
         return reply.status(200).send({
           provider: saved.provider,
@@ -223,6 +245,14 @@ export function registerDashboardApi(
 
       await deps.credentials.deleteKey(workspaceId, providerParse.data);
       invalidateModelsCache(workspaceId, providerParse.data);
+      request.log.info(
+        {
+          event: 'credential.key_deleted',
+          workspaceId,
+          provider: providerParse.data,
+        },
+        'Provider API key deleted',
+      );
       return reply.status(204).send();
     },
   );

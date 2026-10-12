@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Auth } from '../auth/auth.js';
 import { ROLES, type Role } from '../core/types.js';
+import { setRequestLogUser } from '../server/log-context.js';
 
 export interface BetterAuthDbAdapter {
   findOne<T = Record<string, unknown>>(query: {
@@ -46,6 +47,7 @@ export async function getAuthSession(
   if (!session || !session.user) {
     return null;
   }
+  setRequestLogUser(request, session.user.id);
   return session;
 }
 

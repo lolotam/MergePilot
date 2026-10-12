@@ -80,6 +80,14 @@ export function registerInstallationRoutes(app: FastifyInstance, deps: Dashboard
 
       try {
         await deps.store.linkInstallation(installationId, workspaceId);
+        request.log.info(
+          {
+            event: 'installation.linked',
+            workspaceId,
+            installationId,
+          },
+          'Installation linked to workspace',
+        );
         return reply.status(204).send();
       } catch (err) {
         if (err instanceof InstallationAlreadyLinkedError) {

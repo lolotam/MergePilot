@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Auth } from '../auth/auth.js';
 import type { AppConfig } from '../core/config.js';
+import { setRequestLogUser } from '../server/log-context.js';
 
 export interface AdminUser {
   id: string;
@@ -60,6 +61,7 @@ export function requirePlatformAdmin(
     }
 
     request.adminUser = { id: session.user.id };
+    setRequestLogUser(request, session.user.id);
     return undefined;
   };
 }

@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { roleAtLeast, type Role } from '../core/types.js';
 import type { Auth } from './auth.js';
+import { setRequestLogUser } from '../server/log-context.js';
 import { getAuthContext } from './fastify.js';
 
 /**
@@ -37,6 +38,7 @@ export function requireRole(required: Role, authOverride?: Auth) {
 
     const params = request.params as { workspaceId?: string } | undefined;
     const workspaceId = params?.workspaceId;
+    setRequestLogUser(request, session.user.id, workspaceId);
     if (!workspaceId) {
       reply.status(403).send({ error: 'Forbidden', message: 'Workspace ID missing' });
       return;

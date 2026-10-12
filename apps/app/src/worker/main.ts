@@ -2,6 +2,7 @@ import http from 'node:http';
 import { Worker, type ConnectionOptions, type Job } from 'bullmq';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
+import { createLogger } from '../core/logger.js';
 import type { ReviewJob } from '../core/types.js';
 import { createQueueConnection } from '../queue/bullmq-queue.js';
 import { createGitHubAppFactory } from './github-app-factory.js';
@@ -106,6 +107,7 @@ export interface WorkerOptions {
   connection?: ConnectionOptions | undefined;
   githubAppFactory?: GitHubAppClientFactory | undefined;
   log?: ((message: string) => void) | undefined;
+  logger?: import('pino').Logger | undefined;
 }
 
 export async function createWorker(options?: WorkerOptions): Promise<WorkerInstance> {
@@ -122,10 +124,13 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
       appSlug: config.github.appSlug,
     });
 
+  const workerLog = options?.logger ?? createLogger({ service: 'worker' });
+
   const deps: ProcessReviewDeps = {
     store: services.store,
     credentials: services.credentials,
     githubAppFactory,
+    logger: workerLog,
     ...(options?.log ? { log: options.log } : {}),
   };
 
@@ -154,8 +159,11 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
       if (failedCount > 0) {
         deps.log?.(`Marked ${failedCount} stale running/queued run(s) as failed (interrupted)`);
       }
+      workerLog.info({ event: 'worker.stale_sweep', failedCount }, `Stale run sweep completed: marked ${failedCount} stale run(s) as failed`);
     } catch (err) {
-      deps.log?.(`Failed to sweep stale runs: ${err instanceof Error ? err.name : 'unknown error'}`);
+      const name = err instanceof Error ? err.name : 'unknown error';
+      deps.log?.(`Failed to sweep stale runs: ${name}`);
+      workerLog.error({ event: 'worker.stale_sweep_failed', errorName: name }, `Failed to sweep stale runs: ${name}`);
     }
   };
 
