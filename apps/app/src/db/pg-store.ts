@@ -1,24 +1,29 @@
-import { randomUUID } from 'node:crypto';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, sql } from 'drizzle-orm';
 import { InstallationAlreadyLinkedError } from '../core/types.js';
+import { deleteWorkspaceInTx, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
   ApiProvider,
   AppStore,
+  FinishReviewRunOptions,
   Installation,
+  ListReviewRunsOptions,
+  ListReviewRunsResult,
+  NewReviewRun,
   ReviewRun,
-  ReviewRunStatus,
   StoredCredential,
   WorkspaceSettings,
 } from '../core/types.js';
 import {
-  installations,
-  providerCredentials,
-  reviewRuns,
-  webhookDeliveries,
-  workspaceSettings,
-} from './schema.js';
+  createPgReviewRun,
+  failPgStaleRuns,
+  finishPgReviewRun,
+  mapReviewRunRow,
+  queryPgReviewRuns,
+  touchPgReviewRun,
+} from './pg-runs.js';
+import { installations, providerCredentials, reviewRuns, webhookDeliveries, workspaceSettings } from './schema.js';
 import type * as schema from './schema.js';
 
 export type AppDb = NodePgDatabase<typeof schema> | PgliteDatabase<typeof schema>;
@@ -89,16 +94,18 @@ export class PgStore implements AppStore {
   async linkInstallation(installationId: number, workspaceId: string): Promise<void> {
     // Atomic: only claim an installation that is unlinked or already ours, so two workspaces
     // linking the same pending installation at once cannot both succeed.
-    const result = await this.db
-      .update(installations)
-      .set({ workspaceId, updatedAt: new Date() })
-      .where(
-        and(
-          eq(installations.id, installationId),
-          sql`(${installations.workspaceId} IS NULL OR ${installations.workspaceId} = ${workspaceId})`,
-        ),
-      )
-      .returning();
+    const result = await withLiveWorkspace(this.db, workspaceId, async (tx) =>
+      await tx
+        .update(installations)
+        .set({ workspaceId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(installations.id, installationId),
+            sql`(${installations.workspaceId} IS NULL OR ${installations.workspaceId} = ${workspaceId})`,
+          ),
+        )
+        .returning(),
+    );
     if (result.length > 0) return;
     const exists = await this.db.select({ id: installations.id }).from(installations).where(eq(installations.id, installationId));
     throw exists.length > 0
@@ -178,52 +185,39 @@ export class PgStore implements AppStore {
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
     const budgetStr =
       settings.monthlyBudgetUsd !== null ? String(settings.monthlyBudgetUsd) : null;
-    await this.db
-      .insert(workspaceSettings)
-      .values({
-        workspaceId: settings.workspaceId,
-        provider: settings.provider,
-        model: settings.model,
-        language: settings.language,
-        monthlyBudgetUsd: budgetStr,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: workspaceSettings.workspaceId,
-        set: {
-          provider: settings.provider,
-          model: settings.model,
-          language: settings.language,
-          monthlyBudgetUsd: budgetStr,
-          updatedAt: new Date(),
-        },
-      });
+    const values = {
+      provider: settings.provider,
+      model: settings.model,
+      language: settings.language,
+      monthlyBudgetUsd: budgetStr,
+      updatedAt: new Date(),
+    };
+    await withLiveWorkspace(this.db, settings.workspaceId, async (tx) => {
+      await tx
+        .insert(workspaceSettings)
+        .values({ workspaceId: settings.workspaceId, ...values })
+        .onConflictDoUpdate({ target: workspaceSettings.workspaceId, set: values });
+    });
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
-    await this.db
-      .insert(providerCredentials)
-      .values({
-        id: credential.id,
-        workspaceId: credential.workspaceId,
-        provider: credential.provider,
-        ciphertext: credential.ciphertext,
-        keyVersion: credential.keyVersion,
-        last4: credential.last4,
-        createdBy: credential.createdBy,
-        createdAt: credential.createdAt,
-      })
-      .onConflictDoUpdate({
-        target: [providerCredentials.workspaceId, providerCredentials.provider],
-        set: {
-          id: credential.id,
-          ciphertext: credential.ciphertext,
-          keyVersion: credential.keyVersion,
-          last4: credential.last4,
-          createdBy: credential.createdBy,
-          createdAt: credential.createdAt,
-        },
-      });
+    const values = {
+      id: credential.id,
+      ciphertext: credential.ciphertext,
+      keyVersion: credential.keyVersion,
+      last4: credential.last4,
+      createdBy: credential.createdBy,
+      createdAt: credential.createdAt,
+    };
+    await withLiveWorkspace(this.db, credential.workspaceId, async (tx) => {
+      await tx
+        .insert(providerCredentials)
+        .values({ workspaceId: credential.workspaceId, provider: credential.provider, ...values })
+        .onConflictDoUpdate({
+          target: [providerCredentials.workspaceId, providerCredentials.provider],
+          set: values,
+        });
+    });
   }
 
   async getCredential(
@@ -292,74 +286,54 @@ export class PgStore implements AppStore {
       );
   }
 
-  async createReviewRun(
-    run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>,
-  ): Promise<ReviewRun> {
-    const id = randomUUID();
-    const createdAt = new Date();
-    await this.db.insert(reviewRuns).values({
-      id,
-      workspaceId: run.workspaceId,
-      installationId: run.installationId,
-      repoFullName: run.repoFullName,
-      pullNumber: run.pullNumber,
-      headSha: run.headSha,
-      status: run.status,
-      costUsd: run.costUsd !== null ? String(run.costUsd) : null,
-      detail: run.detail,
-      createdAt,
-      finishedAt: null,
-    });
-    return {
-      ...run,
-      id,
-      costUsd: run.costUsd !== null ? Number(run.costUsd) : null,
-      createdAt,
-      finishedAt: null,
-    };
+  async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {
+    return createPgReviewRun(this.db, run);
+  }
+
+  async touchReviewRun(workspaceId: string, id: string): Promise<void> {
+    return touchPgReviewRun(this.db, workspaceId, id);
   }
 
   async finishReviewRun(
     workspaceId: string,
     id: string,
-    result: { status: ReviewRunStatus; costUsd: number | null; detail: string | null },
+    result: FinishReviewRunOptions,
   ): Promise<void> {
-    await this.db
-      .update(reviewRuns)
-      .set({
-        status: result.status,
-        costUsd: result.costUsd !== null ? String(result.costUsd) : null,
-        detail: result.detail,
-        finishedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(reviewRuns.id, id),
-          eq(reviewRuns.workspaceId, workspaceId),
-        ),
-      );
+    return finishPgReviewRun(this.db, workspaceId, id, result);
   }
 
-  async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]> {
+  async getReviewRun(workspaceId: string, id: string): Promise<ReviewRun | null> {
     const rows = await this.db
       .select()
       .from(reviewRuns)
+      .where(and(eq(reviewRuns.id, id), eq(reviewRuns.workspaceId, workspaceId)));
+    const row = rows[0];
+    return row ? mapReviewRunRow(row) : null;
+  }
+
+  async listReviewRunRepos(workspaceId: string): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ repo: reviewRuns.repoFullName })
+      .from(reviewRuns)
       .where(eq(reviewRuns.workspaceId, workspaceId))
-      .orderBy(desc(reviewRuns.createdAt))
-      .limit(limit);
-    return rows.map((row) => ({
-      id: row.id,
-      workspaceId: row.workspaceId,
-      installationId: Number(row.installationId),
-      repoFullName: row.repoFullName,
-      pullNumber: Number(row.pullNumber),
-      headSha: row.headSha,
-      status: row.status as ReviewRunStatus,
-      costUsd: row.costUsd !== null ? Number(row.costUsd) : null,
-      detail: row.detail,
-      createdAt: new Date(row.createdAt),
-      finishedAt: row.finishedAt ? new Date(row.finishedAt) : null,
-    }));
+      .orderBy(asc(reviewRuns.repoFullName));
+    return rows.map((r) => r.repo);
+  }
+
+  async failStaleRuns(heartbeatBefore: Date): Promise<number> {
+    return failPgStaleRuns(this.db, heartbeatBefore);
+  }
+
+  async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
+  async listReviewRuns(
+    workspaceId: string,
+    options: ListReviewRunsOptions,
+  ): Promise<ListReviewRunsResult>;
+  async listReviewRuns(
+    workspaceId: string,
+    limitOrOptions?: number | ListReviewRunsOptions,
+  ): Promise<ReviewRun[] | ListReviewRunsResult> {
+    return queryPgReviewRuns(this.db, workspaceId, limitOrOptions);
   }
 
   async monthCostUsd(workspaceId: string, monthStart: Date): Promise<number> {
@@ -376,5 +350,11 @@ export class PgStore implements AppStore {
       );
     const total = rows[0]?.total ?? '0';
     return Number(total);
+  }
+
+  async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
+    // Organization row first, then the workspace data, in one transaction (see deleteWorkspaceInTx).
+    await this.db.transaction((tx) => deleteWorkspaceInTx(tx, workspaceId));
+    return { organizationDeleted: true };
   }
 }

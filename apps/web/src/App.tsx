@@ -1,6 +1,7 @@
+import { lazy, Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
-import { I18nProvider } from './i18n/context.js';
+import { I18nProvider, useI18n } from './i18n/context.js';
 import { ToastProvider } from './components/Toast.js';
 import { Layout } from './components/Layout.js';
 import { LoginPage } from './pages/LoginPage.js';
@@ -13,6 +14,15 @@ import { RunsPage } from './pages/RunsPage.js';
 import { InstallPage } from './pages/InstallPage.js';
 import { PrivacyPage } from './pages/PrivacyPage.js';
 import { TermsPage } from './pages/TermsPage.js';
+
+// Operator-only area: loaded on demand so regular users never download it.
+const AdminPage = lazy(() => import('./admin/AdminPage.js'));
+const RunDetailPage = lazy(() => import('./runs/RunDetailPage.js'));
+
+function PageFallback() {
+  const { t } = useI18n();
+  return <div className="py-12 text-center text-sm text-gray-400">{t('loading')}</div>;
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +51,22 @@ export function App() {
                 <Route path="/w/:workspaceId/settings" element={<SettingsPage />} />
                 <Route path="/w/:workspaceId/team" element={<TeamPage />} />
                 <Route path="/w/:workspaceId/runs" element={<RunsPage />} />
+                <Route
+                  path="/w/:workspaceId/runs/:runId"
+                  element={
+                    <Suspense fallback={<PageFallback />}>
+                      <RunDetailPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/admin"
+                  element={
+                    <Suspense fallback={<PageFallback />}>
+                      <AdminPage />
+                    </Suspense>
+                  }
+                />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

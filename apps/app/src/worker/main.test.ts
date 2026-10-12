@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../core/config.js';
@@ -104,6 +104,36 @@ describe('worker/main', { timeout: 20000 }, () => {
       expect(typeof result.client.getPullRequest).toBe('function');
       expect(mockApp.getInstallationOctokit).toHaveBeenCalledWith(100);
     });
+
+    it('real App installation clients reach GitHub REST endpoints (no app mock)', async () => {
+      const { privateKey } = generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      });
+      const calls: string[] = [];
+      const fetchStub = vi.fn(async (input: string | URL | Request) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        calls.push(url);
+        const body = url.endsWith('/app/installations/100/access_tokens')
+          ? { token: 'ghs_t', expires_at: '2099-01-01T00:00:00Z', permissions: {}, repository_selection: 'all' }
+          : { number: 7, head: { sha: 'abc' }, base: { sha: 'def' } };
+        return new Response(JSON.stringify(body), {
+          status: url.endsWith('/access_tokens') ? 201 : 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+      vi.stubGlobal('fetch', fetchStub);
+      try {
+        const factory = createGitHubAppFactory({ appId: '1', privateKey, appSlug: 'my-bot-app' });
+        const { client } = await factory(100);
+        const pr = await client.getPullRequest({ owner: 'o', repo: 'r', pull_number: 7 });
+        expect(pr.number).toBe(7);
+        expect(calls.some((u) => u.endsWith('/repos/o/r/pulls/7'))).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
   });
 
   describe('Worker health HTTP endpoint', () => {
@@ -204,6 +234,50 @@ describe('worker/main', { timeout: 20000 }, () => {
 
       await signalHandlers['SIGTERM']?.();
       expect(mockWorkerClose).toHaveBeenCalled();
+    });
+
+    it('sweeps runs with a stale heartbeat on worker startup', async () => {
+      const store = new MemoryStore();
+      const failStaleSpy = vi.spyOn(store, 'failStaleRuns');
+
+      const workerInstance = await createWorker({
+        env: {
+          MERGEPILOT_BASE_URL: 'https://test.mergepilot.com',
+          PORT: '3000',
+          DATABASE_URL: 'memory:',
+          REDIS_URL: 'memory:',
+          MERGEPILOT_MASTER_KEY: masterKey,
+          GITHUB_APP_ID: '12345',
+          GITHUB_APP_PRIVATE_KEY: 'pk',
+          GITHUB_WEBHOOK_SECRET: 'wh',
+          GITHUB_CLIENT_ID: 'gh-id',
+          GITHUB_CLIENT_SECRET: 'gh-s',
+          GOOGLE_CLIENT_ID: 'goog-id',
+          GOOGLE_CLIENT_SECRET: 'g-s',
+          BETTER_AUTH_SECRET: 'x'.repeat(32),
+          WORKER_CONCURRENCY: '1',
+          WORKER_HEALTH_PORT: '0',
+        },
+        services: {
+          store,
+          vault: {} as unknown as import('../core/types.js').Vault,
+          credentials: {} as unknown as import('../credentials/service.js').CredentialService,
+          queue: {} as unknown as import('../core/types.js').ReviewQueue,
+          close: vi.fn(),
+        },
+      });
+
+      try {
+        expect(failStaleSpy).toHaveBeenCalled();
+        const calledArg = failStaleSpy.mock.calls[0]?.[0];
+        expect(calledArg).toBeInstanceOf(Date);
+        // Heartbeat cutoff: approximately 15 minutes in the past
+        const diffMs = Date.now() - (calledArg as Date).getTime();
+        expect(diffMs).toBeGreaterThanOrEqual(14 * 60 * 1000);
+        expect(diffMs).toBeLessThanOrEqual(16 * 60 * 1000);
+      } finally {
+        await workerInstance.stop();
+      }
     });
   });
 });

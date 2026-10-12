@@ -201,14 +201,18 @@ describe('processReviewJob', () => {
     expect(runs[0]?.detail).toBe('workspace not configured');
   });
 
-  it('rejects claude-code override in repo config and records skipped', async () => {
+  it('uses the workspace provider, model and language even when the repo config differs', async () => {
     const claudeCodeYaml = `
 provider: claude-code
-language: en
+language: ar
 review:
   maxFindings: 5
+budget:
+  pricing:
+    inputPerMTok: 99
+    outputPerMTok: 99
 `;
-    const { deps, job, store } = createTestSetup({
+    const { deps, job, store, createModelForProvider } = createTestSetup({
       filesAtRef: {
         [`${baseSha}:.mergepilot.yml`]: claudeCodeYaml,
       },
@@ -216,13 +220,24 @@ review:
 
     const result = await processReviewJob(job, deps);
 
-    expect(result.status).toBe('skipped');
-    expect(result.detail).toBe('subscription mode is not available in the SaaS');
-
+    expect(result.status).toBe('completed');
+    expect(createModelForProvider).toHaveBeenCalledTimes(1);
+    const [config] = createModelForProvider.mock.calls[0] as unknown as [
+      {
+        provider: string;
+        model?: string;
+        language: string;
+        review: { maxFindings: number };
+        budget: { pricing?: unknown };
+      },
+    ];
+    expect(config.provider).toBe('anthropic');
+    expect(config.model).toBe('claude-3-5-sonnet');
+    expect(config.language).toBe('en');
+    expect(config.review.maxFindings).toBe(5);
+    expect(config.budget.pricing).toBeUndefined();
     const runs = await store.listReviewRuns(workspaceId, 10);
-    expect(runs).toHaveLength(1);
-    expect(runs[0]?.status).toBe('skipped');
-    expect(runs[0]?.detail).toBe('subscription mode is not available in the SaaS');
+    expect(runs[0]?.status).toBe('completed');
   });
 
   it('publishes summary-only and makes no model call when monthly budget reached', async () => {
@@ -328,5 +343,51 @@ review:
     const runsWs2 = await store.listReviewRuns('ws-other-2', 10);
     expect(runsWs1).toHaveLength(1);
     expect(runsWs2).toHaveLength(0);
+  });
+
+  it('does not publish when the workspace is deleted while the model is running', async () => {
+    const { deps, job, store, createdReviews, fakeModel } = createTestSetup();
+    const generate = fakeModel.generate;
+    fakeModel.generate = vi.fn(async (...args: Parameters<typeof generate>) => {
+      await store.deleteWorkspace(workspaceId);
+      return generate(...args);
+    });
+
+    const result = await processReviewJob(job, deps);
+
+    expect(result).toEqual({ status: 'skipped', detail: 'workspace_deleted' });
+    expect(createdReviews).toHaveLength(0);
+    expect(await store.listReviewRuns(workspaceId, 10)).toEqual([]);
+  });
+
+  it('does not publish when the installation is relinked to another workspace mid-review', async () => {
+    const { deps, job, store, createdReviews, fakeModel } = createTestSetup();
+    const generate = fakeModel.generate;
+    fakeModel.generate = vi.fn(async (...args: Parameters<typeof generate>) => {
+      await store.deleteWorkspace(workspaceId);
+      await store.linkInstallation(installationId, 'ws-new-owner');
+      return generate(...args);
+    });
+
+    const result = await processReviewJob(job, deps);
+
+    expect(result.detail).toBe('workspace_deleted');
+    expect(createdReviews).toHaveLength(0);
+  });
+
+  it('skips without recording a run when the workspace is deleted after settings were read', async () => {
+    const { deps, job, store, createdReviews } = createTestSetup();
+    const getSettings = store.getSettings.bind(store);
+    vi.spyOn(store, 'getSettings').mockImplementation(async (wsId: string) => {
+      const settings = await getSettings(wsId);
+      await store.deleteWorkspace(wsId);
+      return settings;
+    });
+
+    const result = await processReviewJob(job, deps);
+
+    expect(result).toEqual({ status: 'skipped', detail: 'workspace_deleted' });
+    expect(createdReviews).toHaveLength(0);
+    expect(await store.listReviewRuns(workspaceId, 10)).toEqual([]);
   });
 });

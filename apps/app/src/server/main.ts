@@ -1,6 +1,7 @@
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
+import { registerAdminApi } from '../admin/index.js';
 import { registerAuthRoutes } from '../auth/index.js';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
@@ -182,6 +183,13 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
           instance.log.warn({ err }, 'Failed to load dashboard API module; skipping');
         }
       }
+
+      // 4b. Platform Admin API
+      registerAdminApi(instance, {
+        auth: services.auth,
+        db: services.db,
+        config,
+      });
 
       // 5. SPA static files from apps/web/dist
       await registerStatic(instance, { distDir: options?.distDir });

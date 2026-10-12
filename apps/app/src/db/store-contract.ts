@@ -5,6 +5,18 @@ import type {
   StoredCredential,
   WorkspaceSettings,
 } from '../core/types.js';
+import { defineDeleteWorkspaceContract } from './store-contract-delete.js';
+import { defineReviewRunLifecycleContract } from './store-contract-runs.js';
+
+/** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
+export const STORE_CONTRACT_WORKSPACES = [
+  'ws-alpha',
+  'ws-settings-test',
+  'ws-cred-test',
+  'ws-runs-test',
+  'ws-del-target',
+  'ws-del-other',
+] as const;
 
 export function describeStoreContract(
   suiteName: string,
@@ -238,5 +250,71 @@ export function describeStoreContract(
         await cleanup?.();
       }
     });
+
+    it('records review run details and retrieves via getReviewRun', async () => {
+      const store = await createStore();
+      try {
+        const payload = {
+          v: 1 as const,
+          summary: 'Review summary text',
+          highlights: ['Fix memory leak', 'Add test coverage'],
+          findings: [
+            {
+              path: 'src/index.ts',
+              line: 10,
+              severity: 'high' as const,
+              title: 'Memory leak',
+              body: 'Listener is not cleaned up',
+            },
+          ],
+          language: 'en' as const,
+          usage: { inputTokens: 120, outputTokens: 80 },
+        };
+
+        const run = await store.createReviewRun({
+          workspaceId: 'ws-runs-test',
+          installationId: 42,
+          repoFullName: 'org/repo-details',
+          pullNumber: 99,
+          headSha: 'head-sha-123',
+          status: 'running',
+          costUsd: null,
+          detail: null,
+          jobId: 'job-meta-1',
+        });
+
+        await store.finishReviewRun('ws-runs-test', run.id, {
+          status: 'completed',
+          costUsd: 0.12,
+          detail: null,
+          provider: 'anthropic',
+          model: 'claude-3-5-sonnet',
+          effort: 'high',
+          fallbackFrom: 'openai',
+          findingsCount: 1,
+          result: payload,
+          reviewUrl: 'https://github.com/org/repo-details/pull/99#pullrequestreview-456',
+        });
+
+        const fetched = await store.getReviewRun('ws-runs-test', run.id);
+        expect(fetched).not.toBeNull();
+        expect(fetched?.provider).toBe('anthropic');
+        expect(fetched?.model).toBe('claude-3-5-sonnet');
+        expect(fetched?.effort).toBe('high');
+        expect(fetched?.fallbackFrom).toBe('openai');
+        expect(fetched?.findingsCount).toBe(1);
+        expect(fetched?.result).toEqual(payload);
+        expect(fetched?.reviewUrl).toBe('https://github.com/org/repo-details/pull/99#pullrequestreview-456');
+
+        // Isolation: getReviewRun for different workspace returns null
+        const otherWorkspace = await store.getReviewRun('ws-alpha', run.id);
+        expect(otherWorkspace).toBeNull();
+      } finally {
+        await cleanup?.();
+      }
+    });
+
+    defineReviewRunLifecycleContract(createStore, cleanup);
+    defineDeleteWorkspaceContract(createStore, cleanup);
   });
 }

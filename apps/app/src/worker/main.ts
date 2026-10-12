@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { App } from '@octokit/app';
+import { Octokit } from '@octokit/rest';
 import { Worker, type ConnectionOptions, type Job } from 'bullmq';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
@@ -8,6 +9,10 @@ import { createQueueConnection } from '../queue/bullmq-queue.js';
 import { wrapOctokit, type OctokitLike } from './octokit-client.js';
 import { processReviewJob } from './process-review.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
+
+/** A queued/running run with no heartbeat for this long is failed as `interrupted`. */
+export const STALE_RUN_HEARTBEAT_MS = 15 * 60 * 1000;
+const STALE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 export interface ReviewWorkerOptions {
   connection?: ConnectionOptions;
@@ -24,6 +29,8 @@ export function createGitHubAppFactory(
       : new App({
           appId: config.appId,
           privateKey: config.privateKey,
+          // The bare App client has no `.rest` namespace; the review client needs `rest.pulls` etc.
+          Octokit,
         });
 
   return async (installationId: number) => {
@@ -161,7 +168,27 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   const healthPort = healthPortStr ? parseInt(healthPortStr, 10) : 3001;
   const healthServer = await startHealthServer(healthPort);
 
+  const sweepStale = async () => {
+    try {
+      // Stale = no heartbeat (updated_at) for STALE_RUN_HEARTBEAT_MS; a live review touches it every 60 s.
+      const heartbeatBefore = new Date(Date.now() - STALE_RUN_HEARTBEAT_MS);
+      const failedCount = await services.store.failStaleRuns(heartbeatBefore);
+      if (failedCount > 0) {
+        deps.log?.(`Marked ${failedCount} stale running/queued run(s) as failed (interrupted)`);
+      }
+    } catch (err) {
+      deps.log?.(`Failed to sweep stale runs: ${err instanceof Error ? err.name : 'unknown error'}`);
+    }
+  };
+
+  await sweepStale();
+  const sweepTimer = setInterval(() => {
+    void sweepStale();
+  }, STALE_SWEEP_INTERVAL_MS);
+  sweepTimer.unref?.();
+
   const stop = async () => {
+    clearInterval(sweepTimer);
     await Promise.allSettled([
       new Promise<void>((resolve) => healthServer.close(() => resolve())),
       worker.close(),

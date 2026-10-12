@@ -74,6 +74,49 @@ export const GitHubInstallationsResponseSchema = z.object({
   installUrl: z.string().url(),
 });
 
+export const SeverityCountsSchema = z.object({
+  critical: z.number(),
+  high: z.number(),
+  medium: z.number(),
+  low: z.number(),
+  info: z.number(),
+});
+export type SeverityCounts = z.infer<typeof SeverityCountsSchema>;
+
+export const ReviewRunFindingSchema = z.object({
+  path: z.string(),
+  line: z.number().optional(),
+  endLine: z.number().optional(),
+  severity: z.enum(['critical', 'high', 'medium', 'low', 'info']),
+  category: z.string().optional(),
+  title: z.string(),
+  body: z.string(),
+  suggestion: z.string().optional(),
+  truncated: z.boolean().optional(),
+});
+export type ReviewRunFinding = z.infer<typeof ReviewRunFindingSchema>;
+
+export const ReviewRunResultSchema = z.object({
+  v: z.literal(1),
+  summary: z.string(),
+  highlights: z.array(z.string()),
+  findings: z.array(ReviewRunFindingSchema),
+  outOfDiff: z.array(ReviewRunFindingSchema).optional(),
+  language: z.enum(['ar', 'en']),
+  usage: z
+    .object({
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+    })
+    .optional(),
+  verify: z
+    .object({
+      dropped: z.number(),
+    })
+    .optional(),
+});
+export type ReviewRunResult = z.infer<typeof ReviewRunResultSchema>;
+
 export const ReviewRunSchema = z.object({
   id: z.string(),
   repoFullName: z.string(),
@@ -84,9 +127,56 @@ export const ReviewRunSchema = z.object({
   detail: z.string().nullable(),
   createdAt: z.string(),
   finishedAt: z.string().nullable(),
+  provider: z.string().nullable().optional(),
+  model: z.string().nullable().optional(),
+  effort: z.string().nullable().optional(),
+  fallbackFrom: z.string().nullable().optional(),
+  findingsCount: z.number().nullable().optional(),
+  severityCounts: SeverityCountsSchema.nullable().optional(),
+  reviewUrl: z.string().nullable().optional(),
 });
-/** GET (member) /api/workspaces/:workspaceId/runs?limit=50 (max 200) */
-export const RunsResponseSchema = z.object({ runs: z.array(ReviewRunSchema) });
+export type ReviewRun = z.infer<typeof ReviewRunSchema>;
+
+/** GET (member) /api/workspaces/:workspaceId/runs */
+export const RunsResponseSchema = z.object({
+  runs: z.array(ReviewRunSchema),
+  total: z.number().optional(),
+});
+export type RunsResponse = z.infer<typeof RunsResponseSchema>;
+
+/** GET (member) /api/workspaces/:workspaceId/runs/:runId */
+export const RunDetailResponseSchema = z.object({
+  run: ReviewRunSchema.extend({
+    result: ReviewRunResultSchema.nullable().optional(),
+  }),
+});
+export type RunDetailResponse = z.infer<typeof RunDetailResponseSchema>;
+
+/** GET (member) /api/workspaces/:workspaceId/runs/repos */
+export const RunReposResponseSchema = z.object({
+  repos: z.array(z.string()),
+});
+export type RunReposResponse = z.infer<typeof RunReposResponseSchema>;
+
+export function computeSeverityCounts(
+  findings?: Array<{ severity: 'critical' | 'high' | 'medium' | 'low' | 'info' }> | null,
+  outOfDiff?: Array<{ severity: 'critical' | 'high' | 'medium' | 'low' | 'info' }> | null,
+): SeverityCounts {
+  const counts: SeverityCounts = {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    info: 0,
+  };
+  const list = [...(findings ?? []), ...(outOfDiff ?? [])];
+  for (const f of list) {
+    if (f.severity in counts) {
+      counts[f.severity]++;
+    }
+  }
+  return counts;
+}
 
 /** GET (member) /api/workspaces/:workspaceId/usage */
 export const UsageResponseSchema = z.object({
@@ -99,3 +189,21 @@ export const UsageResponseSchema = z.object({
  * GET /app/installed?installation_id=&setup_action= — GitHub's post-install redirect.
  * Redirects to the web UI at `/install?installation_id=…` where the user picks a workspace.
  */
+
+/** PATCH (admin/owner) /api/workspaces/:workspaceId — 1–60 chars after trim */
+export const RenameWorkspaceRequestSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+});
+export type RenameWorkspaceRequest = z.infer<typeof RenameWorkspaceRequestSchema>;
+
+export const RenameWorkspaceResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+export type RenameWorkspaceResponse = z.infer<typeof RenameWorkspaceResponseSchema>;
+
+/** DELETE (owner) /api/workspaces/:workspaceId — confirmName, trimmed like rename, must equal the name */
+export const DeleteWorkspaceRequestSchema = z.object({
+  confirmName: z.string().trim(),
+});
+export type DeleteWorkspaceRequest = z.infer<typeof DeleteWorkspaceRequestSchema>;

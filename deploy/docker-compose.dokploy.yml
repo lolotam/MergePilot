@@ -7,7 +7,7 @@
 
 # The release is pinned here (x-image) so shipping or rolling back is one edit of this file,
 # independent of the secrets kept in Dokploy's Environment tab.
-x-image: &image ghcr.io/lolotam/mergepilot:b4b5f85e9c5bdce283835e149d91f921014ca4b2
+x-image: &image ghcr.io/lolotam/mergepilot:725997e85927ac43f5ff93c49f2b5840f9d556f7
 
 x-app-env: &app-env
   NODE_ENV: production
@@ -26,6 +26,8 @@ x-app-env: &app-env
   GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
   BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+  # Comma-separated emails of the platform operators who may open /admin (set in Dokploy's Environment tab).
+  MERGEPILOT_PLATFORM_ADMINS: ${MERGEPILOT_PLATFORM_ADMINS:-}
 
 services:
   postgres:

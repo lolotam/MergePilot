@@ -65,7 +65,25 @@ describe('API client and fetchApi', () => {
       const apiErr = err as ApiClientError;
       expect(apiErr.code).toBe('FORBIDDEN_ROLE');
       expect(apiErr.status).toBe(403);
+      expect(apiErr.details).toEqual({});
     }
+  });
+
+  it('fetchApi keeps extra error fields as details', async () => {
+    const workspaces = [{ id: 'ws-1', name: 'Acme Corp' }];
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      statusText: 'Conflict',
+      json: async () => ({
+        error: { code: 'sole_owner_of_shared_workspace', message: 'Refused', workspaces },
+      }),
+    } as unknown as Response);
+
+    const err = await fetchApi('/api/admin/users/u-1', { method: 'DELETE' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiClientError);
+    expect((err as ApiClientError).code).toBe('sole_owner_of_shared_workspace');
+    expect((err as ApiClientError).details).toEqual({ workspaces });
   });
 
   it('api helper calls correct paths', async () => {

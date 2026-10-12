@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Auth } from '../auth/auth.js';
+import { isUserPlatformAdmin } from '../admin/guard.js';
 import { requireRole } from '../auth/guard.js';
 import { listUserInstallations, type UserInstallation } from '../auth/github-installations.js';
 import type { AppConfig } from '../core/config.js';
@@ -14,6 +15,8 @@ import {
   getUserWorkspaces,
   fetchUserGitHubInstallations,
 } from './helpers.js';
+import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
+import { registerRunsRoutes } from './runs-routes.js';
 
 export interface DashboardApiDeps {
   auth: Auth;
@@ -41,6 +44,8 @@ export function registerDashboardApi(
     const githubAccount = await getUserGitHubAccount(deps.auth, session.user.id);
     const workspaces = await getUserWorkspaces(deps.auth, session.user.id);
 
+    const isPlatformAdmin = isUserPlatformAdmin(session.user, deps.config.platformAdmins);
+
     return reply.status(200).send({
       user: {
         id: session.user.id,
@@ -50,6 +55,7 @@ export function registerDashboardApi(
         githubLinked: githubAccount.linked,
       },
       workspaces,
+      isPlatformAdmin,
     });
   });
 
@@ -301,38 +307,8 @@ export function registerDashboardApi(
     return reply.status(200).send({ installations, installUrl });
   });
 
-  // 10. GET /api/workspaces/:workspaceId/runs
-  app.get(
-    '/api/workspaces/:workspaceId/runs',
-    { preHandler: [requireRole('member', deps.auth)] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      const query = request.query as { limit?: string };
-
-      let limit = 50;
-      if (query?.limit !== undefined) {
-        const parsed = parseInt(query.limit, 10);
-        if (!Number.isNaN(parsed) && parsed > 0) {
-          limit = Math.min(parsed, 200);
-        }
-      }
-
-      const runs = await deps.store.listReviewRuns(workspaceId, limit);
-      return reply.status(200).send({
-        runs: runs.map((r) => ({
-          id: r.id,
-          repoFullName: r.repoFullName,
-          pullNumber: r.pullNumber,
-          headSha: r.headSha,
-          status: r.status,
-          costUsd: r.costUsd,
-          detail: r.detail,
-          createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString(),
-          finishedAt: r.finishedAt ? (r.finishedAt instanceof Date ? r.finishedAt.toISOString() : new Date(r.finishedAt).toISOString()) : null,
-        })),
-      });
-    },
-  );
+  // 10. Runs routes (GET runs, GET runs/repos, GET runs/:runId)
+  registerRunsRoutes(app, deps);
 
   // 11. GET /api/workspaces/:workspaceId/usage
   app.get(
@@ -364,4 +340,6 @@ export function registerDashboardApi(
 
     return reply.redirect(`/install?installation_id=${installationId}`, 302);
   });
+
+  registerWorkspaceLifecycleRoutes(app, deps);
 }

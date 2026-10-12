@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Settings } from '@mergepilot/app/contract';
-import { api, type ApiProvider } from './client.js';
+import type { MeResponse, Settings } from '@mergepilot/app/contract';
+import { api, type ApiProvider, type GetRunsParams } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -114,10 +114,26 @@ export function useGitHubInstallationsQuery(enabled = true) {
   });
 }
 
-export function useRunsQuery(workspaceId: string, limit = 50) {
+export function useRunsQuery(workspaceId: string, params?: GetRunsParams | number) {
   return useQuery({
-    queryKey: ['workspaces', workspaceId, 'runs', limit],
-    queryFn: () => api.getRuns(workspaceId, limit),
+    queryKey: ['workspaces', workspaceId, 'runs', params],
+    queryFn: () => api.getRuns(workspaceId, params),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useRunDetailQuery(workspaceId: string, runId: string) {
+  return useQuery({
+    queryKey: ['workspaces', workspaceId, 'runs', runId, 'detail'],
+    queryFn: () => api.getRun(workspaceId, runId),
+    enabled: Boolean(workspaceId && runId),
+  });
+}
+
+export function useRunReposQuery(workspaceId: string) {
+  return useQuery({
+    queryKey: ['workspaces', workspaceId, 'runs', 'repos'],
+    queryFn: () => api.getRunRepos(workspaceId),
     enabled: Boolean(workspaceId),
   });
 }
@@ -127,5 +143,45 @@ export function useUsageQuery(workspaceId: string) {
     queryKey: ['workspaces', workspaceId, 'usage'],
     queryFn: () => api.getUsage(workspaceId),
     enabled: Boolean(workspaceId),
+  });
+}
+
+export function useRenameWorkspaceMutation(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+
+  return useMutation({
+    mutationFn: (name: string) => api.renameWorkspace(workspaceId, name),
+    onSuccess: () => {
+      showToast(t('workspaceRenamedSuccess'), 'success');
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+    onError: (err: Error) => {
+      showToast(err.message || t('error'), 'error');
+    },
+  });
+}
+
+export function useDeleteWorkspaceMutation(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+
+  return useMutation({
+    mutationFn: (confirmName: string) => api.deleteWorkspace(workspaceId, confirmName),
+    onSuccess: async () => {
+      // Drop the deleted workspace from the cache before the caller navigates to `/`, so the root
+      // redirect cannot send the user back to it while /api/me is refetched.
+      queryClient.setQueryData<MeResponse>(['me'], (prev) =>
+        prev ? { ...prev, workspaces: prev.workspaces.filter((w) => w.id !== workspaceId) } : prev,
+      );
+      queryClient.removeQueries({ queryKey: ['workspaces', workspaceId] });
+      showToast(t('workspaceDeletedSuccess'), 'success');
+      await queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+    onError: (err: Error) => {
+      showToast(err.message || t('error'), 'error');
+    },
   });
 }

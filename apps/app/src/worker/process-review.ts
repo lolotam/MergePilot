@@ -15,11 +15,23 @@ import {
   loadRepoConfig,
   publishReview,
   renderReviewSummary,
-  reviewPullRequest,
   type FileContent,
 } from '@mergepilot/github';
-import type { ApiProvider, ReviewJob, ReviewRun, ReviewRunStatus } from '../core/types.js';
+import {
+  WorkspaceDeletedError,
+  type ApiProvider,
+  type ReviewJob,
+  type ReviewRun,
+  type ReviewRunResultPayload,
+  type ReviewRunStatus,
+} from '../core/types.js';
+import { executeReview } from './execute-review.js';
+import { prepareRunResult } from './prepare-run-result.js';
+import { startRunHeartbeat } from './run-heartbeat.js';
+import { guardWritesForWorkspace } from './workspace-guard.js';
 import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
+
+const WORKSPACE_DELETED = 'workspace_deleted';
 
 class WorkspaceCredentialStore implements CredentialStore {
   constructor(
@@ -65,16 +77,24 @@ export async function processReviewJob(
 
   const settings = await deps.store.getSettings(workspaceId);
   if (!settings) {
-    const run = await deps.store.createReviewRun({
-      workspaceId,
-      installationId: job.installationId,
-      repoFullName: job.repoFullName,
-      pullNumber: job.pullNumber,
-      headSha: job.headSha,
-      status: 'running',
-      costUsd: null,
-      detail: null,
-    });
+    let run: ReviewRun;
+    try {
+      run = await deps.store.createReviewRun({
+        workspaceId,
+        jobId: job.deliveryId,
+        installationId: job.installationId,
+        repoFullName: job.repoFullName,
+        pullNumber: job.pullNumber,
+        headSha: job.headSha,
+        status: 'running',
+        costUsd: null,
+        detail: null,
+      });
+    } catch (error) {
+      if (!(error instanceof WorkspaceDeletedError)) throw error;
+      deps.log?.(`Skipping job ${job.deliveryId}: workspace ${workspaceId} was deleted`);
+      return { status: 'skipped', detail: WORKSPACE_DELETED };
+    }
     await deps.store.finishReviewRun(workspaceId, run.id, {
       status: 'skipped',
       costUsd: null,
@@ -86,10 +106,12 @@ export async function processReviewJob(
 
   let run: ReviewRun | undefined;
   let secret: Secret | undefined;
+  let stopHeartbeat: (() => void) | undefined;
 
   try {
     run = await deps.store.createReviewRun({
       workspaceId,
+      jobId: job.deliveryId,
       installationId: job.installationId,
       repoFullName: job.repoFullName,
       pullNumber: job.pullNumber,
@@ -97,6 +119,12 @@ export async function processReviewJob(
       status: 'running',
       costUsd: null,
       detail: null,
+      provider: settings.provider,
+      model: settings.model,
+    });
+    stopHeartbeat = startRunHeartbeat(deps.store, workspaceId, run.id, {
+      intervalMs: deps.heartbeatIntervalMs,
+      log: deps.log,
     });
 
     const [owner, repo] = job.repoFullName.split('/');
@@ -104,7 +132,8 @@ export async function processReviewJob(
       throw new Error(`Invalid repoFullName: ${job.repoFullName}`);
     }
 
-    const { client, publisherLogin } = await deps.githubAppFactory(job.installationId);
+    const { client: rawClient, publisherLogin } = await deps.githubAppFactory(job.installationId);
+    const client = guardWritesForWorkspace(rawClient, deps.store, job.installationId, workspaceId);
 
     const pr = await client.getPullRequest({ owner, repo, pull_number: job.pullNumber });
     const prRecord = pr as unknown as { title?: string; body?: string | null };
@@ -137,16 +166,20 @@ export async function processReviewJob(
     } else if ('errors' in repoConfigResult) {
       throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
     } else {
-      if (repoConfigResult.config.provider === 'claude-code') {
-        await deps.store.finishReviewRun(workspaceId, run.id, {
-          status: 'skipped',
-          costUsd: null,
-          detail: 'subscription mode is not available in the SaaS',
-        });
-        deps.log?.('Skipping job: subscription mode is not available in the SaaS');
-        return { status: 'skipped', detail: 'subscription mode is not available in the SaaS' };
-      }
-      effectiveConfig = repoConfigResult.config;
+      // In the SaaS the workspace's dashboard settings choose the provider, model and review
+      // language (the repo file may target the GitHub Action, e.g. `provider: claude-code`); the
+      // repo still supplies its review rules and other settings.
+      const repoConfig = repoConfigResult.config;
+      const sameModel =
+        repoConfig.provider === settings.provider && repoConfig.model === settings.model;
+      effectiveConfig = {
+        ...repoConfig,
+        provider: settings.provider,
+        model: settings.model,
+        language: settings.language,
+        // Prices in the repo file describe the repo's own model; keep them only when it matches.
+        budget: sameModel ? repoConfig.budget : { ...repoConfig.budget, pricing: undefined },
+      };
       rulesFiles = repoConfigResult.rulesFiles;
       configHash = createHash('sha256')
         .update(repoConfigResult.configText)
@@ -173,7 +206,7 @@ export async function processReviewJob(
           reason: 'monthly budget reached',
         });
 
-        await publishReview(client, {
+        const publishResult = await publishReview(client, {
           owner,
           repo,
           pull_number: job.pullNumber,
@@ -186,10 +219,22 @@ export async function processReviewJob(
           publisherLogin,
         });
 
+        const budgetReviewUrl =
+          'reviewId' in publishResult && typeof publishResult.reviewId === 'number'
+            ? `https://github.com/${owner}/${repo}/pull/${job.pullNumber}#pullrequestreview-${publishResult.reviewId}`
+            : null;
+
         await deps.store.finishReviewRun(workspaceId, run.id, {
           status: 'skipped',
           costUsd: null,
           detail: 'monthly budget reached',
+          provider: effectiveConfig.provider,
+          model: effectiveConfig.model,
+          effort: ((effectiveConfig.review as Record<string, unknown>)?.effort as string) ?? null,
+          fallbackFrom: ((effectiveConfig as Record<string, unknown>)?.fallbackFrom as string) ?? null,
+          findingsCount: 0,
+          result: null,
+          reviewUrl: budgetReviewUrl,
         });
         deps.log?.(`Monthly budget reached for workspace ${workspaceId}; skipping`);
         return { status: 'skipped', detail: 'monthly budget reached' };
@@ -215,7 +260,7 @@ export async function processReviewJob(
       );
     }
 
-    const reviewResult = await reviewPullRequest({
+    const reviewResult = await executeReview({
       client,
       owner,
       repo,
@@ -243,10 +288,36 @@ export async function processReviewJob(
     const costUsd = reviewResult.costUsd ?? null;
     const detail = reviewResult.detail ?? null;
 
+    let payload: ReviewRunResultPayload | null = null;
+    let findingsCount: number | null = null;
+
+    if (reviewResult.runResult && reviewResult.runResult.status === 'completed') {
+      const rr = reviewResult.runResult;
+      payload = prepareRunResult({
+        summary: rr.summary,
+        inlineFindings: rr.inline,
+        summaryOnlyFindings: rr.summaryOnly,
+        language: effectiveConfig.language,
+        usage: rr.usage,
+        verification: rr.verification,
+        knownSecrets: [secret],
+      });
+      findingsCount = rr.inline.length + rr.summaryOnly.length;
+    } else if (status === 'skipped') {
+      findingsCount = 0;
+    }
+
     await deps.store.finishReviewRun(workspaceId, run.id, {
       status,
       costUsd,
       detail,
+      provider: effectiveConfig.provider,
+      model: effectiveConfig.model,
+      effort: ((effectiveConfig.review as Record<string, unknown>)?.effort as string) ?? null,
+      fallbackFrom: ((effectiveConfig as Record<string, unknown>)?.fallbackFrom as string) ?? null,
+      findingsCount,
+      result: payload,
+      reviewUrl: reviewResult.reviewUrl ?? null,
     });
 
     return {
@@ -255,6 +326,18 @@ export async function processReviewJob(
       detail,
     };
   } catch (error) {
+    if (error instanceof WorkspaceDeletedError) {
+      deps.log?.(`Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`);
+      if (run) {
+        // No-op when the run was deleted with the workspace; kept for an unlink without deletion.
+        await deps.store.finishReviewRun(workspaceId, run.id, {
+          status: 'skipped',
+          costUsd: null,
+          detail: WORKSPACE_DELETED,
+        });
+      }
+      return { status: 'skipped', detail: WORKSPACE_DELETED };
+    }
     const rawMessage = error instanceof Error ? error.message : String(error);
     // Always redact: errors before the key is loaded can still carry GitHub installation tokens.
     const redactedDetail = redactSecrets(rawMessage, secret ? [secret] : []).text.slice(0, 500);
@@ -266,6 +349,8 @@ export async function processReviewJob(
         status: 'failed',
         costUsd: null,
         detail: redactedDetail,
+        provider: settings?.provider ?? null,
+        model: settings?.model ?? null,
       });
     }
 
@@ -273,5 +358,7 @@ export async function processReviewJob(
       status: 'failed',
       detail: redactedDetail,
     };
+  } finally {
+    stopHeartbeat?.();
   }
 }
