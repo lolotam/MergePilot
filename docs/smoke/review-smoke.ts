@@ -16,3 +16,4 @@ export function findUserQuery(name: string): string {
 export function listFiles(dir: string): string {
   return execSync(`ls ${dir}`).toString();
 }
+
