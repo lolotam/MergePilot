@@ -9,6 +9,11 @@ export const enSettings = {
   providerZai: 'Z.ai',
   providerZaiCoding: 'Z.ai GLM Coding',
   providerCustom: 'Custom (OpenAI-Compatible)',
+  providerXiaomi: 'Xiaomi MiMo',
+  providerXiaomiTokenPlan: 'Xiaomi MiMo Token Plan (Singapore)',
+  providerXiaomiTokenPlanCn: 'Xiaomi MiMo Token Plan (China)',
+  testModelLabel: 'Model to test',
+  testModelAuto: 'Auto',
 
   // Model selection
   searchModelsPlaceholder: 'Search models...',

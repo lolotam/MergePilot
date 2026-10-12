@@ -9,6 +9,11 @@ export const arSettings = {
   providerZai: 'Z.ai',
   providerZaiCoding: 'Z.ai GLM Coding',
   providerCustom: 'مخصص (OpenAI-Compatible)',
+  providerXiaomi: 'شاومي MiMo',
+  providerXiaomiTokenPlan: 'شاومي MiMo Token Plan (سنغافورة)',
+  providerXiaomiTokenPlanCn: 'شاومي MiMo Token Plan (الصين)',
+  testModelLabel: 'نموذج الاختبار',
+  testModelAuto: 'تلقائي',
 
   // Model selection
   searchModelsPlaceholder: 'ابحث عن نموذج...',

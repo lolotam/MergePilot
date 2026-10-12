@@ -141,6 +141,33 @@ const ENTRIES: Record<ApiProviderId, EntryInit> = {
     envName: 'CUSTOM_LLM_API_KEY',
     requiresBaseUrl: true,
   },
+  xiaomi: {
+    label: 'Xiaomi MiMo',
+    kind: 'openai-compatible',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    keyHint: 'sk-',
+    thinkingStyle: 'none',
+    defaultModel: 'mimo-v2.5',
+    envName: 'XIAOMI_API_KEY',
+  },
+  'xiaomi-token-plan': {
+    label: 'Xiaomi MiMo Token Plan (Singapore)',
+    kind: 'openai-compatible',
+    baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1',
+    keyHint: 'tp-',
+    thinkingStyle: 'none',
+    defaultModel: 'mimo-v2.5',
+    envName: 'XIAOMI_TOKEN_PLAN_API_KEY',
+  },
+  'xiaomi-token-plan-cn': {
+    label: 'Xiaomi MiMo Token Plan (China)',
+    kind: 'openai-compatible',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+    keyHint: 'tp-',
+    thinkingStyle: 'none',
+    defaultModel: 'mimo-v2.5',
+    envName: 'XIAOMI_TOKEN_PLAN_API_KEY',
+  },
 };
 
 export const PROVIDER_REGISTRY: Readonly<Record<ApiProviderId, Readonly<ProviderEntry>>> = Object.freeze(

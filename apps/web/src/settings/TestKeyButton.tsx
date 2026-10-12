@@ -3,6 +3,7 @@ import { CheckCircle2, Plug, XCircle } from 'lucide-react';
 import { api, ApiClientError, type ApiProvider, type TestConnectionResponse } from '../api/client.js';
 import type { I18nKey } from '../i18n/ar.js';
 import { useI18n } from '../i18n/context.js';
+import { useModelsQuery } from './providers.js';
 
 const REASONS: Record<string, I18nKey> = {
   auth: 'testReasonAuth',
@@ -48,10 +49,22 @@ export function TestKeyButton({ workspaceId, provider, disabled = false }: TestK
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<TestConnectionResponse | null>(null);
 
+  // "Auto" ('') lets the server pick (configured model, a free model, then the default); the
+  // models list is only fetched once the picker is opened, so the keys page stays cheap.
+  const [wantModels, setWantModels] = useState(false);
+  const modelsQuery = useModelsQuery(workspaceId, provider, wantModels);
+  const models = modelsQuery.data?.models ?? [];
+  const [selectedModel, setSelectedModel] = useState('');
+
   const handleTest = async () => {
     setIsLoading(true);
     setResult(null);
-    setResult(await runConnectionTest(() => api.testConnection(workspaceId, provider)));
+    const options = selectedModel ? { model: selectedModel } : undefined;
+    setResult(
+      await runConnectionTest(() =>
+        options ? api.testConnection(workspaceId, provider, options) : api.testConnection(workspaceId, provider),
+      ),
+    );
     setIsLoading(false);
   };
 
@@ -60,6 +73,25 @@ export function TestKeyButton({ workspaceId, provider, disabled = false }: TestK
 
   return (
     <div className="inline-flex items-center gap-1.5">
+      <select
+        aria-label={`${t('testModelLabel')} (${provider})`}
+        value={selectedModel}
+        disabled={disabled || isLoading}
+        onFocus={() => setWantModels(true)}
+        onMouseDown={() => setWantModels(true)}
+        onChange={(e) => {
+          setSelectedModel(e.target.value);
+          setResult(null);
+        }}
+        className="px-2 py-1 text-[11px] rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 max-w-[130px] truncate focus:ring-1 focus:ring-brand-500 focus:outline-hidden disabled:opacity-50"
+      >
+        <option value="">{t('testModelAuto')}</option>
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name || m.id}
+          </option>
+        ))}
+      </select>
       <button
         type="button"
         disabled={disabled || isLoading}
@@ -78,7 +110,11 @@ export function TestKeyButton({ workspaceId, provider, disabled = false }: TestK
         {result &&
           (result.ok ? (
             <span
-              title={t('testKeySuccess', { ms: String(result.ms ?? 0) })}
+              title={
+                result.model
+                  ? `${t('testKeySuccess', { ms: String(result.ms ?? 0) })} (${result.model})`
+                  : t('testKeySuccess', { ms: String(result.ms ?? 0) })
+              }
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
             >
               <CheckCircle2 className="w-3 h-3" aria-hidden="true" />

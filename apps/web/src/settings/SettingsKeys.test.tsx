@@ -46,6 +46,30 @@ describe('key test icon and "test before saving" (J2)', () => {
     expect(await screen.findByText(/تم تجاوز معدل الطلبات/)).toBeDefined();
   });
 
+  it('TestKeyButton: model picker defaults to Auto, loads models on open, sends chosen model and tooltip names the model tested', async () => {
+    vi.mocked(api.getModels).mockResolvedValueOnce({
+      models: [
+        { id: 'mimo-v2-flash', name: 'MiMo v2 Flash', efforts: [] },
+        { id: 'mimo-v2-pro', name: 'MiMo v2 Pro', efforts: [] },
+      ],
+    });
+    vi.mocked(api.testConnection).mockResolvedValueOnce({ ok: true, ms: 88, model: 'mimo-v2-pro' });
+    renderSettings(<TestKeyButton workspaceId="ws-1" provider="xiaomi" />, 'en');
+
+    const picker = screen.getByRole('combobox', { name: /model/i });
+    expect(api.getModels).not.toHaveBeenCalled();
+    picker.focus();
+    await screen.findByRole('option', { name: 'MiMo v2 Pro' });
+    await user.selectOptions(picker, 'mimo-v2-pro');
+
+    const button = screen.getByRole('button', { name: /Test connection/ });
+    await user.click(button);
+
+    expect(api.testConnection).toHaveBeenCalledWith('ws-1', 'xiaomi', { model: 'mimo-v2-pro' });
+    expect(await screen.findByText('88ms')).toBeDefined();
+    expect(screen.getByTitle(/mimo-v2-pro/)).toBeDefined();
+  });
+
   it('AddKeyModal tests a preset key before saving, sending no base URL', async () => {
     vi.mocked(api.testConnection).mockResolvedValueOnce({ ok: true, ms: 40, model: 'glm-5' });
     renderSettings(<AddKeyModal isOpen onClose={vi.fn()} onSubmit={vi.fn()} isPending={false} workspaceId="ws-1" />, 'en');

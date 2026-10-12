@@ -16,6 +16,9 @@ export const API_PROVIDER_IDS = [
   'zai',
   'zai-coding',
   'custom',
+  'xiaomi',
+  'xiaomi-token-plan',
+  'xiaomi-token-plan-cn',
 ] as const;
 
 export type ApiProviderId = (typeof API_PROVIDER_IDS)[number];

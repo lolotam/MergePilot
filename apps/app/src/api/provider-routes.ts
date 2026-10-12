@@ -98,15 +98,52 @@ function routeSignal(reply: FastifyReply): AbortSignal {
 }
 
 /**
- * The model a connection test uses when the request names none: the workspace's primary model,
- * then its heavy model, then its first fallback for this provider, then the registry default
- * (`custom` has none, so a custom key used only as heavy/fallback still tests its own model).
+ * Picks a free model for providers known to have free tiers (OpenRouter, OpenCode Zen).
  */
-export function testModelFor(settings: WorkspaceSettings | null, provider: ApiProviderId): string {
+export function pickFreeModel(
+  provider: ApiProviderId,
+  models: readonly (CatalogModel | { id: string })[],
+): string | undefined {
+  if (provider === 'openrouter') {
+    return models.find((m) => m.id.endsWith(':free'))?.id;
+  }
+  if (provider === 'opencode-zen') {
+    return models.find((m) => m.id.includes('free'))?.id;
+  }
+  return undefined;
+}
+
+/**
+ * The model explicitly configured in workspace settings for this provider (primary, heavy, or fallback).
+ */
+export function configuredModelFor(settings: WorkspaceSettings | null, provider: ApiProviderId): string | undefined {
   if (settings?.provider === provider && settings.model) return settings.model;
   if (settings?.heavyProvider === provider && settings.heavyModel) return settings.heavyModel;
   const fallback = settings?.fallback?.find((f) => f.provider === provider && f.model);
-  return fallback?.model ?? providerEntry(provider).defaultModel;
+  return fallback?.model;
+}
+
+/**
+ * The model a connection test uses when the request names none: the workspace's primary model,
+ * then its heavy model, then its first fallback for this provider, then a free model from the
+ * provider's models list (OpenRouter / OpenCode Zen), then the registry default
+ * (`custom` has none, so a custom key used only as heavy/fallback still tests its own model).
+ */
+export function testModelFor(
+  settings: WorkspaceSettings | null,
+  provider: ApiProviderId,
+  models?: readonly CatalogModel[],
+): string {
+  const configured = configuredModelFor(settings, provider);
+  if (configured) return configured;
+  const fallback = providerEntry(provider).defaultModel;
+  if (models && models.length > 0) {
+    const free = pickFreeModel(provider, models);
+    if (free) return free;
+    // A registry default the provider no longer lists (retired model) would fail a valid key.
+    if (!models.some((m) => m.id === fallback)) return models[0]?.id ?? fallback;
+  }
+  return fallback;
 }
 
 function sendTargetError(reply: FastifyReply, result: Exclude<TargetResult, { ok: true }>): FastifyReply {
@@ -250,12 +287,34 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         ? await unsavedTarget(deps, provider, apiKey, body.baseUrl, signal)
         : await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
+      const { target } = result;
 
       const settings = await deps.store.getSettings(workspaceId);
-      const model = body.model?.trim() || testModelFor(settings, provider);
+      let model = body.model?.trim() || configuredModelFor(settings, provider);
+      if (!model) {
+        // The workspace cache belongs to the stored key: an unsaved key never reads or fills it.
+        const cacheKey = apiKey ? undefined : `${workspaceId}:${provider}`;
+        let models: CatalogModel[] | undefined;
+        const cached = cacheKey ? modelsCache.get(cacheKey) : undefined;
+        if (cached && Date.now() < cached.expiresAt) {
+          models = cached.models;
+        } else {
+          try {
+            models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
+            if (cacheKey) cacheModels(cacheKey, models);
+          } catch (error: unknown) {
+            if (signal.aborted) throw error;
+            // Not fatal: the test still runs on the registry default, and the reply names that model.
+            request.log.warn(
+              { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
+              'Could not list models to pick a test model; using the registry default',
+            );
+          }
+        }
+        model = testModelFor(settings, provider, models);
+      }
       if (!model) return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
       const effort = body.effort?.trim();
-      const { target } = result;
 
       const start = Date.now();
       try {

@@ -16,6 +16,9 @@ export const SAAS_PROVIDERS: readonly ApiProvider[] = [
   'opencode-go',
   'zai',
   'zai-coding',
+  'xiaomi',
+  'xiaomi-token-plan',
+  'xiaomi-token-plan-cn',
   'custom',
 ];
 
@@ -31,7 +34,23 @@ const LABEL_KEYS: Record<ApiProvider, I18nKey> = {
   'opencode-go': 'providerOpencodeGo',
   zai: 'providerZai',
   'zai-coding': 'providerZaiCoding',
+  xiaomi: 'providerXiaomi',
+  'xiaomi-token-plan': 'providerXiaomiTokenPlan',
+  'xiaomi-token-plan-cn': 'providerXiaomiTokenPlanCn',
   custom: 'providerCustom',
+};
+
+export const PROVIDER_KEY_HINTS: Partial<Record<ApiProvider, string>> = {
+  anthropic: 'sk-ant-',
+  openai: 'sk-',
+  gemini: 'AIza',
+  xai: 'xai-',
+  deepseek: 'sk-',
+  nvidia: 'nvapi-',
+  openrouter: 'sk-or-',
+  xiaomi: 'sk-',
+  'xiaomi-token-plan': 'tp-',
+  'xiaomi-token-plan-cn': 'tp-',
 };
 
 export function useProviderLabel(): (provider: ApiProvider) => string {
@@ -43,11 +62,11 @@ export const modelsQueryKey = (workspaceId: string, provider: ApiProvider) =>
   ['workspaces', workspaceId, 'providers', provider, 'models'] as const;
 
 /** The provider's model list with the workspace's stored key (shared by every model select). */
-export function useModelsQuery(workspaceId: string, provider: ApiProvider) {
+export function useModelsQuery(workspaceId: string, provider: ApiProvider, enabled = true) {
   return useQuery<{ models: CatalogModel[] }>({
     queryKey: modelsQueryKey(workspaceId, provider),
     queryFn: () => api.getModels(workspaceId, provider),
-    enabled: Boolean(workspaceId),
+    enabled: enabled && Boolean(workspaceId),
     staleTime: 5 * 60 * 1000,
     retry: false,
   });

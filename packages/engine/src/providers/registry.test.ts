@@ -20,6 +20,9 @@ describe('provider registry', () => {
         'zai',
         'zai-coding',
         'custom',
+        'xiaomi',
+        'xiaomi-token-plan',
+        'xiaomi-token-plan-cn',
       ].sort(),
     );
     expect(Object.keys(PROVIDER_REGISTRY).sort()).toEqual([...API_PROVIDER_IDS].sort());
@@ -27,6 +30,8 @@ describe('provider registry', () => {
     expect(PROVIDER_IDS).toContain('claude-code');
     expect(isApiProviderId('claude-code')).toBe(false);
     expect(isApiProviderId('xai')).toBe(true);
+    expect(isApiProviderId('xiaomi')).toBe(true);
+    expect(isApiProviderId('xiaomi-token-plan')).toBe(true);
   });
 
   it('gives every entry its id, label, kind, base URL, thinking style and env name', () => {
@@ -49,6 +54,10 @@ describe('provider registry', () => {
     expect(providerEntry('deepseek').thinkingStyle).toBe('none');
     expect(providerEntry('anthropic').keyHint).toBe('sk-ant-');
     expect(providerEntry('openrouter').keyHint).toBe('sk-or-');
+    expect(providerEntry('xiaomi').keyHint).toBe('sk-');
+    expect(providerEntry('xiaomi-token-plan').keyHint).toBe('tp-');
+    expect(providerEntry('xiaomi').label).toBe('Xiaomi MiMo');
+    expect(providerEntry('xiaomi-token-plan').label).toBe('Xiaomi MiMo Token Plan (Singapore)');
   });
 
   it('requires a base URL only for custom and never overrides a preset', () => {
@@ -58,6 +67,12 @@ describe('provider registry', () => {
     expect(resolveBaseUrl('xai')).toBe('https://api.x.ai/v1');
     // A preset never takes an override: a key must not be sent to another URL.
     expect(resolveBaseUrl('xai', 'https://proxy.example/v1')).toBe('https://api.x.ai/v1');
+    expect(resolveBaseUrl('xiaomi')).toBe('https://api.xiaomimimo.com/v1');
+    expect(resolveBaseUrl('xiaomi', 'https://proxy.example/v1')).toBe('https://api.xiaomimimo.com/v1');
+    expect(resolveBaseUrl('xiaomi-token-plan')).toBe('https://token-plan-sgp.xiaomimimo.com/v1');
+    expect(resolveBaseUrl('xiaomi-token-plan', 'https://proxy.example/v1')).toBe('https://token-plan-sgp.xiaomimimo.com/v1');
+    expect(resolveBaseUrl('xiaomi-token-plan-cn')).toBe('https://token-plan-cn.xiaomimimo.com/v1');
+    expect(resolveBaseUrl('xiaomi-token-plan-cn', 'https://proxy.example/v1')).toBe('https://token-plan-cn.xiaomimimo.com/v1');
   });
 
   it('drops OpenCode model families that are not served on /chat/completions', () => {
@@ -71,6 +86,9 @@ describe('provider registry', () => {
     expect(credentialEnvName('xai')).toBe('XAI_API_KEY');
     expect(credentialEnvName('opencode-zen')).toBe(credentialEnvName('opencode-go'));
     expect(credentialEnvName('claude-code')).toBe('CLAUDE_CODE_OAUTH_TOKEN');
+    expect(credentialEnvName('xiaomi')).toBe('XIAOMI_API_KEY');
+    expect(credentialEnvName('xiaomi-token-plan')).toBe('XIAOMI_TOKEN_PLAN_API_KEY');
+    expect(credentialEnvName('xiaomi-token-plan-cn')).toBe('XIAOMI_TOKEN_PLAN_API_KEY');
     const store = new EnvCredentialStore({ DEEPSEEK_API_KEY: 'k1' });
     expect(await store.info({ provider: 'deepseek' })).toEqual({
       provider: 'deepseek',
