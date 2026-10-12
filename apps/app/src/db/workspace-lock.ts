@@ -1,10 +1,24 @@
 import { eq } from 'drizzle-orm';
+import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { organization } from '../auth/schema.js';
 import { WorkspaceDeletedError } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
-import { installations, providerCredentials, reviewRuns, workspaceSettings } from './schema.js';
+import {
+  installations,
+  providerCredentials,
+  reviewRuns,
+  workspaceSettings,
+  workspaceUsageMonthly,
+} from './schema.js';
+import type * as schema from './schema.js';
 
 export type AppTx = Parameters<Parameters<AppDb['transaction']>[0]>[0];
+
+/**
+ * The driver-neutral base of AppDb and AppTx. Some builder overloads (e.g. `returning({...})`)
+ * do not resolve on the node-postgres | PGlite union; widening to the shared base type does.
+ */
+export type PgBase = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 /**
  * Runs a workspace-scoped write in a transaction that first takes a share lock on the workspace's
@@ -32,7 +46,8 @@ export async function withLiveWorkspace<T>(
  * Deletes a workspace inside the caller's transaction. The organization row goes first (members
  * and invitations cascade), so writes holding its share lock (withLiveWorkspace) finish before this
  * proceeds and later ones see it gone and throw WorkspaceDeletedError. Then the workspace-scoped
- * rows (no foreign key to the organization) are removed and its installations unlinked.
+ * rows (no foreign key to the organization), including the monthly usage, are removed and its
+ * installations unlinked.
  * Returns whether the organization row existed.
  */
 export async function deleteWorkspaceInTx(tx: AppTx, workspaceId: string): Promise<boolean> {
@@ -44,6 +59,8 @@ export async function deleteWorkspaceInTx(tx: AppTx, workspaceId: string): Promi
   await tx.delete(providerCredentials).where(eq(providerCredentials.workspaceId, workspaceId));
   await tx.delete(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
   await tx.delete(reviewRuns).where(eq(reviewRuns.workspaceId, workspaceId));
+  // After the runs: a run finishing concurrently commits its usage row before this delete runs.
+  await tx.delete(workspaceUsageMonthly).where(eq(workspaceUsageMonthly.workspaceId, workspaceId));
   await tx
     .update(installations)
     .set({ workspaceId: null, updatedAt: new Date() })

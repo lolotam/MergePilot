@@ -1,9 +1,11 @@
 import { arSettings } from './settings-ar.js';
 import { arAdmin } from './admin-ar.js';
+import { arRuns } from './runs-ar.js';
 
 export const ar = {
   ...arSettings,
   ...arAdmin,
+  ...arRuns,
   // App
   appName: 'MergePilot',
   appTagline: 'محرك مراجعة طلبات السحب المدعوم بالذكاء الاصطناعي',

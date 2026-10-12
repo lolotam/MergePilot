@@ -17,6 +17,8 @@ import { AddKeyModal } from '../components/AddKeyModal.js';
 import { WorkspaceGeneralCard } from '../components/WorkspaceGeneralCard.js';
 import { WorkspaceDangerZone } from '../components/WorkspaceDangerZone.js';
 import { ReviewSettingsCard } from '../settings/ReviewSettingsCard.js';
+import { RepoColorsCard } from '../settings/RepoColorsCard.js';
+import { RetentionCard } from '../settings/RetentionCard.js';
 import { TestKeyButton } from '../settings/TestKeyButton.js';
 import { useProviderLabel } from '../settings/providers.js';
 
@@ -90,6 +92,9 @@ export function SettingsPage() {
         isSaving={updateSettingsMutation.isPending}
         keyedProviders={keyedProviders}
       />
+
+      <RetentionCard workspaceId={workspaceId} isMember={isMember} />
+      <RepoColorsCard workspaceId={workspaceId} isMember={isMember} />
 
       {/* API Keys Section */}
       <div className="p-6 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs">

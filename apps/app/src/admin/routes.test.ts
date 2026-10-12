@@ -67,6 +67,12 @@ describe('platform admin API routes', () => {
     expect(body.costUsd.last30Days).toBeCloseTo(0.20, 2);
   });
 
+  it('keeps the all-time cost after old runs are deleted (it reads the monthly usage summary)', async () => {
+    await db.delete(dbSchema.reviewRuns);
+    const res = await app.inject({ method: 'GET', url: '/api/admin/overview', headers: { cookie: adminCookie } });
+    expect(res.json().costUsd.allTime).toBeCloseTo(0.2, 2);
+  });
+
   it('GET /api/admin/users returns users without any secrets', async () => {
     const res = await app.inject({
       method: 'GET',

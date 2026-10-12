@@ -1,8 +1,6 @@
 import fastify, { type FastifyInstance } from 'fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { FetchLike } from '@mergepilot/engine';
 import { createAuth } from '../auth/auth.js';
 import * as authSchema from '../auth/schema.js';
@@ -11,19 +9,12 @@ import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import type { AppConfig } from '../core/config.js';
 import type { DnsLookupFn } from '../core/ssrf.js';
 import { CredentialService } from '../credentials/service.js';
+import { runMigrations } from '../db/migrate.js';
 import { PgStore } from '../db/pg-store.js';
 import * as dbSchema from '../db/schema.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { resetProviderTestRateLimits } from './provider-routes.js';
 import { registerDashboardApi } from './routes.js';
-
-const MIGRATIONS = [
-  '0001_app.sql',
-  '0002_auth.sql',
-  '0003_review_run_details.sql',
-  '0004_active_run_unique.sql',
-  '0005_settings_models.sql',
-];
 
 /** A provider key built at runtime, so no secret-looking literal sits in the tests. */
 export const keyFor = (tag: string): string => ['tk', tag, 'z8'.repeat(6)].join('-');
@@ -61,7 +52,7 @@ export interface ProviderHarness {
 export async function createProviderHarness(customFetch?: FetchLike): Promise<ProviderHarness> {
   resetProviderTestRateLimits();
   const pglite = new PGlite();
-  for (const f of MIGRATIONS) await pglite.exec(readFileSync(join(__dirname, '../../migrations', f), 'utf-8'));
+  await runMigrations(pglite);
   const db = drizzle(pglite, { schema: { ...authSchema, ...dbSchema } });
   const store = new PgStore(db);
   const dns = { address: '93.184.216.34' };

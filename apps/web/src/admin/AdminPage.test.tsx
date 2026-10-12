@@ -24,6 +24,8 @@ vi.mock('../api/admin.js', async (importOriginal) => ({
     getRuns: vi.fn(),
     deleteUser: vi.fn(),
     deleteWorkspace: vi.fn(),
+    getMaintenance: vi.fn(),
+    runRetention: vi.fn(),
   },
 }));
 
@@ -42,6 +44,7 @@ describe('AdminPage', () => {
     vi.mocked(adminApi.getWorkspaces).mockResolvedValue(workspacesFixture);
     vi.mocked(adminApi.getRuns).mockResolvedValue(runsFixture);
     vi.mocked(adminApi.deleteUser).mockResolvedValue(undefined);
+    vi.mocked(adminApi.getMaintenance).mockResolvedValue({ retention: { lastRun: null } });
   });
 
   it('redirects non-admins to / without calling the admin API', async () => {

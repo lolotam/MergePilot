@@ -32,6 +32,7 @@ export async function createAdminTestDb(): Promise<AdminTestDb> {
     '0003_review_run_details.sql',
     '0004_active_run_unique.sql',
     '0005_settings_models.sql',
+    '0006_run_retention.sql',
   ]) {
     await client.exec(readFileSync(join(migrationsDir, file), 'utf-8'));
   }
@@ -215,6 +216,17 @@ export async function seedAdminFixtures(db: AdminTestDb['db']): Promise<void> {
       createdAt: new Date(),
     },
   ]);
+
+  // The finished runs above, as the worker would have added them to the monthly usage summary.
+  const month = `${new Date().toISOString().slice(0, 7)}-01`;
+  await db.insert(dbSchema.workspaceUsageMonthly).values({
+    workspaceId: 'ws-1',
+    month,
+    runsTotal: 2,
+    runsCompleted: 1,
+    runsFailed: 1,
+    costUsd: '0.200000',
+  });
 }
 
 export interface SeededAdminApp {
@@ -231,7 +243,7 @@ export async function createSeededAdminApp(): Promise<SeededAdminApp> {
   const auth = createAuth({ db: handle.db, config });
   const app = fastify();
   registerAuthRoutes(app, auth);
-  registerAdminApi(app, { auth, db: handle.db, config });
+  registerAdminApi(app, { auth, db: handle.db, config, store: handle.store });
   await seedAdminFixtures(handle.db);
   await app.ready();
   return { app, handle, adminCookie: signedSessionCookie(fixtureToken('admin'), config.authSecret) };

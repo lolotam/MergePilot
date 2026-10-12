@@ -1,3 +1,4 @@
+import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { ApiProvider, AppStore, WorkspaceSettings } from '../core/types.js';
 import type { Settings, SettingsUpdate } from './contract.js';
 
@@ -22,6 +23,12 @@ export function mergeSettings(
     heavyThresholdLines: keep(update.heavyThresholdLines, current?.heavyThresholdLines),
     fallback: keep(update.fallback, current?.fallback) ?? [],
     minSeverity: keep(update.minSeverity, current?.minSeverity) ?? 'medium',
+    // Undefined keeps the stored value; a workspace without settings starts at the 30-day default.
+    runRetentionDays:
+      update.runRetentionDays !== undefined
+        ? update.runRetentionDays
+        : current?.runRetentionDays !== undefined ? current.runRetentionDays : DEFAULT_RUN_RETENTION_DAYS,
+    repoColors: update.repoColors ?? current?.repoColors ?? {},
   };
 }
 

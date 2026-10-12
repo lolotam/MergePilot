@@ -10,6 +10,9 @@ import { z } from 'zod';
  */
 
 import { API_PROVIDER_IDS, SeveritySchema } from '@mergepilot/engine';
+import { RepoColorsSchema, RunRetentionDaysSchema } from './contract-runs.js';
+
+export * from './contract-runs.js';
 
 export const ApiProviderSchema = z.enum(API_PROVIDER_IDS);
 export type ApiProvider = z.infer<typeof ApiProviderSchema>;
@@ -62,6 +65,10 @@ export const SettingsSchema = z.object({
   heavyThresholdLines: z.number().int().positive().max(1_000_000).nullable().optional(),
   fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).optional().default([]),
   minSeverity: SeveritySchema.optional().default('medium'),
+  /** Days to keep review runs; null = forever. Left out on PUT keeps the stored value (30 by default). */
+  runRetentionDays: RunRetentionDaysSchema.optional(),
+  /** `owner/repo` -> palette key for the runs table; left out on PUT keeps the stored map. */
+  repoColors: RepoColorsSchema.optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -227,6 +234,9 @@ export const ReviewRunSchema = z.object({
   findingsCount: z.number().nullable().optional(),
   severityCounts: SeverityCountsSchema.nullable().optional(),
   reviewUrl: z.string().nullable().optional(),
+  /** From the run's result usage; null when unknown. */
+  inputTokens: z.number().nullable().optional(),
+  outputTokens: z.number().nullable().optional(),
 });
 export type ReviewRun = z.infer<typeof ReviewRunSchema>;
 
@@ -236,6 +246,29 @@ export const RunsResponseSchema = z.object({
   total: z.number().optional(),
 });
 export type RunsResponse = z.infer<typeof RunsResponseSchema>;
+
+/** One PR in the grouped runs list: its matching runs (newest first) and their sums. */
+export const RunGroupSchema = z.object({
+  repoFullName: z.string(),
+  pullNumber: z.number().int(),
+  runCount: z.number().int(),
+  costUsd: z.number().nullable(),
+  inputTokens: z.number().nullable(),
+  outputTokens: z.number().nullable(),
+  runs: z.array(ReviewRunSchema),
+});
+export type RunGroup = z.infer<typeof RunGroupSchema>;
+
+/**
+ * GET (member) /api/workspaces/:workspaceId/runs?groupBy=pr — same filters and sort keys as the
+ * flat list; paging is over PR groups (`total` groups) and sorting uses each group's latest run.
+ */
+export const RunGroupsResponseSchema = z.object({
+  groups: z.array(RunGroupSchema),
+  total: z.number().int(),
+  totalRuns: z.number().int(),
+});
+export type RunGroupsResponse = z.infer<typeof RunGroupsResponseSchema>;
 
 /** GET (member) /api/workspaces/:workspaceId/runs/:runId */
 export const RunDetailResponseSchema = z.object({

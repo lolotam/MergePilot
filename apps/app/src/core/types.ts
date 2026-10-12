@@ -1,4 +1,7 @@
 import type { MergePilotConfig, ReviewModel, CredentialStore, ApiProviderId, Severity } from '@mergepilot/engine';
+import type { RepoColorKey, RunMaintenanceStore } from './run-types.js';
+
+export * from './run-types.js';
 
 /** Workspace roles (ADR-0007). Order matters: each role includes everything below it. */
 export const ROLES = ['member', 'admin', 'owner'] as const;
@@ -69,6 +72,13 @@ export interface WorkspaceSettings {
   heavyThresholdLines?: number | null | undefined;
   fallback?: FallbackSetting[] | undefined;
   minSeverity?: Severity | undefined;
+  /**
+   * Days to keep review runs (ADR-0014); null keeps them forever. Stores always read back a value
+   * (30 by default); undefined on save keeps the stored value.
+   */
+  runRetentionDays?: number | null | undefined;
+  /** Chosen palette color per `owner/repo`; repos left out use the default (hashed) color. */
+  repoColors?: Record<string, RepoColorKey> | undefined;
 }
 
 export interface StoredCredential {
@@ -183,6 +193,8 @@ export interface ListReviewRunsOptions {
     | 'model'
     | 'findingsCount'
     | 'costUsd'
+    | 'inputTokens'
+    | 'outputTokens'
     | 'duration'
     | undefined;
   dir?: 'asc' | 'desc' | undefined;
@@ -194,7 +206,7 @@ export interface ListReviewRunsResult {
 }
 
 /** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
-export interface AppStore {
+export interface AppStore extends RunMaintenanceStore {
   /** Returns false when this delivery id was already recorded (duplicate webhook). */
   recordDelivery(deliveryId: string, event: string): Promise<boolean>;
 
@@ -227,6 +239,11 @@ export interface AppStore {
   createReviewRun(run: NewReviewRun): Promise<ReviewRun>;
   /** Refreshes the heartbeat of a queued/running run; finished runs are left untouched. */
   touchReviewRun(workspaceId: string, id: string): Promise<void>;
+  /**
+   * Records the run's outcome. A finished status (completed/failed/skipped) also adds the run's
+   * cost, tokens and status to the monthly usage of the month it was created in, in the same
+   * transaction (every finish counts, so a retried run counts each attempt).
+   */
   finishReviewRun(
     workspaceId: string,
     id: string,
@@ -255,9 +272,14 @@ export interface AppStore {
   listLatestFailedRuns(workspaceId: string, options?: LatestFailedRunsOptions): Promise<ReviewRun[]>;
   /** Fails queued/running runs whose heartbeat (updatedAt) is older than `heartbeatBefore`. */
   failStaleRuns(heartbeatBefore: Date): Promise<number>;
+  /**
+   * Cost of the UTC month containing `monthStart` and every later month, from the monthly usage
+   * summary (finished runs), so deleting runs never lowers it.
+   */
   monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;
   /**
-   * Deletes the workspace's credentials, settings and review runs and unlinks its installations.
+   * Deletes the workspace's credentials, settings, review runs and monthly usage and unlinks its
+   * installations.
    * Postgres also deletes the Better Auth organization row (members and invitations cascade) in the
    * same transaction and reports `organizationDeleted: true`; a store without the auth tables
    * reports false and the caller deletes the organization itself.

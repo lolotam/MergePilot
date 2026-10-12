@@ -8,6 +8,7 @@ import { createQueueConnection, PAUSE_COMMAND_JOB_NAME, type QueueJobData } from
 import { createGitHubAppFactory } from './github-app-factory.js';
 import { processPauseCommandJob } from './process-pause-command.js';
 import { processReviewJob } from './process-review.js';
+import { startMaintenanceScheduler, type MaintenanceScheduler } from './retention-schedule.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
 
 /** A queued/running run with no heartbeat for this long is failed as `interrupted`. */
@@ -174,6 +175,20 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     }
   };
 
+  // Daily run retention (ADR-0014). Started in the background: a slow Redis must not hold up reviews.
+  let maintenance: MaintenanceScheduler | undefined;
+  if (connection) {
+    startMaintenanceScheduler(services.store, connection, workerLog)
+      .then((scheduler) => {
+        maintenance = scheduler;
+        workerLog.info({ event: 'worker.retention_scheduled' }, 'Daily run retention scheduled (03:00 UTC)');
+      })
+      .catch((err: unknown) => {
+        const name = err instanceof Error ? err.name : 'unknown error';
+        workerLog.error({ event: 'worker.retention_schedule_failed', errorName: name }, `Failed to schedule run retention: ${name}`);
+      });
+  }
+
   await sweepStale();
   const sweepTimer = setInterval(() => {
     void sweepStale();
@@ -185,6 +200,7 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     await Promise.allSettled([
       new Promise<void>((resolve) => healthServer.close(() => resolve())),
       worker.close(),
+      maintenance?.close(),
       services.close(),
     ]);
   };

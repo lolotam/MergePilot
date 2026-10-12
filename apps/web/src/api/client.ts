@@ -4,6 +4,8 @@ import type {
   ErrorBody,
   ReviewRun,
   RunsResponse,
+  RunGroup,
+  RunGroupsResponse,
   RunDetailResponse,
   RunReposResponse,
   ReviewRunResult,
@@ -14,6 +16,8 @@ import type {
 
 export type {
   ReviewRun,
+  RunGroup,
+  RunGroupsResponse,
   RunsResponse,
   RunDetailResponse,
   RunReposResponse,
@@ -152,6 +156,22 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
   return (await res.json()) as T;
 }
 
+function runsQueryString(params: GetRunsParams | undefined, groupBy?: 'pr'): string {
+  const search = new URLSearchParams();
+  if (params?.limit !== undefined) search.set('limit', String(params.limit));
+  if (params?.offset !== undefined) search.set('offset', String(params.offset));
+  if (params?.provider) search.set('provider', params.provider);
+  if (params?.from) search.set('from', params.from);
+  if (params?.to) search.set('to', params.to);
+  if (params?.q) search.set('q', params.q);
+  if (params?.sort) search.set('sort', params.sort);
+  if (params?.dir) search.set('dir', params.dir);
+  for (const r of params?.repo ?? []) search.append('repo', r);
+  for (const st of params?.status ?? []) search.append('status', st);
+  if (groupBy) search.set('groupBy', groupBy);
+  return search.toString();
+}
+
 export const api = {
   getMe: () => fetchApi<MeResponseWithAdmin>('/api/me'),
   getSettings: (workspaceId: string) =>
@@ -205,31 +225,16 @@ export const api = {
   getGitHubInstallations: () =>
     fetchApi<GitHubInstallationsResponse>('/api/github/installations'),
   getRuns: (workspaceId: string, params?: GetRunsParams | number) => {
-    let qs = '';
-    if (typeof params === 'number') {
-      qs = `limit=${params}`;
-    } else if (params) {
-      const search = new URLSearchParams();
-      if (params.limit !== undefined) search.set('limit', String(params.limit));
-      if (params.offset !== undefined) search.set('offset', String(params.offset));
-      if (params.provider) search.set('provider', params.provider);
-      if (params.from) search.set('from', params.from);
-      if (params.to) search.set('to', params.to);
-      if (params.q) search.set('q', params.q);
-      if (params.sort) search.set('sort', params.sort);
-      if (params.dir) search.set('dir', params.dir);
-      if (params.repo) {
-        for (const r of params.repo) search.append('repo', r);
-      }
-      if (params.status) {
-        for (const s of params.status) search.append('status', s);
-      }
-      qs = search.toString();
-    }
+    const qs = typeof params === 'number' ? `limit=${params}` : runsQueryString(params);
     return fetchApi<RunsResponse>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/runs${qs ? `?${qs}` : ''}`,
     );
   },
+  /** The runs list grouped by PR (paging and sorting over PR groups). */
+  getRunGroups: (workspaceId: string, params?: GetRunsParams) =>
+    fetchApi<RunGroupsResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/runs?${runsQueryString(params, 'pr')}`,
+    ),
   getRun: (workspaceId: string, runId: string) =>
     fetchApi<RunDetailResponse>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/runs/${encodeURIComponent(runId)}`,

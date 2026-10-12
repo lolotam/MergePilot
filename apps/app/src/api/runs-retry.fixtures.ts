@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { drizzle } from 'drizzle-orm/pglite';
+import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
 import fastify, { type FastifyInstance } from 'fastify';
 import { createAuth } from '../auth/auth.js';
 import { registerAuthRoutes } from '../auth/fastify.js';
@@ -31,6 +31,7 @@ export interface FakePr {
 export interface RetryHarness {
   app: FastifyInstance;
   store: PgStore;
+  db: PgliteDatabase<typeof authSchema & typeof dbSchema>;
   enqueued: ReviewJob[];
   /** `owner/repo#n` -> PR; unset PRs are open with head `sha-current-head`. */
   prs: Map<string, FakePr>;
@@ -134,6 +135,7 @@ export async function createRetryHarness(): Promise<RetryHarness> {
   return {
     app,
     store,
+    db,
     enqueued,
     prs,
     adminCookie: signedSessionCookie(token, config.authSecret),

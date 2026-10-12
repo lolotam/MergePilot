@@ -123,7 +123,7 @@ describe('Domain events logging - Core API', () => {
     });
 
     cookie = signedSessionCookie(sessionToken, mockConfig.authSecret);
-  });
+  }, 30000);
 
   afterEach(async () => {
     await pglite.close();
@@ -223,6 +223,43 @@ describe('Domain events logging - Core API', () => {
     expect(again.statusCode).toBe(200);
     const second = lines.filter((l) => l.event === 'settings.changed')[1];
     expect(second?.changedFields).toEqual(['language']);
+  });
+
+  it('logs retention / repo color changes and bulk deletes by field names and counts only', async () => {
+    const { stream, lines } = createCapture();
+    const app = setupApp(createLogger({ service: 'web', stream }));
+    const put = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${workspaceId}/settings`,
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: JSON.stringify({
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        language: 'en',
+        runRetentionDays: 90,
+        repoColors: { 'secret-org/hidden-repo': 'violet' },
+      }),
+    });
+    expect(put.statusCode).toBe(200);
+    const settingsLog = lines.find((l) => l.event === 'settings.changed');
+    expect(settingsLog?.changedFields).toEqual(['runRetentionDays', 'repoColors']);
+    expect(JSON.stringify(settingsLog)).not.toContain('hidden-repo');
+
+    const run = await store.createReviewRun({
+      workspaceId, installationId: 1, repoFullName: 'secret-org/hidden-repo', pullNumber: 1,
+      headSha: 'sha', status: 'running', costUsd: null, detail: null,
+    });
+    await store.finishReviewRun(workspaceId, run.id, { status: 'completed', costUsd: null, detail: null });
+    const del = await app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${workspaceId}/runs/delete`,
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: JSON.stringify({ filters: { repo: ['secret-org/hidden-repo'] }, confirmCount: 1 }),
+    });
+    expect(del.json()).toEqual({ deleted: 1 });
+    const deleteLog = lines.find((l) => l.event === 'runs.bulk_delete');
+    expect(deleteLog).toMatchObject({ workspaceId, mode: 'filters', requested: 1, deleted: 1 });
+    expect(JSON.stringify(deleteLog)).not.toContain('hidden-repo');
   });
 
   it('logs workspace renamed and deleted events', async () => {

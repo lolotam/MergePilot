@@ -59,8 +59,9 @@ export async function getWorkspaces(
     const runs = dbSchema.reviewRuns;
     const inst = dbSchema.installations;
     const creds = dbSchema.providerCredentials;
+    const usage = dbSchema.workspaceUsageMonthly;
 
-    const [memberRows, ownerRows, instRows, credRows, runRows] = await Promise.all([
+    const [memberRows, ownerRows, instRows, credRows, runRows, usageRows] = await Promise.all([
       db
         .select({ wsId: m.organizationId, n: count() })
         .from(m)
@@ -97,6 +98,12 @@ export async function getWorkspaces(
         .from(runs)
         .where(inArray(runs.workspaceId, ids))
         .groupBy(runs.workspaceId),
+      // Total cost comes from the monthly usage summary, which run retention never deletes.
+      db
+        .select({ wsId: usage.workspaceId, cost: sum(usage.costUsd) })
+        .from(usage)
+        .where(inArray(usage.workspaceId, ids))
+        .groupBy(usage.workspaceId),
     ]);
 
     for (const row of memberRows) members.set(row.wsId, Number(row.n));
@@ -119,8 +126,9 @@ export async function getWorkspaces(
       set.add(row.provider);
       providers.set(row.wsId, set);
     }
+    const usageCost = new Map(usageRows.map((row) => [row.wsId, toUsd(row.cost)]));
     for (const row of runRows) {
-      runStats.set(row.wsId, { n: Number(row.n), cost: toUsd(row.cost), last: row.last });
+      runStats.set(row.wsId, { n: Number(row.n), cost: usageCost.get(row.wsId) ?? toUsd(row.cost), last: row.last });
     }
   }
 

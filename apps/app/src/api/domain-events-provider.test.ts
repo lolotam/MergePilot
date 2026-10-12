@@ -143,7 +143,7 @@ describe('Domain events logging - Provider & Runs', () => {
     });
 
     cookie = signedSessionCookie(sessionToken, mockConfig.authSecret);
-  });
+  }, 30000);
 
   afterEach(async () => {
     await pglite.close();

@@ -173,82 +173,39 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
     }
   });
 
-  it('monthCostUsd sums only that workspace and month', async () => {
+  it('monthCostUsd sums the monthly usage of that workspace from the given month on', async () => {
     const { store, client, close } = await createTestDb(undefined, { workspaces: ISOLATION_WORKSPACES });
     try {
-      const now = Date.now();
-      const monthStart = new Date(now - 10 * 24 * 60 * 60 * 1000); // 10 days ago
+      const now = new Date();
+      const thisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+      const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      const base = { installationId: 10, repoFullName: 'org/repo', status: 'queued' as const, costUsd: null, detail: null };
 
-      // Run 1: Workspace A, moved to 40 days ago (prior month) ($0.50)
-      const r1 = await store.createReviewRun({
-        workspaceId: 'ws-a',
-        installationId: 10,
-        repoFullName: 'org/repo',
-        pullNumber: 1,
-        headSha: 'sha1',
-        status: 'queued',
-        costUsd: null,
-        detail: null,
-      });
-      await store.finishReviewRun('ws-a', r1.id, {
-        status: 'completed',
-        costUsd: 0.50,
-        detail: null,
-      });
-      await client.query("UPDATE review_runs SET created_at = now() - interval '40 days' WHERE id = $1;", [r1.id]);
+      // A prior month already summarised ($0.50), e.g. by the 0006 backfill.
+      await client.query(
+        `INSERT INTO workspace_usage_monthly (workspace_id, month, runs_total, runs_completed, cost_usd)
+         VALUES ('ws-a', $1, 1, 1, 0.5);`,
+        [lastMonth.toISOString().slice(0, 10)],
+      );
+      const r2 = await store.createReviewRun({ ...base, workspaceId: 'ws-a', pullNumber: 2, headSha: 'sha2' });
+      await store.finishReviewRun('ws-a', r2.id, { status: 'completed', costUsd: 0.75, detail: null });
+      const r3 = await store.createReviewRun({ ...base, workspaceId: 'ws-b', pullNumber: 3, headSha: 'sha3' });
+      await store.finishReviewRun('ws-b', r3.id, { status: 'completed', costUsd: 5, detail: null });
 
-      // Run 2: Workspace A inside current month ($0.75)
-      const r2 = await store.createReviewRun({
-        workspaceId: 'ws-a',
-        installationId: 10,
-        repoFullName: 'org/repo',
-        pullNumber: 2,
-        headSha: 'sha2',
-        status: 'queued',
-        costUsd: null,
-        detail: null,
-      });
-      await store.finishReviewRun('ws-a', r2.id, {
-        status: 'completed',
-        costUsd: 0.75,
-        detail: null,
-      });
-
-      // Run 3: Workspace B inside current month ($5.00) - must NOT be included in ws-a
-      const r3 = await store.createReviewRun({
-        workspaceId: 'ws-b',
-        installationId: 20,
-        repoFullName: 'org/repo-b',
-        pullNumber: 3,
-        headSha: 'sha3',
-        status: 'queued',
-        costUsd: null,
-        detail: null,
-      });
-      await store.finishReviewRun('ws-b', r3.id, {
-        status: 'completed',
-        costUsd: 5.00,
-        detail: null,
-      });
-
-      // For Workspace A, only r2 ($0.75) is >= monthStart
-      const costA = await store.monthCostUsd('ws-a', monthStart);
+      const costA = await store.monthCostUsd('ws-a', thisMonth);
       expect(costA).toBeCloseTo(0.75, 4);
       expect(typeof costA).toBe('number');
+      // Any instant inside the month means that whole month.
+      expect(await store.monthCostUsd('ws-a', new Date(thisMonth.getTime() + 60_000))).toBeCloseTo(0.75, 4);
+      expect(await store.monthCostUsd('ws-b', thisMonth)).toBeCloseTo(5, 4);
+      expect(await store.monthCostUsd('ws-a', nextMonth)).toBe(0);
+      expect(await store.monthCostUsd('ws-a', lastMonth)).toBeCloseTo(1.25, 4);
 
-      // For Workspace B, only r3 ($5.00) is included
-      const costB = await store.monthCostUsd('ws-b', monthStart);
-      expect(costB).toBeCloseTo(5.00, 4);
-
-      // Future month returns 0 for both
-      const futureMonth = new Date(now + 10 * 24 * 60 * 60 * 1000);
-      const futureCostA = await store.monthCostUsd('ws-a', futureMonth);
-      expect(futureCostA).toBe(0);
-
-      // Starting from 60 days ago includes both r1 and r2 ($0.50 + $0.75 = $1.25)
-      const olderMonth = new Date(now - 60 * 24 * 60 * 60 * 1000);
-      const olderCostA = await store.monthCostUsd('ws-a', olderMonth);
-      expect(olderCostA).toBeCloseTo(1.25, 4);
+      // Moving or deleting the run does not change the recorded spend.
+      await client.query("UPDATE review_runs SET created_at = now() - interval '400 days' WHERE id = $1;", [r2.id]);
+      await store.deleteReviewRuns('ws-a', { ids: [r2.id] });
+      expect(await store.monthCostUsd('ws-a', thisMonth)).toBeCloseTo(0.75, 4);
     } finally {
       await close();
     }

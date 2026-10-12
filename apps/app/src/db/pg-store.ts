@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { InstallationAlreadyLinkedError } from '../core/types.js';
 import { deleteWorkspaceInTx, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -6,27 +6,42 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
   ApiProvider,
   AppStore,
+  DeleteRunsTarget,
   FinishReviewRunOptions,
   Installation,
   LatestFailedRunsOptions,
+  ListReviewRunGroupsResult,
   ListReviewRunsOptions,
   ListReviewRunsResult,
+  MaintenanceKind,
+  MaintenanceRun,
+  MonthlyUsage,
   NewReviewRun,
+  RetentionPolicy,
   ReviewRun,
   StoredCredential,
   WorkspaceSettings,
 } from '../core/types.js';
 import {
+  deletePgReviewRuns,
+  finishPgMaintenanceRun,
+  getLatestPgMaintenanceRun,
+  listPgRetentionPolicies,
+  prunePgReviewRuns,
+  startPgMaintenanceRun,
+} from './pg-maintenance.js';
+import { listPgRunGroups } from './pg-run-groups.js';
+import {
   createPgReviewRun,
-  failPgStaleRuns,
   findPgActiveReviewRun,
-  finishPgReviewRun,
   listPgLatestFailedRuns,
   mapReviewRunRow,
   queryPgReviewRuns,
   touchPgReviewRun,
 } from './pg-runs.js';
-import { installations, providerCredentials, reviewRuns, webhookDeliveries, workspaceSettings } from './schema.js';
+import { getPgSettings, savePgSettings } from './pg-settings.js';
+import { failPgStaleRuns, finishPgReviewRun, listPgMonthlyUsage, monthPgCostUsd } from './pg-usage.js';
+import { installations, providerCredentials, reviewRuns, webhookDeliveries } from './schema.js';
 import type * as schema from './schema.js';
 
 export type AppDb = NodePgDatabase<typeof schema> | PgliteDatabase<typeof schema>;
@@ -167,48 +182,11 @@ export class PgStore implements AppStore {
   }
 
   async getSettings(workspaceId: string): Promise<WorkspaceSettings | null> {
-    const rows = await this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
-    const row = rows[0];
-    if (!row) return null;
-    return {
-      workspaceId: row.workspaceId,
-      provider: row.provider as ApiProvider,
-      model: row.model,
-      language: row.language as 'ar' | 'en',
-      monthlyBudgetUsd: row.monthlyBudgetUsd !== null ? Number(row.monthlyBudgetUsd) : null,
-      effort: row.effort ?? null,
-      heavyProvider: (row.heavyProvider as ApiProvider) ?? null,
-      heavyModel: row.heavyModel ?? null,
-      heavyEffort: row.heavyEffort ?? null,
-      heavyThresholdLines: row.heavyThresholdLines !== null ? Number(row.heavyThresholdLines) : 800,
-      fallback: Array.isArray(row.fallback) ? (row.fallback as WorkspaceSettings['fallback']) : [],
-      minSeverity: (row.minSeverity as WorkspaceSettings['minSeverity']) ?? 'medium',
-    };
+    return getPgSettings(this.db, workspaceId);
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
-    const budgetStr = settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined
-      ? String(settings.monthlyBudgetUsd) : null;
-    const values = {
-      provider: settings.provider,
-      model: settings.model,
-      language: settings.language,
-      monthlyBudgetUsd: budgetStr,
-      effort: settings.effort ?? null,
-      heavyProvider: settings.heavyProvider ?? null,
-      heavyModel: settings.heavyModel ?? null,
-      heavyEffort: settings.heavyEffort ?? null,
-      heavyThresholdLines: settings.heavyThresholdLines ?? 800,
-      fallback: settings.fallback ?? [],
-      minSeverity: settings.minSeverity ?? 'medium',
-      updatedAt: new Date(),
-    };
-    await withLiveWorkspace(this.db, settings.workspaceId, async (tx) => {
-      await tx
-        .insert(workspaceSettings)
-        .values({ workspaceId: settings.workspaceId, ...values })
-        .onConflictDoUpdate({ target: workspaceSettings.workspaceId, set: values });
-    });
+    return savePgSettings(this.db, settings);
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
@@ -356,19 +334,39 @@ export class PgStore implements AppStore {
   }
 
   async monthCostUsd(workspaceId: string, monthStart: Date): Promise<number> {
-    const rows = await this.db
-      .select({
-        total: sql<string>`coalesce(sum(${reviewRuns.costUsd}), 0)`,
-      })
-      .from(reviewRuns)
-      .where(
-        and(
-          eq(reviewRuns.workspaceId, workspaceId),
-          gte(reviewRuns.createdAt, monthStart),
-        ),
-      );
-    const total = rows[0]?.total ?? '0';
-    return Number(total);
+    return monthPgCostUsd(this.db, workspaceId, monthStart);
+  }
+
+  async listMonthlyUsage(workspaceId: string): Promise<MonthlyUsage[]> {
+    return listPgMonthlyUsage(this.db, workspaceId);
+  }
+
+  async listReviewRunGroups(workspaceId: string, options: ListReviewRunsOptions): Promise<ListReviewRunGroupsResult> {
+    return listPgRunGroups(this.db, workspaceId, options);
+  }
+
+  async deleteReviewRuns(workspaceId: string, target: DeleteRunsTarget): Promise<number> {
+    return deletePgReviewRuns(this.db, workspaceId, target);
+  }
+
+  async listRetentionPolicies(): Promise<RetentionPolicy[]> {
+    return listPgRetentionPolicies(this.db);
+  }
+
+  async pruneReviewRuns(workspaceId: string, createdBefore: Date, limit: number): Promise<number> {
+    return prunePgReviewRuns(this.db, workspaceId, createdBefore, limit);
+  }
+
+  async startMaintenanceRun(kind: MaintenanceKind, staleBefore: Date): Promise<MaintenanceRun | null> {
+    return startPgMaintenanceRun(this.db, kind, staleBefore);
+  }
+
+  async finishMaintenanceRun(id: string, result: { deletedCount: number; error: string | null }): Promise<void> {
+    return finishPgMaintenanceRun(this.db, id, result);
+  }
+
+  async getLatestMaintenanceRun(kind: MaintenanceKind): Promise<MaintenanceRun | null> {
+    return getLatestPgMaintenanceRun(this.db, kind);
   }
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
