@@ -33,7 +33,7 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
   const sortHeader = (labelKey: I18nKey, key: string) => {
     const isSorted = sort === key;
     return (
-      <th scope="col" aria-sort={isSorted ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-4 text-start font-semibold whitespace-nowrap">
+      <th scope="col" aria-sort={isSorted ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-2.5 px-2 text-start font-semibold leading-tight">
         <button
           type="button"
           onClick={() => onSort(key)}
@@ -56,11 +56,11 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-start text-xs">
+      <table className="w-full text-start text-[11px]">
         <thead className="bg-[#FBFBFA] dark:bg-ink-800/50 border-b border-ink-200 dark:border-ink-700 text-[11px] text-ink-500 dark:text-ink-400">
           <tr>
-            <th scope="col" className="py-3 px-4 text-start font-semibold">{t('runNumberCol')}</th>
-            <th scope="col" className="py-3 px-2 text-start">
+            <th scope="col" className="py-2.5 px-2 text-start font-semibold">{t('runNumberCol')}</th>
+            <th scope="col" className="py-2.5 px-2 text-start">
               <SelectBox
                 checked={pageIds.length > 0 && pageSelected === pageIds.length}
                 indeterminate={pageSelected > 0}
@@ -72,15 +72,14 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
             </th>
             {sortHeader('runPrCol', 'pullNumber')}
             {sortHeader('runStatusCol', 'status')}
-            {sortHeader('runProviderCol', 'provider')}
-            {sortHeader('runModelCol', 'model')}
+            {sortHeader('runProviderModelCol', 'model')}
             {sortHeader('runResultCol', 'findingsCount')}
             {sortHeader('runTokensInCol', 'inputTokens')}
             {sortHeader('runTokensOutCol', 'outputTokens')}
             {sortHeader('duration', 'duration')}
             {sortHeader('runCostCol', 'costUsd')}
             {sortHeader('runDateCol', 'createdAt')}
-            <th scope="col" className="py-3 px-4 text-center font-semibold">{t('actions')}</th>
+            <th scope="col" className="py-2.5 px-2 text-center font-semibold">{t('actions')}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-ink-100 dark:divide-ink-800/60">

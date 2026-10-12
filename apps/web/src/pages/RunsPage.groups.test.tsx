@@ -32,7 +32,7 @@ describe('RunsPage grouped by PR', () => {
     renderRunsPage({ url: '/w/ws-1/runs?offset=25', groups: [backendPr7(), webPr3()], total: 27 });
     expect(cellTexts(rows()[0]!)[0]).toBe('26');
     expect(cellTexts(rows()[1]!)[0]).toBe('27');
-    expect(cellTexts(rows()[1]!)[2]).toContain('acme/web');
+    expect(cellTexts(rows()[1]!)[2]).toContain('web#3');
   });
 
   it('expands a PR with several runs into sub-rows; a single-run PR has no expander', () => {
@@ -40,7 +40,7 @@ describe('RunsPage grouped by PR', () => {
     const expander = screen.getByRole('button', { name: 'Show the runs of acme/backend#7' });
     expect(expander.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByRole('button', { name: /acme\/web#3/ , expanded: false })).toBeNull();
-    expect(screen.getByText('3 runs')).toBeDefined();
+    expect(screen.getByTitle('3 reviews of this pull request').textContent).toBe('×3');
     expect(screen.queryAllByTestId('run-sub-row')).toHaveLength(0);
 
     fireEvent.click(expander);
@@ -66,7 +66,8 @@ describe('RunsPage grouped by PR', () => {
     expect(parentCells).toContain('300');
     expect(parentCells).toContain('$0.3100');
     expect(cellTexts(single!).filter((c) => c === '—').length).toBeGreaterThanOrEqual(2);
-    expect(cellTexts(big!)).toContain('1,234,567');
+    expect(cellTexts(big!)).toContain('1.2M');
+    expect(big!.querySelector('[title="1,234,567"]')).not.toBeNull();
   });
 
   it('a parent checkbox selects its deletable runs, a sub-row checkbox one run, the header the page', () => {

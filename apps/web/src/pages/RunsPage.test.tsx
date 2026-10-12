@@ -95,8 +95,7 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
     renderComponent();
 
     // Headers
-    expect(screen.getByText('Provider')).toBeDefined();
-    expect(screen.getByText('Model')).toBeDefined();
+    expect(screen.getByText('Provider / Model')).toBeDefined();
     expect(screen.getByText('Result')).toBeDefined();
     expect(screen.getByText('Tokens in')).toBeDefined();
     expect(screen.getByText('Tokens out')).toBeDefined();
@@ -129,7 +128,7 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
   it('navigates to run detail on row click and keyboard enter', () => {
     renderComponent();
 
-    const row = table().getByText('acme/backend').closest('tr');
+    const row = table().getByTitle('acme/backend').closest('tr');
     expect(row).not.toBeNull();
 
     // Click row
@@ -152,10 +151,10 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
   it('supports sorting columns with aria-sort toggle', () => {
     renderComponent();
 
-    const modelHeader = screen.getByText('Model').closest('th');
+    const modelHeader = screen.getByText('Provider / Model').closest('th');
     expect(modelHeader?.getAttribute('aria-sort')).toBe('none');
 
-    const modelButton = screen.getByText('Model');
+    const modelButton = screen.getByText('Provider / Model');
     fireEvent.click(modelButton);
 
     // Click triggers params update for sorting

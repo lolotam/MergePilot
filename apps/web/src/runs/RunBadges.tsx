@@ -51,8 +51,8 @@ export function RunModelBadge({
     : '';
 
   return (
-    <div className="inline-flex items-center gap-1.5 flex-wrap">
-      <span className="font-mono text-xs text-ink-900 dark:text-ink-100 font-medium" dir="ltr">
+    <div className="inline-flex items-center gap-1 flex-wrap max-w-[8.5rem]">
+      <span className="font-mono text-[11px] text-ink-900 dark:text-ink-100 font-medium truncate max-w-[8rem]" dir="ltr" title={model}>
         {model}
       </span>
       {effort && (
@@ -93,7 +93,7 @@ export function RunSeverityChips({
     const errorMsg = getFailedRunMessage(detail, t);
     return (
       <span
-        className="inline-block text-xs text-red-600 dark:text-red-400 truncate max-w-[200px]"
+        className="inline-block text-[11px] text-red-600 dark:text-red-400 truncate max-w-[120px]"
         title={detail || errorMsg}
       >
         {errorMsg}
@@ -124,7 +124,7 @@ export function RunSeverityChips({
   }
 
   return (
-    <div className="inline-flex items-center gap-1.5 flex-wrap">
+    <div className="inline-flex items-center gap-1 flex-wrap max-w-[120px]">
       {severityCounts && severityCounts.critical > 0 && (
         <span
           className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300"

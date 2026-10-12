@@ -256,6 +256,7 @@ export const ar = {
   runStatusCol: 'الحالة',
   runProviderCol: 'المزود',
   runModelCol: 'النموذج',
+  runProviderModelCol: 'المزود / النموذج',
   runResultCol: 'النتيجة',
   runCostCol: 'التكلفة',
   runDateCol: 'التاريخ',
