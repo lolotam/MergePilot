@@ -112,7 +112,7 @@ export function LandingPage() {
 
             <Link
               to="/login"
-              className="px-4 py-2 text-xs font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="whitespace-nowrap px-4 py-2 text-xs font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               {t('signInCTA')}
             </Link>
