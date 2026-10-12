@@ -18,6 +18,7 @@ import { useI18n } from '../i18n/context.js';
 import type { I18nKey } from '../i18n/ar.js';
 import { RunProviderBadge, RunModelBadge } from './RunBadges.js';
 import { RunFindingsList } from './RunFindingsList.js';
+import { RunDuration } from './RunDuration.js';
 import type { ReviewRun } from '../api/client.js';
 
 export default function RunDetailPage() {
@@ -60,7 +61,6 @@ export default function RunDetailPage() {
   }
 
   const result = run.result;
-  const durationText = formatDuration(run.createdAt, run.finishedAt);
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -171,8 +171,8 @@ export default function RunDetailPage() {
             <Clock className="w-3 h-3 text-ink-400" />
             <span>{t('duration')}</span>
           </span>
-          <div className="text-xs font-semibold text-ink-800 dark:text-ink-200">
-            {durationText}
+          <div className="text-xs font-semibold text-ink-800 dark:text-ink-200 tabular-nums" data-testid="run-duration">
+            <RunDuration run={run} />
           </div>
           <span className="text-[10px] text-ink-400">
             {new Date(run.createdAt).toLocaleString()}
@@ -295,15 +295,4 @@ function getStatusBadge(status: ReviewRun['status'], t: (key: I18nKey) => string
         </span>
       );
   }
-}
-
-function formatDuration(start: string, end: string | null): string {
-  if (!end) return '—';
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  if (ms < 0) return '—';
-  const sec = Math.round(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  const remSec = sec % 60;
-  return `${min}m ${remSec}s`;
 }
