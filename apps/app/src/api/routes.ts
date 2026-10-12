@@ -104,7 +104,8 @@ export function registerDashboardApi(
       }
 
       // A patch over the stored settings: fields left out keep their value, null clears them.
-      const merged = mergeSettings(workspaceId, await deps.store.getSettings(workspaceId), parsed.data);
+      const previous = await deps.store.getSettings(workspaceId);
+      const merged = mergeSettings(workspaceId, previous, parsed.data);
       const problem = await validateSettings(deps.store, workspaceId, merged);
       if (problem) return sendError(reply, 400, problem.code, problem.message);
 
@@ -113,7 +114,12 @@ export function registerDashboardApi(
         {
           event: 'settings.changed',
           workspaceId,
-          changedFields: Object.keys(parsed.data),
+          // Only fields whose stored value really changed (forms resend unchanged values).
+          changedFields: Object.keys(parsed.data).filter(
+            (key) =>
+              JSON.stringify((previous as Record<string, unknown> | null)?.[key] ?? null) !==
+              JSON.stringify((merged as unknown as Record<string, unknown>)[key] ?? null),
+          ),
         },
         'Workspace settings updated',
       );

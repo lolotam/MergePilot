@@ -209,9 +209,20 @@ describe('Domain events logging - Core API', () => {
     const settingsLog = lines.find((l) => l.event === 'settings.changed');
     expect(settingsLog).toBeDefined();
     expect(settingsLog?.workspaceId).toBe(workspaceId);
-    expect(settingsLog?.changedFields).toEqual(['provider', 'model', 'language']);
+    expect(settingsLog?.changedFields).toEqual(['model', 'language']);
     expect(settingsLog?.model).toBeUndefined();
     expect(settingsLog?.language).toBeUndefined();
+
+    // Resubmitting the same values with one real change reports only that field.
+    const again = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${workspaceId}/settings`,
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: JSON.stringify({ provider: 'anthropic', model: 'claude-3-5-haiku', language: 'en' }),
+    });
+    expect(again.statusCode).toBe(200);
+    const second = lines.filter((l) => l.event === 'settings.changed')[1];
+    expect(second?.changedFields).toEqual(['language']);
   });
 
   it('logs workspace renamed and deleted events', async () => {
