@@ -94,7 +94,13 @@ export const defaultLookup: DnsLookupFn = async (hostname) => {
   return res.map((r) => ({ address: r.address, family: r.family }));
 };
 
-/** Parses and checks the URL itself (scheme, credentials, host name); no DNS yet. */
+/**
+ * Parses and checks the URL itself (scheme, credentials, host name); no DNS yet. Everything
+ * downstream uses THIS parse (WHATWG, as Node's https uses): it already turns `\` into `/`,
+ * lowercases the scheme and host, converts IDN to punycode, and rewrites decimal / octal / hex
+ * IPv4 forms (`2130706433`, `0177.0.0.1`, `0x7f.1`) to dotted form, so the address checked is
+ * the address connected to.
+ */
 export function parseSafeUrl(urlString: string): URL {
   let parsed: URL;
   try {
@@ -110,6 +116,7 @@ export function parseSafeUrl(urlString: string): URL {
   }
   const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
   if (!hostname) throw new SsrFValidationError('Base URL missing hostname');
+  if (hostname.includes('%')) throw new SsrFValidationError('IPv6 zone ids are not allowed');
   if (BLOCKED_NAMES.test(hostname)) {
     throw new SsrFValidationError(`Hostname "${hostname}" points to a private or loopback address`);
   }
@@ -151,6 +158,11 @@ export async function resolveSafeAddresses(
  */
 export async function assertSafeBaseUrl(urlString: string, lookupFn: DnsLookupFn = defaultLookup): Promise<string> {
   const parsed = parseSafeUrl(urlString);
+  if (parsed.search || parsed.hash) {
+    throw new SsrFValidationError('The base URL must not contain a query or a fragment');
+  }
   await resolveSafeAddresses(parsed.hostname, lookupFn);
-  return urlString.trim().replace(/\/+$/, '');
+  // The normalized form (punycode host, dotted IPv4, explicit non-default port) is what is
+  // stored and later joined with `/models` or `/chat/completions`.
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
 }

@@ -11,20 +11,47 @@ type PinnedLookupFn = (host: string, opts: { all?: boolean }, cb: LookupCallback
 
 interface Captured {
   url: URL;
-  options: { method?: string; headers?: Record<string, string>; lookup?: PinnedLookupFn; agent?: unknown };
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    lookup?: PinnedLookupFn;
+    agent?: unknown;
+    signal?: AbortSignal;
+  };
   written: string[];
+  idle?: () => void;
 }
 
-/** A fake https.request: records the call and answers with `status` / `headers` / `body`. */
-function fakeRequest(status: number, headers: Record<string, string>, body: string, captured: Captured[]): RequestFn {
+/**
+ * A fake https.request: records the call and answers with `status` / `headers` / `body`
+ * (`body: null` never answers). It honours the abort signal and the idle timeout like Node.
+ */
+function fakeRequest(
+  status: number,
+  headers: Record<string, string>,
+  body: string | Buffer[] | null,
+  captured: Captured[],
+): RequestFn {
   return ((url: URL, options: Captured['options'], onResponse: (res: IncomingMessage) => void) => {
     const entry: Captured = { url, options, written: [] };
     captured.push(entry);
     const req = new EventEmitter() as unknown as ClientRequest;
+    const destroy = (err?: Error) => {
+      queueMicrotask(() => req.emit('error', err ?? new Error('destroyed')));
+      return req;
+    };
+    options.signal?.addEventListener('abort', () => destroy(Object.assign(new Error('aborted'), { name: 'AbortError' })));
     Object.assign(req, {
       write: (chunk: string) => entry.written.push(chunk),
+      setTimeout: (_ms: number, cb: () => void) => {
+        entry.idle = cb;
+        return req;
+      },
+      destroy,
       end: () => {
-        const res = Readable.from([Buffer.from(body)]) as unknown as IncomingMessage;
+        if (body === null) return;
+        const chunks = typeof body === 'string' ? [Buffer.from(body)] : body;
+        const res = Readable.from(chunks) as unknown as IncomingMessage;
         Object.assign(res, { statusCode: status, statusMessage: '', headers });
         onResponse(res);
       },
@@ -81,5 +108,58 @@ describe('createSafeFetch (custom base URL, ADR-0010)', () => {
     await expect(safeFetch('https://[::ffff:7f00:1]/v1')).rejects.toThrow('private or loopback');
     await expect(safeFetch('https://metadata.google.internal/v1')).rejects.toThrow('private');
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('fails a call that hangs, after the overall timeout', async () => {
+    const safeFetch = createSafeFetch({ lookup: publicLookup, request: fakeRequest(200, {}, null, []), timeoutMs: 20 });
+    await expect(safeFetch('https://llm.example.com/v1/models')).rejects.toThrow();
+  });
+
+  it('fails a silent connection on the idle timeout', async () => {
+    const captured: Captured[] = [];
+    const safeFetch = createSafeFetch({ lookup: publicLookup, request: fakeRequest(200, {}, null, captured), idleTimeoutMs: 5 });
+    const pending = safeFetch('https://llm.example.com/v1/models');
+    await vi.waitFor(() => expect(captured[0]?.idle).toBeDefined());
+    captured[0]?.idle?.();
+    await expect(pending).rejects.toThrow('no data from the server');
+  });
+
+  it('honours the caller signal combined with its own limits', async () => {
+    const controller = new AbortController();
+    const safeFetch = createSafeFetch({ lookup: publicLookup, request: fakeRequest(200, {}, null, []), signal: controller.signal });
+    const pending = safeFetch('https://llm.example.com/v1/models');
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    const perCall = new AbortController();
+    perCall.abort();
+    const plain = createSafeFetch({ lookup: publicLookup, request: fakeRequest(200, {}, '{}', []) });
+    await expect(plain('https://llm.example.com/v1/models', { signal: perCall.signal })).rejects.toThrow();
+  });
+
+  it('refuses a body larger than the cap, declared or streamed', async () => {
+    const declared = createSafeFetch({
+      lookup: publicLookup,
+      request: fakeRequest(200, { 'content-length': '999999' }, '{}', []),
+      maxResponseBytes: 1000,
+    });
+    await expect(declared('https://llm.example.com/v1/models')).rejects.toThrow('exceeds 1000 bytes');
+
+    const chunks = Array.from({ length: 5 }, () => Buffer.alloc(400, 97));
+    const streamed = createSafeFetch({ lookup: publicLookup, request: fakeRequest(200, {}, chunks, []), maxResponseBytes: 1000 });
+    const res = await streamed('https://llm.example.com/v1/models');
+    await expect(res.text()).rejects.toThrow();
+  });
+
+  it('connects to exactly the host it checked, for every URL spelling', async () => {
+    const seen: string[] = [];
+    const lookup: DnsLookupFn = async (host) => (seen.push(host), [{ address: '93.184.216.34', family: 4 }]);
+    const captured: Captured[] = [];
+    const safeFetch = createSafeFetch({ lookup, request: fakeRequest(200, {}, '{}', captured) });
+    await safeFetch('HTTPS://LLM.Example.COM.:8443\\v1/models');
+    await safeFetch('https://bücher.example/v1/models');
+    expect(seen).toEqual(['llm.example.com.', 'xn--bcher-kva.example']);
+    expect(captured.map((c) => c.url.hostname)).toEqual(seen);
+    expect(captured[0]?.url.port).toBe('8443');
+    expect(captured[0]?.url.pathname).toBe('/v1/models');
   });
 });

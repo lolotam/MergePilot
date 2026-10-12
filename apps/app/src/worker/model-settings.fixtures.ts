@@ -26,6 +26,9 @@ export interface HarnessOptions {
   additions?: number;
   deletions?: number;
   customBaseUrl?: string;
+  /** The PR payload carries no additions/deletions; the file list has `fileLines` added lines. */
+  omitCounts?: boolean;
+  fileLines?: number;
   /** Use the real engine model (with these seams) instead of the fake model. */
   engine?: { customFetch: FetchLike; publicIp?: string };
   fakeModel?: ReviewModel;
@@ -68,18 +71,24 @@ export function createHarness(options: HarnessOptions) {
     resolve: vi.fn(async (_ws: string, provider: ApiProvider) => new Secret(keyFor(provider))),
   };
   const reviews: CreateReviewParams[] = [];
-  const client: GitHubClient = {
+  const client: GitHubClient & { listPullRequestFilesPage: ReturnType<typeof vi.fn> } = {
     getFileContent: async () => null,
-    listPullRequestFilesPage: async () => [
-      { filename: 'src/main.ts', status: 'modified', additions: 1, deletions: 0, changes: 1, patch: '@@ -1,1 +1,2 @@\n a\n+b' },
-    ],
+    listPullRequestFilesPage: vi.fn(async () => [
+      {
+        filename: 'src/main.ts',
+        status: 'modified',
+        additions: options.fileLines ?? 1,
+        deletions: 0,
+        changes: options.fileLines ?? 1,
+        patch: '@@ -1,1 +1,2 @@\n a\n+b',
+      },
+    ]),
     getPullRequest: async () =>
       ({
         head: { sha: 'sha-head' },
         title: 'PR',
         body: '',
-        additions: options.additions ?? 50,
-        deletions: options.deletions ?? 50,
+        ...(options.omitCounts ? {} : { additions: options.additions ?? 50, deletions: options.deletions ?? 50 }),
       }) as unknown as GitHubPullRequest,
     listReviewsPage: async () => [],
     createReview: async (params) => {
@@ -125,5 +134,5 @@ export function createHarness(options: HarnessOptions) {
     const runs = await store.listReviewRuns(WORKSPACE_ID);
     return 'runs' in runs ? runs.runs[0] : runs[0];
   };
-  return { store, deps, job, reviews, credentials, latestRun, getCapturedConfig: () => capturedConfig };
+  return { store, deps, job, reviews, credentials, client, latestRun, getCapturedConfig: () => capturedConfig };
 }

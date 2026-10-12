@@ -9,6 +9,7 @@ import {
   type CatalogModel,
 } from '@mergepilot/engine';
 import { requireRole } from '../auth/guard.js';
+import { DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } from './contract.js';
 import { sendError } from './helpers.js';
 import { engineOptions, storedTarget, unsavedTarget, type TargetResult } from './provider-target.js';
@@ -81,6 +82,20 @@ function parseProvider(request: FastifyRequest, reply: FastifyReply): ApiProvide
   return parsed.data;
 }
 
+/**
+ * Aborts the provider call when the dashboard request goes away or after the dashboard limit;
+ * the guarded custom fetch adds its own timeout, idle timeout and size cap on top.
+ */
+function routeSignal(reply: FastifyReply): AbortSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DASHBOARD_FETCH_LIMITS.timeoutMs);
+  reply.raw.once('close', () => {
+    clearTimeout(timer);
+    if (!reply.raw.writableFinished) controller.abort();
+  });
+  return controller.signal;
+}
+
 function sendTargetError(reply: FastifyReply, result: Exclude<TargetResult, { ok: true }>): FastifyReply {
   return sendError(reply, result.status, result.code, result.message);
 }
@@ -89,11 +104,12 @@ async function fetchModels(
   reply: FastifyReply,
   provider: ApiProviderId,
   result: Extract<TargetResult, { ok: true }>,
+  signal: AbortSignal,
   cacheKey?: string,
 ): Promise<FastifyReply> {
   const { target } = result;
   try {
-    const models = await listModels(provider, target.apiKey, engineOptions(target));
+    const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
     if (cacheKey) cacheModels(cacheKey, models);
     return reply.status(200).send({ models });
   } catch (err) {
@@ -121,9 +137,10 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         const cached = modelsCache.get(cacheKey);
         if (cached && Date.now() < cached.expiresAt) return reply.status(200).send({ models: cached.models });
       }
-      const result = await storedTarget(deps, workspaceId, provider);
+      const signal = routeSignal(reply);
+      const result = await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(reply, provider, result, cacheKey);
+      return fetchModels(reply, provider, result, signal, cacheKey);
     },
   );
 
@@ -140,9 +157,10 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       if (!allow(`${workspaceId}:models`, UNSAVED_MODELS_LIMIT)) {
         return sendError(reply, 429, 'rate_limited', `Too many requests: ${UNSAVED_MODELS_LIMIT} per minute per workspace`);
       }
-      const result = await unsavedTarget(deps, provider, body.data.apiKey, body.data.baseUrl);
+      const signal = routeSignal(reply);
+      const result = await unsavedTarget(deps, provider, body.data.apiKey, body.data.baseUrl, signal);
       if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(reply, provider, result);
+      return fetchModels(reply, provider, result, signal);
     },
   );
 
@@ -162,9 +180,10 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       }
 
       const apiKey = body.apiKey?.trim();
+      const signal = routeSignal(reply);
       const result = apiKey
-        ? await unsavedTarget(deps, provider, apiKey, body.baseUrl)
-        : await storedTarget(deps, workspaceId, provider);
+        ? await unsavedTarget(deps, provider, apiKey, body.baseUrl, signal)
+        : await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
 
       const settings = await deps.store.getSettings(workspaceId);
@@ -179,6 +198,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       try {
         const outcome = await testConnection(provider, target.apiKey, model, {
           ...engineOptions(target),
+          timeoutMs: DASHBOARD_FETCH_LIMITS.timeoutMs,
           ...(effort ? { effort } : {}),
         });
         if (outcome.ok) return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model });

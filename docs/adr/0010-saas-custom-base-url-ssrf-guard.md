@@ -32,6 +32,12 @@ the engine only as the trusted `CreateReviewModelOptions.customBaseUrl`.
   failed response). The engine accepts this fetch as `CreateReviewModelOptions.customFetch`
   (used for `custom` only, primary and fallbacks); `listModels` / `testConnection` take it as
   `fetch`.
+- **Limits on every guarded call.** An overall timeout, an idle (no data) timeout and a response
+  size cap, combined with the caller's abort signal: dashboard calls 30 s / 15 s / 5 MB (the
+  routes also abort when the browser request goes away), worker review calls 10 min / 3 min /
+  32 MB. The URL is stored in its normalized WHATWG form (lowercase, punycode, dotted IPv4, no
+  query or fragment), and the guarded fetch re-parses the final request URL once and connects with
+  that same parse, so the host checked is the host connected to.
 - **One URL per workspace.** A workspace has one `custom` credential, so every `custom` entry —
   primary, heavy-duty or fallback — uses that one URL. If the URL fails the check at review time,
   a `custom` primary fails the review clearly; a `custom` fallback is left out and the engine

@@ -1,5 +1,5 @@
 import type { ApiProviderId, FetchLike } from '@mergepilot/engine';
-import { createSafeFetch } from '../core/safe-fetch.js';
+import { createSafeFetch, DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { AppStore } from '../core/types.js';
 import type { CredentialService } from '../credentials/service.js';
@@ -29,7 +29,12 @@ export interface ProviderTargetDeps {
 
 const fail = (status: number, code: string, message: string): TargetResult => ({ ok: false, status, code, message });
 
-async function customTarget(deps: ProviderTargetDeps, apiKey: string, baseUrl: string | undefined): Promise<TargetResult> {
+async function customTarget(
+  deps: ProviderTargetDeps,
+  apiKey: string,
+  baseUrl: string | undefined,
+  signal: AbortSignal | undefined,
+): Promise<TargetResult> {
   if (!baseUrl?.trim()) return fail(400, 'custom_base_url_required', 'Base URL is required for custom provider');
   let safe: string;
   try {
@@ -39,7 +44,11 @@ async function customTarget(deps: ProviderTargetDeps, apiKey: string, baseUrl: s
   }
   return {
     ok: true,
-    target: { apiKey, baseUrl: safe, fetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup }) },
+    target: {
+      apiKey,
+      baseUrl: safe,
+      fetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup, ...DASHBOARD_FETCH_LIMITS, signal }),
+    },
   };
 }
 
@@ -48,6 +57,7 @@ export async function storedTarget(
   deps: ProviderTargetDeps,
   workspaceId: string,
   provider: ApiProviderId,
+  signal?: AbortSignal,
 ): Promise<TargetResult> {
   const cred = await deps.store.getCredential(workspaceId, provider);
   if (!cred) return fail(404, 'key_not_found', `No API key configured for provider "${provider}"`);
@@ -57,7 +67,7 @@ export async function storedTarget(
   } catch {
     return fail(404, 'key_not_found', `The stored key for "${provider}" could not be read`);
   }
-  if (provider === 'custom') return customTarget(deps, apiKey, cred.baseUrl ?? undefined);
+  if (provider === 'custom') return customTarget(deps, apiKey, cred.baseUrl ?? undefined, signal);
   return { ok: true, target: { apiKey } };
 }
 
@@ -67,10 +77,11 @@ export async function unsavedTarget(
   provider: ApiProviderId,
   apiKey: string,
   baseUrl: string | undefined,
+  signal?: AbortSignal,
 ): Promise<TargetResult> {
   const key = apiKey.trim();
   if (!key) return fail(400, 'validation_error', 'apiKey is required');
-  if (provider === 'custom') return customTarget(deps, key, baseUrl);
+  if (provider === 'custom') return customTarget(deps, key, baseUrl, signal);
   if (baseUrl?.trim()) return fail(400, 'base_url_not_allowed', 'Only the custom provider takes a base URL');
   return { ok: true, target: { apiKey: key } };
 }

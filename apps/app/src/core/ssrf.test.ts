@@ -117,4 +117,40 @@ describe('assertSafeBaseUrl', () => {
     const sanitized = await assertSafeBaseUrl('https://api.custom-model.com/v1///', mockLookup);
     expect(sanitized).toBe('https://api.custom-model.com/v1');
   });
+
+  it('sees through numeric, octal, hex, uppercase, backslash and trailing-dot spellings of private hosts', async () => {
+    const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+    for (const url of [
+      'https://2130706433/v1',
+      'https://0x7f.1/v1',
+      'https://0177.0.0.1/v1',
+      'https://0x7f000001/v1',
+      'https://127.1/v1',
+      'https://127.0.0.1./v1',
+      'HTTPS://169.254.169.254/latest',
+      'https://[::ffff:127.0.0.1]/v1',
+      'https://[::1]:8443/v1',
+      'https:\\\\127.0.0.1\\v1',
+      'https://LOCALHOST/v1',
+      'https://api.LocalHost./v1',
+    ]) {
+      await expect(assertSafeBaseUrl(url, lookup), url).rejects.toThrow(SsrFValidationError);
+    }
+  });
+
+  it('rejects user info hiding the real host, zone ids, queries and fragments', async () => {
+    const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+    await expect(assertSafeBaseUrl('https://llm.example.com@127.0.0.1/v1', lookup)).rejects.toThrow();
+    await expect(assertSafeBaseUrl('https://[fe80::1%25eth0]/v1', lookup)).rejects.toThrow(SsrFValidationError);
+    await expect(assertSafeBaseUrl('https://llm.example.com/v1?x=1', lookup)).rejects.toThrow('query');
+    await expect(assertSafeBaseUrl('https://llm.example.com/v1#@127.0.0.1', lookup)).rejects.toThrow('fragment');
+  });
+
+  it('stores the normalized URL: lowercase, punycode, explicit port, no trailing slash', async () => {
+    const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+    expect(await assertSafeBaseUrl('HTTPS://LLM.Example.com:8443/V1/', lookup)).toBe('https://llm.example.com:8443/V1');
+    expect(await assertSafeBaseUrl('https://bücher.example/v1', lookup)).toBe('https://xn--bcher-kva.example/v1');
+    expect(await assertSafeBaseUrl('https://llm.example.com:443/v1', lookup)).toBe('https://llm.example.com/v1');
+  });
 });
+

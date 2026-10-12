@@ -26,9 +26,9 @@ import {
   type ReviewRunResultPayload,
   type ReviewRunStatus,
 } from '../core/types.js';
-import { createSafeFetch } from '../core/safe-fetch.js';
+import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { executeReview } from './execute-review.js';
-import { chooseModel, customBaseUrlFor, usedModel, type ModelChoice } from './model-choice.js';
+import { changedLinesOf, chooseModel, customBaseUrlFor, usedModel, type ModelChoice } from './model-choice.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { startRunHeartbeat } from './run-heartbeat.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
@@ -148,10 +148,12 @@ export async function processReviewJob(
     const prTitle = typeof prRecord.title === 'string' ? prRecord.title : '';
     const prBody = typeof prRecord.body === 'string' ? prRecord.body : '';
 
-    const additions = typeof prRecord.additions === 'number' ? prRecord.additions : 0;
-    const deletions = typeof prRecord.deletions === 'number' ? prRecord.deletions : 0;
-    choice = chooseModel(settings, additions + deletions);
-    if (choice.heavy) deps.log?.(`Large PR (${additions + deletions} changed lines): using the heavy-duty model`);
+    // Only needed when a heavy model is set: no extra GitHub call otherwise.
+    const changedLines = settings.heavyModel
+      ? await changedLinesOf(client, { owner, repo, pull_number: job.pullNumber }, prRecord)
+      : 0;
+    choice = chooseModel(settings, changedLines);
+    if (choice.heavy) deps.log?.(`Large PR (${changedLines} changed lines): using the heavy-duty model`);
     const { provider: chosenProvider, model: chosenModel, effort: chosenEffort } = choice;
 
     const repoConfigResult = await loadRepoConfig(client, { owner, repo, baseSha: job.baseSha });
@@ -280,7 +282,7 @@ export async function processReviewJob(
       model = await createReviewModel(effectiveConfig, credStore, {
         cwd: process.cwd(),
         ...(customBaseUrl
-          ? { customBaseUrl, customFetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup }) }
+          ? { customBaseUrl, customFetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup, ...REVIEW_FETCH_LIMITS }) }
           : {}),
       });
     }

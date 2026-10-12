@@ -1,4 +1,5 @@
 import { isApiProviderId } from '@mergepilot/engine';
+import { listPullRequestFiles, type GitHubClient } from '@mergepilot/github';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { ApiProvider, AppStore, WorkspaceSettings } from '../core/types.js';
 
@@ -27,6 +28,21 @@ export function chooseModel(settings: WorkspaceSettings, changedLines: number): 
     };
   }
   return { provider: settings.provider, model: settings.model, effort: settings.effort ?? null, heavy: false };
+}
+
+/**
+ * The PR's changed lines (additions + deletions) for the heavy-model threshold. Taken from the
+ * PR payload; when it does not carry the counts, they are summed from the PR's file list so a
+ * missing field never silently keeps a large PR on the light model.
+ */
+export async function changedLinesOf(
+  client: GitHubClient,
+  params: { owner: string; repo: string; pull_number: number },
+  pr: { additions?: unknown; deletions?: unknown },
+): Promise<number> {
+  if (typeof pr.additions === 'number' && typeof pr.deletions === 'number') return pr.additions + pr.deletions;
+  const { files } = await listPullRequestFiles(client, params);
+  return files.reduce((sum, f) => sum + f.additions + f.deletions, 0);
 }
 
 export interface UsedModel {

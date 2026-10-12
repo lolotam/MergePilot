@@ -33,7 +33,7 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect(res.json()).toEqual({ ok: true, ms: 120, model: 'gpt-5' });
     const call = vi.mocked(testConnection).mock.calls[0];
     expect(call?.[1]).toBe(keyFor('o'));
-    expect(call?.[3]).toEqual({ effort: 'high' });
+    expect(call?.[3]).toEqual({ effort: 'high', timeoutMs: 30000 });
   });
 
   it('answers ok:false with the category and a redacted message', async () => {

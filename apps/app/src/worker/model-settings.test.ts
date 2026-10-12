@@ -47,6 +47,27 @@ describe('worker: heavy-duty model, effort, fallback and minimum severity (J2)',
     expect(large.getCapturedConfig()?.effort).toBeUndefined();
   });
 
+  it('counts changed lines from the PR files when the PR payload has no additions/deletions', async () => {
+    const large = createHarness({ settings: heavySettings, omitCounts: true, fileLines: 900 });
+    await processReviewJob(large.job, large.deps);
+    expect(large.getCapturedConfig()?.model).toBe('gpt-5-pro');
+
+    const small = createHarness({ settings: heavySettings, omitCounts: true, fileLines: 20 });
+    await processReviewJob(small.job, small.deps);
+    expect(small.getCapturedConfig()?.model).toBe('claude-3-5-haiku');
+  });
+
+  it('uses the PR payload counts without listing files first, and skips counting without a heavy model', async () => {
+    const withCounts = createHarness({ settings: heavySettings, additions: 400, deletions: 100, fileLines: 1 });
+    await processReviewJob(withCounts.job, withCounts.deps);
+    expect(withCounts.getCapturedConfig()?.model).toBe('gpt-5-pro');
+    const listedBeforeReview = withCounts.client.listPullRequestFilesPage.mock.calls.length;
+
+    const noHeavy = createHarness({ settings: { provider: 'anthropic', model: 'm' }, omitCounts: true });
+    await processReviewJob(noHeavy.job, noHeavy.deps);
+    expect(noHeavy.client.listPullRequestFilesPage.mock.calls.length).toBe(listedBeforeReview);
+  });
+
   it('passes the fallback chain and the minimum severity, with no baseUrl on any entry', async () => {
     const h = createHarness({
       settings: {

@@ -112,6 +112,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     const options = vi.mocked(listModels).mock.calls[0]?.[2];
     expect(options?.baseUrl).toBe('https://llm.example.com/v1');
     expect(options?.fetch).toBe(customFetch);
+    expect(options?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('custom: re-checks the stored URL at call time (DNS rebinding after the key was saved)', async () => {
