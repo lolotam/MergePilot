@@ -122,12 +122,22 @@ export function useRunsQuery(workspaceId: string, params?: GetRunsParams | numbe
   });
 }
 
+/** How often a list or detail showing a queued/running run asks the server again. */
+export const ACTIVE_RUN_POLL_MS = 5_000;
+
+function isActiveRunStatus(status: string | undefined): boolean {
+  return status === 'queued' || status === 'running';
+}
+
 /** The runs page list, grouped by PR. */
 export function useRunGroupsQuery(workspaceId: string, params: GetRunsParams) {
   return useQuery({
     queryKey: ['workspaces', workspaceId, 'runs', 'groups', params],
     queryFn: () => api.getRunGroups(workspaceId, params),
     enabled: Boolean(workspaceId),
+    // While a shown run is queued/running, poll so its live timer ends at the stored duration.
+    refetchInterval: (query) =>
+      query.state.data?.groups.some((g) => g.runs.some((r) => isActiveRunStatus(r.status))) ? ACTIVE_RUN_POLL_MS : false,
   });
 }
 
@@ -136,6 +146,7 @@ export function useRunDetailQuery(workspaceId: string, runId: string) {
     queryKey: ['workspaces', workspaceId, 'runs', runId, 'detail'],
     queryFn: () => api.getRun(workspaceId, runId),
     enabled: Boolean(workspaceId && runId),
+    refetchInterval: (query) => (isActiveRunStatus(query.state.data?.run.status) ? ACTIVE_RUN_POLL_MS : false),
   });
 }
 
