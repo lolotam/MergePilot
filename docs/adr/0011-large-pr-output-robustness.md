@@ -51,3 +51,12 @@ Investigation revealed the root causes:
 - Protects user budget: every retry and batched sub-call passes the same gate, priced with thinking headroom, and spend accumulates across calls even on providers that report no usage.
 - A finished-but-invalid answer fails fast as `invalid-json` instead of paying for retries and batches.
 - Gracefully degrades to chunked review when diff output exceeds single-response token boundaries.
+
+## Amendment — JSON-mode fallback scope
+
+The compatible adapter retries once without `response_format` only when the HTTP 400 body says the
+server rejected JSON mode or an unknown/unsupported request field (`response_format`, `json_object`,
+"unsupported parameter", "unknown field", "unrecognized", "not supported", "extra inputs",
+"additional properties"). Any other 400 (context too long, invalid model) is a real error: it is not
+retried and keeps its original message. The first response body is read before the retry so its
+connection is released.

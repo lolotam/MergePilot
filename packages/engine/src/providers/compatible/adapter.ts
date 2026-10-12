@@ -24,6 +24,13 @@ export interface OpenAICompatibleAdapterOptions {
   fetch?: FetchLike;
 }
 
+/**
+ * Wordings compatible servers use when they reject JSON mode or an extra request field. Any other
+ * 400 (context too long, bad model id, …) is a real error and is not retried.
+ */
+const JSON_MODE_REJECTED =
+  /response[_ ]format|json[_ ]object|json mode|unsupported (?:parameter|field|argument)|unknown (?:parameter|field|argument)|unrecognized|not supported|extra (?:inputs|fields)|additional properties/i;
+
 /** Presets known to support response_format: { type: "json_object" }. */
 const JSON_OBJECT_SUPPORTED_PRESETS = new Set<string>([
   'openrouter',
@@ -201,7 +208,7 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
     // Retry without JSON mode only when the 400 is about JSON mode itself; read the first body so
     // its connection is released, and keep that body for the error when it is not.
     const firstErrorBody = !response.ok && response.status === 400 && sendsJsonObject ? await response.text() : '';
-    if (firstErrorBody && /response_format|json_object|json mode/i.test(firstErrorBody)) {
+    if (firstErrorBody && JSON_MODE_REJECTED.test(firstErrorBody)) {
       try {
         const retryResponse = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
           method: 'POST',
