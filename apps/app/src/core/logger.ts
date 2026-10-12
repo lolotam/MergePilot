@@ -68,6 +68,19 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
  * depth). Anything else (request objects, Dates, class instances) is passed
  * through unchanged. The caller's values are never mutated.
  */
+const ID_FIELDS = new Set([
+  'reqId',
+  'workspace',
+  'workspaceId',
+  'userId',
+  'runId',
+  'jobId',
+  'deliveryId',
+  'installationId',
+  'targetId',
+]);
+const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 function sanitizeValue(val: unknown, secrets: Secret[], depth: number): unknown {
   if (typeof val === 'string') return redactText(val, secrets);
   if (val instanceof Error) return sanitizeError(val, secrets);
@@ -76,7 +89,12 @@ function sanitizeValue(val: unknown, secrets: Secret[], depth: number): unknown 
   if (isPlainObject(val)) {
     const copy: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(val)) {
-      copy[key] = sanitizeValue(item, secrets, depth + 1);
+      // Our own identifiers (UUIDs, cuid-like ids, delivery ids) look random to the entropy
+      // pattern; they are not secrets and are what an operator searches the logs by.
+      copy[key] =
+        ID_FIELDS.has(key) && typeof item === 'string' && SAFE_ID.test(item)
+          ? item
+          : sanitizeValue(item, secrets, depth + 1);
     }
     return copy;
   }

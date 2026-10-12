@@ -184,4 +184,17 @@ describe('core/logger sanitizing never mutates caller values', () => {
     expect(context.inner.note).toContain('[REDACTED:anthropic]');
     expect(context.list[0]).toContain('[REDACTED:anthropic]');
   });
+
+  it('keeps our own ids readable while still redacting secret-looking free text', () => {
+    const { stream, lines } = createCapture();
+    const log = createLogger({ service: 'worker', stream });
+    const workspace = 'Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z';
+    const runId = '880f7ffa-d04c-4334-822f-342f3399a4d9';
+    const fake = ['s', 'k-', 'ant-', 'z'.repeat(40)].join('');
+    log.info({ workspace, runId, detail: `failed with ${fake}` }, 'job');
+    expect(lines[0]?.workspace).toBe(workspace);
+    expect(lines[0]?.runId).toBe(runId);
+    expect(String(lines[0]?.detail)).not.toContain(fake);
+  });
 });
+
