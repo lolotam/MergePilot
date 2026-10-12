@@ -61,7 +61,6 @@ PORT=3000
 
 # 2. صورة Docker المنشورة من مستودع GitHub Packages (GHCR)
 # استبدل COMMIT_SHA برقم الـ commit المراد نشره، مثل: ghcr.io/lolotam/mergepilot:5008209
-MERGEPILOT_IMAGE=ghcr.io/lolotam/mergepilot:latest
 
 # 3. قواعد البيانات والخدمات الداخلية (ضمن شبكة Dokploy الداخلية)
 DATABASE_URL=postgres://postgres:StrongDbPasswordHere@postgres:5432/mergepilot
@@ -99,7 +98,7 @@ WORKER_CONCURRENCY=2
 ## الخطوة 4: النشر الأول (First Deploy)
 
 1. في لوحة Dokploy، اضغط على زر **Deploy**.
-2. سيقوم Dokploy بسحب الصورة (`MERGEPILOT_IMAGE`) وتشغيل الحاويات بالترتيب التالي:
+2. سيقوم Dokploy بسحب الصورة (المكتوبة في سطر `x-image` في ملف الـ compose) وتشغيل الحاويات بالترتيب التالي:
    - حاوية `postgres` و `redis` أولاً حتى تصبحا في حالة جاهزية (`healthy`).
    - حاوية `migrate` لتطبيق تعديلات الجداول في قاعدة البيانات مرة واحدة والانتهاء بنجاح (`exited 0`).
    - حاوية `web` لاستقبال الطلبات وتوجيهها عبر Traefik.
@@ -147,11 +146,11 @@ WORKER_CONCURRENCY=2
    `ghcr.io/lolotam/mergepilot:<COMMIT_SHA>`
 2. **للتحديث:**
    - ادخل إلى Dokploy وافتح تبويب **Environment**.
-   - عدّل قيمة `MERGEPILOT_IMAGE` إلى الـ SHA الجديد، مثلاً:
-     `MERGEPILOT_IMAGE=ghcr.io/lolotam/mergepilot:abcdef12`
+   - عدّل سطر `x-image` في ملف الـ compose إلى الـ SHA الجديد، مثلاً:
+     `x-image: &image ghcr.io/lolotam/mergepilot:abcdef12`
    - احفظ واضغط **Deploy**.
 3. **للتراجع الفوري (Rollback):**
-   - إذا حدث أي طارئ في الإصدار الجديد، كل ما عليك فعله هو إعادة قيمة `MERGEPILOT_IMAGE` إلى الـ SHA السابق الذي كان يعمل بنجاح.
+   - إذا حدث أي طارئ في الإصدار الجديد، كل ما عليك فعله هو إعادة سطر `x-image` إلى الـ SHA السابق الذي كان يعمل بنجاح.
    - اضغط **Deploy** وسيعود النظام فوراً للإصدار السابق بدون توقف للخدمة.
 
 ---
