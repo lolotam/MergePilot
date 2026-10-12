@@ -174,6 +174,10 @@ describe('default thinking headroom (P0.1)', () => {
     // DeepSeek reasoner and V4 think at effort high by default: they reserve the `high` budget
     expect(deepseek.requestedOutputTokens({ model: 'deepseek-reasoner', maxOutputTokens: 4096 })).toBe(4096 + 16384);
     expect(deepseek.requestedOutputTokens({ model: 'deepseek-v4-pro', maxOutputTokens: 4096 })).toBe(4096 + 16384);
+    // Canonical ids think by default too, and a configured effort is sized as the mapped one.
+    expect(deepseek.requestedOutputTokens({ model: 'deepseek-flash', maxOutputTokens: 4096 })).toBe(4096 + 16384);
+    expect(deepseek.requestedOutputTokens({ model: 'deepseek-flash', maxOutputTokens: 4096, effort: 'medium' })).toBe(4096 + 16384);
+    expect(deepseek.requestedOutputTokens({ model: 'deepseek-flash', maxOutputTokens: 4096, effort: 'off' })).toBe(4096);
     // DeepSeek chat does not add headroom
     expect(deepseek.requestedOutputTokens({ model: 'deepseek-chat', maxOutputTokens: 4096 })).toBe(4096);
 

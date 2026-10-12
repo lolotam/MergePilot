@@ -94,7 +94,7 @@ export function compatibleEffortFields(
   }
   if (style === 'deepseek') {
     if (value === 'off' || value === 'none') return { thinking: { type: 'disabled' } };
-    const graded = DEEPSEEK_EFFORTS[value];
+    const graded = deepseekEffort(value);
     return graded ? { thinking: { type: 'enabled' }, reasoning_effort: graded } : {};
   }
   return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
@@ -109,6 +109,11 @@ const DEEPSEEK_EFFORTS: Readonly<Record<string, string>> = Object.freeze({
   xhigh: 'high',
   max: 'max',
 });
+
+/** The effort DeepSeek really runs at for this configured value (undefined when it sends none). */
+export function deepseekEffort(effort: string | undefined): string | undefined {
+  return DEEPSEEK_EFFORTS[normalize(effort)];
+}
 
 /**
  * Output tokens reserved when a model thinks by default and no effort is configured. DeepSeek V4
@@ -190,7 +195,8 @@ export function isCompatibleReasoningModel(
     return true;
   }
   // DeepSeek V4 and later think by default on the official API.
-  if ((style === 'deepseek' || provider === 'deepseek') && /deepseek-v(?:[4-9]|\d{2})/.test(lowerModel)) {
+  // Versioned ids (deepseek-v4-pro) and the current canonical ids (deepseek-flash, deepseek-pro).
+  if ((style === 'deepseek' || provider === 'deepseek') && /deepseek-(?:v(?:[4-9]|\d{2})|flash|pro)\b/.test(lowerModel)) {
     return true;
   }
   // NVIDIA NIM reasoning models (Nemotron, R1 / QwQ distills, `-reasoning` / `thinking` ids).

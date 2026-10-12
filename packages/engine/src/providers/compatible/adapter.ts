@@ -9,7 +9,7 @@ import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
-import { DEFAULT_THINKING_HEADROOM, compatibleEffortFields, defaultThinkingHeadroom, isCompatibleReasoningModel, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
+import { DEFAULT_THINKING_HEADROOM, compatibleEffortFields, deepseekEffort, defaultThinkingHeadroom, isCompatibleReasoningModel, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
 import { bearerHeaders, failureFromResponse, failureFromThrown, redactKey, type FetchLike, type KeyInput } from '../http.js';
 import type { ApiProviderId } from '../ids.js';
 import { providerEntry, resolveBaseUrl } from '../registry.js';
@@ -129,7 +129,9 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
       const effortFields = compatibleEffortFields(this.#style, options.effort);
       const thinks = Object.keys(effortFields).length > 0 && !isOff;
       // `on` (GLM) and other non-graded switches enable thinking without a size: use the default.
-      const headroom = thinks ? thinkingHeadroom(options.effort) || DEFAULT_THINKING_HEADROOM : 0;
+      // DeepSeek runs a mapped effort (medium -> high), so the headroom follows what is really sent.
+      const sized = this.#style === 'deepseek' ? deepseekEffort(options.effort) : options.effort;
+      const headroom = thinks ? thinkingHeadroom(sized) || DEFAULT_THINKING_HEADROOM : 0;
       return options.maxOutputTokens + headroom;
     }
     const thinksByDefault = isCompatibleReasoningModel(this.provider, options.model, this.#style);

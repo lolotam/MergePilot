@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import { parseJsonLenient } from './json-lenient.js';
 import { extractCandidateObjects, isTruncatedAnswer } from './answer.js';
 import type { Finding } from './types.js';
 
@@ -241,7 +242,7 @@ export function parseVerifyAnswer(
   for (const candidate of candidates) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(candidate);
+      parsed = parseJsonLenient(candidate);
     } catch (err) {
       if (!firstParseError) {
         firstParseError = err instanceof Error ? err.message : String(err);
