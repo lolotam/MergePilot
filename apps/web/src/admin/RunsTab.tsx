@@ -40,7 +40,7 @@ export function RunsTab() {
   else if (runs.length === 0) body = <StateMessage>{t('noRunsFound')}</StateMessage>;
   else {
     body = (
-      <table className="w-full text-start text-sm">
+      <table className="w-full text-start text-xs">
         <thead className={theadClass}>
           <tr>
             <th className={thClass}>{t('colWorkspace')}</th>
@@ -53,13 +53,13 @@ export function RunsTab() {
         </thead>
         <tbody className={tbodyClass}>
           {runs.map((run) => (
-            <tr key={run.id} className="hover:bg-gray-50/50 dark:hover:bg-ink-800/40">
-              <td className={`${tdClass} whitespace-nowrap`}>
+            <tr key={run.id} className="hover:bg-ink-50/50 dark:hover:bg-ink-800/40 transition-colors">
+              <td className={`${tdClass} whitespace-nowrap font-medium text-ink-900 dark:text-ink-100`}>
                 {run.workspaceName ?? (
-                  <span className="text-gray-400">{t('adminDeletedWorkspace')}</span>
+                  <span className="text-ink-400">{t('adminDeletedWorkspace')}</span>
                 )}
               </td>
-              <td className={`${tdClass} font-medium whitespace-nowrap`} dir="ltr">
+              <td className={`${tdClass} font-semibold whitespace-nowrap text-ink-900 dark:text-ink-100`} dir="ltr">
                 {run.repoFullName}
               </td>
               <td className={tdClass}>
@@ -68,7 +68,7 @@ export function RunsTab() {
                   target="_blank"
                   rel="noreferrer"
                   title={t('viewPrOnGitHub')}
-                  className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 hover:underline font-mono text-xs font-semibold"
+                  className="inline-flex items-center gap-1 text-brand-700 dark:text-brand-300 hover:underline font-mono text-xs font-semibold"
                 >
                   #{run.pullNumber}
                   <ExternalLink className="w-3 h-3" />
@@ -77,10 +77,10 @@ export function RunsTab() {
               <td className={tdClass}>
                 <StatusBadge status={run.status} />
               </td>
-              <td className={`${tdClass} font-mono text-xs whitespace-nowrap`}>
+              <td className={`${tdClass} font-mono text-xs whitespace-nowrap text-ink-900 dark:text-ink-100`}>
                 {formatUsd(run.costUsd, language)}
               </td>
-              <td className={`${tdClass} text-xs whitespace-nowrap text-gray-500 dark:text-gray-400`}>
+              <td className={`${tdClass} text-xs whitespace-nowrap text-ink-500 dark:text-ink-400`}>
                 {formatDateTime(run.createdAt, language)}
               </td>
             </tr>

@@ -91,9 +91,9 @@ export function LandingPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-ink-950 text-ink-800 dark:text-ink-100 flex flex-col font-sans">
-      {/* Public Header */}
-      <header className="sticky top-0 z-40 bg-white/90 dark:bg-ink-900/90 backdrop-blur-md border-b border-gray-200 dark:border-ink-800">
+    <div className="min-h-screen bg-[#FBFBFA] dark:bg-ink-950 text-ink-800 dark:text-ink-100 flex flex-col font-sans">
+      {/* Public Top Bar */}
+      <header className="sticky top-0 z-40 bg-[#FBFBFA]/90 dark:bg-ink-900/90 backdrop-blur-md border-b border-ink-200 dark:border-ink-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16 gap-4">
           <Link to="/" className="flex items-center gap-2" aria-label={t('appName')}>
             <Logo size="md" />
@@ -104,7 +104,7 @@ export function LandingPage() {
               type="button"
               onClick={toggleLanguage}
               aria-label={t('languageToggle')}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-ink-700 hover:bg-gray-100 dark:hover:bg-ink-800 transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-900 hover:bg-ink-50 dark:hover:bg-ink-800 transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               <Globe className="w-3.5 h-3.5" />
               <span>{t('languageToggle')}</span>
@@ -112,7 +112,7 @@ export function LandingPage() {
 
             <Link
               to="/login"
-              className="whitespace-nowrap px-4 py-2 text-xs font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="whitespace-nowrap px-5 py-2 text-xs font-semibold rounded-full bg-brand-600 hover:bg-brand-700 text-white transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               {t('signInCTA')}
             </Link>
@@ -121,10 +121,10 @@ export function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden pt-12 pb-20 sm:pt-20 sm:pb-28 border-b border-gray-200 dark:border-ink-800 bg-linear-to-b from-white via-gray-50/50 to-gray-100/30 dark:from-ink-900 dark:via-ink-950/80 dark:to-ink-950">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 mb-8 rounded-full bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800/80 text-brand-700 dark:text-brand-300 text-xs font-medium">
-            <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
+      <section className="relative overflow-hidden pt-16 pb-20 sm:pt-24 sm:pb-28 border-b border-ink-200 dark:border-ink-800">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 mb-6 rounded-full bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-800 text-brand-700 dark:text-brand-300 text-xs font-medium">
+            <span className="w-2 h-2 rounded-full bg-brand-500" />
             <span>{t('appTagline')}</span>
           </div>
 
@@ -132,18 +132,18 @@ export function LandingPage() {
             <Logo size="lg" />
           </div>
 
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-ink-900 dark:text-ink-50 mb-6 leading-tight sm:leading-tight">
+          <h1 className="font-serif text-3xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-ink-900 dark:text-ink-50 mb-6 leading-tight sm:leading-tight">
             {t('landingHeroTitle')}
           </h1>
 
-          <p className="text-base sm:text-xl text-gray-600 dark:text-gray-300 mb-10 max-w-3xl mx-auto leading-relaxed">
+          <p className="text-base sm:text-lg text-ink-500 dark:text-ink-400 mb-10 max-w-2xl mx-auto font-sans leading-relaxed">
             {t('landingHeroSubtitle')}
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               to="/login"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-sm shadow-md transition-all hover:shadow-lg focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3 rounded-full bg-brand-600 hover:bg-brand-700 text-white font-medium text-sm transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               <span>{t('landingGetStarted')}</span>
               <Arrow className="w-4 h-4" />
@@ -151,7 +151,7 @@ export function LandingPage() {
 
             <Link
               to="/login"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-900 hover:bg-gray-50 dark:hover:bg-ink-800 text-ink-800 dark:text-ink-100 font-semibold text-sm transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-900 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-800 dark:text-ink-100 font-medium text-sm transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               <Github className="w-4 h-4" />
               <span>{t('landingInstallGitHub')}</span>
@@ -161,35 +161,37 @@ export function LandingPage() {
       </section>
 
       {/* How It Works Section */}
-      <section className="py-20 sm:py-28 max-w-7xl mx-auto px-4 sm:px-6 w-full border-b border-gray-200 dark:border-ink-800">
-        <div className="text-center max-w-2xl mx-auto mb-16">
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink-900 dark:text-ink-50 mb-3">
+      <section className="py-20 sm:py-24 max-w-7xl mx-auto px-4 sm:px-6 w-full border-b border-ink-200 dark:border-ink-800">
+        <div className="text-center max-w-2xl mx-auto mb-14">
+          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-ink-900 dark:text-ink-50 mb-3">
             {t('howItWorksTitle')}
           </h2>
-          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
+          <p className="text-sm sm:text-base text-ink-500 dark:text-ink-400 font-sans">
             {t('howItWorksSubtitle')}
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {steps.map((st) => {
             const Icon = st.icon;
             return (
               <div
                 key={st.num}
-                className="relative p-6 sm:p-8 rounded-2xl bg-white dark:bg-ink-900 border border-gray-200 dark:border-ink-800 shadow-xs flex flex-col justify-between"
+                className="p-6 rounded-[10px] bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-700 shadow-xs flex flex-col justify-between"
               >
                 <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <span className="text-xs font-mono font-bold text-brand-600 dark:text-brand-400 px-2.5 py-1 rounded-md bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-900">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-xs font-mono font-bold text-brand-700 dark:text-brand-300 px-2.5 py-1 rounded-full bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-800">
                       {st.num}
                     </span>
-                    <Icon className="w-6 h-6 text-brand-600 dark:text-brand-400" />
+                    <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 flex items-center justify-center">
+                      <Icon className="w-4 h-4" />
+                    </div>
                   </div>
-                  <h3 className="text-lg font-bold text-ink-900 dark:text-ink-50 mb-2">
+                  <h3 className="text-base font-bold text-ink-900 dark:text-ink-50 mb-2">
                     {st.title}
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+                  <p className="text-xs sm:text-sm text-ink-500 dark:text-ink-400 leading-relaxed font-sans">
                     {st.desc}
                   </p>
                 </div>
@@ -200,12 +202,12 @@ export function LandingPage() {
       </section>
 
       {/* Features Grid */}
-      <section className="py-20 sm:py-28 max-w-7xl mx-auto px-4 sm:px-6 w-full border-b border-gray-200 dark:border-ink-800">
-        <div className="text-center max-w-2xl mx-auto mb-16">
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink-900 dark:text-ink-50 mb-3">
+      <section className="py-20 sm:py-24 max-w-7xl mx-auto px-4 sm:px-6 w-full border-b border-ink-200 dark:border-ink-800">
+        <div className="text-center max-w-2xl mx-auto mb-14">
+          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-ink-900 dark:text-ink-50 mb-3">
             {t('featuresTitle')}
           </h2>
-          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
+          <p className="text-sm sm:text-base text-ink-500 dark:text-ink-400 font-sans">
             {t('featuresSubtitle')}
           </p>
         </div>
@@ -216,15 +218,15 @@ export function LandingPage() {
             return (
               <div
                 key={idx}
-                className="p-6 rounded-2xl bg-white dark:bg-ink-900 border border-gray-200 dark:border-ink-800 shadow-xs hover:border-brand-500/50 transition-colors"
+                className="p-6 rounded-[10px] bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-700 shadow-xs transition-colors"
               >
-                <div className="w-10 h-10 rounded-xl bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 flex items-center justify-center mb-4">
-                  <Icon className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 flex items-center justify-center mb-4">
+                  <Icon className="w-4 h-4" />
                 </div>
                 <h3 className="text-base font-bold text-ink-900 dark:text-ink-50 mb-2">
                   {feat.title}
                 </h3>
-                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-ink-500 dark:text-ink-400 leading-relaxed font-sans">
                   {feat.desc}
                 </p>
               </div>
@@ -234,12 +236,12 @@ export function LandingPage() {
       </section>
 
       {/* AI Providers Row */}
-      <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 w-full border-b border-gray-200 dark:border-ink-800">
+      <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 w-full border-b border-ink-200 dark:border-ink-800">
         <div className="text-center max-w-2xl mx-auto mb-12">
-          <h2 className="text-xl sm:text-2xl font-extrabold text-ink-900 dark:text-ink-50 mb-2">
+          <h2 className="font-serif text-xl sm:text-2xl font-bold text-ink-900 dark:text-ink-50 mb-2">
             {t('providersTitle')}
           </h2>
-          <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
+          <p className="text-xs sm:text-sm text-ink-500 dark:text-ink-400 font-sans">
             {t('providersSubtitle')}
           </p>
         </div>
@@ -248,12 +250,12 @@ export function LandingPage() {
           {providers.map((p) => (
             <div
               key={p.name}
-              className="p-6 rounded-xl bg-white dark:bg-ink-900 border border-gray-200 dark:border-ink-800 text-center"
+              className="p-6 rounded-[10px] bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-700 text-center shadow-xs"
             >
-              <h3 className="font-bold text-lg text-ink-900 dark:text-ink-50 mb-1">
+              <h3 className="font-bold text-base text-ink-900 dark:text-ink-50 mb-1">
                 {p.name}
               </h3>
-              <p className="text-xs text-brand-600 dark:text-brand-400 font-mono">
+              <p className="text-xs text-brand-700 dark:text-brand-300 font-mono">
                 {p.models}
               </p>
             </div>
@@ -262,15 +264,15 @@ export function LandingPage() {
       </section>
 
       {/* FAQ Section */}
-      <section className="py-20 sm:py-28 max-w-4xl mx-auto px-4 sm:px-6 w-full border-b border-gray-200 dark:border-ink-800">
-        <div className="text-center max-w-2xl mx-auto mb-16">
-          <div className="inline-flex items-center gap-1.5 p-2 rounded-xl bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 mb-3">
-            <HelpCircle className="w-5 h-5" />
+      <section className="py-20 sm:py-24 max-w-4xl mx-auto px-4 sm:px-6 w-full border-b border-ink-200 dark:border-ink-800">
+        <div className="text-center max-w-2xl mx-auto mb-14">
+          <div className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 mb-3">
+            <HelpCircle className="w-4 h-4" />
           </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-ink-900 dark:text-ink-50 mb-3">
+          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-ink-900 dark:text-ink-50 mb-3">
             {t('faqTitle')}
           </h2>
-          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
+          <p className="text-sm sm:text-base text-ink-500 dark:text-ink-400 font-sans">
             {t('faqSubtitle')}
           </p>
         </div>
@@ -279,12 +281,12 @@ export function LandingPage() {
           {faqs.map((faq, idx) => (
             <div
               key={idx}
-              className="p-6 rounded-xl bg-white dark:bg-ink-900 border border-gray-200 dark:border-ink-800 shadow-xs"
+              className="p-6 rounded-[10px] bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-700 shadow-xs"
             >
               <h3 className="text-base font-bold text-ink-900 dark:text-ink-50 mb-2">
                 {faq.q}
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+              <p className="text-xs sm:text-sm text-ink-500 dark:text-ink-400 leading-relaxed font-sans">
                 {faq.a}
               </p>
             </div>
@@ -293,17 +295,17 @@ export function LandingPage() {
       </section>
 
       {/* CTA Bottom Banner */}
-      <section className="py-16 sm:py-24 bg-linear-to-r from-brand-700 to-brand-900 text-white text-center px-4 sm:px-6">
-        <div className="max-w-3xl mx-auto">
-          <h2 className="text-2xl sm:text-4xl font-extrabold mb-4">
+      <section className="py-16 sm:py-24 bg-brand-700 text-white text-center px-4 sm:px-6">
+        <div className="max-w-2xl mx-auto">
+          <h2 className="font-serif text-2xl sm:text-4xl font-bold mb-4">
             {t('ctaBannerTitle')}
           </h2>
-          <p className="text-sm sm:text-base text-brand-100 mb-8 max-w-xl mx-auto">
+          <p className="text-sm sm:text-base text-brand-100 mb-8 max-w-xl mx-auto font-sans">
             {t('ctaBannerSubtitle')}
           </p>
           <Link
             to="/login"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white hover:bg-gray-100 text-brand-800 font-bold text-sm shadow-md transition-colors"
+            className="inline-flex items-center gap-2 px-8 py-3 rounded-full bg-white hover:bg-ink-50 text-brand-800 font-semibold text-sm shadow-xs transition-colors"
           >
             <span>{t('landingGetStarted')}</span>
             <Arrow className="w-4 h-4" />

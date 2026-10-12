@@ -21,7 +21,7 @@ export function WorkspacesTab() {
   else if (workspaces.length === 0) body = <StateMessage>{t('noWorkspacesFound')}</StateMessage>;
   else {
     body = (
-      <table className="w-full text-start text-sm">
+      <table className="w-full text-start text-xs">
         <thead className={theadClass}>
           <tr>
             <th className={thClass}>{t('colWorkspace')}</th>
@@ -38,23 +38,23 @@ export function WorkspacesTab() {
         </thead>
         <tbody className={tbodyClass}>
           {workspaces.map((ws) => (
-            <tr key={ws.id} className="hover:bg-gray-50/50 dark:hover:bg-ink-800/40">
+            <tr key={ws.id} className="hover:bg-ink-50/50 dark:hover:bg-ink-800/40 transition-colors">
               <td className={tdClass}>
                 <div className="min-w-[160px]">
-                  <p className="font-medium">{ws.name}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 font-mono" dir="ltr">
+                  <p className="font-semibold text-ink-900 dark:text-ink-100">{ws.name}</p>
+                  <p className="text-[11px] text-ink-500 dark:text-ink-400 font-mono" dir="ltr">
                     {ws.slug}
                   </p>
-                  <p className="text-xs text-gray-400">{formatDateTime(ws.createdAt, language)}</p>
+                  <p className="text-[10px] text-ink-400">{formatDateTime(ws.createdAt, language)}</p>
                 </div>
               </td>
               <td className={`${tdClass} text-xs`} dir="ltr">
                 {ws.ownerEmail ?? '—'}
               </td>
-              <td className={`${tdClass} tabular-nums`}>{formatCount(ws.memberCount, language)}</td>
+              <td className={`${tdClass} tabular-nums font-semibold`}>{formatCount(ws.memberCount, language)}</td>
               <td className={tdClass}>
                 <ul className="flex flex-col gap-1 min-w-[150px]">
-                  {ws.installations.length === 0 && <li className="text-gray-400">—</li>}
+                  {ws.installations.length === 0 && <li className="text-ink-400">—</li>}
                   {ws.installations.map((inst) => (
                     <li key={inst.id} className="flex flex-wrap items-center gap-1 text-xs">
                       <span className="font-medium" dir="ltr">
@@ -70,7 +70,7 @@ export function WorkspacesTab() {
               </td>
               <td className={tdClass}>
                 <div className="flex flex-wrap gap-1">
-                  {ws.providers.length === 0 && <span className="text-gray-400">—</span>}
+                  {ws.providers.length === 0 && <span className="text-ink-400">—</span>}
                   {ws.providers.map((p) => (
                     <Badge key={p} tone="brand">
                       {p}
@@ -79,11 +79,11 @@ export function WorkspacesTab() {
                 </div>
               </td>
               <td className={`${tdClass} whitespace-nowrap tabular-nums`}>
-                <span>{formatCount(ws.runsCount, language)}</span>
-                <span className="text-gray-400"> · </span>
+                <span className="font-semibold">{formatCount(ws.runsCount, language)}</span>
+                <span className="text-ink-400"> · </span>
                 <span>{formatUsd(ws.costUsdTotal, language)}</span>
               </td>
-              <td className={`${tdClass} text-xs whitespace-nowrap text-gray-500 dark:text-gray-400`}>
+              <td className={`${tdClass} text-xs whitespace-nowrap text-ink-500 dark:text-ink-400`}>
                 {formatDateTime(ws.lastRunAt, language)}
               </td>
               <td className={`${tdClass} text-end`}>
@@ -92,7 +92,7 @@ export function WorkspacesTab() {
                   onClick={() => setPending(ws)}
                   aria-label={`${t('deleteWorkspace')}: ${ws.name}`}
                   title={t('deleteWorkspace')}
-                  className="p-1.5 rounded-md text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40"
+                  className="p-1.5 rounded-full text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>

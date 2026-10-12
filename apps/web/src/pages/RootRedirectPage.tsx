@@ -20,7 +20,7 @@ export function RootRedirectPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-sm text-gray-500 dark:text-gray-400">{t('loading')}</div>
+        <div className="text-sm text-ink-400">{t('loading')}</div>
       </div>
     );
   }
@@ -62,18 +62,20 @@ export function RootRedirectPage() {
   };
 
   return (
-    <div className="max-w-md mx-auto my-12 p-6 bg-white dark:bg-ink-900 rounded-xl shadow-md border border-gray-200 dark:border-ink-800">
-      <div className="flex items-center gap-3 mb-4">
-        <PlusCircle className="w-8 h-8 text-brand-600 dark:text-brand-400 shrink-0" />
+    <div className="max-w-md mx-auto my-12 p-8 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-10 h-10 rounded-full bg-brand-100 dark:bg-brand-900/50 text-brand-700 dark:text-brand-300 flex items-center justify-center shrink-0">
+          <PlusCircle className="w-5 h-5" />
+        </div>
         <div>
-          <h1 className="text-xl font-bold">{t('createWorkspaceTitle')}</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{t('createWorkspaceDesc')}</p>
+          <h1 className="font-serif text-xl font-bold text-ink-900 dark:text-ink-100">{t('createWorkspaceTitle')}</h1>
+          <p className="text-xs text-ink-500 dark:text-ink-400 mt-0.5">{t('createWorkspaceDesc')}</p>
         </div>
       </div>
 
-      <form onSubmit={handleCreateWorkspace} className="flex flex-col gap-4 mt-6">
+      <form onSubmit={handleCreateWorkspace} className="flex flex-col gap-4">
         <div>
-          <label htmlFor="ws-name" className="block text-sm font-medium mb-1">
+          <label htmlFor="ws-name" className="block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300">
             {t('workspaceNameLabel')}
           </label>
           <input
@@ -88,12 +90,12 @@ export function RootRedirectPage() {
               }
             }}
             placeholder={t('workspaceNamePlaceholder')}
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+            className="w-full px-3.5 py-2 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 text-xs focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
           />
         </div>
 
         <div>
-          <label htmlFor="ws-slug" className="block text-sm font-medium mb-1">
+          <label htmlFor="ws-slug" className="block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300">
             {t('workspaceSlugLabel')}
           </label>
           <input
@@ -102,14 +104,14 @@ export function RootRedirectPage() {
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder={t('workspaceSlugPlaceholder')}
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+            className="w-full px-3.5 py-2 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 text-xs focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
           />
         </div>
 
         <button
           type="submit"
           disabled={isSubmitting || !name.trim()}
-          className="mt-2 w-full py-2.5 px-4 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+          className="mt-2 w-full py-2.5 px-5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-full font-medium text-xs transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
         >
           {isSubmitting ? t('creatingWorkspace') : t('createWorkspaceButton')}
         </button>

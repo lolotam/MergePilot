@@ -25,7 +25,7 @@ export function AdminPage() {
   const [active, setActive] = useState<TabId>('overview');
 
   if (isLoading) {
-    return <div className="py-12 text-center text-sm text-gray-400">{t('loading')}</div>;
+    return <div className="py-12 text-center text-sm text-ink-400">{t('loading')}</div>;
   }
   if (!me?.isPlatformAdmin) {
     return <Navigate to="/" replace />;
@@ -49,15 +49,15 @@ export function AdminPage() {
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl">
-      <div className="flex items-start gap-3">
-        <div className="p-2 rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300">
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300 flex items-center justify-center shrink-0">
           <Shield className="w-5 h-5" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-ink-900 dark:text-ink-100">
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-ink-900 dark:text-ink-100">
             {t('adminTitle')}
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('adminSubtitle')}</p>
+          <p className="text-xs sm:text-sm text-ink-500 dark:text-ink-400 mt-0.5 font-sans">{t('adminSubtitle')}</p>
         </div>
       </div>
 
@@ -65,7 +65,7 @@ export function AdminPage() {
         role="tablist"
         aria-label={t('adminTitle')}
         onKeyDown={onKeyDown}
-        className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-ink-800"
+        className="flex gap-2 overflow-x-auto pb-1"
       >
         {TABS.map((tab) => {
           const selected = tab.id === active;
@@ -79,10 +79,10 @@ export function AdminPage() {
               aria-controls={`${baseId}-panel`}
               tabIndex={selected ? 0 : -1}
               onClick={() => setActive(tab.id)}
-              className={`px-4 py-2.5 -mb-px border-b-2 text-sm font-medium whitespace-nowrap transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${
                 selected
-                  ? 'border-brand-600 text-brand-600 dark:border-brand-400 dark:text-brand-400'
-                  : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  ? 'bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
+                  : 'text-ink-600 dark:text-ink-400 hover:text-ink-900 dark:hover:text-ink-100 hover:bg-ink-100/60 dark:hover:bg-ink-800/60'
               }`}
             >
               {t(tab.label)}

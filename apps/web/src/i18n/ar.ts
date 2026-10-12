@@ -42,6 +42,11 @@ export const ar = {
   navTeam: 'الفريق',
   navSettings: 'الإعدادات',
   navAdmin: 'إدارة المنصة',
+  breadcrumb: 'مسار التنقل',
+  menuToggle: 'القائمة',
+  viewOnGitHub: 'عرض على GitHub',
+  installOnGitHub: 'تثبيت على GitHub',
+  sectionWorkspace: 'مساحة العمل',
 
   // Footer & Legal
   footerPrivacy: 'الخصوصية',

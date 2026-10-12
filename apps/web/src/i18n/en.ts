@@ -44,6 +44,11 @@ export const en: I18nDictionary = {
   navTeam: 'Team',
   navSettings: 'Settings',
   navAdmin: 'Platform Admin',
+  breadcrumb: 'Breadcrumb',
+  menuToggle: 'Toggle menu',
+  viewOnGitHub: 'View on GitHub',
+  installOnGitHub: 'Install on GitHub',
+  sectionWorkspace: 'Workspace',
 
   // Footer & Legal
   footerPrivacy: 'Privacy Policy',
