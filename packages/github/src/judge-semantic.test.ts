@@ -127,10 +127,28 @@ describe('judge disclosure in the summary', () => {
   it('says the judge was unavailable (Arabic too)', () => {
     const judge = judgeSummaryInput(
       { attempts: [{ provider: 'typesafe', model: 'jev-latest', ok: false, code: 'auth', ms: 1 }], inputTokens: 0, outputTokens: 0, unavailable: 'auth' },
-      undefined,
+      { findings: [], mode: 'filter', threshold: 0.35, checked: 0, filtered: [], unavailable: 'auth' },
     );
     expect(renderReviewSummary({ ...base, judge })).toContain('Jev judge unavailable: auth');
     expect(renderReviewSummary({ ...base, language: 'ar', judge })).toContain('حَكَم Jev غير متاح: auth');
+  });
+
+  it('a failed duplicate check is not reported as an unfiltered review', () => {
+    const judge = judgeSummaryInput(
+      {
+        attempts: [
+          { provider: 'opencode-zen', model: 'jev-1.13-free', ok: true, ms: 1 },
+          { provider: 'opencode-zen', model: 'jev-1.13-free', ok: false, code: 'timeout', ms: 1 },
+        ],
+        inputTokens: 10,
+        outputTokens: 0,
+        unavailable: 'timeout',
+      },
+      { findings: [], mode: 'filter', threshold: 0.35, checked: 2, filtered: [] },
+    );
+    const text = renderReviewSummary({ ...base, judge });
+    expect(text).toContain('Jev duplicate check unavailable: timeout');
+    expect(text).not.toContain('published unfiltered');
   });
 
   it('adds judge tokens and known cost to the review totals', () => {

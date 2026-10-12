@@ -18,8 +18,10 @@ export interface ReviewJudge {
 export interface JudgeSummaryInput {
   /** "provider:model (fallback n; … failed: code)" of the entry that answered. */
   answeredBy?: string | undefined;
-  /** Code of a request on which every entry failed (the review then went unfiltered). */
+  /** Code of the false-positive filter request on which every entry failed (published unfiltered). */
   unavailable?: string | undefined;
+  /** Code when only the semantic duplicate check failed (the filter itself ran or was off). */
+  duplicatesUnavailable?: string | undefined;
   filtered?: ReadonlyArray<{ title: string; path: string; line: number; noul: number }> | undefined;
 }
 
@@ -28,10 +30,13 @@ export function judgeSummaryInput(
   filter: JudgeFilterSummary | undefined,
 ): JudgeSummaryInput | undefined {
   if (!report || report.attempts.length === 0) return undefined;
-  const unavailable = filter?.unavailable ?? report.unavailable;
+  const unavailable = filter?.unavailable;
+  // A report-level failure the filter did not have came from the later duplicate check.
+  const duplicatesUnavailable = !unavailable ? report.unavailable : undefined;
   return {
     ...(report.answeredBy ? { answeredBy: describeAnsweredBy(report.answeredBy) } : {}),
     ...(unavailable ? { unavailable } : {}),
+    ...(duplicatesUnavailable ? { duplicatesUnavailable } : {}),
     ...(filter && filter.filtered.length > 0 ? { filtered: filter.filtered } : {}),
   };
 }

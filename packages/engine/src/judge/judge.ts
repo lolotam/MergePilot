@@ -14,6 +14,18 @@ import { callSystemOne, JUDGE_CALL_TIMEOUT_MS, JudgeResponseError } from './call
 import { jevModelPrice, type JudgeProviderId } from './providers.js';
 import type { JudgeAttempt, JudgeDecision, JudgeRequest } from './types.js';
 
+function dedupeBefore(failed: readonly JudgeAttempt[]): JudgeAnsweredBy['before'] {
+  const seen = new Set<string>();
+  const out: JudgeAnsweredBy['before'] = [];
+  for (const a of failed) {
+    const key = `${a.provider}:${a.model}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ provider: a.provider, model: a.model, code: a.code ?? 'error', skipped: a.skipped === true });
+  }
+  return out;
+}
+
 export const JUDGE_TOTAL_TIMEOUT_MS = 60_000;
 export const MAX_JUDGE_FALLBACKS = 3;
 
@@ -212,9 +224,11 @@ export function createJudge(options: JudgeOptions): Judge {
           provider: entry.provider,
           model: entry.model,
           fallbackIndex: index,
-          before: attempts
-            .filter((a) => !a.ok)
-            .map((a) => ({ provider: a.provider, model: a.model, code: a.code ?? 'error', skipped: a.skipped === true })),
+          // Every earlier entry that failed or was skipped during this review, so a later request
+          // that starts at the sticky fallback still discloses why the primary was not used.
+          before: dedupeBefore(
+            allAttempts.filter((a) => !a.ok && !(a.provider === entry.provider && a.model === entry.model)),
+          ),
         };
         return {
           provider: entry.provider,

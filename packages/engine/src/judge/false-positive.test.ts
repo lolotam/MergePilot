@@ -15,7 +15,7 @@ function finding(id: string, line: number, title = `Bug ${id}`): Finding {
     side: 'RIGHT',
     title,
     body: `body ${id}`,
-    severity: 'high',
+    severity: 'medium',
     category: 'correctness',
     evidence: 'x()',
     confidence: 0.9,
@@ -52,6 +52,16 @@ describe('runFalsePositiveFilter', () => {
     expect(out.filtered).toEqual([{ title: 'Bug b', path: 'src/a.ts', line: 42, noul: 0.2 }]);
     expect(out.checked).toBe(3);
     expect(out.unavailable).toBeUndefined();
+  });
+
+  it('filter mode never drops a critical or high finding; a low score is shown on it instead', async () => {
+    const { fetch } = mockFetch(noulReply({ f1: 0.1, f2: 0.1, f3: 0.1 }));
+    const base = input(fetch);
+    const findings = base.findings.map((f, i) => ({ ...f, severity: (['critical', 'high', 'medium'] as const)[i]! }));
+    const out = await runFalsePositiveFilter({ ...base, findings });
+    expect(out.findings.map((f) => f.severity)).toEqual(['critical', 'high']);
+    expect(out.findings[0]?.body).toContain('Jev confidence: 0.10');
+    expect(out.filtered.map((f) => f.title)).toEqual(['Bug c']);
   });
 
   it('annotate mode keeps every finding and adds the confidence line', async () => {

@@ -122,6 +122,10 @@ describe('createJudge — fallback chain', () => {
     ]);
     expect(judge.report()).toMatchObject({ inputTokens: 240, outputTokens: 0 });
     expect(judge.report().attempts).toHaveLength(3);
+    // The second request started at the fallback, yet still discloses why the primary was not used.
+    expect(judge.report().answeredBy?.before).toEqual([
+      { provider: 'openrouter', model: primary.model, code: 'auth', skipped: false },
+    ]);
   });
 
   it('records the cost Vercel reports', async () => {

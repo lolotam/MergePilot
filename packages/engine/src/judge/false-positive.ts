@@ -11,6 +11,9 @@ import { JudgeUnavailableError, judgeFailureCode, type Judge } from './judge.js'
 import { hunkAround, noul, untrustedText } from './questions.js';
 import type { JudgeAnswer, JudgeJson, JudgeQuestion } from './types.js';
 
+/** Severities the filter never drops, whatever Jev answers (ADR-0015). */
+const NEVER_FILTERED: ReadonlySet<string> = new Set(['critical', 'high']);
+
 export const JUDGE_MODES = ['off', 'annotate', 'filter'] as const;
 export type JudgeMode = (typeof JUDGE_MODES)[number];
 export const DEFAULT_JUDGE_THRESHOLD = 0.35;
@@ -109,9 +112,11 @@ export async function runFalsePositiveFilter(input: FalsePositiveInput): Promise
     const value = answer?.type === 'noul' ? answer.noul : undefined;
     if (value === undefined) {
       kept.push(finding);
-    } else if (mode === 'filter' && value < threshold) {
+    } else if (mode === 'filter' && value < threshold && !NEVER_FILTERED.has(finding.severity)) {
       filtered.push({ title: finding.title, path: finding.path, line: finding.line, noul: value });
-    } else if (mode === 'annotate') {
+    } else if (mode === 'annotate' || (mode === 'filter' && value < threshold)) {
+      // Filter mode never drops critical/high findings (the reviewed code could try to steer the
+      // judge); a low score on one is shown as a confidence line instead.
       kept.push({ ...finding, body: `${finding.body}\n\n${confidenceLine(value, input.language)}` });
     } else {
       kept.push(finding);

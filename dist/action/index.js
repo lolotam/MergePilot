@@ -70645,6 +70645,18 @@ async function callSystemOne(call) {
   }
 }
 
+function dedupeBefore(failed) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const a of failed) {
+    const key = `${a.provider}:${a.model}`;
+    if (seen.has(key))
+      continue;
+    seen.add(key);
+    out.push({ provider: a.provider, model: a.model, code: a.code ?? "error", skipped: a.skipped === true });
+  }
+  return out;
+}
 var JUDGE_TOTAL_TIMEOUT_MS = 6e4;
 var MAX_JUDGE_FALLBACKS = 3;
 var JudgeUnavailableError = class extends Error {
@@ -70786,7 +70798,9 @@ function createJudge(options) {
           provider: entry.provider,
           model: entry.model,
           fallbackIndex: index,
-          before: attempts.filter((a) => !a.ok).map((a) => ({ provider: a.provider, model: a.model, code: a.code ?? "error", skipped: a.skipped === true }))
+          // Every earlier entry that failed or was skipped during this review, so a later request
+          // that starts at the sticky fallback still discloses why the primary was not used.
+          before: dedupeBefore(allAttempts.filter((a) => !a.ok && !(a.provider === entry.provider && a.model === entry.model)))
         };
         return {
           provider: entry.provider,
@@ -70871,6 +70885,7 @@ function hunkAround(patch, line) {
   return best.text.join("\n");
 }
 
+var NEVER_FILTERED = /* @__PURE__ */ new Set(["critical", "high"]);
 var JUDGE_MODES = ["off", "annotate", "filter"];
 var DEFAULT_JUDGE_THRESHOLD = 0.35;
 var CRITERIA = {
@@ -70929,9 +70944,9 @@ async function runFalsePositiveFilter(input2) {
     const value = answer?.type === "noul" ? answer.noul : void 0;
     if (value === void 0) {
       kept.push(finding);
-    } else if (mode === "filter" && value < threshold) {
+    } else if (mode === "filter" && value < threshold && !NEVER_FILTERED.has(finding.severity)) {
       filtered.push({ title: finding.title, path: finding.path, line: finding.line, noul: value });
-    } else if (mode === "annotate") {
+    } else if (mode === "annotate" || mode === "filter" && value < threshold) {
       kept.push({ ...finding, body: `${finding.body}
 
 ${confidenceLine(value, input2.language)}` });
@@ -125706,6 +125721,10 @@ function renderJudge(judge, isArabic) {
     const code = neutralize2(judge.unavailable);
     lines.push(isArabic ? `> \u26A0\uFE0F \u062D\u064E\u0643\u064E\u0645 Jev \u063A\u064A\u0631 \u0645\u062A\u0627\u062D: ${code} \u2014 \u0646\u064F\u0634\u0631\u062A \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0646 \u063A\u064A\u0631 \u0641\u0644\u062A\u0631\u0629` : `> \u26A0\uFE0F Jev judge unavailable: ${code} \u2014 findings were published unfiltered`);
   }
+  if (judge.duplicatesUnavailable) {
+    const code = neutralize2(judge.duplicatesUnavailable);
+    lines.push(isArabic ? `> \u26A0\uFE0F \u0641\u062D\u0635 \u0627\u0644\u062A\u0643\u0631\u0627\u0631 \u0628\u0627\u0644\u0645\u0639\u0646\u0649 (Jev) \u063A\u064A\u0631 \u0645\u062A\u0627\u062D: ${code}` : `> \u26A0\uFE0F Jev duplicate check unavailable: ${code}`);
+  }
   const filtered = judge.filtered ?? [];
   if (filtered.length > 0) {
     const label = isArabic ? `\u0627\u0633\u062A\u0628\u0639\u062F\u0647\u0627 Jev (${filtered.length})` : `Filtered by Jev (${filtered.length})`;
@@ -125793,10 +125812,12 @@ ${content}
 function judgeSummaryInput(report, filter) {
   if (!report || report.attempts.length === 0)
     return void 0;
-  const unavailable = filter?.unavailable ?? report.unavailable;
+  const unavailable = filter?.unavailable;
+  const duplicatesUnavailable = !unavailable ? report.unavailable : void 0;
   return {
     ...report.answeredBy ? { answeredBy: describeAnsweredBy(report.answeredBy) } : {},
     ...unavailable ? { unavailable } : {},
+    ...duplicatesUnavailable ? { duplicatesUnavailable } : {},
     ...filter && filter.filtered.length > 0 ? { filtered: filter.filtered } : {}
   };
 }

@@ -147,6 +147,14 @@ function renderJudge(judge: JudgeSummaryInput, isArabic: boolean): string | unde
         : `> ⚠️ Jev judge unavailable: ${code} — findings were published unfiltered`,
     );
   }
+  if (judge.duplicatesUnavailable) {
+    const code = neutralize(judge.duplicatesUnavailable);
+    lines.push(
+      isArabic
+        ? `> ⚠️ فحص التكرار بالمعنى (Jev) غير متاح: ${code}`
+        : `> ⚠️ Jev duplicate check unavailable: ${code}`,
+    );
+  }
   const filtered = judge.filtered ?? [];
   if (filtered.length > 0) {
     const label = isArabic ? `استبعدها Jev (${filtered.length})` : `Filtered by Jev (${filtered.length})`;
