@@ -7,17 +7,19 @@ describe('Logo Component', () => {
   it('renders the original wordmark artwork for light and dark mode, always LTR', () => {
     const { container } = render(React.createElement(Logo, null));
     expect((container.firstElementChild as HTMLElement).getAttribute('dir')).toBe('ltr');
-    const sources = [...container.querySelectorAll('img')].map((img) => img.getAttribute('src'));
-    expect(sources).toEqual(['/brand/logo.png', '/brand/logo-dark.png']);
-    for (const img of container.querySelectorAll('img')) {
-      expect(img.getAttribute('alt')).toBe('MergePilot');
-    }
+    const imgs = container.querySelectorAll('img');
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0]?.getAttribute('src')).toBe('/brand/logo.png');
+    expect(imgs[0]?.getAttribute('alt')).toBe('MergePilot');
+    const source = container.querySelector('source');
+    expect(source?.getAttribute('srcset')).toBe('/brand/logo-dark.png');
+    expect(source?.getAttribute('media')).toBe('(prefers-color-scheme: dark)');
   });
 
   it('renders only the mark when showWordmark is false', () => {
     const { container } = render(React.createElement(Logo, { showWordmark: false }));
-    const sources = [...container.querySelectorAll('img')].map((img) => img.getAttribute('src'));
-    expect(sources).toEqual(['/brand/mark.png', '/brand/mark-dark.png']);
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/brand/mark.png');
+    expect(container.querySelector('source')?.getAttribute('srcset')).toBe('/brand/mark-dark.png');
   });
 
   it('applies sizing classes', () => {
