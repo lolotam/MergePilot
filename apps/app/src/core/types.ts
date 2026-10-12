@@ -95,6 +95,7 @@ export interface AppStore {
   ): Promise<void>;
   listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
   monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;
+  deleteWorkspaceData(workspaceId: string): Promise<void>;
 }
 
 /** Envelope encryption of customer secrets (ADR-0007). */

@@ -135,4 +135,14 @@ export const api = {
     fetchApi<RunsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/runs?limit=${limit}`),
   getUsage: (workspaceId: string) =>
     fetchApi<UsageResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/usage`),
+  renameWorkspace: (workspaceId: string, name: string) =>
+    fetchApi<{ id: string; name: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+  deleteWorkspace: (workspaceId: string, confirmName: string) =>
+    fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirmName }),
+    }),
 };

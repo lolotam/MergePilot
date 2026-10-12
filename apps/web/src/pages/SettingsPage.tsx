@@ -13,6 +13,8 @@ import {
 } from '../api/hooks.js';
 import { useI18n } from '../i18n/context.js';
 import { Modal } from '../components/Modal.js';
+import { WorkspaceGeneralCard } from '../components/WorkspaceGeneralCard.js';
+import { WorkspaceDangerZone } from '../components/WorkspaceDangerZone.js';
 
 export function SettingsPage() {
   const { workspaceId = '' } = useParams();
@@ -138,7 +140,11 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* General Settings Section */}
+      {currentWorkspace && (
+        <WorkspaceGeneralCard workspaceId={workspaceId} workspaceName={currentWorkspace.name} isMember={isMember} />
+      )}
+
+      {/* Review Settings Section */}
       <div className="p-6 bg-white dark:bg-ink-900 rounded-xl border border-gray-200 dark:border-ink-800 shadow-xs">
         <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
           <Sliders className="w-5 h-5 text-brand-600 dark:text-brand-400" />
@@ -307,6 +313,10 @@ export function SettingsPage() {
           </div>
         )}
       </div>
+
+      {currentWorkspace && (
+        <WorkspaceDangerZone workspaceId={workspaceId} workspaceName={currentWorkspace.name} role={currentWorkspace.role} />
+      )}
 
       {/* Add Key Modal */}
       <Modal

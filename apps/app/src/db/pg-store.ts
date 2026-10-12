@@ -377,4 +377,16 @@ export class PgStore implements AppStore {
     const total = rows[0]?.total ?? '0';
     return Number(total);
   }
+
+  async deleteWorkspaceData(workspaceId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.delete(providerCredentials).where(eq(providerCredentials.workspaceId, workspaceId));
+      await tx.delete(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
+      await tx.delete(reviewRuns).where(eq(reviewRuns.workspaceId, workspaceId));
+      await tx
+        .update(installations)
+        .set({ workspaceId: null, updatedAt: new Date() })
+        .where(eq(installations.workspaceId, workspaceId));
+    });
+  }
 }

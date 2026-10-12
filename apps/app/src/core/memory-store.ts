@@ -115,4 +115,24 @@ export class MemoryStore implements AppStore {
       .filter((r) => r.workspaceId === workspaceId && r.createdAt >= monthStart)
       .reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
   }
+
+  async deleteWorkspaceData(workspaceId: string): Promise<void> {
+    for (const [key, cred] of this.credentials.entries()) {
+      if (cred.workspaceId === workspaceId) {
+        this.credentials.delete(key);
+      }
+    }
+    this.settings.delete(workspaceId);
+    for (const [key, run] of this.runs.entries()) {
+      if (run.workspaceId === workspaceId) {
+        this.runs.delete(key);
+      }
+    }
+    for (const [id, inst] of this.installations.entries()) {
+      if ('workspaceId' in inst && inst.workspaceId === workspaceId) {
+        const { workspaceId: _, ...unlinked } = inst;
+        this.installations.set(id, unlinked);
+      }
+    }
+  }
 }

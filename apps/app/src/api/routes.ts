@@ -14,6 +14,7 @@ import {
   getUserWorkspaces,
   fetchUserGitHubInstallations,
 } from './helpers.js';
+import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
 
 export interface DashboardApiDeps {
   auth: Auth;
@@ -358,4 +359,6 @@ export function registerDashboardApi(
 
     return reply.redirect(`/install?installation_id=${installationId}`, 302);
   });
+
+  registerWorkspaceLifecycleRoutes(app, deps);
 }

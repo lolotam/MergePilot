@@ -129,3 +129,37 @@ export function useUsageQuery(workspaceId: string) {
     enabled: Boolean(workspaceId),
   });
 }
+
+export function useRenameWorkspaceMutation(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+
+  return useMutation({
+    mutationFn: (name: string) => api.renameWorkspace(workspaceId, name),
+    onSuccess: () => {
+      showToast(t('workspaceRenamedSuccess'), 'success');
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+    onError: (err: Error) => {
+      showToast(err.message || t('error'), 'error');
+    },
+  });
+}
+
+export function useDeleteWorkspaceMutation(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+
+  return useMutation({
+    mutationFn: (confirmName: string) => api.deleteWorkspace(workspaceId, confirmName),
+    onSuccess: () => {
+      showToast(t('workspaceDeletedSuccess'), 'success');
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+    onError: (err: Error) => {
+      showToast(err.message || t('error'), 'error');
+    },
+  });
+}
