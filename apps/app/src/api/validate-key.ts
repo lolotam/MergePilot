@@ -1,5 +1,4 @@
-import { providerEntry, resolveBaseUrl } from '@mergepilot/engine';
-import { assertSafeBaseUrl } from '../core/ssrf.js';
+import { resolveBaseUrl, type FetchLike } from '@mergepilot/engine';
 import type { ApiProvider } from '../core/types.js';
 
 export class ValidateKeyError extends Error {
@@ -9,11 +8,15 @@ export class ValidateKeyError extends Error {
   }
 }
 
+/**
+ * A cheap "list models" call that proves a key works before it is saved. For `custom` the
+ * caller MUST pass the SSRF-guarded fetch (core/safe-fetch.ts) with the already-checked URL.
+ */
 export async function validateKey(
   provider: ApiProvider,
   apiKey: string,
-  fetchFnOrBaseUrl?: typeof fetch | string,
-  maybeFetchFn?: typeof fetch,
+  fetchFnOrBaseUrl?: FetchLike | string,
+  maybeFetchFn?: FetchLike,
 ): Promise<void> {
   const trimmed = apiKey.trim();
   if (trimmed.length === 0) {
@@ -21,13 +24,14 @@ export async function validateKey(
   }
 
   let baseUrl: string | undefined;
-  let fetchFn: typeof fetch;
+  let fetchFn: FetchLike;
+  const globalFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 
   if (typeof fetchFnOrBaseUrl === 'string') {
     baseUrl = fetchFnOrBaseUrl;
-    fetchFn = maybeFetchFn ?? globalThis.fetch;
+    fetchFn = maybeFetchFn ?? globalFetch;
   } else {
-    fetchFn = fetchFnOrBaseUrl ?? globalThis.fetch;
+    fetchFn = fetchFnOrBaseUrl ?? globalFetch;
   }
 
   let url: string;
@@ -48,15 +52,8 @@ export async function validateKey(
       headers['x-goog-api-key'] = trimmed;
       break;
     default: {
-      if (provider === 'custom') {
-        if (!baseUrl) {
-          throw new ValidateKeyError('Base URL is required for custom provider');
-        }
-        baseUrl = await assertSafeBaseUrl(baseUrl);
-      }
-      const entry = providerEntry(provider);
-      if (!entry) {
-        throw new ValidateKeyError(`Unsupported provider: ${provider}`);
+      if (provider === 'custom' && !baseUrl) {
+        throw new ValidateKeyError('Base URL is required for custom provider');
       }
       const base = resolveBaseUrl(provider, baseUrl);
       url = `${base}/models`;
@@ -70,6 +67,7 @@ export async function validateKey(
     response = await fetchFn(url, {
       method: 'GET',
       headers,
+      redirect: 'manual',
     });
   } catch {
     // Network errors -> "could not verify"; never leak the key

@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import { CheckCircle2, XCircle } from 'lucide-react';
 import { api, type ApiProvider, type TestConnectionResponse } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
+import { ProviderSelect } from '../settings/providers.js';
+import { runConnectionTest, useTestReason } from '../settings/TestKeyButton.js';
 import { Modal } from './Modal.js';
 
 export interface AddKeyModalProps {
@@ -11,23 +14,9 @@ export interface AddKeyModalProps {
   workspaceId?: string | undefined;
 }
 
-const SAAS_PROVIDERS: readonly ApiProvider[] = [
-  'anthropic',
-  'openai',
-  'gemini',
-  'xai',
-  'deepseek',
-  'nvidia',
-  'openrouter',
-  'opencode-zen',
-  'opencode-go',
-  'zai',
-  'zai-coding',
-  'custom',
-] as const;
-
 export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId }: AddKeyModalProps) {
   const { t } = useI18n();
+  const testReason = useTestReason();
   const [keyProvider, setKeyProvider] = useState<ApiProvider>('anthropic');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [baseUrlInput, setBaseUrlInput] = useState('');
@@ -43,24 +32,6 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     onClose();
   };
 
-  const getProviderLabel = (p: ApiProvider) => {
-    switch (p) {
-      case 'anthropic': return t('providerAnthropic') || 'Anthropic';
-      case 'openai': return t('providerOpenai') || 'OpenAI';
-      case 'gemini': return t('providerGemini') || 'Google Gemini';
-      case 'xai': return t('providerXai') || 'xAI';
-      case 'deepseek': return t('providerDeepseek') || 'DeepSeek';
-      case 'nvidia': return t('providerNvidia') || 'NVIDIA';
-      case 'openrouter': return t('providerOpenrouter') || 'OpenRouter';
-      case 'opencode-zen': return t('providerOpencodeZen') || 'OpenCode Zen';
-      case 'opencode-go': return t('providerOpencodeGo') || 'OpenCode Go';
-      case 'zai': return t('providerZai') || 'Z.ai';
-      case 'zai-coding': return t('providerZaiCoding') || 'Z.ai GLM Coding';
-      case 'custom': return t('providerCustom') || 'Custom';
-      default: return p;
-    }
-  };
-
   const handleTestBeforeSave = async () => {
     if (!workspaceId || apiKeyInput.length < 8) {
       setKeyError(t('keySecretMinLength'));
@@ -74,18 +45,21 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     setIsTesting(true);
     setTestResult(null);
     setKeyError('');
-    try {
-      const res = await api.testConnection(workspaceId, keyProvider, {
-        apiKey: apiKeyInput.trim(),
-        baseUrl: baseUrlInput.trim() || undefined,
-      });
-      setTestResult(res);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setTestResult({ ok: false, message: msg });
-    } finally {
-      setIsTesting(false);
-    }
+    const apiKey = apiKeyInput.trim();
+    const baseUrl = keyProvider === 'custom' ? baseUrlInput.trim() : undefined;
+    // The typed key goes only to this one test call: it is never stored, logged or shown.
+    const result = await runConnectionTest(async () => {
+      let model: string | undefined;
+      if (keyProvider === 'custom') {
+        // A custom server has no default model: test the first one it lists.
+        const { models } = await api.testModelsUnsaved(workspaceId, keyProvider, apiKey, baseUrl);
+        model = models[0]?.id;
+        if (!model) return { ok: false, code: 'invalid-response', message: '' };
+      }
+      return api.testConnection(workspaceId, keyProvider, { apiKey, baseUrl, model });
+    });
+    setTestResult(result);
+    setIsTesting(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -106,7 +80,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     }
 
     const secretToSave = apiKeyInput.trim();
-    const urlToSave = baseUrlInput.trim() || undefined;
+    const urlToSave = keyProvider === 'custom' ? baseUrlInput.trim() || undefined : undefined;
     setApiKeyInput('');
     setBaseUrlInput('');
     setTestResult(null);
@@ -121,27 +95,16 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
       description={t('addKeyModalDesc')}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
-        <div>
-          <label htmlFor="key-provider-select" className="block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300">
-            {t('keyProviderCol')}
-          </label>
-          <select
-            id="key-provider-select"
-            value={keyProvider}
-            onChange={(e) => {
-              setKeyProvider(e.target.value as ApiProvider);
-              setTestResult(null);
-              setKeyError('');
-            }}
-            className="w-full px-3.5 py-2 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-xs text-ink-900 dark:text-ink-100 focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
-          >
-            {SAAS_PROVIDERS.map((p) => (
-              <option key={p} value={p}>
-                {getProviderLabel(p)}
-              </option>
-            ))}
-          </select>
-        </div>
+        <ProviderSelect
+          id="key-provider-select"
+          label={t('keyProviderCol')}
+          value={keyProvider}
+          onChange={(next) => {
+            setKeyProvider(next);
+            setTestResult(null);
+            setKeyError('');
+          }}
+        />
 
         {keyProvider === 'custom' && (
           <div>
@@ -197,17 +160,22 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
         {/* Test Result Banner */}
         {testResult && (
           <div
+            role="status"
             className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
               testResult.ok
                 ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                 : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
             }`}
           >
-            <span>{testResult.ok ? '✅' : '❌'}</span>
-            <span>
+            {testResult.ok ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+            ) : (
+              <XCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+            )}
+            <span title={testResult.ok ? undefined : testResult.message}>
               {testResult.ok
                 ? t('testKeySuccess', { ms: String(testResult.ms ?? 0) })
-                : t('testKeyFailed', { reason: testResult.message || testResult.code || 'Failed' })}
+                : t('testKeyFailed', { reason: testReason(testResult.code) })}
             </span>
           </div>
         )}

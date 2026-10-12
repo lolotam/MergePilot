@@ -37,6 +37,22 @@ describe('isPrivateIp', () => {
     expect(isPrivateIp('::ffff:8.8.8.8')).toBe(false);
   });
 
+  it('identifies hex-form IPv4-mapped, CGNAT, NAT64, 6to4, Teredo and reserved ranges', () => {
+    expect(isPrivateIp('::ffff:7f00:1')).toBe(true); // 127.0.0.1
+    expect(isPrivateIp('::ffff:a9fe:a9fe')).toBe(true); // 169.254.169.254
+    expect(isPrivateIp('100.64.0.1')).toBe(true);
+    expect(isPrivateIp('100.127.255.254')).toBe(true);
+    expect(isPrivateIp('64:ff9b::7f00:1')).toBe(true);
+    expect(isPrivateIp('2002:7f00:1::1')).toBe(true);
+    expect(isPrivateIp('2001:0:4136:e378::1')).toBe(true);
+    expect(isPrivateIp('fd00:ec2::254')).toBe(true);
+    expect(isPrivateIp('::')).toBe(true);
+    expect(isPrivateIp('0.0.0.0')).toBe(true);
+    expect(isPrivateIp('198.18.0.1')).toBe(true);
+    expect(isPrivateIp('255.255.255.255')).toBe(true);
+    expect(isPrivateIp('not-an-ip')).toBe(true);
+  });
+
   it('allows public IPv4 and IPv6 addresses', () => {
     expect(isPrivateIp('8.8.8.8')).toBe(false);
     expect(isPrivateIp('1.1.1.1')).toBe(false);
@@ -75,6 +91,25 @@ describe('assertSafeBaseUrl', () => {
     await expect(assertSafeBaseUrl('https://evil.local/v1', mockLookup)).rejects.toThrow(
       'private or loopback',
     );
+  });
+
+  it('rejects a host when ANY resolved address is private (mixed answers)', async () => {
+    const mixed = async () => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.8', family: 4 },
+    ];
+    await expect(assertSafeBaseUrl('https://llm.example.com/v1', mixed)).rejects.toThrow('private or loopback');
+  });
+
+  it('rejects user info, metadata host names and unresolvable hosts', async () => {
+    const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+    await expect(assertSafeBaseUrl('https://user:pw@llm.example.com/v1', lookup)).rejects.toThrow('user name');
+    await expect(assertSafeBaseUrl('https://metadata.google.internal/v1', lookup)).rejects.toThrow('private');
+    await expect(assertSafeBaseUrl('https://localhost./v1', lookup)).rejects.toThrow('private');
+    const failing = async () => {
+      throw new Error('ENOTFOUND');
+    };
+    await expect(assertSafeBaseUrl('https://nope.example.com', failing)).rejects.toThrow('Could not resolve');
   });
 
   it('accepts safe public HTTPS URLs and trims trailing slashes', async () => {

@@ -3,7 +3,8 @@ import { Secret } from '../credentials/secret.js';
 import { testConnection } from './connection.js';
 import { hangingFetch, jsonResponse, mockFetch, textResponse } from './fetch-mock.fixtures.js';
 
-const KEY = new Secret('sk-test-conn-key-99999');
+// Built at runtime so no literal in the repository looks like a real key.
+const KEY = new Secret(['s', 'k-', 'c'.repeat(24)].join(''));
 
 describe('testConnection', () => {
   describe('Anthropic', () => {
@@ -119,6 +120,43 @@ describe('testConnection', () => {
         model: 'glm-4.6',
         thinking: { type: 'enabled' },
       });
+    });
+  });
+
+  describe('Empty replies', () => {
+    it('returns invalid-response when Gemini blocks the candidate and sends no text', async () => {
+      const { fetch } = mockFetch(
+        jsonResponse({ candidates: [{ finishReason: 'SAFETY', safetyRatings: [] }], promptFeedback: {} }),
+      );
+
+      const result = await testConnection('gemini', KEY, 'gemini-3.8-flash', { fetch });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe('invalid-response');
+    });
+
+    it('returns invalid-response when a compatible endpoint answers with an unexpected payload', async () => {
+      const { fetch } = mockFetch(jsonResponse({ result: { output: 'OK' } }));
+
+      const result = await testConnection('custom', undefined, 'local-model', {
+        fetch,
+        baseUrl: 'http://localhost:8080/v1',
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe('invalid-response');
+        expect(result.message).toContain('custom');
+      }
+    });
+
+    it('returns invalid-response when the body is not JSON', async () => {
+      const { fetch } = mockFetch(textResponse('<html>gateway</html>', 200));
+
+      const result = await testConnection('xai', KEY, 'grok-4', { fetch });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe('invalid-response');
     });
   });
 

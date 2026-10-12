@@ -7,7 +7,8 @@ import { jsonResponse, mockFetch, sseResponse, textResponse } from '../fetch-moc
 import { OpenAICompatibleAdapter } from './adapter.js';
 import { parseSseChunk } from './sse.js';
 
-const KEY = 'sk-test-000';
+// Built at runtime so no literal in the repository looks like a real key.
+const KEY = ['s', 'k-', 't'.repeat(24)].join('');
 const base: GenerateOptions = {
   model: 'grok-4',
   messages: [

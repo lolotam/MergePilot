@@ -2,8 +2,10 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Auth } from '../auth/auth.js';
 import { isUserPlatformAdmin } from '../admin/guard.js';
 import { requireRole } from '../auth/guard.js';
+import type { FetchLike } from '@mergepilot/engine';
 import type { AppConfig } from '../core/config.js';
-import { assertSafeBaseUrl } from '../core/ssrf.js';
+import { createSafeFetch } from '../core/safe-fetch.js';
+import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { ApiProvider, AppStore, ReviewQueue } from '../core/types.js';
 import type { CredentialService } from '../credentials/service.js';
 import type { GitHubAppClientFactory } from '../worker/types.js';
@@ -16,8 +18,9 @@ import {
   getUserWorkspaces,
 } from './helpers.js';
 import { registerInstallationRoutes } from './installation-routes.js';
-import { registerProviderRoutes } from './provider-routes.js';
+import { invalidateModelsCache, registerProviderRoutes } from './provider-routes.js';
 import { registerRunsRoutes } from './runs-routes.js';
+import { validateSettings } from './settings-validation.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
 
 export interface DashboardApiDeps {
@@ -30,6 +33,9 @@ export interface DashboardApiDeps {
   now?: () => Date;
   queue?: ReviewQueue;
   githubAppFactory?: GitHubAppClientFactory;
+  /** Test seams for the custom base URL SSRF guard (ADR-0010): DNS lookup and guarded fetch. */
+  ssrfLookup?: DnsLookupFn | undefined;
+  customFetch?: FetchLike | undefined;
 }
 
 const toIso = (d: Date | string) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
@@ -38,7 +44,13 @@ export function registerDashboardApi(
   app: FastifyInstance,
   deps: DashboardApiDeps,
 ): void {
-  const validateKeyFn = deps.validateKey ?? ((p, k, b) => defaultValidateKey(p, k, b, deps.githubFetch));
+  // `custom` is validated through the SSRF-guarded fetch; presets call their fixed URLs.
+  const guardedFetch = deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup });
+  const githubFetch = deps.githubFetch;
+  const presetFetch: FetchLike | undefined = githubFetch ? (input, init) => githubFetch(input, init) : undefined;
+  const validateKeyFn =
+    deps.validateKey ??
+    ((p, k, b) => (p === 'custom' ? defaultValidateKey(p, k, b ?? '', guardedFetch) : defaultValidateKey(p, k, presetFetch)));
 
   // 1. GET /api/me
   app.get('/api/me', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -91,32 +103,8 @@ export function registerDashboardApi(
         );
       }
 
-      if (parsed.data.heavyProvider) {
-        if (!parsed.data.heavyModel) {
-          return sendError(reply, 400, 'validation_error', 'heavyModel is required when heavyProvider is set');
-        }
-        const cred = await deps.store.getCredential(workspaceId, parsed.data.heavyProvider);
-        if (!cred) {
-          return sendError(
-            reply,
-            400,
-            'heavy_key_missing',
-            `Stored API key required for heavy provider: ${parsed.data.heavyProvider}`,
-          );
-        }
-      }
-
-      for (const entry of parsed.data.fallback ?? []) {
-        const cred = await deps.store.getCredential(workspaceId, entry.provider);
-        if (!cred) {
-          return sendError(
-            reply,
-            400,
-            'fallback_key_missing',
-            `Stored API key required for fallback provider: ${entry.provider}`,
-          );
-        }
-      }
+      const problem = await validateSettings(deps.store, workspaceId, parsed.data);
+      if (problem) return sendError(reply, 400, problem.code, problem.message);
 
       await deps.store.saveSettings({
         workspaceId,
@@ -187,18 +175,13 @@ export function registerDashboardApi(
           return sendError(reply, 400, 'custom_base_url_required', 'Base URL is required for custom provider');
         }
         try {
-          baseUrl = await assertSafeBaseUrl(baseUrl);
+          baseUrl = await assertSafeBaseUrl(baseUrl, deps.ssrfLookup);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = err instanceof Error ? err.message : 'Base URL is not allowed';
           return sendError(reply, 400, 'ssrf_validation_error', msg);
         }
       } else if (baseUrl) {
-        try {
-          baseUrl = await assertSafeBaseUrl(baseUrl);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return sendError(reply, 400, 'ssrf_validation_error', msg);
-        }
+        return sendError(reply, 400, 'base_url_not_allowed', 'Only the custom provider takes a base URL');
       }
 
       try {
@@ -218,6 +201,7 @@ export function registerDashboardApi(
           userId,
           baseUrl,
         });
+        invalidateModelsCache(workspaceId, provider);
 
         return reply.status(200).send({
           provider: saved.provider,
@@ -249,6 +233,7 @@ export function registerDashboardApi(
       }
 
       await deps.credentials.deleteKey(workspaceId, providerParse.data);
+      invalidateModelsCache(workspaceId, providerParse.data);
       return reply.status(204).send();
     },
   );

@@ -31,9 +31,12 @@ export interface TestConnectionOptions {
   timeoutMs?: number;
 }
 
+/** A failure category, or `invalid-response`: the call succeeded but carried no reply text. */
+export type ConnectionFailureCode = FailureKind | 'invalid-response';
+
 export type ConnectionResult =
   | { ok: true; ms: number; model: string; reply: string }
-  | { ok: false; ms: number; code: FailureKind; message: string };
+  | { ok: false; ms: number; code: ConnectionFailureCode; message: string };
 
 const PROMPT = 'Reply with the single word OK';
 const MAX_OUTPUT_TOKENS = 16;
@@ -101,7 +104,7 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
     };
   }
   if (provider === 'openai') {
-    const effort = openAIReasoningEffort(options.effort);
+    const effort = openAIReasoningEffort(model, options.effort);
     return {
       url: `${base}/chat/completions`,
       headers: { ...json, ...bearerHeaders(key) },
@@ -164,7 +167,17 @@ export async function testConnection(
       throw failureFromThrown(error, provider, apiKey, controller.signal);
     }
     if (!res.ok) throw await failureFromResponse(res, provider, apiKey);
-    const reply = request.reply(record(await res.json())).trim();
+    let json: Record<string, unknown>;
+    try {
+      json = record(await res.json());
+    } catch {
+      return { ok: false, ms: elapsed(), code: 'invalid-response', message: `${provider} answered with a body that is not JSON` };
+    }
+    const reply = request.reply(json).trim();
+    if (!reply) {
+      // A blocked candidate or an unexpected payload shape: the model did not really answer.
+      return { ok: false, ms: elapsed(), code: 'invalid-response', message: `${provider} answered without any reply text` };
+    }
     return { ok: true, ms: elapsed(), model, reply };
   } catch (error) {
     if (timedOut) {

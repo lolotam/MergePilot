@@ -205,6 +205,8 @@ describe('processReviewJob', () => {
     const claudeCodeYaml = `
 provider: claude-code
 language: ar
+fallback:
+  - { provider: custom, model: m, baseUrl: 'http://evil.example/v1' }
 review:
   maxFindings: 5
 budget:
@@ -236,6 +238,7 @@ budget:
     expect(config.language).toBe('en');
     expect(config.review.maxFindings).toBe(5);
     expect(config.budget.pricing).toBeUndefined();
+    expect(JSON.stringify(config)).not.toContain('evil.example'); // repo baseUrl never kept
     const runs = await store.listReviewRuns(workspaceId, 10);
     expect(runs[0]?.status).toBe('completed');
   });

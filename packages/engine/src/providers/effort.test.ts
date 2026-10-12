@@ -42,12 +42,20 @@ describe('compatibleEffortFields', () => {
 });
 
 describe('openAIReasoningEffort', () => {
-  it('passes known values and ignores off and unknown ones', () => {
-    expect(openAIReasoningEffort('Medium')).toBe('medium');
-    expect(openAIReasoningEffort('none')).toBe('none');
-    expect(openAIReasoningEffort('off')).toBeUndefined();
-    expect(openAIReasoningEffort('banana')).toBeUndefined();
-    expect(openAIReasoningEffort(undefined)).toBeUndefined();
+  it('sends only minimal|low|medium|high to reasoning models', () => {
+    expect(openAIReasoningEffort('gpt-5', 'Medium')).toBe('medium');
+    expect(openAIReasoningEffort('gpt-5-mini', 'minimal')).toBe('minimal');
+    expect(openAIReasoningEffort('o3', 'high')).toBe('high');
+    expect(openAIReasoningEffort('o4-mini', 'low')).toBe('low');
+    for (const rejected of ['none', 'xhigh', 'max', 'off', 'on', 'banana', '', undefined]) {
+      expect(openAIReasoningEffort('gpt-5', rejected)).toBeUndefined();
+    }
+  });
+
+  it('sends nothing to non-reasoning models', () => {
+    for (const model of ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'chatgpt-4o-latest', 'gpt-5-chat-latest']) {
+      expect(openAIReasoningEffort(model, 'high')).toBeUndefined();
+    }
   });
 });
 

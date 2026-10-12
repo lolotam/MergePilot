@@ -51,12 +51,13 @@ describe('provider registry', () => {
     expect(providerEntry('openrouter').keyHint).toBe('sk-or-');
   });
 
-  it('requires a base URL only for custom', () => {
+  it('requires a base URL only for custom and never overrides a preset', () => {
     expect(providerEntry('custom').requiresBaseUrl).toBe(true);
     expect(() => resolveBaseUrl('custom')).toThrow('requires a base URL');
     expect(resolveBaseUrl('custom', 'http://10.0.0.5:8000/v1/')).toBe('http://10.0.0.5:8000/v1');
     expect(resolveBaseUrl('xai')).toBe('https://api.x.ai/v1');
-    expect(resolveBaseUrl('xai', 'https://proxy.example/v1')).toBe('https://proxy.example/v1');
+    // A preset never takes an override: a key must not be sent to another URL.
+    expect(resolveBaseUrl('xai', 'https://proxy.example/v1')).toBe('https://api.x.ai/v1');
   });
 
   it('drops OpenCode model families that are not served on /chat/completions', () => {
@@ -70,14 +71,14 @@ describe('provider registry', () => {
     expect(credentialEnvName('xai')).toBe('XAI_API_KEY');
     expect(credentialEnvName('opencode-zen')).toBe(credentialEnvName('opencode-go'));
     expect(credentialEnvName('claude-code')).toBe('CLAUDE_CODE_OAUTH_TOKEN');
-    const store = new EnvCredentialStore({ DEEPSEEK_API_KEY: 'sk-test-000' });
+    const store = new EnvCredentialStore({ DEEPSEEK_API_KEY: 'k1' });
     expect(await store.info({ provider: 'deepseek' })).toEqual({
       provider: 'deepseek',
       configured: true,
       source: 'env',
       envName: 'DEEPSEEK_API_KEY',
     });
-    expect((await store.resolve({ provider: 'deepseek' }, 'review')).reveal()).toBe('sk-test-000');
+    expect((await store.resolve({ provider: 'deepseek' }, 'review')).reveal()).toBe('k1');
     expect((await store.info({ provider: 'nvidia' })).configured).toBe(false);
   });
 });

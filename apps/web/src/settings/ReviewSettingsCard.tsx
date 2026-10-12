@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Sliders } from 'lucide-react';
-import type { Settings, FallbackEntry, Severity } from '@mergepilot/app/contract';
+import type { FallbackEntry, Settings, Severity } from '@mergepilot/app/contract';
 import type { ApiProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
-import { ModelSelect } from './ModelSelect.js';
-import { EffortSelect } from './EffortSelect.js';
-import { SeveritySelect } from './SeveritySelect.js';
-import { HeavyModelCard } from './HeavyModelCard.js';
+import { EffortSelect, effortFor } from './EffortSelect.js';
 import { FallbackModelsCard } from './FallbackModelsCard.js';
+import { HeavyModelCard, type HeavyModelValue } from './HeavyModelCard.js';
+import { ModelSelect } from './ModelSelect.js';
+import { fieldClass, labelClass, ProviderSelect, useModelEfforts } from './providers.js';
+import { SeveritySelect } from './SeveritySelect.js';
 
 export interface ReviewSettingsCardProps {
   workspaceId: string;
@@ -16,22 +17,18 @@ export interface ReviewSettingsCardProps {
   isMember: boolean;
   onSave: (settings: Settings) => Promise<void>;
   isSaving: boolean;
+  /** Providers with a saved key; heavy and fallback models may only use these. Undefined = unknown. */
+  keyedProviders?: readonly ApiProvider[] | undefined;
 }
 
-const SAAS_PROVIDERS: readonly ApiProvider[] = [
-  'anthropic',
-  'openai',
-  'gemini',
-  'xai',
-  'deepseek',
-  'nvidia',
-  'openrouter',
-  'opencode-zen',
-  'opencode-go',
-  'zai',
-  'zai-coding',
-  'custom',
-] as const;
+type FormErrors = Partial<Record<'model' | 'budget' | 'heavy' | 'fallback', string>>;
+
+const NO_HEAVY: HeavyModelValue = { heavyProvider: null, heavyModel: null, heavyEffort: null, heavyThresholdLines: null };
+
+function withoutError(errors: FormErrors, field: keyof FormErrors): FormErrors {
+  const { [field]: _removed, ...rest } = errors;
+  return rest;
+}
 
 export function ReviewSettingsCard({
   workspaceId,
@@ -40,100 +37,74 @@ export function ReviewSettingsCard({
   isMember,
   onSave,
   isSaving,
+  keyedProviders,
 }: ReviewSettingsCardProps) {
   const { t } = useI18n();
-
   const [provider, setProvider] = useState<ApiProvider>('anthropic');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState<string | null>(null);
-  const [heavyProvider, setHeavyProvider] = useState<ApiProvider | null>(null);
-  const [heavyModel, setHeavyModel] = useState<string | null>(null);
-  const [heavyEffort, setHeavyEffort] = useState<string | null>(null);
-  const [heavyThresholdLines, setHeavyThresholdLines] = useState<number | null>(800);
+  const [heavy, setHeavy] = useState<HeavyModelValue>(NO_HEAVY);
   const [fallback, setFallback] = useState<FallbackEntry[]>([]);
   const [minSeverity, setMinSeverity] = useState<Severity>('medium');
   const [language, setLanguage] = useState<'ar' | 'en'>('ar');
   const [monthlyBudget, setMonthlyBudget] = useState('');
-  const [modelEfforts, setModelEfforts] = useState<string[]>([]);
-
-  const [modelError, setModelError] = useState('');
-  const [budgetError, setBudgetError] = useState('');
+  const [errors, setErrors] = useState<FormErrors>({});
+  const efforts = useModelEfforts(workspaceId, provider, model);
+  // The heavy model starts on the main provider when it has a key, else on the first keyed one.
+  const heavyDefault: ApiProvider =
+    keyedProviders && !keyedProviders.includes(provider) ? (keyedProviders[0] ?? provider) : provider;
 
   useEffect(() => {
-    if (settings) {
-      setProvider(settings.provider);
-      setModel(settings.model);
-      setEffort(settings.effort ?? null);
-      setHeavyProvider(settings.heavyProvider ?? null);
-      setHeavyModel(settings.heavyModel ?? null);
-      setHeavyEffort(settings.heavyEffort ?? null);
-      setHeavyThresholdLines(settings.heavyThresholdLines ?? 800);
-      setFallback(settings.fallback ?? []);
-      setMinSeverity(settings.minSeverity ?? 'medium');
-      setLanguage(settings.language);
-      setMonthlyBudget(
-        settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined
-          ? String(settings.monthlyBudgetUsd)
-          : '',
-      );
-    }
+    if (!settings) return;
+    setProvider(settings.provider);
+    setModel(settings.model);
+    setEffort(settings.effort ?? null);
+    setHeavy(
+      settings.heavyProvider && settings.heavyModel
+        ? {
+            heavyProvider: settings.heavyProvider,
+            heavyModel: settings.heavyModel,
+            heavyEffort: settings.heavyEffort ?? null,
+            heavyThresholdLines: settings.heavyThresholdLines ?? null,
+          }
+        : NO_HEAVY,
+    );
+    setFallback(settings.fallback ?? []);
+    setMinSeverity(settings.minSeverity ?? 'medium');
+    setLanguage(settings.language);
+    setMonthlyBudget(
+      settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined ? String(settings.monthlyBudgetUsd) : '',
+    );
   }, [settings]);
-
-  const getProviderLabel = (p: ApiProvider) => {
-    switch (p) {
-      case 'anthropic': return t('providerAnthropic') || 'Anthropic';
-      case 'openai': return t('providerOpenai') || 'OpenAI';
-      case 'gemini': return t('providerGemini') || 'Google Gemini';
-      case 'xai': return t('providerXai') || 'xAI';
-      case 'deepseek': return t('providerDeepseek') || 'DeepSeek';
-      case 'nvidia': return t('providerNvidia') || 'NVIDIA';
-      case 'openrouter': return t('providerOpenrouter') || 'OpenRouter';
-      case 'opencode-zen': return t('providerOpencodeZen') || 'OpenCode Zen';
-      case 'opencode-go': return t('providerOpencodeGo') || 'OpenCode Go';
-      case 'zai': return t('providerZai') || 'Z.ai';
-      case 'zai-coding': return t('providerZaiCoding') || 'Z.ai GLM Coding';
-      case 'custom': return t('providerCustom') || 'Custom';
-      default: return p;
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isMember) return;
-
-    let hasError = false;
-    setModelError('');
-    setBudgetError('');
-
-    if (!model.trim()) {
-      setModelError(t('modelRequired'));
-      hasError = true;
-    }
-
+    const next: FormErrors = {};
+    if (!model.trim()) next.model = t('modelRequired');
     let parsedBudget: number | null = null;
     if (monthlyBudget.trim()) {
       const num = Number(monthlyBudget.trim());
-      if (Number.isNaN(num) || num <= 0) {
-        setBudgetError(t('budgetMustBePositive'));
-        hasError = true;
-      } else {
-        parsedBudget = num;
-      }
+      if (Number.isNaN(num) || num <= 0) next.budget = t('budgetMustBePositive');
+      else parsedBudget = num;
     }
+    if (heavy.heavyProvider && !heavy.heavyModel?.trim()) next.heavy = t('heavyModelRequired');
+    if (fallback.some((f) => !f.model.trim())) next.fallback = t('fallbackModelRequired');
+    setErrors(next);
+    if (Object.keys(next).length > 0) return;
 
-    if (hasError) return;
-
+    const heavyOn = Boolean(heavy.heavyProvider && heavy.heavyModel);
     await onSave({
       provider,
       model: model.trim(),
       language,
       monthlyBudgetUsd: parsedBudget,
-      effort: effort || null,
-      heavyProvider: heavyModel ? heavyProvider : null,
-      heavyModel: heavyModel?.trim() ? heavyModel.trim() : null,
-      heavyEffort: heavyModel ? heavyEffort : null,
-      heavyThresholdLines: heavyModel ? heavyThresholdLines : null,
-      fallback,
+      effort,
+      heavyProvider: heavyOn ? heavy.heavyProvider : null,
+      heavyModel: heavyOn ? (heavy.heavyModel?.trim() ?? null) : null,
+      heavyEffort: heavyOn ? heavy.heavyEffort : null,
+      heavyThresholdLines: heavyOn ? heavy.heavyThresholdLines : null,
+      fallback: fallback.map((f) => ({ provider: f.provider, model: f.model.trim(), effort: f.effort ?? null })),
       minSeverity,
     });
   };
@@ -150,61 +121,40 @@ export function ReviewSettingsCard({
       {isLoading ? (
         <div className="py-4 text-sm text-ink-400">{t('loading')}</div>
       ) : (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-          {/* Main Provider & Model Section */}
+        <form onSubmit={handleSubmit} className="flex flex-col gap-6" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="settings-provider" className="block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300">
-                {t('providerLabel')}
-              </label>
-              <select
-                id="settings-provider"
-                disabled={isMember}
-                value={provider}
-                onChange={(e) => {
-                  setProvider(e.target.value as ApiProvider);
-                  setModelEfforts([]);
-                }}
-                className="w-full px-3.5 py-2 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-xs text-ink-900 dark:text-ink-100 focus:ring-2 focus:ring-brand-500 focus:outline-hidden disabled:opacity-60"
-              >
-                {SAAS_PROVIDERS.map((p) => (
-                  <option key={p} value={p}>
-                    {getProviderLabel(p)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
+            <ProviderSelect
+              id="settings-provider"
+              label={t('providerLabel')}
+              value={provider}
+              disabled={isMember}
+              onChange={(next) => {
+                setProvider(next);
+                setModel('');
+                setEffort(null);
+              }}
+            />
             <div>
               <ModelSelect
+                id="settings-model"
                 workspaceId={workspaceId}
                 provider={provider}
                 value={model}
                 disabled={isMember}
-                onChange={(m, eff) => {
+                onChange={(m, modelEfforts) => {
                   setModel(m);
-                  setModelEfforts(eff);
-                  if (modelError) setModelError('');
+                  setEffort((current) => effortFor(modelEfforts, current));
+                  if (errors.model) setErrors(withoutError(errors, 'model'));
                 }}
               />
-              {modelError && <p className="text-xs text-red-500 mt-1 ms-2">{modelError}</p>}
+              {errors.model && <p className="text-xs text-red-500 mt-1 ms-2">{errors.model}</p>}
             </div>
 
-            <EffortSelect
-              efforts={modelEfforts}
-              value={effort}
-              onChange={setEffort}
-              disabled={isMember}
-            />
-
-            <SeveritySelect
-              value={minSeverity}
-              onChange={setMinSeverity}
-              disabled={isMember}
-            />
+            <EffortSelect id="settings-effort" efforts={efforts} value={effort} onChange={setEffort} disabled={isMember} />
+            <SeveritySelect value={minSeverity} onChange={setMinSeverity} disabled={isMember} />
 
             <div>
-              <label htmlFor="settings-language" className="block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300">
+              <label htmlFor="settings-language" className={labelClass}>
                 {t('languageLabel')}
               </label>
               <select
@@ -212,7 +162,7 @@ export function ReviewSettingsCard({
                 disabled={isMember}
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as 'ar' | 'en')}
-                className="w-full px-3.5 py-2 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-xs text-ink-900 dark:text-ink-100 focus:ring-2 focus:ring-brand-500 focus:outline-hidden disabled:opacity-60"
+                className={fieldClass}
               >
                 <option value="ar">{t('langArabic')}</option>
                 <option value="en">{t('langEnglish')}</option>
@@ -220,51 +170,49 @@ export function ReviewSettingsCard({
             </div>
 
             <div>
-              <label htmlFor="settings-budget" className="block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300">
+              <label htmlFor="settings-budget" className={labelClass}>
                 {t('budgetLabel')}
               </label>
               <input
                 id="settings-budget"
                 type="text"
+                inputMode="decimal"
                 disabled={isMember}
                 value={monthlyBudget}
                 onChange={(e) => {
                   setMonthlyBudget(e.target.value);
-                  if (budgetError) setBudgetError('');
+                  if (errors.budget) setErrors(withoutError(errors, 'budget'));
                 }}
                 placeholder={t('budgetPlaceholder')}
-                className={`w-full px-3.5 py-2 rounded-full border text-xs focus:ring-2 focus:outline-hidden disabled:opacity-60 ${
-                  budgetError
-                    ? 'border-red-500 focus:ring-red-500'
-                    : 'border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 focus:ring-brand-500'
-                }`}
+                className={errors.budget ? `${fieldClass} border-red-500 focus:ring-red-500` : fieldClass}
               />
-              {budgetError && <p className="text-xs text-red-500 mt-1 ms-2">{budgetError}</p>}
+              {errors.budget && <p className="text-xs text-red-500 mt-1 ms-2">{errors.budget}</p>}
             </div>
           </div>
 
-          {/* Heavy-duty Model Section */}
           <HeavyModelCard
             workspaceId={workspaceId}
-            heavyProvider={heavyProvider}
-            heavyModel={heavyModel}
-            heavyEffort={heavyEffort}
-            heavyThresholdLines={heavyThresholdLines}
-            onChange={(updates) => {
-              setHeavyProvider(updates.heavyProvider);
-              setHeavyModel(updates.heavyModel);
-              setHeavyEffort(updates.heavyEffort);
-              setHeavyThresholdLines(updates.heavyThresholdLines);
+            value={heavy}
+            onChange={(next) => {
+              setHeavy(next);
+              if (errors.heavy) setErrors(withoutError(errors, 'heavy'));
             }}
+            providers={keyedProviders}
+            defaultProvider={heavyDefault}
             disabled={isMember}
+            error={errors.heavy}
           />
 
-          {/* Fallback Models Section */}
           <FallbackModelsCard
             workspaceId={workspaceId}
             fallbacks={fallback}
-            onChange={setFallback}
+            onChange={(next) => {
+              setFallback(next);
+              if (errors.fallback) setErrors(withoutError(errors, 'fallback'));
+            }}
+            providers={keyedProviders}
             disabled={isMember}
+            error={errors.fallback}
           />
 
           {!isMember && (

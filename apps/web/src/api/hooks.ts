@@ -63,33 +63,6 @@ export function useSaveKeyMutation(workspaceId: string) {
   });
 }
 
-export function useModelsQuery(workspaceId: string, provider: ApiProvider | null) {
-  return useQuery({
-    queryKey: ['workspaces', workspaceId, 'providers', provider, 'models'],
-    queryFn: () => (provider ? api.getModels(workspaceId, provider) : Promise.resolve({ models: [] })),
-    enabled: Boolean(workspaceId && provider),
-    staleTime: 5 * 60 * 1000,
-  });
-}
-
-export function useTestConnectionMutation(workspaceId: string) {
-  return useMutation({
-    mutationFn: ({
-      provider,
-      apiKey,
-      baseUrl,
-      model,
-      effort,
-    }: {
-      provider: ApiProvider;
-      apiKey?: string | undefined;
-      baseUrl?: string | undefined;
-      model?: string | undefined;
-      effort?: string | undefined;
-    }) => api.testConnection(workspaceId, provider, { apiKey, baseUrl, model, effort }),
-  });
-}
-
 export function useDeleteKeyMutation(workspaceId: string) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();

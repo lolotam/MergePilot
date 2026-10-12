@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Secret } from '@mergepilot/engine';
-import { assertSafeBaseUrl } from '../core/ssrf.js';
+import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { ApiProvider, AppStore, StoredCredential, Vault } from '../core/types.js';
 
 export type ValidateApiKeyFn = (provider: ApiProvider, apiKey: string, baseUrl?: string) => Promise<boolean | void>;
@@ -9,6 +9,8 @@ export interface CredentialServiceOptions {
   store: AppStore;
   vault: Vault;
   validate?: ValidateApiKeyFn | undefined;
+  /** Test seam: DNS lookup for the custom base URL SSRF check. */
+  ssrfLookup?: DnsLookupFn | undefined;
 }
 
 export interface SaveKeyParams {
@@ -25,11 +27,13 @@ export class CredentialService {
   readonly #store: AppStore;
   readonly #vault: Vault;
   readonly #validate: ValidateApiKeyFn | undefined;
+  readonly #ssrfLookup: DnsLookupFn | undefined;
 
   constructor(options: CredentialServiceOptions) {
     this.#store = options.store;
     this.#vault = options.vault;
     this.#validate = options.validate;
+    this.#ssrfLookup = options.ssrfLookup;
   }
 
   async saveKey(params: SaveKeyParams): Promise<KeyMetadata> {
@@ -49,9 +53,10 @@ export class CredentialService {
       if (!params.baseUrl || !params.baseUrl.trim()) {
         throw new Error('Base URL is required for custom provider');
       }
-      sanitizedBaseUrl = await assertSafeBaseUrl(params.baseUrl);
-    } else if (params.baseUrl) {
-      sanitizedBaseUrl = await assertSafeBaseUrl(params.baseUrl);
+      sanitizedBaseUrl = await assertSafeBaseUrl(params.baseUrl, this.#ssrfLookup);
+    } else if (params.baseUrl?.trim()) {
+      // Presets always call their fixed registry URL (ADR-0008); a stored URL would be ignored.
+      throw new Error('Only the custom provider takes a base URL');
     }
 
     if (this.#validate) {

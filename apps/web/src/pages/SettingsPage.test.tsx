@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsPage } from './SettingsPage.js';
 import { I18nProvider } from '../i18n/context.js';
 import { ToastProvider } from '../components/Toast.js';
@@ -102,6 +103,9 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
   const renderComponent = () =>
     render(
       React.createElement(
+        QueryClientProvider,
+        { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+        React.createElement(
         I18nProvider,
         { initialLanguage: 'ar' },
         React.createElement(
@@ -120,6 +124,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
             ),
           ),
         ),
+      ),
       ),
     );
 

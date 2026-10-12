@@ -1,309 +1,196 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   failureKind,
+  listModels,
   LlmFailure,
   providerEntry,
   testConnection,
-  listModels,
   type ApiProviderId,
   type CatalogModel,
 } from '@mergepilot/engine';
 import { requireRole } from '../auth/guard.js';
-import { assertSafeBaseUrl, SsrFValidationError } from '../core/ssrf.js';
-import type { ApiProvider } from '../core/types.js';
-import {
-  ApiProviderSchema,
-  ListModelsBodySchema,
-  TestConnectionBodySchema,
-} from './contract.js';
+import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } from './contract.js';
 import { sendError } from './helpers.js';
+import { engineOptions, storedTarget, unsavedTarget, type TargetResult } from './provider-target.js';
 import type { DashboardApiDeps } from './routes.js';
 
-function redactKey(text: string, key?: string): string {
-  if (!key || !text) return text;
-  return text.replaceAll(key, '[REDACTED]');
-}
+/**
+ * Model catalog and connection-test routes (J2). A key typed into the "add key" dialog may be
+ * sent here BEFORE it is saved: it is used for that one provider call only, never stored, never
+ * logged, and every message that could carry it is redacted.
+ */
 
-interface ModelsCacheEntry {
-  expiresAt: number;
-  models: CatalogModel[];
-}
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 1000;
+const modelsCache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
 
-const modelsCache = new Map<string, ModelsCacheEntry>();
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const RATE_WINDOW_MS = 60 * 1000;
+const TEST_LIMIT = 10;
+const UNSAVED_MODELS_LIMIT = 20;
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
-
-const testRateLimits = new Map<string, RateLimitEntry>();
-const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-
+/** Test helper: forget every cached model list and rate-limit bucket. */
 export function resetProviderTestRateLimits(): void {
-  testRateLimits.clear();
+  rateBuckets.clear();
   modelsCache.clear();
 }
 
-function checkRateLimit(workspaceId: string): boolean {
+/** Drops a workspace's cached model list for one provider (its key changed or was removed). */
+export function invalidateModelsCache(workspaceId: string, provider: string): void {
+  modelsCache.delete(`${workspaceId}:${provider}`);
+}
+
+function cacheModels(key: string, models: CatalogModel[]): void {
   const now = Date.now();
-  let entry = testRateLimits.get(workspaceId);
+  if (modelsCache.size >= CACHE_MAX_ENTRIES) {
+    for (const [k, v] of modelsCache) if (v.expiresAt <= now) modelsCache.delete(k);
+    if (modelsCache.size >= CACHE_MAX_ENTRIES) modelsCache.clear();
+  }
+  modelsCache.set(key, { expiresAt: now + CACHE_TTL_MS, models });
+}
+
+function allow(bucket: string, limit: number): boolean {
+  const now = Date.now();
+  const entry = rateBuckets.get(bucket);
   if (!entry || now >= entry.resetAt) {
-    entry = { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
-    testRateLimits.set(workspaceId, entry);
+    rateBuckets.set(bucket, { count: 1, resetAt: now + RATE_WINDOW_MS });
     return true;
   }
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return false;
-  }
+  if (entry.count >= limit) return false;
   entry.count++;
   return true;
 }
 
-function mapFailureToStatus(kind: string): number {
-  switch (kind) {
-    case 'auth':
-      return 422;
-    case 'quota':
-    case 'rate-limit':
-      return 429;
-    case 'network':
-    case 'timeout':
-    case 'server':
-      return 502;
-    default:
-      return 422;
+function statusFor(kind: string): number {
+  if (kind === 'quota' || kind === 'rate-limit') return 429;
+  if (kind === 'network' || kind === 'timeout' || kind === 'server') return 502;
+  return 422;
+}
+
+function redact(text: string, key: string): string {
+  return key ? text.replaceAll(key, '[REDACTED]') : text;
+}
+
+function parseProvider(request: FastifyRequest, reply: FastifyReply): ApiProviderId | undefined {
+  const raw = (request.params as { provider?: string }).provider ?? '';
+  const parsed = ApiProviderSchema.safeParse(raw);
+  if (!parsed.success) {
+    sendError(reply, 400, 'invalid_provider', 'Unknown provider');
+    return undefined;
+  }
+  return parsed.data;
+}
+
+function sendTargetError(reply: FastifyReply, result: Exclude<TargetResult, { ok: true }>): FastifyReply {
+  return sendError(reply, result.status, result.code, result.message);
+}
+
+async function fetchModels(
+  reply: FastifyReply,
+  provider: ApiProviderId,
+  result: Extract<TargetResult, { ok: true }>,
+  cacheKey?: string,
+): Promise<FastifyReply> {
+  const { target } = result;
+  try {
+    const models = await listModels(provider, target.apiKey, engineOptions(target));
+    if (cacheKey) cacheModels(cacheKey, models);
+    return reply.status(200).send({ models });
+  } catch (err) {
+    if (err instanceof LlmFailure) {
+      const kind = failureKind(err.code);
+      return sendError(reply, statusFor(kind), kind, redact(err.message, target.apiKey));
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return sendError(reply, 502, 'models_fetch_failed', redact(msg, target.apiKey));
   }
 }
 
 export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiDeps): void {
-  // GET /api/workspaces/:workspaceId/providers/:provider/models
+  // Model list with the workspace's stored key. Members may read it (it reveals no secret).
   app.get(
     '/api/workspaces/:workspaceId/providers/:provider/models',
     { preHandler: [requireRole('member', deps.auth)] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { workspaceId, provider: rawProvider } = request.params as {
-        workspaceId: string;
-        provider: string;
-      };
-      const parseProvider = ApiProviderSchema.safeParse(rawProvider);
-      if (!parseProvider.success) {
-        return sendError(reply, 400, 'invalid_provider', `Unknown provider: ${rawProvider}`);
-      }
-      const provider = parseProvider.data as ApiProviderId;
-
-      const query = request.query as { refresh?: string };
-      const refresh = query?.refresh === 'true' || query?.refresh === '1';
-
+    async (request, reply) => {
+      const { workspaceId } = request.params as { workspaceId: string };
+      const provider = parseProvider(request, reply);
+      if (!provider) return reply;
+      const { refresh } = (request.query ?? {}) as { refresh?: string };
       const cacheKey = `${workspaceId}:${provider}`;
-      if (!refresh) {
+      if (refresh !== 'true' && refresh !== '1') {
         const cached = modelsCache.get(cacheKey);
-        if (cached && Date.now() < cached.expiresAt) {
-          return reply.status(200).send({ models: cached.models });
-        }
+        if (cached && Date.now() < cached.expiresAt) return reply.status(200).send({ models: cached.models });
       }
-
-      const cred = await deps.store.getCredential(workspaceId, provider as ApiProvider);
-      if (!cred) {
-        return sendError(reply, 404, 'key_not_found', `No API key configured for provider "${provider}"`);
-      }
-
-      let secretValue: string;
-      try {
-        const resolved = await deps.credentials.resolve(workspaceId, provider as ApiProvider);
-        secretValue = resolved.reveal();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return sendError(reply, 404, 'key_not_found', msg);
-      }
-
-      let baseUrl = cred.baseUrl ?? undefined;
-      if (provider === 'custom') {
-        if (!baseUrl) {
-          return sendError(reply, 400, 'custom_base_url_required', 'Base URL is required for custom provider');
-        }
-        try {
-          baseUrl = await assertSafeBaseUrl(baseUrl);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return sendError(reply, 400, 'ssrf_validation_error', msg);
-        }
-      }
-
-      try {
-        const models = await listModels(provider, secretValue, { ...(baseUrl ? { baseUrl } : {}) });
-        modelsCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, models });
-        return reply.status(200).send({ models });
-      } catch (err) {
-        if (err instanceof SsrFValidationError) {
-          return sendError(reply, 400, 'ssrf_validation_error', err.message);
-        }
-        if (err instanceof LlmFailure) {
-          const kind = failureKind(err.code);
-          const status = mapFailureToStatus(kind);
-          return sendError(reply, status, kind, redactKey(err.message, secretValue));
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        return sendError(reply, 422, 'models_fetch_failed', redactKey(msg, secretValue));
-      }
+      const result = await storedTarget(deps, workspaceId, provider);
+      if (!result.ok) return sendTargetError(reply, result);
+      return fetchModels(reply, provider, result, cacheKey);
     },
   );
 
-  // POST /api/workspaces/:workspaceId/providers/:provider/models (unsaved key test)
+  // Model list with a key typed in the "add key" dialog, before it is saved (admins only).
   app.post(
     '/api/workspaces/:workspaceId/providers/:provider/models',
-    { preHandler: [requireRole('member', deps.auth)] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { provider: rawProvider } = request.params as {
-        workspaceId: string;
-        provider: string;
-      };
-      const parseProvider = ApiProviderSchema.safeParse(rawProvider);
-      if (!parseProvider.success) {
-        return sendError(reply, 400, 'invalid_provider', `Unknown provider: ${rawProvider}`);
+    { preHandler: [requireRole('admin', deps.auth)] },
+    async (request, reply) => {
+      const { workspaceId } = request.params as { workspaceId: string };
+      const provider = parseProvider(request, reply);
+      if (!provider) return reply;
+      const body = ListModelsBodySchema.safeParse(request.body);
+      if (!body.success) return sendError(reply, 400, 'validation_error', 'apiKey is required');
+      if (!allow(`${workspaceId}:models`, UNSAVED_MODELS_LIMIT)) {
+        return sendError(reply, 429, 'rate_limited', `Too many requests: ${UNSAVED_MODELS_LIMIT} per minute per workspace`);
       }
-      const provider = parseProvider.data as ApiProviderId;
-
-      const parsedBody = ListModelsBodySchema.safeParse(request.body);
-      if (!parsedBody.success) {
-        return sendError(
-          reply,
-          400,
-          'validation_error',
-          parsedBody.error.issues[0]?.message ?? 'Invalid request body',
-        );
-      }
-      const apiKey = parsedBody.data.apiKey.trim();
-      let baseUrl = parsedBody.data.baseUrl?.trim();
-
-      if (provider === 'custom') {
-        if (!baseUrl) {
-          return sendError(reply, 400, 'custom_base_url_required', 'Base URL is required for custom provider');
-        }
-        try {
-          baseUrl = await assertSafeBaseUrl(baseUrl);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return sendError(reply, 400, 'ssrf_validation_error', msg);
-        }
-      } else if (baseUrl) {
-        try {
-          baseUrl = await assertSafeBaseUrl(baseUrl);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return sendError(reply, 400, 'ssrf_validation_error', msg);
-        }
-      }
-
-      try {
-        const models = await listModels(provider, apiKey, { ...(baseUrl ? { baseUrl } : {}) });
-        return reply.status(200).send({ models });
-      } catch (err) {
-        if (err instanceof SsrFValidationError) {
-          return sendError(reply, 400, 'ssrf_validation_error', err.message);
-        }
-        if (err instanceof LlmFailure) {
-          const kind = failureKind(err.code);
-          const status = mapFailureToStatus(kind);
-          return sendError(reply, status, kind, redactKey(err.message, apiKey));
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        return sendError(reply, 422, 'models_fetch_failed', redactKey(msg, apiKey));
-      }
+      const result = await unsavedTarget(deps, provider, body.data.apiKey, body.data.baseUrl);
+      if (!result.ok) return sendTargetError(reply, result);
+      return fetchModels(reply, provider, result);
     },
   );
 
-  // POST /api/workspaces/:workspaceId/credentials/:provider/test
+  // Connection test: stored key, or an unsaved key for "test before saving" (admins only).
   app.post(
     '/api/workspaces/:workspaceId/credentials/:provider/test',
-    { preHandler: [requireRole('member', deps.auth)] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const { workspaceId, provider: rawProvider } = request.params as {
-        workspaceId: string;
-        provider: string;
-      };
-      const parseProvider = ApiProviderSchema.safeParse(rawProvider);
-      if (!parseProvider.success) {
-        return sendError(reply, 400, 'invalid_provider', `Unknown provider: ${rawProvider}`);
-      }
-      const provider = parseProvider.data as ApiProviderId;
-
-      if (!checkRateLimit(workspaceId)) {
-        return sendError(reply, 429, 'rate_limited', 'Rate limit exceeded: 10 tests per minute per workspace');
+    { preHandler: [requireRole('admin', deps.auth)] },
+    async (request, reply) => {
+      const { workspaceId } = request.params as { workspaceId: string };
+      const provider = parseProvider(request, reply);
+      if (!provider) return reply;
+      const parsed = TestConnectionBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) return sendError(reply, 400, 'validation_error', 'Invalid test request');
+      const body = parsed.data;
+      if (!allow(`${workspaceId}:test`, TEST_LIMIT)) {
+        return sendError(reply, 429, 'rate_limited', `Rate limit exceeded: ${TEST_LIMIT} tests per minute per workspace`);
       }
 
-      const bodyParse = TestConnectionBodySchema.safeParse(request.body ?? {});
-      const body = bodyParse.success ? bodyParse.data : {};
+      const apiKey = body.apiKey?.trim();
+      const result = apiKey
+        ? await unsavedTarget(deps, provider, apiKey, body.baseUrl)
+        : await storedTarget(deps, workspaceId, provider);
+      if (!result.ok) return sendTargetError(reply, result);
 
-      let apiKey = body.apiKey?.trim();
-      let baseUrl = body.baseUrl?.trim();
-
-      if (!apiKey) {
-        const cred = await deps.store.getCredential(workspaceId, provider as ApiProvider);
-        if (!cred) {
-          return sendError(reply, 404, 'key_not_found', `No credential stored for provider "${provider}"`);
-        }
-        try {
-          const resolved = await deps.credentials.resolve(workspaceId, provider as ApiProvider);
-          apiKey = resolved.reveal();
-          baseUrl = cred.baseUrl ?? undefined;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return sendError(reply, 404, 'key_not_found', msg);
-        }
-      }
-
-      if (provider === 'custom') {
-        if (!baseUrl) {
-          return sendError(reply, 400, 'custom_base_url_required', 'Base URL is required for custom provider');
-        }
-        try {
-          baseUrl = await assertSafeBaseUrl(baseUrl);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return sendError(reply, 400, 'ssrf_validation_error', msg);
-        }
-      } else if (baseUrl) {
-        try {
-          baseUrl = await assertSafeBaseUrl(baseUrl);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return sendError(reply, 400, 'ssrf_validation_error', msg);
-        }
-      }
-
-      const defaultModel = providerEntry(provider)?.defaultModel || 'gpt-4o';
-      const model = body.model?.trim() || defaultModel;
+      const settings = await deps.store.getSettings(workspaceId);
+      const model =
+        body.model?.trim() ||
+        (settings?.provider === provider ? settings.model : '') ||
+        providerEntry(provider).defaultModel;
+      if (!model) return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
       const effort = body.effort?.trim();
+      const { target } = result;
 
       try {
-        const result = await testConnection(provider, apiKey, model, {
-          ...(baseUrl ? { baseUrl } : {}),
+        const outcome = await testConnection(provider, target.apiKey, model, {
+          ...engineOptions(target),
           ...(effort ? { effort } : {}),
         });
-
-        if (result.ok) {
-          return reply.status(200).send({
-            ok: true,
-            ms: result.ms,
-            model: result.model,
-          });
-        }
-
+        if (outcome.ok) return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model });
         return reply.status(200).send({
           ok: false,
-          code: result.code,
-          message: redactKey(result.message, apiKey),
-          ms: result.ms,
+          code: outcome.code,
+          message: redact(outcome.message, target.apiKey),
+          ms: outcome.ms,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        return reply.status(200).send({
-          ok: false,
-          code: 'network',
-          message: redactKey(msg, apiKey),
-        });
+        return reply.status(200).send({ ok: false, code: 'network', message: redact(msg, target.apiKey) });
       }
     },
   );

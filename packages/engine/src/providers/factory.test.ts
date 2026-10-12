@@ -11,7 +11,7 @@ describe('createReviewModel', () => {
 
   it('creates an Anthropic review model with correct label', async () => {
     const store = new EnvCredentialStore({
-      ANTHROPIC_API_KEY: 'sk-ant-test-key-123',
+      ANTHROPIC_API_KEY: 'k1',
     });
     const config: MergePilotConfig = {
       provider: 'anthropic',
@@ -40,7 +40,7 @@ describe('createReviewModel', () => {
 
   it('creates an OpenAI review model with correct label', async () => {
     const store = new EnvCredentialStore({
-      OPENAI_API_KEY: 'sk-test-openai-key-456',
+      OPENAI_API_KEY: 'k2',
     });
     const config: MergePilotConfig = {
       provider: 'openai',
@@ -69,7 +69,7 @@ describe('createReviewModel', () => {
 
   it('creates a Gemini review model with correct label', async () => {
     const store = new EnvCredentialStore({
-      GEMINI_API_KEY: 'test-gemini-key-789',
+      GEMINI_API_KEY: 'k3',
     });
     const config: MergePilotConfig = {
       provider: 'gemini',
@@ -154,7 +154,7 @@ describe('createReviewModel', () => {
 
   it('wraps generate with withRetry for API adapters', async () => {
     const store = new EnvCredentialStore({
-      OPENAI_API_KEY: 'sk-test-openai',
+      OPENAI_API_KEY: 'k5',
     });
     const config: MergePilotConfig = {
       provider: 'openai',
@@ -232,7 +232,7 @@ describe('createReviewModel', () => {
 
   it('creates an OpenAI-compatible review model for compatible presets', async () => {
     const store = new EnvCredentialStore({
-      XAI_API_KEY: 'xai-test-key',
+      XAI_API_KEY: 'k4',
     });
     const config: MergePilotConfig = {
       provider: 'xai',
@@ -250,8 +250,8 @@ describe('createReviewModel', () => {
 
   it('attaches configured fallbacks to the review model', async () => {
     const store = new EnvCredentialStore({
-      OPENAI_API_KEY: 'sk-test-openai',
-      XAI_API_KEY: 'xai-test-key',
+      OPENAI_API_KEY: 'k5',
+      XAI_API_KEY: 'k4',
     });
     const config: MergePilotConfig = {
       provider: 'openai',

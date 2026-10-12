@@ -1,309 +1,176 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import React from 'react';
-import { I18nProvider } from '../i18n/context.js';
-import { api, type ApiProvider } from '../api/client.js';
-import { ModelSelect } from './ModelSelect.js';
+import type { FallbackEntry } from '@mergepilot/app/contract';
+import { api, ApiClientError, type ApiProvider } from '../api/client.js';
 import { EffortSelect } from './EffortSelect.js';
-import { SeveritySelect } from './SeveritySelect.js';
-import { HeavyModelCard } from './HeavyModelCard.js';
 import { FallbackModelsCard } from './FallbackModelsCard.js';
-import { TestKeyButton } from './TestKeyButton.js';
-import { AddKeyModal } from '../components/AddKeyModal.js';
+import { HeavyModelCard } from './HeavyModelCard.js';
+import { ModelSelect } from './ModelSelect.js';
+import { ReviewSettingsCard } from './ReviewSettingsCard.js';
+import { SeveritySelect } from './SeveritySelect.js';
+import { renderSettings } from './settings.fixtures.js';
 
 vi.mock('../api/client.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client.js')>();
-  return {
-    ...actual,
-    api: {
-      ...actual.api,
-      getModels: vi.fn(),
-      testConnection: vi.fn(),
-      saveKey: vi.fn(),
-    },
-  };
+  return { ...actual, api: { ...actual.api, getModels: vi.fn(), testConnection: vi.fn(), testModelsUnsaved: vi.fn() } };
 });
 
-describe('Task J2 Settings Components', () => {
+const CATALOG = {
+  models: [
+    { id: 'openai/gpt-5:free', name: 'GPT-5 (free)', efforts: ['low', 'medium', 'high'] },
+    { id: 'z-ai/glm-5', name: 'GLM 5', efforts: ['on', 'off'] },
+    { id: 'plain', name: 'Plain', efforts: [] },
+  ],
+};
+
+describe('J2 settings components', () => {
   const user = userEvent.setup();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(api.getModels).mockResolvedValue(CATALOG);
   });
 
-  const renderWithI18n = (ui: React.ReactElement) =>
-    render(React.createElement(I18nProvider, { initialLanguage: 'ar' }, ui));
-
-  describe('ModelSelect & EffortSelect', () => {
-    it('populates models dropdown and triggers onChange with efforts', async () => {
-      const mockOnChange = vi.fn();
-      vi.mocked(api.getModels).mockResolvedValueOnce({
-        models: [
-          { id: 'claude-3-7-sonnet', name: 'Claude 3.7 Sonnet', efforts: ['low', 'medium', 'high'] },
-          { id: 'claude-3-5-haiku', name: 'Claude 3.5 Haiku', efforts: [] },
-        ],
-      });
-
-      renderWithI18n(
-        React.createElement(ModelSelect, {
-          workspaceId: 'ws-1',
-          provider: 'anthropic' as ApiProvider,
-          value: '',
-          onChange: mockOnChange,
-        }),
-      );
-
-      // Open dropdown
-      const trigger = await screen.findByRole('button', { name: /اسم النموذج/i });
-      await user.click(trigger);
-
-      // Select Claude 3.7 Sonnet
-      const option = await screen.findByText('Claude 3.7 Sonnet');
-      await user.click(option);
-
-      expect(mockOnChange).toHaveBeenCalledWith('claude-3-7-sonnet', ['low', 'medium', 'high']);
-    });
-
-    it('renders effort options and updates value', async () => {
-      const mockOnChange = vi.fn();
-      renderWithI18n(
-        React.createElement(EffortSelect, {
-          efforts: ['low', 'medium', 'high'],
-          value: 'medium',
-          onChange: mockOnChange,
-        }),
-      );
-
-      const select = screen.getByRole('combobox') as HTMLSelectElement;
-      expect(select.value).toBe('medium');
-
-      await user.selectOptions(select, 'high');
-      expect(mockOnChange).toHaveBeenCalledWith('high');
-    });
-
-    it('returns null when model has no effort options', () => {
-      const { container } = renderWithI18n(
-        React.createElement(EffortSelect, {
-          efforts: [],
-          value: null,
-          onChange: vi.fn(),
-        }),
-      );
-      expect(container.firstChild).toBeNull();
-    });
+  it('ModelSelect fills the dropdown from the models endpoint and reports the picked model with its efforts', async () => {
+    const onChange = vi.fn();
+    renderSettings(<ModelSelect id="m" workspaceId="ws-1" provider="openrouter" value="" onChange={onChange} />, 'en');
+    await user.click(await screen.findByRole('button', { name: 'Model name' }));
+    await user.type(screen.getByRole('searchbox'), 'glm');
+    expect(screen.queryByText('GPT-5 (free)')).toBeNull();
+    await user.click(screen.getByRole('option', { name: /GLM 5/ }));
+    expect(onChange).toHaveBeenCalledWith('z-ai/glm-5', ['on', 'off']);
+    expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openrouter');
   });
 
-  describe('HeavyModelCard', () => {
-    it('enables heavy duty model and updates threshold and provider', async () => {
-      const mockOnChange = vi.fn();
-      renderWithI18n(
-        React.createElement(HeavyModelCard, {
-          workspaceId: 'ws-1',
-          heavyProvider: null,
-          heavyModel: null,
-          heavyEffort: null,
-          heavyThresholdLines: null,
-          onChange: mockOnChange,
-        }),
-      );
-
-      // Toggle enable
-      const toggle = screen.getByRole('checkbox');
-      expect((toggle as HTMLInputElement).checked).toBe(false);
-
-      await user.click(toggle);
-      expect(mockOnChange).toHaveBeenCalledWith({
-        heavyProvider: 'anthropic',
-        heavyModel: 'claude-3-7-sonnet',
-        heavyEffort: null,
-        heavyThresholdLines: 800,
-      });
-    });
+  it('ModelSelect falls back to free text with an "add a key" hint when the provider has no key', async () => {
+    vi.mocked(api.getModels).mockRejectedValue(new ApiClientError('no key', 'key_not_found', 404));
+    const onChange = vi.fn();
+    renderSettings(<ModelSelect id="m" workspaceId="ws-1" provider="zai-coding" value="" onChange={onChange} />, 'en');
+    expect(await screen.findByText(/Add an API key for this provider first/)).toBeDefined();
+    await user.type(screen.getByRole('textbox', { name: 'Model name' }), 'g');
+    expect(onChange).toHaveBeenLastCalledWith('g', []);
   });
 
-  describe('FallbackModelsCard', () => {
-    it('allows adding, reordering and removing fallback models (max 3)', async () => {
-      const initial = [
-        { provider: 'openai' as ApiProvider, model: 'gpt-4o', effort: null },
-        { provider: 'gemini' as ApiProvider, model: 'gemini-2.5-pro', effort: null },
-      ];
-      let current = initial;
-      const mockOnChange = vi.fn((next) => {
-        current = next;
-      });
-
-      const { rerender } = renderWithI18n(
-        React.createElement(FallbackModelsCard, {
-          workspaceId: 'ws-1',
-          fallbacks: current,
-          onChange: mockOnChange,
-        }),
-      );
-
-      // Add third fallback
-      const addBtn = screen.getByRole('button', { name: /إضافة نموذج احتياطي/i });
-      await user.click(addBtn);
-
-      expect(mockOnChange).toHaveBeenCalledWith([
-        ...initial,
-        { provider: 'openai', model: 'gpt-4o', effort: null },
-      ]);
-
-      rerender(
-        React.createElement(
-          I18nProvider,
-          { initialLanguage: 'ar' },
-          React.createElement(FallbackModelsCard, {
-            workspaceId: 'ws-1',
-            fallbacks: current,
-            onChange: mockOnChange,
-          }),
-        ),
-      );
-
-      // Move up the second item (index 1)
-      const moveUpBtns = screen.getAllByTitle(/تحريك للأعلى/i);
-      expect(moveUpBtns[1]).toBeDefined();
-      await user.click(moveUpBtns[1]!);
-
-      expect(mockOnChange).toHaveBeenLastCalledWith([
-        { provider: 'gemini', model: 'gemini-2.5-pro', effort: null },
-        { provider: 'openai', model: 'gpt-4o', effort: null },
-        { provider: 'openai', model: 'gpt-4o', effort: null },
-      ]);
-
-      rerender(
-        React.createElement(
-          I18nProvider,
-          { initialLanguage: 'ar' },
-          React.createElement(FallbackModelsCard, {
-            workspaceId: 'ws-1',
-            fallbacks: current,
-            onChange: mockOnChange,
-          }),
-        ),
-      );
-
-      // Remove the last item
-      const removeBtns = screen.getAllByRole('button', { name: /إزالة/i });
-      expect(removeBtns[2]).toBeDefined();
-      await user.click(removeBtns[2]!);
-
-      expect(mockOnChange).toHaveBeenLastCalledWith([
-        { provider: 'gemini', model: 'gemini-2.5-pro', effort: null },
-        { provider: 'openai', model: 'gpt-4o', effort: null },
-      ]);
-    });
+  it('ModelSelect refresh asks the server to bypass its cache', async () => {
+    renderSettings(<ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />, 'en');
+    await screen.findByRole('button', { name: 'Model name' });
+    await user.click(screen.getByRole('button', { name: 'Refresh list' }));
+    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true));
   });
 
-  describe('TestKeyButton', () => {
-    it('handles successful test connection with latency', async () => {
-      vi.mocked(api.testConnection).mockResolvedValueOnce({
-        ok: true,
-        ms: 154,
-        model: 'claude-3-7-sonnet',
-      });
-
-      renderWithI18n(
-        React.createElement(TestKeyButton, {
-          workspaceId: 'ws-1',
-          provider: 'anthropic' as ApiProvider,
-        }),
-      );
-
-      const testBtn = screen.getByRole('button', { name: /اختبار الاتصال/i });
-      await user.click(testBtn);
-
-      await waitFor(() => {
-        expect(screen.getByText('154ms')).toBeDefined();
-        expect(screen.getByText('✅')).toBeDefined();
-      });
-    });
-
-    it('handles failed test connection with error code', async () => {
-      vi.mocked(api.testConnection).mockResolvedValueOnce({
-        ok: false,
-        code: 'auth_failed',
-        message: 'Invalid API key',
-      });
-
-      renderWithI18n(
-        React.createElement(TestKeyButton, {
-          workspaceId: 'ws-1',
-          provider: 'anthropic' as ApiProvider,
-        }),
-      );
-
-      const testBtn = screen.getByRole('button', { name: /اختبار الاتصال/i });
-      await user.click(testBtn);
-
-      await waitFor(() => {
-        expect(screen.getByText('auth_failed')).toBeDefined();
-        expect(screen.getByText('❌')).toBeDefined();
-      });
-    });
+  it('EffortSelect lists the model efforts, is labelled, and hides when there are none', async () => {
+    const onChange = vi.fn();
+    const { container, rerender } = renderSettings(
+      <EffortSelect id="e" efforts={['off', 'low', 'high']} value="low" onChange={onChange} />,
+      'en',
+    );
+    const select = screen.getByRole('combobox', { name: 'Effort' }) as HTMLSelectElement;
+    expect(select.value).toBe('low');
+    await user.selectOptions(select, 'high');
+    expect(onChange).toHaveBeenCalledWith('high');
+    rerender(<EffortSelect id="e" efforts={[]} value={null} onChange={onChange} />);
+    expect(container.querySelector('select')).toBeNull();
   });
 
-  describe('SeveritySelect', () => {
-    it('changes minimum severity level', async () => {
-      const mockOnChange = vi.fn();
-      renderWithI18n(
-        React.createElement(SeveritySelect, {
-          value: 'medium',
-          onChange: mockOnChange,
-        }),
-      );
-
-      const select = screen.getByRole('combobox') as HTMLSelectElement;
-      expect(select.value).toBe('medium');
-
-      await user.selectOptions(select, 'high');
-      expect(mockOnChange).toHaveBeenCalledWith('high');
-    });
+  it('SeveritySelect changes the minimum severity', async () => {
+    const onChange = vi.fn();
+    renderSettings(<SeveritySelect value="medium" onChange={onChange} />);
+    await user.selectOptions(screen.getByRole('combobox'), 'critical');
+    expect(onChange).toHaveBeenCalledWith('critical');
   });
 
-  describe('AddKeyModal - test before saving and baseUrl', () => {
-    it('tests unsaved key before saving and supports baseUrl for custom provider', async () => {
-      vi.mocked(api.testConnection).mockResolvedValueOnce({
-        ok: true,
-        ms: 88,
-        model: 'custom-model',
-      });
+  it('HeavyModelCard stays open while a model is chosen and offers only keyed providers', async () => {
+    const onChange = vi.fn();
+    const value = { heavyProvider: null, heavyModel: null, heavyEffort: null, heavyThresholdLines: null };
+    const { rerender } = renderSettings(
+      <HeavyModelCard workspaceId="ws-1" value={value} onChange={onChange} providers={['openrouter']} defaultProvider="openrouter" />,
+      'en',
+    );
+    await user.click(screen.getByRole('checkbox'));
+    expect(onChange).toHaveBeenLastCalledWith({ heavyProvider: 'openrouter', heavyModel: null, heavyEffort: null, heavyThresholdLines: 800 });
 
-      renderWithI18n(
-        React.createElement(AddKeyModal, {
-          isOpen: true,
-          onClose: vi.fn(),
-          onSubmit: vi.fn(),
-          isPending: false,
-          workspaceId: 'ws-1',
-        }),
-      );
+    const on = { heavyProvider: 'openrouter' as ApiProvider, heavyModel: null, heavyEffort: null, heavyThresholdLines: 800 };
+    rerender(<HeavyModelCard workspaceId="ws-1" value={on} onChange={onChange} providers={['openrouter']} defaultProvider="openrouter" />);
+    const providerSelect = screen.getByRole('combobox', { name: 'Heavy model provider' });
+    expect(within(providerSelect).getAllByRole('option').map((o) => o.getAttribute('value'))).toEqual(['openrouter']);
+    await user.click(await screen.findByRole('button', { name: 'Heavy model' }));
+    await user.click(screen.getByRole('option', { name: /GPT-5/ }));
+    expect(onChange).toHaveBeenLastCalledWith({ ...on, heavyModel: 'openai/gpt-5:free', heavyEffort: null });
+    expect(screen.getByRole('spinbutton', { name: 'Changed lines threshold' })).toBeDefined();
+  });
 
-      // Select custom provider
-      const providerSelect = screen.getByLabelText(/المزود/i);
-      await user.selectOptions(providerSelect, 'custom');
-
-      // Base URL field should now be visible
-      const baseUrlInput = screen.getByLabelText(/الرابط الأساسي/i);
-      await user.type(baseUrlInput, 'https://custom-llm.example.com/v1');
-
-      // Enter key
-      const keyInput = screen.getByLabelText(/المفتاح السري/i);
-      await user.type(keyInput, 'sk-custom-test-12345');
-
-      // Test before saving
-      const testBtn = screen.getByRole('button', { name: /اختبر قبل الحفظ/i });
-      await user.click(testBtn);
-
-      await waitFor(() => {
-        expect(api.testConnection).toHaveBeenCalledWith('ws-1', 'custom', {
-          apiKey: 'sk-custom-test-12345',
-          baseUrl: 'https://custom-llm.example.com/v1',
-        });
-        expect(screen.getByText(/الاتصال ناجح/i)).toBeDefined();
-      });
+  it('FallbackModelsCard adds (max 3), reorders and removes entries', async () => {
+    let current: FallbackEntry[] = [
+      { provider: 'openrouter', model: 'a', effort: null },
+      { provider: 'openrouter', model: 'b', effort: null },
+    ];
+    const onChange = vi.fn((next: FallbackEntry[]) => {
+      current = next;
     });
+    const view = (list: FallbackEntry[]) => (
+      <FallbackModelsCard workspaceId="ws-1" fallbacks={list} onChange={onChange} providers={['openrouter', 'zai-coding']} />
+    );
+    const { rerender } = renderSettings(view(current), 'en');
+    await user.click(screen.getByRole('button', { name: /Add fallback model/ }));
+    expect(current[2]).toEqual({ provider: 'openrouter', model: '', effort: null });
+    rerender(view(current));
+    expect((screen.getByRole('button', { name: /Add fallback model/ }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(screen.getAllByRole('button', { name: 'Move up' })[1]!);
+    expect(current.map((f) => f.model)).toEqual(['b', 'a', '']);
+    rerender(view(current));
+    await user.click(screen.getAllByRole('button', { name: 'Remove' })[2]!);
+    expect(current.map((f) => f.model)).toEqual(['b', 'a']);
+  });
+
+  it('ReviewSettingsCard: effort follows the model and the full payload is saved', async () => {
+    const onSave = vi.fn(async () => undefined);
+    renderSettings(
+      <ReviewSettingsCard
+        workspaceId="ws-1"
+        settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'ar', effort: 'on', fallback: [], minSeverity: 'medium' }}
+        isLoading={false}
+        isMember={false}
+        onSave={onSave}
+        isSaving={false}
+        keyedProviders={['openrouter']}
+      />,
+      'en',
+    );
+    const effort = (await screen.findByRole('combobox', { name: 'Effort' })) as HTMLSelectElement;
+    expect([...effort.options].map((o) => o.value)).toEqual(['', 'on', 'off']);
+
+    await user.click(screen.getByRole('button', { name: 'Model name' }));
+    await user.click(screen.getByRole('option', { name: /GPT-5/ }));
+    const updated = screen.getByRole('combobox', { name: 'Effort' }) as HTMLSelectElement;
+    expect([...updated.options].map((o) => o.value)).toEqual(['', 'low', 'medium', 'high']);
+    expect(updated.value).toBe('');
+    await user.selectOptions(updated, 'high');
+    await user.selectOptions(screen.getByRole('combobox', { name: /Minimum severity/ }), 'high');
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'openrouter', model: 'openai/gpt-5:free', effort: 'high', minSeverity: 'high', fallback: [] }),
+    );
+  });
+
+  it('ReviewSettingsCard refuses to save an enabled heavy model without a model', async () => {
+    const onSave = vi.fn(async () => undefined);
+    renderSettings(
+      <ReviewSettingsCard
+        workspaceId="ws-1"
+        settings={{ provider: 'openrouter', model: 'plain', language: 'en', fallback: [], minSeverity: 'medium' }}
+        isLoading={false}
+        isMember={false}
+        onSave={onSave}
+        isSaving={false}
+        keyedProviders={['openrouter']}
+      />,
+      'en',
+    );
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(await screen.findByText(/Choose the heavy-duty model/)).toBeDefined();
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

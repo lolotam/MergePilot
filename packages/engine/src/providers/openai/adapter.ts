@@ -1,6 +1,6 @@
 import { OpenAI, APIConnectionTimeoutError, APIError, APIUserAbortError } from 'openai';
 import type { Secret } from '../../credentials/secret.js';
-import { LlmAdapter } from '../../llm/adapter.js';
+import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
@@ -44,6 +44,11 @@ export class OpenAIAdapter extends LlmAdapter {
     this.#client = options.client ?? new OpenAI({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
 
+  override requestedOutputTokens(options: OutputTokenRequest): number {
+    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
+    return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
+  }
+
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -58,11 +63,11 @@ export class OpenAIAdapter extends LlmAdapter {
       content: m.content,
     }));
 
-    const reasoningEffort = openAIReasoningEffort(options.effort);
+    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
     const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming = {
       model: options.model,
       messages,
-      max_completion_tokens: options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0),
+      max_completion_tokens: this.requestedOutputTokens(options),
       ...(reasoningEffort
         ? { reasoning_effort: reasoningEffort as NonNullable<OpenAI.Chat.ChatCompletionCreateParams['reasoning_effort']> }
         : {}),

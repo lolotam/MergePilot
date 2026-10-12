@@ -26,7 +26,9 @@ import {
   type ReviewRunResultPayload,
   type ReviewRunStatus,
 } from '../core/types.js';
+import { createSafeFetch } from '../core/safe-fetch.js';
 import { executeReview } from './execute-review.js';
+import { chooseModel, customBaseUrlFor, usedModel, type ModelChoice } from './model-choice.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { startRunHeartbeat } from './run-heartbeat.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
@@ -112,9 +114,8 @@ export async function processReviewJob(
   let run: ReviewRun | undefined;
   let credStore: WorkspaceCredentialStore | undefined;
   let stopHeartbeat: (() => void) | undefined;
-  let chosenProvider = settings.provider;
-  let chosenModel = settings.model;
-  let chosenEffort = settings.effort ?? null;
+  // The workspace model until the PR size is known; then possibly the heavy-duty model.
+  let choice: ModelChoice = chooseModel(settings, 0);
 
   try {
     run = await deps.store.createReviewRun({
@@ -127,9 +128,9 @@ export async function processReviewJob(
       status: 'running',
       costUsd: null,
       detail: null,
-      provider: chosenProvider,
-      model: chosenModel,
-      effort: chosenEffort,
+      provider: choice.provider,
+      model: choice.model,
+      effort: choice.effort,
     });
     stopHeartbeat = startRunHeartbeat(deps.store, workspaceId, run.id, {
       intervalMs: deps.heartbeatIntervalMs,
@@ -149,37 +150,26 @@ export async function processReviewJob(
 
     const additions = typeof prRecord.additions === 'number' ? prRecord.additions : 0;
     const deletions = typeof prRecord.deletions === 'number' ? prRecord.deletions : 0;
-    const changedLines = additions + deletions;
-    const heavyThreshold = settings.heavyThresholdLines ?? 800;
-    if (Boolean(settings.heavyModel) && changedLines >= heavyThreshold) {
-      chosenProvider = settings.heavyProvider ?? settings.provider;
-      chosenModel = settings.heavyModel!;
-      chosenEffort = (settings.heavyEffort ?? settings.effort) ?? null;
-    }
+    choice = chooseModel(settings, additions + deletions);
+    if (choice.heavy) deps.log?.(`Large PR (${additions + deletions} changed lines): using the heavy-duty model`);
+    const { provider: chosenProvider, model: chosenModel, effort: chosenEffort } = choice;
 
     const repoConfigResult = await loadRepoConfig(client, { owner, repo, baseSha: job.baseSha });
 
-    const fallbackList = await Promise.all(
-      (settings.fallback ?? []).map(async (f) => {
-        let baseUrl: string | undefined;
-        if (f.provider === 'custom') {
-          const c = await deps.store.getCredential(workspaceId, 'custom');
-          baseUrl = c?.baseUrl ?? undefined;
-        }
-        return {
-          provider: f.provider,
-          model: f.model,
-          effort: f.effort ?? undefined,
-          ...(baseUrl ? { baseUrl } : {}),
-        };
-      }),
+    // Fallback entries never carry a URL: a `custom` entry uses the workspace's one custom
+    // server URL, passed to the engine as the trusted `customBaseUrl` (ADR-0008 amendment).
+    const fallbackList = (settings.fallback ?? []).map((f) => ({
+      provider: f.provider,
+      model: f.model,
+      ...(f.effort ? { effort: f.effort } : {}),
+    }));
+    const customBaseUrl = await customBaseUrlFor(
+      deps.store,
+      workspaceId,
+      chosenProvider,
+      fallbackList.map((f) => f.provider),
+      deps.ssrfLookup,
     );
-
-    let primaryBaseUrl: string | undefined;
-    if (chosenProvider === 'custom') {
-      const c = await deps.store.getCredential(workspaceId, 'custom');
-      primaryBaseUrl = c?.baseUrl ?? undefined;
-    }
 
     let effectiveConfig: MergePilotConfig;
     let rulesFiles: FileContent[];
@@ -190,7 +180,6 @@ export async function processReviewJob(
         provider: chosenProvider,
         model: chosenModel,
         ...(chosenEffort ? { effort: chosenEffort } : {}),
-        ...(primaryBaseUrl ? { baseUrl: primaryBaseUrl } : {}),
         fallback: fallbackList,
         language: settings.language,
         review: { minSeverity: settings.minSeverity ?? 'medium' },
@@ -203,14 +192,19 @@ export async function processReviewJob(
     } else if ('errors' in repoConfigResult) {
       throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
     } else {
-      const repoConfig = repoConfigResult.config;
+      // In the SaaS the workspace's dashboard settings choose the provider, model, effort, fallbacks
+      // and review language (the repo file may target the GitHub Action, e.g. `provider:
+      // claude-code`); the repo still supplies its review rules and other settings.
+      // A repo-provided baseUrl never reaches the effective config: a key must not be sent to a
+      // URL from repository content (ADR-0008 amendment). The custom base URL comes only from the
+      // workspace credential, through `customBaseUrl` below.
+      const { baseUrl: _repoBaseUrl, effort: _repoEffort, ...repoConfig } = repoConfigResult.config;
       const sameModel = repoConfig.provider === chosenProvider && repoConfig.model === chosenModel;
       effectiveConfig = {
         ...repoConfig,
         provider: chosenProvider,
         model: chosenModel,
         ...(chosenEffort ? { effort: chosenEffort } : {}),
-        ...(primaryBaseUrl ? { baseUrl: primaryBaseUrl } : {}),
         fallback: fallbackList,
         language: settings.language,
         review: {
@@ -283,7 +277,12 @@ export async function processReviewJob(
     if (deps.createModelForProvider) {
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
-      model = await createReviewModel(effectiveConfig, credStore, { cwd: process.cwd() });
+      model = await createReviewModel(effectiveConfig, credStore, {
+        cwd: process.cwd(),
+        ...(customBaseUrl
+          ? { customBaseUrl, customFetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup }) }
+          : {}),
+      });
     }
 
     const reviewResult = await executeReview({
@@ -332,14 +331,15 @@ export async function processReviewJob(
       findingsCount = 0;
     }
 
+    const used = usedModel(choice, settings, reviewResult.modelUsed, reviewResult.fallbackFrom);
     await deps.store.finishReviewRun(workspaceId, run.id, {
       status,
       costUsd,
       detail,
-      provider: chosenProvider,
-      model: chosenModel,
-      effort: chosenEffort,
-      fallbackFrom: ((effectiveConfig as Record<string, unknown>)?.fallbackFrom as string) ?? null,
+      provider: used.provider,
+      model: used.model,
+      effort: used.effort,
+      fallbackFrom: used.fallbackFrom,
       findingsCount,
       result: payload,
       reviewUrl: reviewResult.reviewUrl ?? null,
@@ -373,9 +373,9 @@ export async function processReviewJob(
         status: 'failed',
         costUsd: null,
         detail: redactedDetail,
-        provider: chosenProvider,
-        model: chosenModel,
-        effort: chosenEffort,
+        provider: choice.provider,
+        model: choice.model,
+        effort: choice.effort,
       });
     }
 

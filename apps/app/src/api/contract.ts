@@ -35,25 +35,32 @@ export const MeResponseSchema = z.object({
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 
+/** A thinking effort as providers name it (off / on / minimal / low / medium / high / xhigh / max ...). */
+export const EffortSchema = z.string().regex(/^[a-z0-9_-]{1,24}$/, 'Invalid effort');
+const ModelIdSchema = z.string().trim().min(1).max(200);
+
+export const MAX_FALLBACK_MODELS = 3;
+
 export const FallbackEntrySchema = z.object({
   provider: ApiProviderSchema,
-  model: z.string().min(1),
-  effort: z.string().nullable().optional(),
+  model: ModelIdSchema,
+  effort: EffortSchema.nullable().optional(),
 });
 export type FallbackEntry = z.infer<typeof FallbackEntrySchema>;
 
 /** GET (member) / PUT (admin) /api/workspaces/:workspaceId/settings */
 export const SettingsSchema = z.object({
   provider: ApiProviderSchema,
-  model: z.string().min(1),
+  model: ModelIdSchema,
   language: z.enum(['ar', 'en']),
   monthlyBudgetUsd: z.number().positive().nullable().optional(),
-  effort: z.string().nullable().optional(),
+  effort: EffortSchema.nullable().optional(),
   heavyProvider: ApiProviderSchema.nullable().optional(),
-  heavyModel: z.string().nullable().optional(),
-  heavyEffort: z.string().nullable().optional(),
-  heavyThresholdLines: z.number().int().positive().nullable().optional(),
-  fallback: z.array(FallbackEntrySchema).max(3).optional().default([]),
+  heavyModel: ModelIdSchema.nullable().optional(),
+  heavyEffort: EffortSchema.nullable().optional(),
+  /** Changed lines (additions + deletions) from which the heavy model reviews the PR. */
+  heavyThresholdLines: z.number().int().positive().max(1_000_000).nullable().optional(),
+  fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).optional().default([]),
   minSeverity: SeveritySchema.optional().default('medium'),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -90,16 +97,25 @@ export const ModelsResponseSchema = z.object({
 });
 export type ModelsResponse = z.infer<typeof ModelsResponseSchema>;
 
+/**
+ * POST (admin) /api/workspaces/:workspaceId/providers/:provider/models — a key typed in the
+ * "add key" dialog, used for this one call: never stored, logged or echoed. `baseUrl` is for
+ * `custom` only (https, public addresses; ADR-0010).
+ */
 export const ListModelsBodySchema = z.object({
-  apiKey: z.string().min(1),
-  baseUrl: z.string().url().optional(),
+  apiKey: z.string().min(1).max(500),
+  baseUrl: z.string().url().max(500).optional(),
 });
 
+/**
+ * POST (admin) /api/workspaces/:workspaceId/credentials/:provider/test — the stored key, or an
+ * unsaved `apiKey` (test before saving); rate-limited to 10 per minute per workspace.
+ */
 export const TestConnectionBodySchema = z.object({
-  apiKey: z.string().optional(),
-  baseUrl: z.string().url().optional(),
-  model: z.string().optional(),
-  effort: z.string().optional(),
+  apiKey: z.string().max(500).optional(),
+  baseUrl: z.string().url().max(500).optional(),
+  model: z.string().max(200).optional(),
+  effort: EffortSchema.optional(),
 });
 
 export const TestConnectionResponseSchema = z.discriminatedUnion('ok', [

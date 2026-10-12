@@ -7,7 +7,7 @@
  * chain is the primary model alone: the old "no fallback" behaviour.
  */
 import { failureKind, type FailureKind, type LlmFailureCode } from '../llm/failure.js';
-import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
+import type { ReviewModel, ReviewModelRequest, ReviewModelResponse, SkippedFallback } from './model.js';
 
 export const FALLBACK_TRIGGERS: readonly FailureKind[] = ['quota', 'rate-limit', 'server', 'network', 'auth'];
 
@@ -38,6 +38,8 @@ export interface FallbackDisclosure {
   fallbackFrom?: string;
   /** Why the primary model was left. */
   fallbackCode?: FailureKind;
+  /** Configured fallbacks that could not take part (e.g. no key), with the reason. */
+  skippedFallbacks?: SkippedFallback[];
 }
 
 export class FallbackChain implements ReviewModel {
@@ -47,6 +49,14 @@ export class FallbackChain implements ReviewModel {
 
   constructor(primary: ReviewModel, fallbacks: readonly ReviewModel[] = []) {
     this.#models = [primary, ...fallbacks];
+  }
+
+  /**
+   * The largest output-token limit any model in the chain would request, so a budget
+   * preflight stays a true ceiling whichever model ends up answering.
+   */
+  outputTokensFor(maxOutputTokens: number): number {
+    return Math.max(...this.#models.map((m) => m.outputTokensFor?.(maxOutputTokens) ?? maxOutputTokens));
   }
 
   get label(): string {
@@ -75,9 +85,11 @@ export class FallbackChain implements ReviewModel {
   }
 
   disclosure(): FallbackDisclosure {
+    const skipped = this.#models[0]?.skippedFallbacks ?? [];
     return {
       modelUsed: this.label,
       ...(this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {}),
+      ...(skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}),
     };
   }
 }

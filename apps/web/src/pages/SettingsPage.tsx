@@ -18,10 +18,12 @@ import { WorkspaceGeneralCard } from '../components/WorkspaceGeneralCard.js';
 import { WorkspaceDangerZone } from '../components/WorkspaceDangerZone.js';
 import { ReviewSettingsCard } from '../settings/ReviewSettingsCard.js';
 import { TestKeyButton } from '../settings/TestKeyButton.js';
+import { useProviderLabel } from '../settings/providers.js';
 
 export function SettingsPage() {
   const { workspaceId = '' } = useParams();
   const { t } = useI18n();
+  const providerLabel = useProviderLabel();
 
   const { data: meData } = useMeQuery();
   const { data: settingsData, isLoading: settingsLoading } = useSettingsQuery(workspaceId);
@@ -35,6 +37,8 @@ export function SettingsPage() {
   const isMember = currentWorkspace?.role === 'member';
 
   const [addKeyModalOpen, setAddKeyModalOpen] = useState(false);
+  // Heavy-duty and fallback models may only use providers with a saved key (members cannot list keys).
+  const keyedProviders = isMember || !keysData ? undefined : keysData.keys.map((k) => k.provider);
 
   const handleSettingsSave = async (updatedSettings: Settings) => {
     if (isMember) return;
@@ -84,6 +88,7 @@ export function SettingsPage() {
         isMember={isMember}
         onSave={handleSettingsSave}
         isSaving={updateSettingsMutation.isPending}
+        keyedProviders={keyedProviders}
       />
 
       {/* API Keys Section */}
@@ -133,9 +138,9 @@ export function SettingsPage() {
                   <tr key={k.provider} className="hover:bg-ink-50/50 dark:hover:bg-ink-800/40">
                     <td className="py-2.5 px-3 font-semibold text-ink-900 dark:text-ink-100">
                       <div className="flex flex-col">
-                        <span className="capitalize">{k.provider}</span>
+                        <span>{providerLabel(k.provider)}</span>
                         {k.baseUrl && (
-                          <span className="text-[10px] text-ink-400 font-mono truncate max-w-[200px]">
+                          <span dir="ltr" className="text-[10px] text-ink-400 font-mono truncate max-w-[200px]">
                             {k.baseUrl}
                           </span>
                         )}

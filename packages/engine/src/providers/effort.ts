@@ -52,10 +52,22 @@ export function thinkingHeadroom(effort: string | undefined): number {
   return THINKING_BUDGET_TOKENS[normalize(effort)] ?? 0;
 }
 
-/** OpenAI native: the `reasoning_effort` value to send, or undefined to send nothing. */
-export function openAIReasoningEffort(effort: string | undefined): string | undefined {
+/** Values the native OpenAI API documents for `reasoning_effort` on reasoning models. */
+const OPENAI_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
+
+/**
+ * OpenAI reasoning models (o-series and GPT-5 family, except the `-chat` variants). Other models
+ * (gpt-4o, gpt-4.1, chatgpt-*) reject `reasoning_effort`, so nothing is sent for them.
+ */
+const OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
+
+/**
+ * OpenAI native: the `reasoning_effort` value to send, or undefined to send nothing: for a
+ * non-reasoning model, for `off`, and for any value the OpenAI API does not accept.
+ */
+export function openAIReasoningEffort(model: string, effort: string | undefined): string | undefined {
   const value = normalize(effort);
-  return REASONING_EFFORT_VALUES.has(value) ? value : undefined;
+  return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : undefined;
 }
 
 /** OpenAI-compatible presets: the extra request-body fields for this effort and thinking style. */

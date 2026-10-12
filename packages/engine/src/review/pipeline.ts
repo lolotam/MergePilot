@@ -22,7 +22,7 @@ import { ReviewAnswerSchema } from './answer.js';
 import { checkBudget, estimateTokens } from './budget.js';
 import { costUsd, estimateCostUsd } from '../budget/cost.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
-import type { ReviewModel } from './model.js';
+import { secretsToRedact, type ReviewModel } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 import {
@@ -32,9 +32,7 @@ import {
   VerifyAnswerSchema,
 } from './verify.js';
 
-// ---------------------------------------------------------------------------
-// Input types
-// ---------------------------------------------------------------------------
+// ── Input types ──
 
 export interface PrFile {
   path: string;
@@ -61,9 +59,7 @@ export interface RunReviewInput {
   signal?: AbortSignal | undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Output types
-// ---------------------------------------------------------------------------
+// ── Output types ──
 
 export type ReviewRunResult =
   | ({
@@ -86,9 +82,7 @@ export type ReviewRunResult =
       detail?: string | undefined;
     } & Partial<FallbackDisclosure>);
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
+// ── Internal helpers ──
 
 /** Builds a security Finding for a redacted secret on an added line. */
 function makeRedactionFinding(
@@ -161,17 +155,18 @@ function combineUsage(u1?: TokenUsage, u2?: TokenUsage): TokenUsage | undefined 
   };
 }
 
-// ---------------------------------------------------------------------------
-// Pipeline
-// ---------------------------------------------------------------------------
+// ── Pipeline ──
 
 /**
  * Runs the full single-pass review pipeline described in PRD v0.2 §7 steps 2–8.
  */
 export async function runReview(input: RunReviewInput): Promise<ReviewRunResult> {
-  const { config, pr, files, rulesFiles, knownSecrets, signal } = input;
+  const { config, pr, files, rulesFiles, signal } = input;
   // One chain per review, so a fallback lasts for the rest of this review only (ADR-0008).
-  const model = new FallbackChain(input.model, input.fallbackModels ?? input.model.fallbacks ?? []);
+  const fallbackModels = input.fallbackModels ?? input.model.fallbacks ?? [];
+  const model = new FallbackChain(input.model, fallbackModels);
+  // Every key a model in the chain may send is redacted before ANY model call, fallbacks included.
+  const knownSecrets = secretsToRedact(input.knownSecrets, input.model, fallbackModels);
   const reviewCfg = config.review;
   const budgetCfg = config.budget;
 
@@ -252,16 +247,20 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
 
   const maxOutputTokens = 4096;
+  // Price the output limit each call really requests: answer budget + effort's thinking headroom
+  // (largest across the chain). Thinking is billed as output, so pricing less could overspend.
+  const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
+  const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
   let estimatedCostUsd: number | undefined;
   if (budgetCfg.pricing) {
     estimatedCostUsd = estimateCostUsd(
-      { inputTokens: promptTokens, maxOutputTokens },
+      { inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens },
       budgetCfg.pricing,
     );
     if (reviewCfg.verify) {
       // Worst case for the verification call: its hunks are a subset of the review prompt.
       estimatedCostUsd += estimateCostUsd(
-        { inputTokens: promptTokens, maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS },
+        { inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens },
         budgetCfg.pricing,
       );
     }
@@ -379,7 +378,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     reviewCostUsd = totalUsage
       ? costUsd(totalUsage, budgetCfg.pricing)
       : (estimatedCostUsd ??
-        estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing));
+        estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing));
   }
 
   return {

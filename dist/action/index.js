@@ -50458,7 +50458,7 @@ function providerEntry(id) {
 }
 function resolveBaseUrl(id, override) {
   const entry = PROVIDER_REGISTRY[id];
-  const chosen = override?.trim() || (entry.requiresBaseUrl ? "" : entry.baseUrl);
+  const chosen = entry.requiresBaseUrl ? override?.trim() ?? "" : entry.baseUrl;
   if (!chosen)
     throw new Error(`Provider ${id} requires a base URL`);
   return chosen.replace(/\/+$/, "");
@@ -50476,6 +50476,9 @@ var PROVIDER_ENV_MAP = {
   ...Object.fromEntries(Object.values(PROVIDER_REGISTRY).map((entry) => [entry.id, entry.envName])),
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
 };
+function credentialEnvName(provider) {
+  return PROVIDER_ENV_MAP[provider];
+}
 var EnvCredentialStore = class {
   #env;
   constructor(env2 = process.env) {
@@ -70125,16 +70128,19 @@ var SEVERITY_RANK = {
 var ProviderSchema = external_exports.enum(PROVIDER_IDS);
 var ApiProviderSchema = external_exports.enum(API_PROVIDER_IDS);
 var BaseUrlSchema = external_exports.url({ protocol: /^https?$/ });
+var BASE_URL_NOT_ALLOWED = 'baseUrl is not allowed here: preset providers always use their fixed API URL, and only provider "custom" may name one (set its URL through the trusted CUSTOM_LLM_BASE_URL / custom-base-url input, not this file)';
+function rejectPresetBaseUrl(entry, ctx) {
+  if (entry.provider !== "custom" && entry.baseUrl !== void 0) {
+    ctx.addIssue({ code: "custom", path: ["baseUrl"], message: BASE_URL_NOT_ALLOWED });
+  }
+}
 var FallbackEntrySchema = external_exports.strictObject({
   provider: ApiProviderSchema,
   model: external_exports.string().min(1),
   effort: external_exports.string().min(1).optional(),
+  /** Untrusted and ignored; rejected for presets (see BASE_URL_NOT_ALLOWED). */
   baseUrl: BaseUrlSchema.optional()
-}).superRefine((entry, ctx) => {
-  if (entry.provider === "custom" && entry.baseUrl === void 0) {
-    ctx.addIssue({ code: "custom", path: ["baseUrl"], message: "required when provider is custom" });
-  }
-});
+}).superRefine(rejectPresetBaseUrl);
 var MAX_FALLBACK_MODELS = 3;
 var PathInstructionSchema = external_exports.strictObject({
   path: external_exports.string().min(1),
@@ -70184,7 +70190,7 @@ var MergePilotConfigSchema = external_exports.strictObject({
   model: external_exports.string().min(1).optional(),
   /** Thinking effort for `model` (e.g. low / medium / high / off); ignored where unknown. */
   effort: external_exports.string().min(1).optional(),
-  /** API root; required for `custom`, an override for the other compatible presets. */
+  /** Untrusted and ignored; rejected for presets (see BASE_URL_NOT_ALLOWED). */
   baseUrl: BaseUrlSchema.optional(),
   /** Explicit, disclosed fallback models (ADR-0008); empty means no fallback at all. */
   fallback: external_exports.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).default([]),
@@ -70200,9 +70206,7 @@ var MergePilotConfigSchema = external_exports.strictObject({
       message: `required when provider is ${config2.provider}`
     });
   }
-  if (config2.provider === "custom" && config2.baseUrl === void 0) {
-    ctx.addIssue({ code: "custom", path: ["baseUrl"], message: "required when provider is custom" });
-  }
+  rejectPresetBaseUrl(config2, ctx);
 });
 
 function valueAt(data, path7) {
@@ -70688,6 +70692,13 @@ var FallbackChain = class {
   constructor(primary, fallbacks = []) {
     this.#models = [primary, ...fallbacks];
   }
+  /**
+   * The largest output-token limit any model in the chain would request, so a budget
+   * preflight stays a true ceiling whichever model ends up answering.
+   */
+  outputTokensFor(maxOutputTokens) {
+    return Math.max(...this.#models.map((m2) => m2.outputTokensFor?.(maxOutputTokens) ?? maxOutputTokens));
+  }
   get label() {
     return this.#current().label;
   }
@@ -70713,9 +70724,11 @@ var FallbackChain = class {
     }
   }
   disclosure() {
+    const skipped = this.#models[0]?.skippedFallbacks ?? [];
     return {
       modelUsed: this.label,
-      ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {}
+      ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {},
+      ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}
     };
   }
 };
@@ -70772,9 +70785,15 @@ async function collectText(stream2) {
   return { text, usage, finishReason };
 }
 
+function secretsToRedact(known, model, fallbacks = model.fallbacks ?? []) {
+  return [...known, ...model.secrets ?? [], ...fallbacks.flatMap((m2) => m2.secrets ?? [])];
+}
 function modelFromAdapter(adapter, model, effort) {
   return {
     label: `${adapter.provider}:${model}`,
+    outputTokensFor(maxOutputTokens) {
+      return adapter.requestedOutputTokens({ model, maxOutputTokens, ...effort ? { effort } : {} });
+    },
     async generate(request2) {
       const result = await collectText(adapter.stream({
         model,
@@ -71443,8 +71462,10 @@ function combineUsage(u1, u2) {
   };
 }
 async function runReview(input2) {
-  const { config: config2, pr, files, rulesFiles, knownSecrets, signal } = input2;
-  const model = new FallbackChain(input2.model, input2.fallbackModels ?? input2.model.fallbacks ?? []);
+  const { config: config2, pr, files, rulesFiles, signal } = input2;
+  const fallbackModels = input2.fallbackModels ?? input2.model.fallbacks ?? [];
+  const model = new FallbackChain(input2.model, fallbackModels);
+  const knownSecrets = secretsToRedact(input2.knownSecrets, input2.model, fallbackModels);
   const reviewCfg = config2.review;
   const budgetCfg = config2.budget;
   const incompleteReasons = [];
@@ -71499,11 +71520,13 @@ async function runReview(input2) {
     return { status: "skipped-budget", reason: budgetResult.reason };
   }
   const maxOutputTokens = 4096;
+  const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
+  const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
   let estimatedCostUsd;
   if (budgetCfg.pricing) {
-    estimatedCostUsd = estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing);
+    estimatedCostUsd = estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing);
     if (reviewCfg.verify) {
-      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS }, budgetCfg.pricing);
+      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens }, budgetCfg.pricing);
     }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return {
@@ -71588,7 +71611,7 @@ async function runReview(input2) {
   const disclosure = model.disclosure();
   let reviewCostUsd;
   if (budgetCfg.pricing && !disclosure.fallbackFrom) {
-    reviewCostUsd = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : estimatedCostUsd ?? estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing);
+    reviewCostUsd = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : estimatedCostUsd ?? estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing);
   }
   return {
     status: "completed",
@@ -71607,6 +71630,14 @@ async function runReview(input2) {
 
 var LlmAdapter = class {
   retryPolicy;
+  /**
+   * The output-token limit one call actually sends for this model and effort: the answer
+   * budget plus any thinking headroom. Adapters build their request from it and the budget
+   * preflight prices it, so the two never disagree.
+   */
+  requestedOutputTokens(options) {
+    return options.maxOutputTokens;
+  }
 };
 
 var DEFAULT_RETRY_POLICY = Object.freeze({
@@ -94345,9 +94376,11 @@ function normalize(effort) {
 function thinkingHeadroom(effort) {
   return THINKING_BUDGET_TOKENS[normalize(effort)] ?? 0;
 }
-function openAIReasoningEffort(effort) {
+var OPENAI_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
+var OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
+function openAIReasoningEffort(model, effort) {
   const value = normalize(effort);
-  return REASONING_EFFORT_VALUES.has(value) ? value : void 0;
+  return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : void 0;
 }
 function compatibleEffortFields(style, effort) {
   const value = normalize(effort);
@@ -94420,6 +94453,10 @@ var OpenAIAdapter = class extends LlmAdapter {
     this.#apiKey = options.apiKey;
     this.#client = options.client ?? new OpenAI({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
+  requestedOutputTokens(options) {
+    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
+    return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
+  }
   async *stream(options) {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -94432,11 +94469,11 @@ var OpenAIAdapter = class extends LlmAdapter {
       role: m2.role,
       content: m2.content
     }));
-    const reasoningEffort = openAIReasoningEffort(options.effort);
+    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
     const params = {
       model: options.model,
       messages,
-      max_completion_tokens: options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0),
+      max_completion_tokens: this.requestedOutputTokens(options),
       ...reasoningEffort ? { reasoning_effort: reasoningEffort } : {},
       stream: true,
       stream_options: {
@@ -94602,6 +94639,10 @@ var AnthropicAdapter = class extends LlmAdapter {
     this.#apiKey = options.apiKey;
     this.#client = options.client ?? new Anthropic({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
+  requestedOutputTokens(options) {
+    const thinks = anthropicThinking(options.model, options.effort) !== void 0;
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
   async *stream(options) {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -94634,7 +94675,7 @@ ${schemaStr}`);
     const thinking = anthropicThinking(options.model, options.effort);
     const streamParams = {
       model: options.model,
-      max_tokens: options.maxOutputTokens + (thinking ? thinkingHeadroom(options.effort) : 0),
+      max_tokens: this.requestedOutputTokens(options),
       messages,
       ...system ? { system } : {},
       ...options.temperature !== void 0 && !thinking ? { temperature: options.temperature } : {},
@@ -118098,6 +118139,11 @@ var GeminiAdapter = class extends LlmAdapter {
       this.#client = new GoogleGenAI2({ apiKey: options.apiKey.reveal() });
     }
   }
+  requestedOutputTokens(options) {
+    const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
+    const thinks = thinkingConfig !== void 0 && !("thinkingBudget" in thinkingConfig && thinkingConfig.thinkingBudget === 0);
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
   async *stream(options) {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -118113,9 +118159,8 @@ var GeminiAdapter = class extends LlmAdapter {
       parts: [{ text: m2.content }]
     }));
     const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
-    const thinks = thinkingConfig !== void 0 && !("thinkingBudget" in thinkingConfig && thinkingConfig.thinkingBudget === 0);
     const config2 = {
-      maxOutputTokens: options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0),
+      maxOutputTokens: this.requestedOutputTokens(options),
       ...thinkingConfig ? { thinkingConfig } : {},
       ...options.signal ? { abortSignal: options.signal } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
@@ -118385,6 +118430,10 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
     this.#style = entry.thinkingStyle;
     this.#streamUsage = entry.streamUsage;
   }
+  requestedOutputTokens(options) {
+    const thinks = Object.keys(compatibleEffortFields(this.#style, options.effort)).length > 0;
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
   /** The JSON request body; exposed for tests of the effort mapping. */
   requestBody(options) {
     const messages = options.messages.map((m2) => ({ role: m2.role, content: m2.content }));
@@ -118400,11 +118449,10 @@ ${instruction}`;
         messages.unshift({ role: "system", content: instruction });
     }
     const effortFields = compatibleEffortFields(this.#style, options.effort);
-    const headroom = Object.keys(effortFields).length > 0 ? thinkingHeadroom(options.effort) : 0;
     return {
       model: options.model,
       messages,
-      max_tokens: options.maxOutputTokens + headroom,
+      max_tokens: this.requestedOutputTokens(options),
       stream: true,
       ...this.#streamUsage ? { stream_options: { include_usage: true } } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
@@ -118492,10 +118540,18 @@ ${instruction}`;
   }
 };
 
-function createAdapter(provider, apiKey, baseUrl) {
+var CUSTOM_BASE_URL_MISSING = 'provider "custom" needs a trusted base URL (CUSTOM_LLM_BASE_URL / the custom-base-url input); .mergepilot.yml baseUrl is ignored';
+function createAdapter(provider, apiKey, customBaseUrl, customFetch) {
   const entry = providerEntry(provider);
   if (entry.kind === "openai-compatible") {
-    return new OpenAICompatibleAdapter({ provider, apiKey, ...baseUrl ? { baseUrl } : {} });
+    if (provider === "custom" && !customBaseUrl?.trim())
+      throw new Error(CUSTOM_BASE_URL_MISSING);
+    return new OpenAICompatibleAdapter({
+      provider,
+      apiKey,
+      ...provider === "custom" && customBaseUrl ? { baseUrl: customBaseUrl } : {},
+      ...provider === "custom" && customFetch ? { fetch: customFetch } : {}
+    });
   }
   if (!apiKey)
     throw new Error(`An API key is required for provider: ${provider}`);
@@ -118510,6 +118566,7 @@ function withRetries(adapter, model, effort) {
   const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
   return {
     label: base.label,
+    ...base.outputTokensFor ? { outputTokensFor: base.outputTokensFor } : {},
     generate(request2) {
       return withRetry(() => base.generate(request2), policy, request2.signal ? { sleep: (ms) => new Promise((resolve2) => setTimeout(resolve2, ms)), random: Math.random, signal: request2.signal } : void 0);
     }
@@ -118525,25 +118582,44 @@ async function resolveKey(store, provider) {
   }
   return store.resolve({ provider }, "review");
 }
-function lazyFallback(entry, store) {
-  let built;
-  return {
-    label: `${entry.provider}:${entry.model}`,
-    async generate(request2) {
-      built ??= resolveKey(store, entry.provider).then((key) => withRetries(createAdapter(entry.provider, key, entry.baseUrl), entry.model, entry.effort));
-      const model = await built.catch((error62) => {
-        built = void 0;
-        throw error62;
-      });
-      return model.generate(request2);
+async function resolveFallbacks(config2, store, customBaseUrl, customFetch) {
+  const resolved = { models: [], secrets: [], skipped: [] };
+  for (const entry of config2.fallback ?? []) {
+    const label = `${entry.provider}:${entry.model}`;
+    let key;
+    try {
+      key = await resolveKey(store, entry.provider);
+    } catch {
+      resolved.skipped.push({ label, reason: `no API key is configured (${credentialEnvName(entry.provider)})` });
+      continue;
     }
+    if (key)
+      resolved.secrets.push(key);
+    if (entry.provider === "custom" && !customBaseUrl?.trim()) {
+      resolved.skipped.push({ label, reason: "no trusted base URL is configured (CUSTOM_LLM_BASE_URL)" });
+      continue;
+    }
+    try {
+      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch), entry.model, entry.effort));
+    } catch {
+      resolved.skipped.push({ label, reason: "the provider could not be set up" });
+    }
+  }
+  return resolved;
+}
+async function resolveReviewSecrets(config2, store) {
+  const primary = config2.provider === "custom" ? await resolveKey(store, "custom") : await store.resolve({ provider: config2.provider }, "review");
+  const fallbacks = await resolveFallbacks(config2, store);
+  return [...primary ? [primary] : [], ...fallbacks.secrets];
+}
+function attachments(primaryKey, fallbacks) {
+  return {
+    ...fallbacks.models.length > 0 ? { fallbacks: fallbacks.models } : {},
+    secrets: [...primaryKey ? [primaryKey] : [], ...fallbacks.secrets],
+    ...fallbacks.skipped.length > 0 ? { skippedFallbacks: fallbacks.skipped } : {}
   };
 }
-function createFallbackModels(config2, store) {
-  return (config2.fallback ?? []).map((entry) => lazyFallback(entry, store));
-}
 async function createReviewModel(config2, store, opts) {
-  const fallbacks = createFallbackModels(config2, store);
   if (config2.provider === "claude-code") {
     const token = await store.resolve({ provider: "claude-code" }, "review");
     const runner = new ClaudeCodeRunner({
@@ -118552,19 +118628,19 @@ async function createReviewModel(config2, store, opts) {
       ...config2.model ? { model: config2.model } : {},
       ...opts.configDir ? { configDir: opts.configDir } : {}
     });
-    return fallbacks.length > 0 ? Object.assign(runner, { fallbacks }) : runner;
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch)));
   }
   if (!isApiProviderId(config2.provider)) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
   }
   const provider = config2.provider;
   const apiKey = provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
-  const adapter = createAdapter(provider, apiKey, config2.baseUrl);
+  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch);
   if (!config2.model) {
     throw new Error(`Model is required for provider: ${config2.provider}`);
   }
   const model = withRetries(adapter, config2.model, config2.effort);
-  return fallbacks.length > 0 ? { ...model, fallbacks } : model;
+  return { ...model, ...attachments(apiKey, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch)) };
 }
 
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
@@ -118760,7 +118836,8 @@ function buildAuditPrompt(input2) {
 }
 
 async function runAudit(input2) {
-  const { config: config2, rulesFiles, readFile: readFile2, files, model, knownSecrets = [], signal } = input2;
+  const { config: config2, rulesFiles, readFile: readFile2, files, model, signal } = input2;
+  const knownSecrets = secretsToRedact(input2.knownSecrets ?? [], model);
   const plan = planAudit({
     files: files.map((f3) => ({ path: f3.path, size: f3.size ?? 0 })),
     include: config2.audit?.include,
@@ -123681,6 +123758,20 @@ async function reviewPullRequest(ctx) {
   };
 }
 
+// src/custom-base-url.ts
+function trustedCustomBaseUrl(env2) {
+  const value = env2["INPUT_CUSTOM-BASE-URL"] || env2.INPUT_CUSTOM_BASE_URL || env2.CUSTOM_LLM_BASE_URL;
+  return value?.trim() || void 0;
+}
+function warnIgnoredBaseUrls(config2, log) {
+  const named = config2.baseUrl !== void 0 || (config2.fallback ?? []).some((entry) => entry.baseUrl !== void 0);
+  if (named) {
+    log(
+      "Warning: baseUrl in .mergepilot.yml is ignored; set the custom server URL with the custom-base-url input or CUSTOM_LLM_BASE_URL."
+    );
+  }
+}
+
 // src/audit.ts
 async function defaultWalk(dir, baseDir = dir) {
   const entries = await readdir2(dir, { withFileTypes: true });
@@ -123756,7 +123847,7 @@ ${parseResult.errors.join("\n")}`);
   const files = await listFiles(cwd);
   log(`Found ${files.length} candidate files`);
   const store = new EnvCredentialStore(env2);
-  const providerSecret = await store.resolve({ provider: config2.provider }, "review");
+  const providerSecrets = await resolveReviewSecrets(config2, store);
   const githubSecret = new Secret(githubToken);
   const isolated = [];
   if (config2.provider === "claude-code") {
@@ -123764,11 +123855,17 @@ ${parseResult.errors.join("\n")}`);
     isolated.push(await mkdtemp(join2(tmpdir(), "mergepilot-audit-config-")));
   }
   const [isolatedCwd, configDir] = isolated;
+  warnIgnoredBaseUrls(config2, log);
+  const customBaseUrl = trustedCustomBaseUrl(env2);
   const model = await createModel(config2, store, {
     cwd: isolatedCwd ?? cwd,
-    ...configDir ? { configDir } : {}
+    ...configDir ? { configDir } : {},
+    ...customBaseUrl ? { customBaseUrl } : {}
   });
   log(`Created audit model: ${model.label}`);
+  for (const skipped of model.skippedFallbacks ?? []) {
+    log(`Fallback ${skipped.label} skipped: ${skipped.reason}`);
+  }
   log("Running repository audit...");
   const result = await runAudit({
     config: config2,
@@ -123776,7 +123873,7 @@ ${parseResult.errors.join("\n")}`);
     readFile: async (p) => readFile2(join2(cwd, p), "utf8"),
     files,
     model,
-    knownSecrets: [providerSecret, githubSecret]
+    knownSecrets: [...providerSecrets, githubSecret]
   }).finally(async () => {
     await Promise.all(isolated.map((dir) => rm(dir, { recursive: true, force: true })));
   });
@@ -123996,7 +124093,7 @@ ${configResult.errors.join("\n")}`);
   const { config: config2, configText, rulesFiles } = configResult;
   log(`Loaded configuration for provider: ${config2.provider}`);
   const store = new EnvCredentialStore(env2);
-  const providerSecret = await store.resolve({ provider: config2.provider }, "review");
+  const providerSecrets = await resolveReviewSecrets(config2, store);
   const githubSecret = new Secret(githubToken);
   let sandbox;
   let tempConfigDir;
@@ -124029,11 +124126,17 @@ ${configResult.errors.join("\n")}`);
       tempConfigDir = await mkdtempFn(join4(tmpdir3(), "mergepilot-claude-config-"));
       effectiveCwd = sandbox.dir;
     }
+    warnIgnoredBaseUrls(config2, log);
+    const customBaseUrl = trustedCustomBaseUrl(env2);
     const model = await createModel(config2, store, {
       cwd: effectiveCwd,
-      ...tempConfigDir ? { configDir: tempConfigDir } : {}
+      ...tempConfigDir ? { configDir: tempConfigDir } : {},
+      ...customBaseUrl ? { customBaseUrl } : {}
     });
     log(`Created review model: ${model.label}`);
+    for (const skipped of model.skippedFallbacks ?? []) {
+      log(`Fallback ${skipped.label} skipped: ${skipped.reason}`);
+    }
     const configHash = createHash("sha256").update(configText).digest("hex").slice(0, 12);
     const publisherLogin = env2["INPUT_PUBLISHER-LOGIN"] || env2.INPUT_PUBLISHER_LOGIN || "github-actions[bot]";
     await reviewPullRequest({
@@ -124049,7 +124152,7 @@ ${configResult.errors.join("\n")}`);
       configHash,
       rulesFiles,
       model,
-      knownSecrets: [providerSecret, githubSecret],
+      knownSecrets: [...providerSecrets, githubSecret],
       publisherLogin,
       log
     });
