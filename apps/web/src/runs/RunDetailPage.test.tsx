@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import RunDetailPage from './RunDetailPage.js';
@@ -7,7 +7,18 @@ import { I18nProvider } from '../i18n/context.js';
 import * as hooks from '../api/hooks.js';
 import type { ReviewRun, ReviewRunResult } from '../api/client.js';
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ToastProvider } from '../components/Toast.js';
+import * as client from '../api/client.js';
+
 vi.mock('../api/hooks.js');
+vi.mock('../api/client.js', async () => {
+  const actual = await vi.importActual('../api/client.js');
+  return {
+    ...actual,
+    fetchApi: vi.fn(),
+  };
+});
 
 describe('RunDetailPage - header, grouped findings, plain text rendering, filters', () => {
   beforeEach(() => {
@@ -82,20 +93,36 @@ describe('RunDetailPage - header, grouped findings, plain text rendering, filter
     result: sampleResult,
   };
 
-  const renderComponent = (runData = sampleRun) => {
+  const renderComponent = (runData = sampleRun, role: 'owner' | 'admin' | 'member' = 'admin') => {
+    vi.mocked(hooks.useMeQuery).mockReturnValue({
+      data: {
+        user: { id: 'u1', email: 'user@test.com', name: 'User', image: null, githubLinked: true },
+        workspaces: [{ id: 'ws-1', name: 'WS 1', slug: 'ws-1', role }],
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof hooks.useMeQuery>);
+
     vi.mocked(hooks.useRunDetailQuery).mockReturnValue({
       data: { run: runData },
       isLoading: false,
     } as unknown as ReturnType<typeof hooks.useRunDetailQuery>);
 
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
     return render(
-      <I18nProvider initialLanguage="en">
-        <MemoryRouter initialEntries={['/w/ws-1/runs/run-123']}>
-          <Routes>
-            <Route path="/w/:workspaceId/runs/:runId" element={<RunDetailPage />} />
-          </Routes>
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider initialLanguage="en">
+          <ToastProvider>
+            <MemoryRouter initialEntries={['/w/ws-1/runs/run-123']}>
+              <Routes>
+                <Route path="/w/:workspaceId/runs/:runId" element={<RunDetailPage />} />
+              </Routes>
+            </MemoryRouter>
+          </ToastProvider>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
   };
 
@@ -179,7 +206,51 @@ describe('RunDetailPage - header, grouped findings, plain text rendering, filter
       result: null,
     };
     renderComponent(failedRun);
-
     expect(screen.getByText('Rate limit exceeded on provider API')).toBeDefined();
+  });
+
+  it('renders enabled Retry button for failed runs when user is admin or owner, and triggers mutation on click', async () => {
+    vi.mocked(client.fetchApi).mockResolvedValueOnce({ runId: 'run-retry-new' });
+
+    const failedRun = {
+      ...sampleRun,
+      status: 'failed' as const,
+      detail: 'Rate limit exceeded',
+      result: null,
+    };
+    renderComponent(failedRun, 'admin');
+
+    const retryButton = screen.getByRole('button', { name: 'Retry' });
+    expect(retryButton).toBeDefined();
+    expect(retryButton.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(retryButton);
+
+    await waitFor(() => {
+      expect(client.fetchApi).toHaveBeenCalledWith('/api/workspaces/ws-1/runs/run-123/retry', {
+        method: 'POST',
+      });
+    });
+  });
+
+  it('renders disabled Retry button with tooltip for members on failed runs', () => {
+    const failedRun = {
+      ...sampleRun,
+      status: 'failed' as const,
+      detail: 'Rate limit exceeded',
+      result: null,
+    };
+    renderComponent(failedRun, 'member');
+
+    const retryButton = screen.getByRole('button', { name: 'Retry' });
+    expect(retryButton).toBeDefined();
+    expect(retryButton.hasAttribute('disabled')).toBe(true);
+    expect(retryButton.getAttribute('title')).toBe('Retrying requires admin or owner role');
+  });
+
+  it('does not render Retry button for completed runs', () => {
+    renderComponent(sampleRun, 'admin');
+
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 });

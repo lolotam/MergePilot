@@ -1,14 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
+  ACTIVE_RUN_STATUSES,
+  ActiveRunExistsError,
   InstallationAlreadyLinkedError,
   REUSABLE_RUN_STATUSES,
   WorkspaceDeletedError,
 } from './types.js';
+import { findActiveRun, selectLatestFailedRuns } from './memory-runs.js';
 import type {
   ApiProvider,
   AppStore,
   FinishReviewRunOptions,
   Installation,
+  LatestFailedRunsOptions,
   ListReviewRunsOptions,
   ListReviewRunsResult,
   NewReviewRun,
@@ -119,6 +123,7 @@ export class MemoryStore implements AppStore {
       result: run.result ?? null,
       reviewUrl: run.reviewUrl ?? null,
     };
+    let reusable: ReviewRun | undefined;
     if (run.jobId) {
       // Only a queued/running/failed run of this job is reused; completed and skipped runs stay.
       for (const existing of this.runs.values()) {
@@ -127,11 +132,22 @@ export class MemoryStore implements AppStore {
           existing.jobId === run.jobId &&
           REUSABLE_RUN_STATUSES.includes(existing.status)
         ) {
-          const updated: ReviewRun = { ...existing, ...run, ...starting };
-          this.runs.set(existing.id, updated);
-          return { ...updated };
+          reusable = existing;
+          break;
         }
       }
+    }
+    // Emulates the partial unique index of migration 0004: one queued/running run per head.
+    if (
+      ACTIVE_RUN_STATUSES.includes(run.status) &&
+      findActiveRun(this.runs.values(), run, reusable?.id)
+    ) {
+      throw new ActiveRunExistsError(run.repoFullName, run.pullNumber);
+    }
+    if (reusable) {
+      const updated: ReviewRun = { ...reusable, ...run, ...starting };
+      this.runs.set(reusable.id, updated);
+      return { ...updated };
     }
     const created: ReviewRun = { ...run, ...starting, id: randomUUID(), createdAt: now };
     this.runs.set(created.id, created);
@@ -175,6 +191,23 @@ export class MemoryStore implements AppStore {
       }
     }
     return [...repos].sort();
+  }
+
+  async findActiveReviewRun(
+    workspaceId: string,
+    repoFullName: string,
+    pullNumber: number,
+    headSha: string,
+  ): Promise<ReviewRun | null> {
+    const run = findActiveRun(this.runs.values(), { workspaceId, repoFullName, pullNumber, headSha });
+    return run ? { ...run } : null;
+  }
+
+  async listLatestFailedRuns(
+    workspaceId: string,
+    options?: LatestFailedRunsOptions,
+  ): Promise<ReviewRun[]> {
+    return selectLatestFailedRuns(this.runs.values(), workspaceId, options);
   }
 
   async failStaleRuns(heartbeatBefore: Date): Promise<number> {

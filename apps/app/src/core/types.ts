@@ -24,6 +24,20 @@ export class WorkspaceDeletedError extends Error {
   }
 }
 
+/**
+ * Thrown by AppStore.createReviewRun when another run for the same workspace, repo, PR and head
+ * commit is already `queued` or `running` (one active run per head; ADR-0009 amendment).
+ */
+export class ActiveRunExistsError extends Error {
+  constructor(repoFullName: string, pullNumber: number) {
+    super(`a review run for ${repoFullName}#${pullNumber} at this commit is already queued or running`);
+    this.name = 'ActiveRunExistsError';
+  }
+}
+
+/** Only these statuses count as active for the one-active-run-per-head rule. */
+export const ACTIVE_RUN_STATUSES: readonly ReviewRunStatus[] = ['queued', 'running'];
+
 export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
 
 export interface Installation {
@@ -117,6 +131,13 @@ export type NewReviewRun = Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt' | '
 /** Only runs in these states may be reused by a retry of the same job id. */
 export const REUSABLE_RUN_STATUSES: readonly ReviewRunStatus[] = ['queued', 'running', 'failed'];
 
+export interface LatestFailedRunsOptions {
+  repo?: string[] | undefined;
+  from?: Date | undefined;
+  to?: Date | undefined;
+  limit?: number | undefined;
+}
+
 export interface FinishReviewRunOptions {
   status: ReviewRunStatus;
   costUsd: number | null;
@@ -185,6 +206,10 @@ export interface AppStore {
    * A run with a jobId reuses that job's queued/running/failed run; completed and skipped runs are
    * never overwritten (a new run is created instead).
    */
+  /**
+   * Also throws ActiveRunExistsError when the new (or reused) run would be a second queued/running
+   * run for the same workspace, repo, PR and head commit.
+   */
   createReviewRun(run: NewReviewRun): Promise<ReviewRun>;
   /** Refreshes the heartbeat of a queued/running run; finished runs are left untouched. */
   touchReviewRun(workspaceId: string, id: string): Promise<void>;
@@ -201,6 +226,19 @@ export interface AppStore {
     limitOrOptions?: number | ListReviewRunsOptions,
   ): Promise<ReviewRun[] | ListReviewRunsResult>;
   listReviewRunRepos(workspaceId: string): Promise<string[]>;
+  /** Finds an active review run ('queued' or 'running') matching repo, PR, and headSha. */
+  findActiveReviewRun(
+    workspaceId: string,
+    repoFullName: string,
+    pullNumber: number,
+    headSha: string,
+  ): Promise<ReviewRun | null>;
+  /**
+   * For each (repo, PR), takes its latest run over all of the PR's runs; returns those latest runs
+   * that are 'failed' and whose createdAt falls in [from, to]. Newest first, capped by
+   * options.limit (default 25).
+   */
+  listLatestFailedRuns(workspaceId: string, options?: LatestFailedRunsOptions): Promise<ReviewRun[]>;
   /** Fails queued/running runs whose heartbeat (updatedAt) is older than `heartbeatBefore`. */
   failStaleRuns(heartbeatBefore: Date): Promise<number>;
   monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;

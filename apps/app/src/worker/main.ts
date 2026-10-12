@@ -1,12 +1,10 @@
 import http from 'node:http';
-import { App } from '@octokit/app';
-import { Octokit } from '@octokit/rest';
 import { Worker, type ConnectionOptions, type Job } from 'bullmq';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
 import type { ReviewJob } from '../core/types.js';
 import { createQueueConnection } from '../queue/bullmq-queue.js';
-import { wrapOctokit, type OctokitLike } from './octokit-client.js';
+import { createGitHubAppFactory } from './github-app-factory.js';
 import { processReviewJob } from './process-review.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
 
@@ -14,32 +12,12 @@ import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
 export const STALE_RUN_HEARTBEAT_MS = 15 * 60 * 1000;
 const STALE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
+// Re-exported for existing importers; new code imports './github-app-factory.js' directly.
+export { createGitHubAppFactory };
+
 export interface ReviewWorkerOptions {
   connection?: ConnectionOptions;
   concurrency?: number;
-}
-
-export function createGitHubAppFactory(
-  config: { appId: string; privateKey: string; appSlug: string },
-  appFactory?: () => App,
-): GitHubAppClientFactory {
-  const app =
-    appFactory !== undefined
-      ? appFactory()
-      : new App({
-          appId: config.appId,
-          privateKey: config.privateKey,
-          // The bare App client has no `.rest` namespace; the review client needs `rest.pulls` etc.
-          Octokit,
-        });
-
-  return async (installationId: number) => {
-    const octokit = await app.getInstallationOctokit(installationId);
-    return {
-      client: wrapOctokit(octokit as unknown as OctokitLike),
-      publisherLogin: `${config.appSlug}[bot]`,
-    };
-  };
 }
 
 export function startHealthServer(port: number): Promise<http.Server> {

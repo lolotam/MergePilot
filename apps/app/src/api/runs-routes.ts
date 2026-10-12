@@ -3,9 +3,12 @@ import { requireRole } from '../auth/guard.js';
 import { computeSeverityCounts } from './contract.js';
 import { sendError } from './helpers.js';
 import { parseRunsListQuery } from './runs-query.js';
+import { registerRunsRetryRoutes } from './runs-retry.js';
 import type { DashboardApiDeps } from './routes.js';
 
 export function registerRunsRoutes(app: FastifyInstance, deps: DashboardApiDeps): void {
+  registerRunsRetryRoutes(app, deps);
+
   // 1. GET /api/workspaces/:workspaceId/runs/repos (distinct repo names)
   app.get(
     '/api/workspaces/:workspaceId/runs/repos',

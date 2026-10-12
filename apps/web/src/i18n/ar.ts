@@ -47,7 +47,6 @@ export const ar = {
   viewOnGitHub: 'عرض على GitHub',
   installOnGitHub: 'تثبيت على GitHub',
   sectionWorkspace: 'مساحة العمل',
-
   // Footer & Legal
   footerPrivacy: 'الخصوصية',
   footerTerms: 'الشروط والأحكام',
@@ -55,7 +54,6 @@ export const ar = {
   footerCopyright: 'جميع الحقوق محفوظة.',
   lastUpdatedLabel: 'آخر تحديث',
   tableOfContents: 'جدول المحتويات',
-
   // Landing Page
   landingHeroTitle: 'مراجعة ذكية لطلبات السحب بلغتك وقواعدك الخاصة',
   landingHeroSubtitle: 'محرك مراجعة فوري لـ GitHub PRs يدعم العربية، يطبق قواعد مشروعك الصارمة، ويعتمد على مفاتيحك الخاصة دون تخزين كودك.',
@@ -204,7 +202,6 @@ export const ar = {
   deleteWorkspaceConfirmButton: 'أنا أدرك العواقب، احذف هذه المساحة',
   deletingWorkspace: 'جاري الحذف...',
   workspaceDeletedSuccess: 'تم حذف مساحة العمل بنجاح',
-
   // Keys Section
   apiKeysTitle: 'مفاتيح API للمزودين',
   apiKeysDesc: 'المفاتيح مشفرة ومحفوظة بأمان، ولا تظهر قيمتها أبدًا بعد الحفظ.',
@@ -225,7 +222,6 @@ export const ar = {
   saveKeyButton: 'حفظ المفتاح',
   savingKey: 'جاري التحقق والحفظ...',
   keySavedSuccess: 'تم التحقق من المفتاح وحفظه بنجاح',
-
   // Team Page
   teamTitle: 'أعضاء الفريق والصلاحيات',
   teamDesc: 'إدارة أعضاء مساحة العمل والدعوات المعلقة.',
@@ -244,7 +240,6 @@ export const ar = {
   removeMemberButton: 'إزالة العضو',
   removeMemberConfirm: 'هل أنت متأكد من إزالة هذا العضو؟',
   cannotChangeOwnerRole: 'لا يمكن تغيير دور المالك',
-
   // Runs Page
   runsTitle: 'سجل مراجعات الكود',
   runsDesc: 'جميع مراجعات طلبات السحب التي قام بها MergePilot.',
@@ -313,7 +308,19 @@ export const ar = {
   expandAll: 'توسيع الكل',
   collapseAll: 'طي الكل',
   noFindingsMatchFilter: 'لا توجد ملاحظات تطابق معايير التصفية',
-
+  retry: 'إعادة المحاولة',
+  retrying: 'جاري إعادة المحاولة...',
+  retryAllFailed: 'إعادة كل الفاشلة',
+  retryAllFailedCount: 'إعادة كل الفاشلة ({count})',
+  retryMemberDisabled: 'إعادة المحاولة تتطلب صلاحية مدير أو مالك',
+  retryRunSuccess: 'تمت جدولة إعادة المحاولة بنجاح',
+  retryAllFailedConfirmTitle: 'إعادة محاولة جميع المراجعات الفاشلة',
+  retryAllFailedConfirmDesc: 'هل أنت متأكد من إعادة محاولة {count} مراجعة فاشلة؟',
+  retryAllFailedSuccess: 'تمت جدولة {queued} مراجعة (تم تخطي {skipped})',
+  retryAllFailedPreviewLoading: 'جاري التحقق من المراجعات الفاشلة القابلة لإعادة المحاولة...',
+  retryAllFailedPreviewError: 'تعذر التحقق من المراجعات الفاشلة. أغلق النافذة وحاول مرة أخرى.',
+  retryAllFailedNone: 'لا توجد مراجعات فاشلة تطابق فلاتر المستودع والتاريخ الحالية يمكن إعادتها الآن.',
+  retryAllFailedSkippedNote: 'سيتم تخطي {count} أخرى (طلب سحب مغلق، أو مراجعة جارية، أو تعذر الوصول).',
   // Install Redirect Page
   installTitle: 'ربط تركيب GitHub بمساحة العمل',
   installDesc: 'تم تثبيت تطبيق MergePilot بنجاح. اختر مساحة العمل التي ترغب في ربط هذا التركيب بها.',
