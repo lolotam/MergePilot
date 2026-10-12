@@ -5,6 +5,10 @@
 # Other stacks on `dokploy-network` may also have services called `postgres`/`redis`, so the app
 # reaches ours through the unique aliases `mergepilot-postgres` and `mergepilot-redis`.
 
+# The release is pinned here (x-image) so shipping or rolling back is one edit of this file,
+# independent of the secrets kept in Dokploy's Environment tab.
+x-image: &image ghcr.io/lolotam/mergepilot:2655830c24acc833eaaf08d5ca7b127b2a7029dc
+
 x-app-env: &app-env
   NODE_ENV: production
   MERGEPILOT_BASE_URL: ${MERGEPILOT_BASE_URL:-https://mergepilot.walidmohamed.com}
@@ -66,7 +70,7 @@ services:
         aliases: [mergepilot-redis]
 
   migrate:
-    image: ${MERGEPILOT_IMAGE}
+    image: *image
     restart: "no"
     command: ["node", "dist/bootstrap/migrate-cli.js"]
     environment:
@@ -81,7 +85,7 @@ services:
     networks: [backend]
 
   web:
-    image: ${MERGEPILOT_IMAGE}
+    image: *image
     restart: unless-stopped
     command: ["node", "dist/server/main.js"]
     environment:
@@ -111,7 +115,7 @@ services:
     networks: [backend, egress, dokploy-network]
 
   worker:
-    image: ${MERGEPILOT_IMAGE}
+    image: *image
     restart: unless-stopped
     command: ["node", "dist/worker/main.js"]
     environment:
