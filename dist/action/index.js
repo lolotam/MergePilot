@@ -36507,7 +36507,7 @@ var require_gaxios = __commonJS({
     var retry_js_1 = require_retry3();
     var stream_1 = __require("stream");
     var interceptor_js_1 = require_interceptor();
-    var randomUUID2 = async () => globalThis.crypto?.randomUUID() || (await import("crypto")).randomUUID();
+    var randomUUID3 = async () => globalThis.crypto?.randomUUID() || (await import("crypto")).randomUUID();
     var HTTP_STATUS_NO_CONTENT = 204;
     var Gaxios = class {
       agentCache = /* @__PURE__ */ new Map();
@@ -36780,7 +36780,7 @@ var require_gaxios = __commonJS({
          */
         ["Blob", "File", "FormData"].includes(opts.data?.constructor?.name || "");
         if (opts.multipart?.length) {
-          const boundary = await randomUUID2();
+          const boundary = await randomUUID3();
           preparedHeaders.set("content-type", `multipart/related; boundary=${boundary}`);
           opts.body = stream_1.Readable.from(this.getMultipartRequest(opts.multipart, boundary));
         } else if (shouldDirectlyPassData) {
@@ -50320,6 +50320,150 @@ var Secret = class {
   }
 };
 
+var API_PROVIDER_IDS = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "xai",
+  "deepseek",
+  "nvidia",
+  "openrouter",
+  "opencode-zen",
+  "opencode-go",
+  "zai",
+  "zai-coding",
+  "custom"
+];
+var PROVIDER_IDS = [...API_PROVIDER_IDS, "claude-code"];
+function isApiProviderId(value) {
+  return API_PROVIDER_IDS.includes(value);
+}
+
+var ENTRIES = {
+  anthropic: {
+    label: "Anthropic",
+    kind: "native",
+    baseUrl: "https://api.anthropic.com/v1",
+    keyHint: "sk-ant-",
+    thinkingStyle: "anthropic",
+    defaultModel: "claude-sonnet-5-5",
+    envName: "ANTHROPIC_API_KEY"
+  },
+  openai: {
+    label: "OpenAI",
+    kind: "native",
+    baseUrl: "https://api.openai.com/v1",
+    keyHint: "sk-",
+    thinkingStyle: "reasoning_effort",
+    defaultModel: "gpt-5",
+    envName: "OPENAI_API_KEY"
+  },
+  gemini: {
+    label: "Google Gemini",
+    kind: "native",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    keyHint: "AIza",
+    thinkingStyle: "gemini",
+    defaultModel: "gemini-3.8-flash",
+    envName: "GEMINI_API_KEY"
+  },
+  xai: {
+    label: "xAI (Grok)",
+    kind: "openai-compatible",
+    baseUrl: "https://api.x.ai/v1",
+    keyHint: "xai-",
+    thinkingStyle: "reasoning_effort",
+    defaultModel: "grok-4",
+    envName: "XAI_API_KEY",
+    streamUsage: true
+  },
+  deepseek: {
+    label: "DeepSeek",
+    kind: "openai-compatible",
+    baseUrl: "https://api.deepseek.com",
+    keyHint: "sk-",
+    thinkingStyle: "none",
+    defaultModel: "deepseek-chat",
+    envName: "DEEPSEEK_API_KEY",
+    streamUsage: true
+  },
+  nvidia: {
+    label: "NVIDIA NIM",
+    kind: "openai-compatible",
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    keyHint: "nvapi-",
+    thinkingStyle: "none",
+    defaultModel: "nvidia/nemotron-3-super-120b-a12b",
+    envName: "NVIDIA_API_KEY",
+    streamUsage: true
+  },
+  openrouter: {
+    label: "OpenRouter",
+    kind: "openai-compatible",
+    baseUrl: "https://openrouter.ai/api/v1",
+    keyHint: "sk-or-",
+    thinkingStyle: "reasoning_effort",
+    defaultModel: "openai/gpt-5",
+    envName: "OPENROUTER_API_KEY",
+    streamUsage: true
+  },
+  "opencode-zen": {
+    label: "OpenCode Zen",
+    kind: "openai-compatible",
+    baseUrl: "https://opencode.ai/zen/v1",
+    thinkingStyle: "none",
+    defaultModel: "glm-5.3",
+    envName: "OPENCODE_API_KEY"
+  },
+  "opencode-go": {
+    label: "OpenCode Go",
+    kind: "openai-compatible",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+    thinkingStyle: "none",
+    defaultModel: "glm-5.3",
+    envName: "OPENCODE_API_KEY"
+  },
+  zai: {
+    label: "Z.ai GLM (API)",
+    kind: "openai-compatible",
+    baseUrl: "https://api.z.ai/api/paas/v4",
+    thinkingStyle: "glm",
+    defaultModel: "glm-4.6",
+    envName: "ZAI_API_KEY"
+  },
+  "zai-coding": {
+    label: "Z.ai GLM Coding Plan",
+    kind: "openai-compatible",
+    baseUrl: "https://api.z.ai/api/coding/paas/v4",
+    thinkingStyle: "glm",
+    defaultModel: "glm-4.6",
+    envName: "ZAI_API_KEY"
+  },
+  custom: {
+    label: "Custom (OpenAI-compatible)",
+    kind: "openai-compatible",
+    baseUrl: "http://localhost:11434/v1",
+    thinkingStyle: "reasoning_effort",
+    defaultModel: "",
+    envName: "CUSTOM_LLM_API_KEY",
+    requiresBaseUrl: true
+  }
+};
+var PROVIDER_REGISTRY = Object.freeze(Object.fromEntries(API_PROVIDER_IDS.map((id) => [
+  id,
+  Object.freeze({ id, requiresBaseUrl: false, streamUsage: false, ...ENTRIES[id] })
+])));
+function providerEntry(id) {
+  return PROVIDER_REGISTRY[id];
+}
+function resolveBaseUrl(id, override) {
+  const entry = PROVIDER_REGISTRY[id];
+  const chosen = override?.trim() || (entry.requiresBaseUrl ? "" : entry.baseUrl);
+  if (!chosen)
+    throw new Error(`Provider ${id} requires a base URL`);
+  return chosen.replace(/\/+$/, "");
+}
+
 var MissingCredentialError = class extends Error {
   envName;
   constructor(envName, message) {
@@ -50329,9 +50473,7 @@ var MissingCredentialError = class extends Error {
   }
 };
 var PROVIDER_ENV_MAP = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  gemini: "GEMINI_API_KEY",
+  ...Object.fromEntries(Object.values(PROVIDER_REGISTRY).map((entry) => [entry.id, entry.envName])),
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
 };
 var EnvCredentialStore = class {
@@ -69980,7 +70122,20 @@ var SEVERITY_RANK = {
   info: 4
 };
 
-var ProviderSchema = external_exports.enum(["anthropic", "openai", "gemini", "claude-code"]);
+var ProviderSchema = external_exports.enum(PROVIDER_IDS);
+var ApiProviderSchema = external_exports.enum(API_PROVIDER_IDS);
+var BaseUrlSchema = external_exports.url({ protocol: /^https?$/ });
+var FallbackEntrySchema = external_exports.strictObject({
+  provider: ApiProviderSchema,
+  model: external_exports.string().min(1),
+  effort: external_exports.string().min(1).optional(),
+  baseUrl: BaseUrlSchema.optional()
+}).superRefine((entry, ctx) => {
+  if (entry.provider === "custom" && entry.baseUrl === void 0) {
+    ctx.addIssue({ code: "custom", path: ["baseUrl"], message: "required when provider is custom" });
+  }
+});
+var MAX_FALLBACK_MODELS = 3;
 var PathInstructionSchema = external_exports.strictObject({
   path: external_exports.string().min(1),
   instructions: external_exports.string().min(1)
@@ -70027,6 +70182,12 @@ var AuditSchema = external_exports.strictObject({
 var MergePilotConfigSchema = external_exports.strictObject({
   provider: ProviderSchema,
   model: external_exports.string().min(1).optional(),
+  /** Thinking effort for `model` (e.g. low / medium / high / off); ignored where unknown. */
+  effort: external_exports.string().min(1).optional(),
+  /** API root; required for `custom`, an override for the other compatible presets. */
+  baseUrl: BaseUrlSchema.optional(),
+  /** Explicit, disclosed fallback models (ADR-0008); empty means no fallback at all. */
+  fallback: external_exports.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).default([]),
   language: external_exports.enum(["ar", "en"]).default("ar"),
   review: ReviewSettingsSchema.prefault({}),
   budget: BudgetSchema.prefault({}),
@@ -70038,6 +70199,9 @@ var MergePilotConfigSchema = external_exports.strictObject({
       path: ["model"],
       message: `required when provider is ${config2.provider}`
     });
+  }
+  if (config2.provider === "custom" && config2.baseUrl === void 0) {
+    ctx.addIssue({ code: "custom", path: ["baseUrl"], message: "required when provider is custom" });
   }
 });
 
@@ -70387,6 +70551,175 @@ function parseReviewAnswer(text) {
   };
 }
 
+var LlmFailure = class extends Error {
+  code;
+  provider;
+  status;
+  retryAfterMs;
+  requestId;
+  constructor(init) {
+    super(init.message);
+    this.name = "LlmFailure";
+    this.code = init.code;
+    this.provider = init.provider;
+    this.status = init.status;
+    this.retryAfterMs = init.retryAfterMs;
+    this.requestId = init.requestId;
+  }
+};
+var QUOTA_WORDING = /quota|billing|insufficient|credit balance|exceeded your|per ?day|daily|payment required|credits? (?:exhausted|remaining: 0)/i;
+var CONTEXT_WORDING = /context (length|window)|too many tokens|prompt is too long|maximum context/i;
+var MAX_BODY_IN_MESSAGE = 300;
+function header(headers, name) {
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted)
+      return value;
+  }
+  return void 0;
+}
+function parseRetryAfter(value, now) {
+  if (!value)
+    return void 0;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0)
+    return Math.round(seconds * 1e3);
+  const date5 = Date.parse(value);
+  return Number.isNaN(date5) ? void 0 : Math.max(0, date5 - now());
+}
+function code429(bodyText) {
+  const quotaId = /"quotaId"\s*:\s*"([^"]+)"/.exec(bodyText)?.[1] ?? "";
+  if (/PerDay/i.test(quotaId))
+    return "QUOTA";
+  if (/PerMinute|PerSecond/i.test(quotaId))
+    return "RATE_LIMIT";
+  return QUOTA_WORDING.test(bodyText) ? "QUOTA" : "RATE_LIMIT";
+}
+function codeFor(status, bodyText) {
+  if (status === 401 || status === 403)
+    return "INVALID_CREDENTIAL";
+  if (status === 402)
+    return "QUOTA";
+  if (status === 429)
+    return code429(bodyText);
+  if (status === 413 || CONTEXT_WORDING.test(bodyText))
+    return "CONTEXT_WINDOW_EXCEEDED";
+  if (status === 408 || status === 504)
+    return "TIMEOUT";
+  if (status >= 500)
+    return "SERVER";
+  if (status >= 400)
+    return "BAD_REQUEST";
+  return "UNKNOWN";
+}
+function failureFromHttp(input2, now = Date.now) {
+  const code = codeFor(input2.status, input2.bodyText);
+  const body = (input2.detail ?? input2.bodyText).trim().slice(0, MAX_BODY_IN_MESSAGE);
+  const retryAfterMs = parseRetryAfter(header(input2.headers, "retry-after"), now);
+  const requestId = header(input2.headers, "request-id") ?? header(input2.headers, "x-request-id");
+  return new LlmFailure({
+    code,
+    provider: input2.provider,
+    status: input2.status,
+    message: `${input2.provider} returned HTTP ${input2.status} (${code})${body ? `: ${body}` : ""}`,
+    ...retryAfterMs !== void 0 ? { retryAfterMs } : {},
+    ...requestId !== void 0 ? { requestId } : {}
+  });
+}
+var KIND_BY_CODE = {
+  QUOTA: "quota",
+  INVALID_CREDENTIAL: "auth",
+  RATE_LIMIT: "rate-limit",
+  SERVER: "server",
+  TIMEOUT: "network",
+  NETWORK: "network",
+  CONTEXT_WINDOW_EXCEEDED: "other",
+  BAD_REQUEST: "other",
+  ABORTED: "other",
+  UNKNOWN: "other"
+};
+function failureKind(code) {
+  return KIND_BY_CODE[code];
+}
+function providerMessage(text, max = 300) {
+  let message = text;
+  try {
+    const body = JSON.parse(text);
+    if (body && typeof body === "object") {
+      const record2 = body;
+      const inner = record2.error ?? record2.detail ?? record2;
+      if (typeof inner === "string")
+        message = inner;
+      else if (inner && typeof inner === "object") {
+        const fields = inner;
+        const found = fields.message ?? fields.msg;
+        if (typeof found === "string")
+          message = found;
+      }
+    }
+  } catch {
+  }
+  return message.trim().slice(0, max);
+}
+
+var FALLBACK_TRIGGERS = ["quota", "rate-limit", "server", "network", "auth"];
+var KNOWN_CODES = /* @__PURE__ */ new Set([
+  "INVALID_CREDENTIAL",
+  "RATE_LIMIT",
+  "QUOTA",
+  "CONTEXT_WINDOW_EXCEEDED",
+  "TIMEOUT",
+  "NETWORK",
+  "SERVER",
+  "BAD_REQUEST",
+  "ABORTED",
+  "UNKNOWN"
+]);
+function failureKindOf(error62) {
+  if (typeof error62 !== "object" || error62 === null || !("code" in error62))
+    return void 0;
+  const code = error62.code;
+  return typeof code === "string" && KNOWN_CODES.has(code) ? failureKind(code) : void 0;
+}
+var FallbackChain = class {
+  #models;
+  #index = 0;
+  #from;
+  constructor(primary, fallbacks = []) {
+    this.#models = [primary, ...fallbacks];
+  }
+  get label() {
+    return this.#current().label;
+  }
+  #current() {
+    const model = this.#models[this.#index];
+    if (!model)
+      throw new Error("fallback chain is empty");
+    return model;
+  }
+  async generate(request2) {
+    for (; ; ) {
+      const model = this.#current();
+      try {
+        return await model.generate(request2);
+      } catch (error62) {
+        const kind = failureKindOf(error62);
+        const last = this.#index >= this.#models.length - 1;
+        if (last || request2.signal?.aborted || !kind || !FALLBACK_TRIGGERS.includes(kind))
+          throw error62;
+        this.#from ??= { label: model.label, code: kind };
+        this.#index++;
+      }
+    }
+  }
+  disclosure() {
+    return {
+      modelUsed: this.label,
+      ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {}
+    };
+  }
+};
+
 function estimateTokens(text) {
   return Math.ceil(text.length / 3.5);
 }
@@ -70439,7 +70772,7 @@ async function collectText(stream2) {
   return { text, usage, finishReason };
 }
 
-function modelFromAdapter(adapter, model) {
+function modelFromAdapter(adapter, model, effort) {
   return {
     label: `${adapter.provider}:${model}`,
     async generate(request2) {
@@ -70450,6 +70783,7 @@ function modelFromAdapter(adapter, model) {
           { role: "user", content: request2.user }
         ],
         maxOutputTokens: request2.maxOutputTokens,
+        ...effort ? { effort } : {},
         ...request2.responseSchema ? { responseSchema: request2.responseSchema } : {},
         ...request2.signal ? { signal: request2.signal } : {}
       }));
@@ -71109,7 +71443,8 @@ function combineUsage(u1, u2) {
   };
 }
 async function runReview(input2) {
-  const { config: config2, pr, files, rulesFiles, model, knownSecrets, signal } = input2;
+  const { config: config2, pr, files, rulesFiles, knownSecrets, signal } = input2;
+  const model = new FallbackChain(input2.model, input2.fallbackModels ?? input2.model.fallbacks ?? []);
   const reviewCfg = config2.review;
   const budgetCfg = config2.budget;
   const incompleteReasons = [];
@@ -71188,11 +71523,12 @@ async function runReview(input2) {
     });
   } catch (err) {
     const failure2 = err;
+    const disclosure2 = model.disclosure();
     if (failure2 && typeof failure2 === "object" && "code" in failure2) {
       const detail = redactSecrets(String(failure2.message ?? ""), knownSecrets).text.slice(0, 500);
-      return { status: "failed", reason: failure2.code, ...detail ? { detail } : {} };
+      return { status: "failed", reason: failure2.code, ...detail ? { detail } : {}, ...disclosure2 };
     }
-    return { status: "failed", reason: String(err) };
+    return { status: "failed", reason: String(err), ...disclosure2 };
   }
   const parseResult = parseReviewAnswer(modelResponse.text);
   if (!parseResult.ok) {
@@ -71249,8 +71585,9 @@ async function runReview(input2) {
     complete,
     incompleteReasons
   };
+  const disclosure = model.disclosure();
   let reviewCostUsd;
-  if (budgetCfg.pricing) {
+  if (budgetCfg.pricing && !disclosure.fallbackFrom) {
     reviewCostUsd = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : estimatedCostUsd ?? estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing);
   }
   return {
@@ -71263,7 +71600,8 @@ async function runReview(input2) {
     ...reviewCostUsd !== void 0 ? { costUsd: reviewCostUsd } : {},
     droppedInvalid: parseResult.droppedInvalid,
     complete,
-    ...verification !== void 0 ? { verification } : {}
+    ...verification !== void 0 ? { verification } : {},
+    ...disclosure
   };
 }
 
@@ -71271,77 +71609,11 @@ var LlmAdapter = class {
   retryPolicy;
 };
 
-var LlmFailure = class extends Error {
-  code;
-  provider;
-  status;
-  retryAfterMs;
-  requestId;
-  constructor(init) {
-    super(init.message);
-    this.name = "LlmFailure";
-    this.code = init.code;
-    this.provider = init.provider;
-    this.status = init.status;
-    this.retryAfterMs = init.retryAfterMs;
-    this.requestId = init.requestId;
-  }
-};
-var QUOTA_WORDING = /quota|billing|insufficient|credit balance|exceeded your/i;
-var CONTEXT_WORDING = /context (length|window)|too many tokens|prompt is too long|maximum context/i;
-var MAX_BODY_IN_MESSAGE = 300;
-function header(headers, name) {
-  const wanted = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === wanted)
-      return value;
-  }
-  return void 0;
-}
-function parseRetryAfter(value, now) {
-  if (!value)
-    return void 0;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0)
-    return Math.round(seconds * 1e3);
-  const date5 = Date.parse(value);
-  return Number.isNaN(date5) ? void 0 : Math.max(0, date5 - now());
-}
-function codeFor(status, bodyText) {
-  if (status === 401 || status === 403)
-    return "INVALID_CREDENTIAL";
-  if (status === 429)
-    return QUOTA_WORDING.test(bodyText) ? "QUOTA" : "RATE_LIMIT";
-  if (status === 413 || CONTEXT_WORDING.test(bodyText))
-    return "CONTEXT_WINDOW_EXCEEDED";
-  if (status === 408 || status === 504)
-    return "TIMEOUT";
-  if (status >= 500)
-    return "SERVER";
-  if (status >= 400)
-    return "BAD_REQUEST";
-  return "UNKNOWN";
-}
-function failureFromHttp(input2, now = Date.now) {
-  const code = codeFor(input2.status, input2.bodyText);
-  const body = input2.bodyText.trim().slice(0, MAX_BODY_IN_MESSAGE);
-  const retryAfterMs = parseRetryAfter(header(input2.headers, "retry-after"), now);
-  const requestId = header(input2.headers, "request-id") ?? header(input2.headers, "x-request-id");
-  return new LlmFailure({
-    code,
-    provider: input2.provider,
-    status: input2.status,
-    message: `${input2.provider} returned HTTP ${input2.status} (${code})${body ? `: ${body}` : ""}`,
-    ...retryAfterMs !== void 0 ? { retryAfterMs } : {},
-    ...requestId !== void 0 ? { requestId } : {}
-  });
-}
-
 var DEFAULT_RETRY_POLICY = Object.freeze({
   maxAttempts: 3,
   baseDelayMs: 1e3,
   maxDelayMs: 3e4,
-  retryableCodes: ["RATE_LIMIT", "SERVER", "TIMEOUT"]
+  retryableCodes: ["RATE_LIMIT", "SERVER", "TIMEOUT", "NETWORK"]
 });
 var defaultDeps = {
   sleep: (ms) => new Promise((resolve2) => setTimeout(resolve2, ms)),
@@ -94051,6 +94323,72 @@ function isUndiciDispatcherVersionMismatchError(error62) {
 var _a6;
 _a6 = brand_privateBedrockClient;
 
+var FALLBACK_EFFORTS = Object.freeze({
+  reasoning_effort: ["off", "low", "medium", "high"],
+  glm: ["on", "off"],
+  gemini: ["minimal", "low", "medium", "high"],
+  anthropic: ["off", "low", "medium", "high"],
+  none: []
+});
+var REASONING_EFFORT_VALUES = /* @__PURE__ */ new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+var THINKING_BUDGET_TOKENS = Object.freeze({
+  minimal: 1024,
+  low: 2048,
+  medium: 8192,
+  high: 16384,
+  xhigh: 24576,
+  max: 32e3
+});
+function normalize(effort) {
+  return (effort ?? "").trim().toLowerCase();
+}
+function thinkingHeadroom(effort) {
+  return THINKING_BUDGET_TOKENS[normalize(effort)] ?? 0;
+}
+function openAIReasoningEffort(effort) {
+  const value = normalize(effort);
+  return REASONING_EFFORT_VALUES.has(value) ? value : void 0;
+}
+function compatibleEffortFields(style, effort) {
+  const value = normalize(effort);
+  if (!value || style === "none")
+    return {};
+  if (style === "glm") {
+    if (value === "off")
+      return { thinking: { type: "disabled" } };
+    if (value === "on")
+      return { thinking: { type: "enabled" } };
+    return {};
+  }
+  return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
+}
+var ADAPTIVE_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]|4-[6-9])(?:\b|-)/;
+var ANTHROPIC_EFFORTS = /* @__PURE__ */ new Set(["low", "medium", "high", "xhigh", "max"]);
+function anthropicThinking(model, effort) {
+  const value = normalize(effort);
+  if (!ANTHROPIC_EFFORTS.has(value))
+    return void 0;
+  if (ADAPTIVE_CLAUDE.test(model)) {
+    return {
+      thinking: { type: "adaptive" },
+      output_config: { effort: value }
+    };
+  }
+  return { thinking: { type: "enabled", budget_tokens: thinkingHeadroom(value) } };
+}
+var GEMINI_BUDGET_MODEL = /^gemini-(?:1|2)\./;
+var GEMINI_LEVELS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
+function geminiThinkingConfig(model, effort) {
+  const value = normalize(effort);
+  const id = model.replace(/^models\//, "");
+  if (GEMINI_BUDGET_MODEL.test(id)) {
+    if (value === "off")
+      return /-pro/.test(id) ? void 0 : { thinkingBudget: 0 };
+    return GEMINI_LEVELS.has(value) ? { thinkingBudget: thinkingHeadroom(value) } : void 0;
+  }
+  return GEMINI_LEVELS.has(value) ? { thinkingLevel: value.toUpperCase() } : void 0;
+}
+
 function extractHeaders(rawHeaders) {
   const result = {};
   if (!rawHeaders || typeof rawHeaders !== "object") {
@@ -94094,10 +94432,12 @@ var OpenAIAdapter = class extends LlmAdapter {
       role: m2.role,
       content: m2.content
     }));
+    const reasoningEffort = openAIReasoningEffort(options.effort);
     const params = {
       model: options.model,
       messages,
-      max_completion_tokens: options.maxOutputTokens,
+      max_completion_tokens: options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0),
+      ...reasoningEffort ? { reasoning_effort: reasoningEffort } : {},
       stream: true,
       stream_options: {
         include_usage: true
@@ -94291,12 +94631,14 @@ ${schemaStr}`);
       ];
     }
     const messages = options.messages.filter((m2) => m2.role !== "system").map((m2) => ({ role: m2.role, content: m2.content }));
+    const thinking = anthropicThinking(options.model, options.effort);
     const streamParams = {
       model: options.model,
-      max_tokens: options.maxOutputTokens,
+      max_tokens: options.maxOutputTokens + (thinking ? thinkingHeadroom(options.effort) : 0),
       messages,
       ...system ? { system } : {},
-      ...options.temperature !== void 0 ? { temperature: options.temperature } : {}
+      ...options.temperature !== void 0 && !thinking ? { temperature: options.temperature } : {},
+      ...thinking ?? {}
     };
     const requestOptions = options.signal ? { signal: options.signal } : void 0;
     let rawStream;
@@ -117770,8 +118112,11 @@ var GeminiAdapter = class extends LlmAdapter {
       role: m2.role === "assistant" ? "model" : "user",
       parts: [{ text: m2.content }]
     }));
+    const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
+    const thinks = thinkingConfig !== void 0 && !("thinkingBudget" in thinkingConfig && thinkingConfig.thinkingBudget === 0);
     const config2 = {
-      maxOutputTokens: options.maxOutputTokens,
+      maxOutputTokens: options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0),
+      ...thinkingConfig ? { thinkingConfig } : {},
       ...options.signal ? { abortSignal: options.signal } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
       ...systemInstruction !== void 0 ? { systemInstruction } : {}
@@ -117874,44 +118219,352 @@ var GeminiAdapter = class extends LlmAdapter {
   }
 };
 
+import { randomUUID as randomUUID2 } from "node:crypto";
+
+var ERROR_BODY_BYTES = 4096;
+function keyValue(key) {
+  if (key === void 0)
+    return void 0;
+  const value = typeof key === "string" ? key : key.reveal();
+  return value.trim() ? value.trim() : void 0;
+}
+function redactKey(text, key) {
+  const value = keyValue(key);
+  return redactSecrets(text, value ? [new Secret(value)] : []).text;
+}
+async function readPrefix(res) {
+  const reader = res.body?.getReader();
+  if (!reader)
+    return "";
+  const chunks = [];
+  let size = 0;
+  try {
+    while (size < ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done || !value)
+        break;
+      chunks.push(value);
+      size += value.length;
+    }
+  } catch {
+  } finally {
+    reader.cancel().catch(() => void 0);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+  return new TextDecoder().decode(bytes.subarray(0, ERROR_BODY_BYTES));
+}
+function headerRecord(headers) {
+  const out = {};
+  for (const name of ["retry-after", "request-id", "x-request-id"]) {
+    const value = headers.get(name);
+    if (value !== null)
+      out[name] = value;
+  }
+  return out;
+}
+async function failureFromResponse(res, provider, key) {
+  const raw = await readPrefix(res);
+  return failureFromHttp({
+    status: res.status,
+    provider,
+    headers: headerRecord(res.headers),
+    bodyText: redactKey(raw, key),
+    detail: redactKey(providerMessage(raw), key)
+  });
+}
+function failureFromThrown(error62, provider, key, signal) {
+  if (error62 instanceof LlmFailure)
+    return error62;
+  const name = error62 instanceof Error ? error62.name : "";
+  const message = redactKey(error62 instanceof Error ? error62.message : String(error62), key);
+  if (name === "TimeoutError") {
+    return new LlmFailure({ code: "TIMEOUT", provider, message: `${provider} did not answer in time` });
+  }
+  if (signal?.aborted || name === "AbortError") {
+    return new LlmFailure({ code: "ABORTED", provider, message: "request aborted" });
+  }
+  if (error62 instanceof TypeError) {
+    return new LlmFailure({ code: "NETWORK", provider, message: `could not reach ${provider}: ${message}` });
+  }
+  return new LlmFailure({ code: "UNKNOWN", provider, message });
+}
+function bearerHeaders(key) {
+  const value = keyValue(key);
+  return value ? { Authorization: `Bearer ${value}` } : {};
+}
+
+function parseSseChunk(buffer) {
+  const blocks = buffer.replace(/\r\n/g, "\n").split("\n\n");
+  const rest = blocks.pop() ?? "";
+  const events = [];
+  for (const block of blocks) {
+    let event = "message";
+    const data = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith(":"))
+        continue;
+      const colon = line.indexOf(":");
+      const field = colon === -1 ? line : line.slice(0, colon);
+      let value = colon === -1 ? "" : line.slice(colon + 1);
+      if (value.startsWith(" "))
+        value = value.slice(1);
+      if (field === "event")
+        event = value;
+      else if (field === "data")
+        data.push(value);
+    }
+    if (data.length)
+      events.push({ event, data: data.join("\n") });
+  }
+  return { events, rest };
+}
+async function* readSse(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (; ; ) {
+      const { value, done } = await reader.read();
+      if (done)
+        break;
+      buffer += decoder.decode(value, { stream: true });
+      const { events, rest } = parseSseChunk(buffer);
+      buffer = rest;
+      yield* events;
+    }
+    buffer += decoder.decode();
+    yield* parseSseChunk(`${buffer}
+
+`).events;
+  } finally {
+    reader.cancel().catch(() => void 0);
+  }
+}
+
+var OPENCODE = /^https:\/\/opencode\.ai\//;
+function mapFinish(reason) {
+  if (reason === "length")
+    return "max-tokens";
+  if (reason === "content_filter")
+    return "error";
+  return "stop";
+}
+function usageFrom(raw) {
+  const cached2 = raw.prompt_tokens_details?.cached_tokens ?? raw.prompt_cache_hit_tokens ?? 0;
+  return {
+    inputTokens: Math.max(0, (raw.prompt_tokens ?? 0) - cached2),
+    outputTokens: raw.completion_tokens ?? 0,
+    cacheReadTokens: cached2,
+    cacheWriteTokens: 0
+  };
+}
+var OpenAICompatibleAdapter = class extends LlmAdapter {
+  provider;
+  retryPolicy = DEFAULT_RETRY_POLICY;
+  #key;
+  #baseUrl;
+  #fetch;
+  #style;
+  #streamUsage;
+  #sessionId = randomUUID2();
+  constructor(options) {
+    super();
+    const entry = providerEntry(options.provider);
+    if (entry.kind !== "openai-compatible") {
+      throw new Error(`${options.provider} is not an OpenAI-compatible preset`);
+    }
+    this.provider = options.provider;
+    this.#key = options.apiKey;
+    this.#baseUrl = resolveBaseUrl(options.provider, options.baseUrl);
+    this.#fetch = options.fetch ?? ((input2, init) => fetch(input2, init));
+    this.#style = entry.thinkingStyle;
+    this.#streamUsage = entry.streamUsage;
+  }
+  /** The JSON request body; exposed for tests of the effort mapping. */
+  requestBody(options) {
+    const messages = options.messages.map((m2) => ({ role: m2.role, content: m2.content }));
+    if (options.responseSchema) {
+      const instruction = `Respond with a single JSON object matching this JSON schema:
+${JSON.stringify(options.responseSchema)}`;
+      const system = messages.find((m2) => m2.role === "system");
+      if (system)
+        system.content = `${system.content}
+
+${instruction}`;
+      else
+        messages.unshift({ role: "system", content: instruction });
+    }
+    const effortFields = compatibleEffortFields(this.#style, options.effort);
+    const headroom = Object.keys(effortFields).length > 0 ? thinkingHeadroom(options.effort) : 0;
+    return {
+      model: options.model,
+      messages,
+      max_tokens: options.maxOutputTokens + headroom,
+      stream: true,
+      ...this.#streamUsage ? { stream_options: { include_usage: true } } : {},
+      ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
+      ...effortFields
+    };
+  }
+  async *stream(options) {
+    if (options.signal?.aborted) {
+      throw new LlmFailure({ code: "ABORTED", provider: this.provider, message: "request aborted" });
+    }
+    const response = await this.#post(options);
+    if (!response.body) {
+      throw new LlmFailure({ code: "SERVER", provider: this.provider, message: `${this.provider} sent an empty body` });
+    }
+    let usage;
+    let finish;
+    let done = false;
+    try {
+      for await (const { data } of readSse(response.body)) {
+        if (options.signal?.aborted) {
+          throw new LlmFailure({ code: "ABORTED", provider: this.provider, message: "request aborted" });
+        }
+        if (data === "[DONE]") {
+          done = true;
+          break;
+        }
+        const chunk = JSON.parse(data);
+        if (chunk.error)
+          throw this.#streamError(chunk.error);
+        const choice = chunk.choices?.[0];
+        if (choice?.delta?.content)
+          yield { type: "text-delta", text: choice.delta.content };
+        if (choice?.finish_reason)
+          finish = mapFinish(choice.finish_reason);
+        if (chunk.usage)
+          usage = usageFrom(chunk.usage);
+      }
+    } catch (error62) {
+      if (error62 instanceof SyntaxError) {
+        throw new LlmFailure({ code: "SERVER", provider: this.provider, message: `${this.provider} sent malformed stream data` });
+      }
+      throw failureFromThrown(error62, this.provider, this.#key, options.signal);
+    }
+    if (!finish && !done) {
+      throw new LlmFailure({
+        code: "NETWORK",
+        provider: this.provider,
+        message: `${this.provider} stream ended before the answer was complete`
+      });
+    }
+    yield { type: "usage", usage: usage ?? { ...ZERO_USAGE } };
+    yield { type: "finish", reason: finish ?? "stop" };
+  }
+  async #post(options) {
+    let response;
+    try {
+      response = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          ...bearerHeaders(this.#key),
+          ...OPENCODE.test(this.#baseUrl) ? { "x-opencode-session": this.#sessionId } : {}
+        },
+        body: JSON.stringify(this.requestBody(options)),
+        ...options.signal ? { signal: options.signal } : {}
+      });
+    } catch (error62) {
+      throw failureFromThrown(error62, this.provider, this.#key, options.signal);
+    }
+    if (!response.ok)
+      throw await failureFromResponse(response, this.provider, this.#key);
+    return response;
+  }
+  #streamError(error62) {
+    const message = typeof error62 === "string" ? error62 : error62.message ?? JSON.stringify(error62);
+    const status = typeof error62 === "object" && typeof error62.code === "number" ? error62.code : void 0;
+    const code = status === 429 ? "RATE_LIMIT" : status === 401 || status === 403 ? "INVALID_CREDENTIAL" : "SERVER";
+    return new LlmFailure({
+      code,
+      provider: this.provider,
+      message: `${this.provider} stream error: ${redactKey(message, this.#key).slice(0, 300)}`,
+      ...status !== void 0 ? { status } : {}
+    });
+  }
+};
+
+function createAdapter(provider, apiKey, baseUrl) {
+  const entry = providerEntry(provider);
+  if (entry.kind === "openai-compatible") {
+    return new OpenAICompatibleAdapter({ provider, apiKey, ...baseUrl ? { baseUrl } : {} });
+  }
+  if (!apiKey)
+    throw new Error(`An API key is required for provider: ${provider}`);
+  if (provider === "anthropic")
+    return new AnthropicAdapter({ apiKey });
+  if (provider === "openai")
+    return new OpenAIAdapter({ apiKey });
+  return new GeminiAdapter({ apiKey });
+}
+function withRetries(adapter, model, effort) {
+  const base = modelFromAdapter(adapter, model, effort);
+  const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
+  return {
+    label: base.label,
+    generate(request2) {
+      return withRetry(() => base.generate(request2), policy, request2.signal ? { sleep: (ms) => new Promise((resolve2) => setTimeout(resolve2, ms)), random: Math.random, signal: request2.signal } : void 0);
+    }
+  };
+}
+async function resolveKey(store, provider) {
+  const info = await store.info({ provider });
+  const configured = info.configured && info.provider === provider;
+  if (!configured && provider === "custom")
+    return void 0;
+  if (!configured) {
+    throw new LlmFailure({ code: "INVALID_CREDENTIAL", provider, message: `no API key is configured for ${provider}` });
+  }
+  return store.resolve({ provider }, "review");
+}
+function lazyFallback(entry, store) {
+  let built;
+  return {
+    label: `${entry.provider}:${entry.model}`,
+    async generate(request2) {
+      built ??= resolveKey(store, entry.provider).then((key) => withRetries(createAdapter(entry.provider, key, entry.baseUrl), entry.model, entry.effort));
+      const model = await built.catch((error62) => {
+        built = void 0;
+        throw error62;
+      });
+      return model.generate(request2);
+    }
+  };
+}
+function createFallbackModels(config2, store) {
+  return (config2.fallback ?? []).map((entry) => lazyFallback(entry, store));
+}
 async function createReviewModel(config2, store, opts) {
+  const fallbacks = createFallbackModels(config2, store);
   if (config2.provider === "claude-code") {
     const token = await store.resolve({ provider: "claude-code" }, "review");
-    return new ClaudeCodeRunner({
+    const runner = new ClaudeCodeRunner({
       token,
       cwd: opts.cwd,
       ...config2.model ? { model: config2.model } : {},
       ...opts.configDir ? { configDir: opts.configDir } : {}
     });
+    return fallbacks.length > 0 ? Object.assign(runner, { fallbacks }) : runner;
   }
-  let adapter;
-  if (config2.provider === "anthropic") {
-    const apiKey = await store.resolve({ provider: "anthropic" }, "review");
-    adapter = new AnthropicAdapter({ apiKey });
-  } else if (config2.provider === "openai") {
-    const apiKey = await store.resolve({ provider: "openai" }, "review");
-    adapter = new OpenAIAdapter({ apiKey });
-  } else if (config2.provider === "gemini") {
-    const apiKey = await store.resolve({ provider: "gemini" }, "review");
-    adapter = new GeminiAdapter({ apiKey });
-  } else {
+  if (!isApiProviderId(config2.provider)) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
   }
+  const provider = config2.provider;
+  const apiKey = provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
+  const adapter = createAdapter(provider, apiKey, config2.baseUrl);
   if (!config2.model) {
     throw new Error(`Model is required for provider: ${config2.provider}`);
   }
-  const baseModel = modelFromAdapter(adapter, config2.model);
-  const retryPolicy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
-  return {
-    label: baseModel.label,
-    generate(request2) {
-      return withRetry(() => baseModel.generate(request2), retryPolicy, request2.signal ? {
-        sleep: (ms) => new Promise((resolve2) => setTimeout(resolve2, ms)),
-        random: Math.random,
-        signal: request2.signal
-      } : void 0);
-    }
-  };
+  const model = withRetries(adapter, config2.model, config2.effort);
+  return fallbacks.length > 0 ? { ...model, fallbacks } : model;
 }
 
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
@@ -122769,6 +123422,12 @@ function renderNotCompletedNotice(outcome, reason, isArabic) {
 >
 > No code was reviewed.`;
 }
+function renderFallbackLine(input2, isArabic) {
+  const used = neutralize2(input2.modelLabel);
+  const from = neutralize2(input2.fallback?.from ?? "");
+  const code = neutralize2(input2.fallback?.code ?? "");
+  return isArabic ? `> \u26A0\uFE0F \u0627\u0633\u062A\u064F\u062E\u062F\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \`${used}\` \u0644\u0623\u0646 \`${from}\` \u0641\u0634\u0644 (${code})` : `> \u26A0\uFE0F Fallback model \`${used}\` was used because \`${from}\` failed (${code})`;
+}
 function renderFindingsOutsideDiff(findings, isArabic) {
   const heading = isArabic ? "### \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u062E\u0627\u0631\u062C \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A" : "### Findings outside the diff";
   const detailsLabel = isArabic ? "\u0627\u0644\u062A\u0641\u0627\u0635\u064A\u0644" : "Details";
@@ -122841,6 +123500,9 @@ function renderReviewSummary(input2) {
   const isArabic = input2.language === "ar";
   const sections = [];
   sections.push(renderHeader(input2.outcome, isArabic));
+  if (input2.fallback) {
+    sections.push(renderFallbackLine(input2, isArabic));
+  }
   if (input2.outcome !== "completed") {
     sections.push(renderNotCompletedNotice(input2.outcome, input2.reason, isArabic));
   }
@@ -122924,6 +123586,10 @@ async function reviewPullRequest(ctx) {
     knownSecrets
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
+  const fallbackSummary = reviewResult.status !== "skipped-budget" && reviewResult.fallbackFrom && reviewResult.fallbackCode ? {
+    modelLabel: reviewResult.modelUsed ?? model.label,
+    fallback: { from: reviewResult.fallbackFrom, code: reviewResult.fallbackCode }
+  } : {};
   const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";
   let summaryMarkdown;
   let inlineFindings;
@@ -122942,6 +123608,7 @@ async function reviewPullRequest(ctx) {
       complete: reviewResult.complete,
       incompleteReasons: reviewResult.result.incompleteReasons,
       modelLabel: model.label,
+      ...fallbackSummary,
       outcome: "completed",
       ...reviewResult.costUsd !== void 0 ? { costUsd: reviewResult.costUsd } : {},
       ...reviewResult.usage?.inputTokens !== void 0 ? { inputTokens: reviewResult.usage.inputTokens } : {},
@@ -122987,6 +123654,7 @@ async function reviewPullRequest(ctx) {
       complete: false,
       incompleteReasons: [reason],
       modelLabel: model.label,
+      ...fallbackSummary,
       outcome: "failed",
       reason
     });

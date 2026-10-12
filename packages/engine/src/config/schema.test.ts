@@ -55,3 +55,81 @@ describe('AuditSchema', () => {
     });
   });
 });
+
+describe('FallbackEntrySchema & MergePilotConfigSchema (ADR-0008)', () => {
+  it('accepts valid fallback entries with effort and baseUrl', () => {
+    const config = MergePilotConfigSchema.parse({
+      provider: 'openai',
+      model: 'gpt-5',
+      effort: 'high',
+      fallback: [
+        { provider: 'xai', model: 'grok-4', effort: 'medium' },
+        { provider: 'custom', model: 'local-model', baseUrl: 'http://localhost:11434/v1' },
+      ],
+    });
+    expect(config.effort).toBe('high');
+    expect(config.fallback).toEqual([
+      { provider: 'xai', model: 'grok-4', effort: 'medium' },
+      { provider: 'custom', model: 'local-model', baseUrl: 'http://localhost:11434/v1' },
+    ]);
+  });
+
+  it('rejects custom provider in fallback without baseUrl', () => {
+    expect(() =>
+      MergePilotConfigSchema.parse({
+        provider: 'openai',
+        model: 'gpt-5',
+        fallback: [{ provider: 'custom', model: 'local-model' }],
+      }),
+    ).toThrow('required when provider is custom');
+  });
+
+  it('rejects more than 3 fallback models (MAX_FALLBACK_MODELS = 3)', () => {
+    expect(() =>
+      MergePilotConfigSchema.parse({
+        provider: 'openai',
+        model: 'gpt-5',
+        fallback: [
+          { provider: 'xai', model: 'grok-4' },
+          { provider: 'deepseek', model: 'deepseek-chat' },
+          { provider: 'openrouter', model: 'openai/gpt-5' },
+          { provider: 'nvidia', model: 'nvidia/nemotron' },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it('requires baseUrl when root provider is custom', () => {
+    expect(() =>
+      MergePilotConfigSchema.parse({
+        provider: 'custom',
+        model: 'local-model',
+      }),
+    ).toThrow('required when provider is custom');
+
+    const validCustom = MergePilotConfigSchema.parse({
+      provider: 'custom',
+      model: 'local-model',
+      baseUrl: 'http://localhost:8000/v1',
+    });
+    expect(validCustom.baseUrl).toBe('http://localhost:8000/v1');
+  });
+
+  it('accepts all compatible provider presets', () => {
+    const presets = [
+      'xai',
+      'deepseek',
+      'nvidia',
+      'openrouter',
+      'opencode-zen',
+      'opencode-go',
+      'zai',
+      'zai-coding',
+    ] as const;
+    for (const p of presets) {
+      const parsed = MergePilotConfigSchema.parse({ provider: p, model: 'test-model' });
+      expect(parsed.provider).toBe(p);
+    }
+  });
+});
+

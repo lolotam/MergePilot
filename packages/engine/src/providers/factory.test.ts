@@ -229,4 +229,47 @@ describe('createReviewModel', () => {
       /unsupported provider/i,
     );
   });
+
+  it('creates an OpenAI-compatible review model for compatible presets', async () => {
+    const store = new EnvCredentialStore({
+      XAI_API_KEY: 'xai-test-key',
+    });
+    const config: MergePilotConfig = {
+      provider: 'xai',
+      model: 'grok-4',
+      language: 'en',
+      fallback: [],
+      review: { maxFindings: 5, minSeverity: 'medium', exclude: [], rulesFiles: [], pathInstructions: [], verify: true, libraryDocs: { source: 'npm', maxCharsPerLibrary: 8000, maxLibraries: 5 } },
+      budget: { perReviewUsd: 0.5, maxInputTokens: 200000 },
+      audit: { enabled: false, output: 'summary', maxFiles: 200, include: ['**/*'], exclude: [] },
+    };
+
+    const model = await createReviewModel(config, store, { cwd: fakeCwd });
+    expect(model.label).toBe('xai:grok-4');
+  });
+
+  it('attaches configured fallbacks to the review model', async () => {
+    const store = new EnvCredentialStore({
+      OPENAI_API_KEY: 'sk-test-openai',
+      XAI_API_KEY: 'xai-test-key',
+    });
+    const config: MergePilotConfig = {
+      provider: 'openai',
+      model: 'gpt-5',
+      language: 'en',
+      fallback: [
+        { provider: 'xai', model: 'grok-4', effort: 'low' },
+      ],
+      review: { maxFindings: 5, minSeverity: 'medium', exclude: [], rulesFiles: [], pathInstructions: [], verify: true, libraryDocs: { source: 'npm', maxCharsPerLibrary: 8000, maxLibraries: 5 } },
+      budget: { perReviewUsd: 0.5, maxInputTokens: 200000 },
+      audit: { enabled: false, output: 'summary', maxFiles: 200, include: ['**/*'], exclude: [] },
+    };
+
+    const model = await createReviewModel(config, store, { cwd: fakeCwd });
+    expect(model.label).toBe('openai:gpt-5');
+    expect(model.fallbacks).toBeDefined();
+    expect(model.fallbacks).toHaveLength(1);
+    expect(model.fallbacks?.[0]?.label).toBe('xai:grok-4');
+  });
 });
+
