@@ -8,6 +8,7 @@ import type {
   AppStore,
   FinishReviewRunOptions,
   Installation,
+  LatestFailedRunsOptions,
   ListReviewRunsOptions,
   ListReviewRunsResult,
   NewReviewRun,
@@ -333,12 +334,7 @@ export class PgStore implements AppStore {
 
   async listLatestFailedRuns(
     workspaceId: string,
-    options?: {
-      repo?: string[] | undefined;
-      from?: Date | undefined;
-      to?: Date | undefined;
-      limit?: number | undefined;
-    },
+    options?: LatestFailedRunsOptions,
   ): Promise<ReviewRun[]> {
     return listPgLatestFailedRuns(this.db, workspaceId, options);
   }

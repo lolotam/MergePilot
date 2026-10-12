@@ -1,9 +1,17 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { requireRole } from '../auth/guard.js';
+import { ActiveRunExistsError } from '../core/types.js';
 import { createRetryJobId, enqueueReviewJob } from '../queue/enqueue.js';
-import { createGitHubAppFactory } from '../worker/main.js';
-import { RetryFailedBodySchema } from './contract.js';
+import { createGitHubAppFactory } from '../worker/github-app-factory.js';
+import type { GitHubAppClientFactory } from '../worker/types.js';
+import type {
+  RetryFailedDryRunResponse,
+  RetryFailedResponse,
+  RetryItem,
+  SkippedRetryItem,
+} from './contract.js';
 import { sendError } from './helpers.js';
+import { parseRetryFailedBody } from './runs-query.js';
 import type { DashboardApiDeps } from './routes.js';
 
 interface PullRequestDetails {
@@ -14,15 +22,41 @@ interface PullRequestDetails {
   base?: { sha: string };
 }
 
+/** What a retry starts from: a failed or skipped run's PR. */
+interface RetrySource {
+  installationId: number;
+  repoFullName: string;
+  pullNumber: number;
+}
+
+type SkipReason =
+  | 'invalid_repo'
+  | 'installation_suspended'
+  | 'pr_not_found'
+  | 'pr_closed'
+  | 'already_running'
+  | 'enqueue_failed';
+
+type Outcome<T> = ({ ok: true } & T) | { ok: false; reason: SkipReason };
+
+const RETRY_FAILED_WINDOW_MS = 60_000;
+const RETRY_FAILED_CAP = 25;
+
+// Rate limit for "retry all failed": one real call per workspace per minute. It lives in this
+// process's memory only, so each API process (replica) enforces its own minute and a restart
+// clears it. Dry runs neither check nor record it.
 const retryFailedTimestamps = new Map<string, number>();
 
-export function checkRetryFailedRateLimit(workspaceId: string, now = Date.now()): boolean {
+export function isRetryFailedRateLimited(workspaceId: string, now = Date.now()): boolean {
   const last = retryFailedTimestamps.get(workspaceId);
-  if (last !== undefined && now - last < 60_000) {
-    return false;
+  return last !== undefined && now - last < RETRY_FAILED_WINDOW_MS;
+}
+
+export function recordRetryFailedCall(workspaceId: string, now = Date.now()): void {
+  for (const [id, at] of retryFailedTimestamps) {
+    if (now - at >= RETRY_FAILED_WINDOW_MS) retryFailedTimestamps.delete(id);
   }
   retryFailedTimestamps.set(workspaceId, now);
-  return true;
 }
 
 export function resetRetryRateLimits(): void {
@@ -31,48 +65,144 @@ export function resetRetryRateLimits(): void {
 
 export function isPrClosedOrMerged(pr: unknown): boolean {
   const details = pr as PullRequestDetails;
-  return (
-    details.state === 'closed' ||
-    Boolean(details.merged) ||
-    Boolean(details.merged_at)
-  );
+  return details.state === 'closed' || Boolean(details.merged) || Boolean(details.merged_at);
 }
 
-function parseDateParam(val?: string, endOfDay = false): Date | undefined {
-  if (!val) return undefined;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
-    return endOfDay
-      ? new Date(`${val}T23:59:59.999Z`)
-      : new Date(`${val}T00:00:00.000Z`);
+/** Checks the PR can be retried now and returns its current head and base. Read-only. */
+async function checkRetryable(
+  deps: DashboardApiDeps,
+  getFactory: () => GitHubAppClientFactory,
+  workspaceId: string,
+  src: RetrySource,
+): Promise<Outcome<{ headSha: string; baseSha: string }>> {
+  const [owner, repo] = src.repoFullName.split('/');
+  if (!owner || !repo) return { ok: false, reason: 'invalid_repo' };
+
+  const installation = await deps.store.getInstallation(src.installationId);
+  if (!installation || installation.suspended) {
+    return { ok: false, reason: 'installation_suspended' };
   }
-  const d = new Date(val);
-  return Number.isNaN(d.getTime()) ? undefined : d;
+
+  let pr: unknown;
+  try {
+    const { client } = await getFactory()(src.installationId);
+    pr = await client.getPullRequest({ owner, repo, pull_number: src.pullNumber });
+  } catch {
+    return { ok: false, reason: 'pr_not_found' };
+  }
+  if (isPrClosedOrMerged(pr)) return { ok: false, reason: 'pr_closed' };
+
+  const details = pr as PullRequestDetails;
+  const headSha = details.head.sha;
+  const active = await deps.store.findActiveReviewRun(
+    workspaceId,
+    src.repoFullName,
+    src.pullNumber,
+    headSha,
+  );
+  if (active) return { ok: false, reason: 'already_running' };
+  return { ok: true, headSha, baseSha: details.base?.sha ?? '' };
 }
+
+/**
+ * Creates the queued run and enqueues its job. The store's unique index makes "no active run for
+ * this head" and the insert one atomic step: a race loser gets ActiveRunExistsError, reported as
+ * `already_running`.
+ */
+async function queueRetry(
+  deps: DashboardApiDeps,
+  workspaceId: string,
+  src: RetrySource,
+  headSha: string,
+  baseSha: string,
+): Promise<Outcome<{ runId: string }>> {
+  const jobId = createRetryJobId();
+  let runId: string;
+  try {
+    const run = await deps.store.createReviewRun({
+      workspaceId,
+      installationId: src.installationId,
+      repoFullName: src.repoFullName,
+      pullNumber: src.pullNumber,
+      headSha,
+      status: 'queued',
+      costUsd: null,
+      detail: null,
+      jobId,
+    });
+    runId = run.id;
+  } catch (error) {
+    if (error instanceof ActiveRunExistsError) return { ok: false, reason: 'already_running' };
+    throw error;
+  }
+
+  try {
+    if (!deps.queue) throw new Error('queue unavailable');
+    await enqueueReviewJob(deps.queue, {
+      deliveryId: jobId,
+      installationId: src.installationId,
+      repoFullName: src.repoFullName,
+      pullNumber: src.pullNumber,
+      headSha,
+      baseSha,
+    });
+  } catch {
+    // Without a job the run would sit in `queued` until the stale sweep; close it now.
+    await deps.store.finishReviewRun(workspaceId, runId, {
+      status: 'failed',
+      costUsd: null,
+      detail: 'enqueue_failed',
+    });
+    return { ok: false, reason: 'enqueue_failed' };
+  }
+  return { ok: true, runId };
+}
+
+const SINGLE_RETRY_ERRORS: Record<SkipReason, { status: number; code: string; message: string }> = {
+  invalid_repo: { status: 400, code: 'invalid_repo', message: 'Invalid repository name' },
+  installation_suspended: {
+    status: 409,
+    code: 'installation_suspended',
+    message: 'Installation is suspended or not found',
+  },
+  pr_not_found: {
+    status: 404,
+    code: 'pr_not_found',
+    message: 'Could not fetch pull request from GitHub',
+  },
+  pr_closed: { status: 409, code: 'pr_closed', message: 'Pull request is closed or merged' },
+  already_running: {
+    status: 409,
+    code: 'already_running',
+    message: 'A review run for this commit is already queued or running',
+  },
+  enqueue_failed: {
+    status: 503,
+    code: 'queue_unavailable',
+    message: 'Could not queue the review, try again',
+  },
+};
 
 export function registerRunsRetryRoutes(app: FastifyInstance, deps: DashboardApiDeps): void {
-  const getAppFactory = () =>
-    deps.githubAppFactory ??
-    createGitHubAppFactory({
+  let factory: GitHubAppClientFactory | undefined = deps.githubAppFactory;
+  const getFactory = (): GitHubAppClientFactory => {
+    factory ??= createGitHubAppFactory({
       appId: deps.config.github.appId,
       privateKey: deps.config.github.privateKey,
       appSlug: deps.config.github.appSlug,
     });
+    return factory;
+  };
 
   // 1. POST /api/workspaces/:workspaceId/runs/:runId/retry
   app.post(
     '/api/workspaces/:workspaceId/runs/:runId/retry',
     { preHandler: [requireRole('admin', deps.auth)] },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const { workspaceId, runId } = request.params as {
-        workspaceId: string;
-        runId: string;
-      };
+      const { workspaceId, runId } = request.params as { workspaceId: string; runId: string };
 
       const run = await deps.store.getReviewRun(workspaceId, runId);
-      if (!run) {
-        return sendError(reply, 404, 'not_found', 'Review run not found');
-      }
-
+      if (!run) return sendError(reply, 404, 'not_found', 'Review run not found');
       if (run.status !== 'failed' && run.status !== 'skipped') {
         return sendError(
           reply,
@@ -82,231 +212,73 @@ export function registerRunsRetryRoutes(app: FastifyInstance, deps: DashboardApi
         );
       }
 
-      const installation = await deps.store.getInstallation(run.installationId);
-      if (!installation || installation.suspended) {
-        return sendError(
-          reply,
-          409,
-          'installation_suspended',
-          'Installation is suspended or not found',
-        );
+      const check = await checkRetryable(deps, getFactory, workspaceId, run);
+      const queued = check.ok
+        ? await queueRetry(deps, workspaceId, run, check.headSha, check.baseSha)
+        : check;
+      if (!queued.ok) {
+        const error = SINGLE_RETRY_ERRORS[queued.reason];
+        return sendError(reply, error.status, error.code, error.message);
       }
-
-      const [owner, repo] = run.repoFullName.split('/');
-      if (!owner || !repo) {
-        return sendError(reply, 400, 'invalid_repo', 'Invalid repository name');
-      }
-
-      let pr: unknown;
-      try {
-        const factory = getAppFactory();
-        const { client } = await factory(run.installationId);
-        pr = await client.getPullRequest({ owner, repo, pull_number: run.pullNumber });
-      } catch {
-        return sendError(reply, 404, 'pr_not_found', 'Could not fetch pull request from GitHub');
-      }
-
-      if (isPrClosedOrMerged(pr)) {
-        return sendError(reply, 409, 'pr_closed', 'Pull request is closed or merged');
-      }
-
-      const prDetails = pr as PullRequestDetails;
-      const currentHeadSha = prDetails.head.sha;
-      const currentBaseSha = prDetails.base?.sha ?? '';
-
-      const activeRun = await deps.store.findActiveReviewRun(
-        workspaceId,
-        run.repoFullName,
-        run.pullNumber,
-        currentHeadSha,
-      );
-      if (activeRun) {
-        return sendError(
-          reply,
-          409,
-          'already_running',
-          'A review run for this commit is already queued or running',
-        );
-      }
-
-      const jobId = createRetryJobId();
-      const newRun = await deps.store.createReviewRun({
-        workspaceId,
-        installationId: run.installationId,
-        repoFullName: run.repoFullName,
-        pullNumber: run.pullNumber,
-        headSha: currentHeadSha,
-        status: 'queued',
-        costUsd: null,
-        detail: null,
-        jobId,
-      });
-
-      try {
-        if (!deps.queue) throw new Error('queue unavailable');
-        await enqueueReviewJob(deps.queue, {
-          deliveryId: jobId,
-          installationId: run.installationId,
-          repoFullName: run.repoFullName,
-          pullNumber: run.pullNumber,
-          headSha: currentHeadSha,
-          baseSha: currentBaseSha,
-        });
-      } catch {
-        // Without a job the run would sit in `queued` until the stale sweep; close it now.
-        await deps.store.finishReviewRun(workspaceId, newRun.id, {
-          status: 'failed',
-          costUsd: null,
-          detail: 'enqueue_failed',
-        });
-        return sendError(reply, 503, 'queue_unavailable', 'Could not queue the review, try again');
-      }
-
-      return reply.status(202).send({ runId: newRun.id });
+      return reply.status(202).send({ runId: queued.runId });
     },
   );
 
-  // 2. POST /api/workspaces/:workspaceId/runs/retry-failed
+  // 2. POST /api/workspaces/:workspaceId/runs/retry-failed (`dryRun: true` only previews)
   app.post(
     '/api/workspaces/:workspaceId/runs/retry-failed',
     { preHandler: [requireRole('admin', deps.auth)] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { workspaceId } = request.params as { workspaceId: string };
 
-      const now = deps.now ? deps.now().getTime() : Date.now();
-      if (!checkRetryFailedRateLimit(workspaceId, now)) {
-        return sendError(
-          reply,
-          429,
-          'rate_limited',
-          'Retry all failed runs is rate limited to once per minute per workspace',
-        );
-      }
+      // Validate first: an invalid body never counts against the rate limit.
+      const parsed = parseRetryFailedBody(request.body);
+      if (!parsed.ok) return sendError(reply, 400, 'validation_error', parsed.message);
+      const { dryRun, ...filters } = parsed.filters;
 
-      const parsed = RetryFailedBodySchema.safeParse(request.body ?? {});
-      if (!parsed.success) {
-        return sendError(reply, 400, 'validation_error', 'Invalid request body');
+      if (!dryRun) {
+        const now = deps.now ? deps.now().getTime() : Date.now();
+        if (isRetryFailedRateLimited(workspaceId, now)) {
+          return sendError(
+            reply,
+            429,
+            'rate_limited',
+            'Retry all failed runs is rate limited to once per minute per workspace',
+          );
+        }
+        // Recorded synchronously right after the check, so two concurrent calls cannot both pass.
+        recordRetryFailedCall(workspaceId, now);
       }
-
-      const body = parsed.data ?? {};
-      const from = parseDateParam(body.from, false);
-      const to = parseDateParam(body.to, true);
 
       const candidates = await deps.store.listLatestFailedRuns(workspaceId, {
-        repo: body.repo,
-        from,
-        to,
-        limit: 25,
+        ...filters,
+        limit: RETRY_FAILED_CAP,
       });
 
-      const skipped: Array<{ repo: string; pullNumber: number; reason: string }> = [];
-      let queued = 0;
-
-      const factory = getAppFactory();
-
+      const items: RetryItem[] = [];
+      const skipped: SkippedRetryItem[] = [];
       for (const candidate of candidates) {
-        const [owner, repo] = candidate.repoFullName.split('/');
-        if (!owner || !repo) {
-          skipped.push({
-            repo: candidate.repoFullName,
-            pullNumber: candidate.pullNumber,
-            reason: 'invalid_repo',
-          });
+        const item: RetryItem = { repo: candidate.repoFullName, pullNumber: candidate.pullNumber };
+        const check = await checkRetryable(deps, getFactory, workspaceId, candidate);
+        if (!check.ok) {
+          skipped.push({ ...item, reason: check.reason });
           continue;
         }
-
-        const installation = await deps.store.getInstallation(candidate.installationId);
-        if (!installation || installation.suspended) {
-          skipped.push({
-            repo: candidate.repoFullName,
-            pullNumber: candidate.pullNumber,
-            reason: 'installation_suspended',
-          });
+        if (dryRun) {
+          items.push(item);
           continue;
         }
-
-        let pr: unknown;
-        try {
-          const { client } = await factory(candidate.installationId);
-          pr = await client.getPullRequest({ owner, repo, pull_number: candidate.pullNumber });
-        } catch {
-          skipped.push({
-            repo: candidate.repoFullName,
-            pullNumber: candidate.pullNumber,
-            reason: 'pr_not_found',
-          });
-          continue;
-        }
-
-        if (isPrClosedOrMerged(pr)) {
-          skipped.push({
-            repo: candidate.repoFullName,
-            pullNumber: candidate.pullNumber,
-            reason: 'pr_closed',
-          });
-          continue;
-        }
-
-        const prDetails = pr as PullRequestDetails;
-        const currentHeadSha = prDetails.head.sha;
-        const currentBaseSha = prDetails.base?.sha ?? '';
-
-        const activeRun = await deps.store.findActiveReviewRun(
-          workspaceId,
-          candidate.repoFullName,
-          candidate.pullNumber,
-          currentHeadSha,
-        );
-        if (activeRun) {
-          skipped.push({
-            repo: candidate.repoFullName,
-            pullNumber: candidate.pullNumber,
-            reason: 'already_running',
-          });
-          continue;
-        }
-
-        const jobId = createRetryJobId();
-        const newRun = await deps.store.createReviewRun({
-          workspaceId,
-          installationId: candidate.installationId,
-          repoFullName: candidate.repoFullName,
-          pullNumber: candidate.pullNumber,
-          headSha: currentHeadSha,
-          status: 'queued',
-          costUsd: null,
-          detail: null,
-          jobId,
-        });
-
-        try {
-          if (!deps.queue) throw new Error('queue unavailable');
-          await enqueueReviewJob(deps.queue, {
-            deliveryId: jobId,
-            installationId: candidate.installationId,
-            repoFullName: candidate.repoFullName,
-            pullNumber: candidate.pullNumber,
-            headSha: currentHeadSha,
-            baseSha: currentBaseSha,
-          });
-        } catch {
-          await deps.store.finishReviewRun(workspaceId, newRun.id, {
-            status: 'failed',
-            costUsd: null,
-            detail: 'enqueue_failed',
-          });
-          skipped.push({
-            repo: candidate.repoFullName,
-            pullNumber: candidate.pullNumber,
-            reason: 'enqueue_failed',
-          });
-          continue;
-        }
-
-        queued++;
+        const queued = await queueRetry(deps, workspaceId, candidate, check.headSha, check.baseSha);
+        if (queued.ok) items.push(item);
+        else skipped.push({ ...item, reason: queued.reason });
       }
 
-      return reply.status(200).send({ queued, skipped });
+      if (dryRun) {
+        const preview: RetryFailedDryRunResponse = { wouldQueue: items.length, items, skipped };
+        return reply.status(200).send(preview);
+      }
+      const result: RetryFailedResponse = { queued: items.length, skipped };
+      return reply.status(200).send(result);
     },
   );
 }

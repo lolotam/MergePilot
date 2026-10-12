@@ -13,8 +13,10 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
+  ActiveRunExistsError,
   REUSABLE_RUN_STATUSES,
   type FinishReviewRunOptions,
+  type LatestFailedRunsOptions,
   type ListReviewRunsOptions,
   type ListReviewRunsResult,
   type NewReviewRun,
@@ -211,7 +213,35 @@ function startingValues(run: NewReviewRun, now: Date) {
   };
 }
 
+/** Name of migration 0004's partial unique index (one queued/running run per head). */
+export const ACTIVE_RUN_INDEX = 'idx_review_runs_active_pr_head';
+
+/** True when `error` (or a driver error it wraps) is a unique violation of ACTIVE_RUN_INDEX. */
+export function isActiveRunConflict(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
+    const fields = current as Error & { code?: unknown; constraint?: unknown };
+    if (
+      fields.code === '23505' &&
+      (fields.constraint === ACTIVE_RUN_INDEX || fields.message.includes(ACTIVE_RUN_INDEX))
+    ) {
+      return true;
+    }
+    current = fields.cause;
+  }
+  return false;
+}
+
 export async function createPgReviewRun(db: AppDb, run: NewReviewRun): Promise<ReviewRun> {
+  try {
+    return await insertOrReusePgReviewRun(db, run);
+  } catch (error) {
+    if (isActiveRunConflict(error)) throw new ActiveRunExistsError(run.repoFullName, run.pullNumber);
+    throw error;
+  }
+}
+
+async function insertOrReusePgReviewRun(db: AppDb, run: NewReviewRun): Promise<ReviewRun> {
   return withLiveWorkspace(db, run.workspaceId, async (tx) => {
     const now = new Date();
     if (run.jobId) {
@@ -303,23 +333,15 @@ export async function findPgActiveReviewRun(
 export async function listPgLatestFailedRuns(
   db: AppDb,
   workspaceId: string,
-  options?: {
-    repo?: string[] | undefined;
-    from?: Date | undefined;
-    to?: Date | undefined;
-    limit?: number | undefined;
-  },
+  options?: LatestFailedRunsOptions,
 ): Promise<ReviewRun[]> {
   const limit = options?.limit ?? 25;
+  // Rank ALL of a PR's runs (the repo filter only narrows whole partitions); the date window is
+  // applied to the latest row afterwards, so a PR that failed inside the window but later
+  // completed is not picked.
   const conditions = [eq(reviewRuns.workspaceId, workspaceId)];
   if (options?.repo && options.repo.length > 0) {
     conditions.push(inArray(reviewRuns.repoFullName, options.repo));
-  }
-  if (options?.from) {
-    conditions.push(gte(reviewRuns.createdAt, options.from));
-  }
-  if (options?.to) {
-    conditions.push(lte(reviewRuns.createdAt, options.to));
   }
 
   const ranked = db
@@ -350,10 +372,14 @@ export async function listPgLatestFailedRuns(
     .where(and(...conditions))
     .as('ranked');
 
+  const outer = [eq(ranked.rn, 1), eq(ranked.status, 'failed')];
+  if (options?.from) outer.push(gte(ranked.createdAt, options.from));
+  if (options?.to) outer.push(lte(ranked.createdAt, options.to));
+
   const rows = await db
     .select()
     .from(ranked)
-    .where(and(eq(ranked.rn, 1), eq(ranked.status, 'failed')))
+    .where(and(...outer))
     .orderBy(desc(ranked.createdAt), desc(ranked.id))
     .limit(limit);
 

@@ -321,6 +321,10 @@ export const en: I18nDictionary = {
   retryAllFailedConfirmTitle: 'Retry all failed review runs',
   retryAllFailedConfirmDesc: 'Are you sure you want to retry {count} failed review runs?',
   retryAllFailedSuccess: 'Queued {queued} review(s) (skipped {skipped})',
+  retryAllFailedPreviewLoading: 'Checking which failed runs can be retried...',
+  retryAllFailedPreviewError: 'Could not check the failed runs. Close and try again.',
+  retryAllFailedNone: 'No failed runs matching the current repository and date filters can be retried now.',
+  retryAllFailedSkippedNote: '{count} more will be skipped (closed pull request, already running, or not reachable).',
   // Install Redirect Page
   installTitle: 'Link GitHub Installation to Workspace',
   installDesc: 'MergePilot has been installed on GitHub. Choose the workspace to connect with this installation.',

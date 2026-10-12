@@ -370,16 +370,17 @@ export function RunsPage() {
 
       <RetryAllFailedModal
         isOpen={retryModalOpen}
-        count={runs.filter((r) => r.status === 'failed').length}
+        workspaceId={workspaceId}
+        // Only the repo and date filters: the server retries failed runs, so status/search do not apply.
+        filters={{
+          repo: selectedRepos.length > 0 ? selectedRepos : undefined,
+          from: fromDate || undefined,
+          to: toDate || undefined,
+        }}
         isLoading={retryFailedMutation.isPending}
         onClose={() => setRetryModalOpen(false)}
-        onConfirm={() => {
-          const body = {
-            repo: selectedRepos.length > 0 ? selectedRepos : undefined,
-            from: fromDate || undefined,
-            to: toDate || undefined,
-          };
-          retryFailedMutation.mutate(body, { onSettled: () => setRetryModalOpen(false) });
+        onConfirm={(filters) => {
+          retryFailedMutation.mutate(filters, { onSettled: () => setRetryModalOpen(false) });
         }}
       />
     </div>

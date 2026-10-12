@@ -317,6 +317,10 @@ export const ar = {
   retryAllFailedConfirmTitle: 'إعادة محاولة جميع المراجعات الفاشلة',
   retryAllFailedConfirmDesc: 'هل أنت متأكد من إعادة محاولة {count} مراجعة فاشلة؟',
   retryAllFailedSuccess: 'تمت جدولة {queued} مراجعة (تم تخطي {skipped})',
+  retryAllFailedPreviewLoading: 'جاري التحقق من المراجعات الفاشلة القابلة لإعادة المحاولة...',
+  retryAllFailedPreviewError: 'تعذر التحقق من المراجعات الفاشلة. أغلق النافذة وحاول مرة أخرى.',
+  retryAllFailedNone: 'لا توجد مراجعات فاشلة تطابق فلاتر المستودع والتاريخ الحالية يمكن إعادتها الآن.',
+  retryAllFailedSkippedNote: 'سيتم تخطي {count} أخرى (طلب سحب مغلق، أو مراجعة جارية، أو تعذر الوصول).',
   // Install Redirect Page
   installTitle: 'ربط تركيب GitHub بمساحة العمل',
   installDesc: 'تم تثبيت تطبيق MergePilot بنجاح. اختر مساحة العمل التي ترغب في ربط هذا التركيب بها.',

@@ -234,29 +234,57 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
     });
   });
 
-  it('shows Retry all failed button for admin, opens confirm dialog, and triggers retry-failed', async () => {
-    vi.mocked(client.fetchApi).mockResolvedValueOnce({ queued: 1, skipped: [] });
-    renderComponent(['/w/ws-1/runs'], 'admin');
+  it('confirm dialog shows the server dry-run count and retries with the same filters', async () => {
+    vi.mocked(client.fetchApi)
+      .mockResolvedValueOnce({
+        wouldQueue: 2,
+        items: [
+          { repo: 'acme/frontend', pullNumber: 15 },
+          { repo: 'acme/frontend', pullNumber: 16 },
+        ],
+        skipped: [{ repo: 'acme/frontend', pullNumber: 17, reason: 'pr_closed' }],
+      })
+      .mockResolvedValueOnce({ queued: 2, skipped: [] });
+    renderComponent(
+      ['/w/ws-1/runs?repo=acme/frontend&from=2026-10-01&to=2026-10-15&status=failed&q=x'],
+      'admin',
+    );
 
-    const retryAllBtn = screen.getByRole('button', { name: 'Retry all failed' });
-    expect(retryAllBtn).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry all failed' }));
 
-    fireEvent.click(retryAllBtn);
-
-    expect(screen.getByText(/Are you sure you want to retry 1 failed review runs\?/)).toBeDefined();
+    // The count comes from the server preview, not from the rows on this page.
+    expect(await screen.findByText(/Are you sure you want to retry 2 failed review runs\?/)).toBeDefined();
+    expect(screen.getByText('acme/frontend#16')).toBeDefined();
+    expect(screen.getByText(/1 more will be skipped/)).toBeDefined();
+    const filters = { repo: ['acme/frontend'], from: '2026-10-01', to: '2026-10-15' };
+    expect(client.fetchApi).toHaveBeenCalledWith('/api/workspaces/ws-1/runs/retry-failed', {
+      method: 'POST',
+      body: JSON.stringify({ ...filters, dryRun: true }),
+    });
 
     const dialogConfirmBtn = screen.getAllByRole('button', { name: 'Retry all failed' }).find(
       (b) => b.closest('[role="dialog"]') !== null,
     );
-    expect(dialogConfirmBtn).toBeDefined();
-
     fireEvent.click(dialogConfirmBtn!);
     await waitFor(() => {
       expect(client.fetchApi).toHaveBeenCalledWith('/api/workspaces/ws-1/runs/retry-failed', {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify(filters),
       });
     });
+  });
+
+  it('disables confirm when the dry run finds nothing to retry', async () => {
+    vi.mocked(client.fetchApi).mockResolvedValueOnce({ wouldQueue: 0, items: [], skipped: [] });
+    renderComponent(['/w/ws-1/runs'], 'admin');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry all failed' }));
+
+    expect(await screen.findByText(/No failed runs matching/)).toBeDefined();
+    const dialogConfirmBtn = screen.getAllByRole('button', { name: 'Retry all failed' }).find(
+      (b) => b.closest('[role="dialog"]') !== null,
+    );
+    expect(dialogConfirmBtn?.hasAttribute('disabled')).toBe(true);
   });
 
   it('does not render Retry all failed button for members', () => {
@@ -273,6 +301,9 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(client.fetchApi).not.toHaveBeenCalled();
+    // Only the dry-run preview may have been requested; nothing was queued.
+    for (const [, init] of vi.mocked(client.fetchApi).mock.calls) {
+      expect(JSON.parse(String(init?.body ?? '{}')).dryRun).toBe(true);
+    }
   });
 });

@@ -214,19 +214,26 @@ export const RetryRunResponseSchema = z.object({
 });
 export type RetryRunResponse = z.infer<typeof RetryRunResponseSchema>;
 
-/** POST (admin/owner) /api/workspaces/:workspaceId/runs/retry-failed -> 200 */
-export const RetryFailedBodySchema = z
-  .object({
-    repo: z.array(z.string()).optional(),
-    from: z.string().optional(),
-    to: z.string().optional(),
-  })
-  .optional();
-export type RetryFailedBody = z.infer<typeof RetryFailedBodySchema>;
+/**
+ * POST (admin/owner) /api/workspaces/:workspaceId/runs/retry-failed -> 200.
+ * Body: the runs page's repo and date filters (validated server-side: ISO date or date-time,
+ * `from` <= `to`, at most 50 repos). With `dryRun: true` nothing is queued and the rate limit is
+ * untouched; the response lists what the real call would queue.
+ */
+export interface RetryFailedBody {
+  repo?: string[] | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  dryRun?: boolean | undefined;
+}
 
-export const SkippedRetryItemSchema = z.object({
+export const RetryItemSchema = z.object({
   repo: z.string(),
   pullNumber: z.number().int(),
+});
+export type RetryItem = z.infer<typeof RetryItemSchema>;
+
+export const SkippedRetryItemSchema = RetryItemSchema.extend({
   reason: z.string(),
 });
 export type SkippedRetryItem = z.infer<typeof SkippedRetryItemSchema>;
@@ -236,3 +243,10 @@ export const RetryFailedResponseSchema = z.object({
   skipped: z.array(SkippedRetryItemSchema),
 });
 export type RetryFailedResponse = z.infer<typeof RetryFailedResponseSchema>;
+
+export const RetryFailedDryRunResponseSchema = z.object({
+  wouldQueue: z.number().int(),
+  items: z.array(RetryItemSchema),
+  skipped: z.array(SkippedRetryItemSchema),
+});
+export type RetryFailedDryRunResponse = z.infer<typeof RetryFailedDryRunResponseSchema>;

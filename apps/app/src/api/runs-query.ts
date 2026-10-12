@@ -41,7 +41,8 @@ function intParam(min: number, max: number) {
 }
 
 /** `YYYY-MM-DD` (the date picker) or a full ISO 8601 date-time with an offset. */
-const isoDateParam = z.union([z.iso.date(), z.iso.datetime({ offset: true })]).optional();
+const isoDateString = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
+const isoDateParam = isoDateString.optional();
 
 /** GET /api/workspaces/:workspaceId/runs query string. Unknown params are ignored. */
 export const RunsListQuerySchema = z.object({
@@ -58,7 +59,7 @@ export const RunsListQuerySchema = z.object({
 });
 
 /** A date-only `from` starts at 00:00 UTC; a date-only `to` covers that whole UTC day. */
-function toDate(value: string, edge: 'start' | 'end'): Date {
+export function toDate(value: string, edge: 'start' | 'end'): Date {
   const date = new Date(value);
   return edge === 'end' && DATE_ONLY.test(value) ? new Date(date.getTime() + DAY_MS - 1) : date;
 }
@@ -103,5 +104,46 @@ export function parseRunsListQuery(query: unknown): RunsQueryParseResult {
       sort: q.sort,
       dir: q.dir ?? 'desc',
     },
+  };
+}
+
+/**
+ * POST /api/workspaces/:workspaceId/runs/retry-failed body: the runs page's repo and date filters
+ * (status and search are ignored; only failed runs are retried) and an optional `dryRun`.
+ */
+export const RetryFailedBodySchema = z.object({
+  repo: z.array(z.string().min(1).max(MAX_REPO_LENGTH)).max(MAX_REPO_FILTERS).optional(),
+  from: isoDateParam,
+  to: isoDateParam,
+  dryRun: z.boolean().optional(),
+});
+
+export interface RetryFailedFilters {
+  repo: string[] | undefined;
+  from: Date | undefined;
+  to: Date | undefined;
+  dryRun: boolean;
+}
+
+export type RetryFailedParseResult =
+  | { ok: true; filters: RetryFailedFilters }
+  | { ok: false; message: string };
+
+/** Validates the retry-failed body; failures name the bad fields but never echo their values. */
+export function parseRetryFailedBody(body: unknown): RetryFailedParseResult {
+  const parsed = RetryFailedBodySchema.safeParse(body ?? {});
+  if (!parsed.success) {
+    const fields = [...new Set(parsed.error.issues.map((issue) => String(issue.path[0] ?? 'body')))];
+    return { ok: false, message: `Invalid field(s): ${fields.join(', ')}` };
+  }
+  const b = parsed.data;
+  const from = b.from ? toDate(b.from, 'start') : undefined;
+  const to = b.to ? toDate(b.to, 'end') : undefined;
+  if (from && to && from.getTime() > to.getTime()) {
+    return { ok: false, message: '`from` must not be after `to`' };
+  }
+  return {
+    ok: true,
+    filters: { repo: b.repo && b.repo.length > 0 ? b.repo : undefined, from, to, dryRun: b.dryRun ?? false },
   };
 }

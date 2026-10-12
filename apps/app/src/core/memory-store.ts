@@ -1,14 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
+  ACTIVE_RUN_STATUSES,
+  ActiveRunExistsError,
   InstallationAlreadyLinkedError,
   REUSABLE_RUN_STATUSES,
   WorkspaceDeletedError,
 } from './types.js';
+import { findActiveRun, selectLatestFailedRuns } from './memory-runs.js';
 import type {
   ApiProvider,
   AppStore,
   FinishReviewRunOptions,
   Installation,
+  LatestFailedRunsOptions,
   ListReviewRunsOptions,
   ListReviewRunsResult,
   NewReviewRun,
@@ -119,6 +123,7 @@ export class MemoryStore implements AppStore {
       result: run.result ?? null,
       reviewUrl: run.reviewUrl ?? null,
     };
+    let reusable: ReviewRun | undefined;
     if (run.jobId) {
       // Only a queued/running/failed run of this job is reused; completed and skipped runs stay.
       for (const existing of this.runs.values()) {
@@ -127,11 +132,22 @@ export class MemoryStore implements AppStore {
           existing.jobId === run.jobId &&
           REUSABLE_RUN_STATUSES.includes(existing.status)
         ) {
-          const updated: ReviewRun = { ...existing, ...run, ...starting };
-          this.runs.set(existing.id, updated);
-          return { ...updated };
+          reusable = existing;
+          break;
         }
       }
+    }
+    // Emulates the partial unique index of migration 0004: one queued/running run per head.
+    if (
+      ACTIVE_RUN_STATUSES.includes(run.status) &&
+      findActiveRun(this.runs.values(), run, reusable?.id)
+    ) {
+      throw new ActiveRunExistsError(run.repoFullName, run.pullNumber);
+    }
+    if (reusable) {
+      const updated: ReviewRun = { ...reusable, ...run, ...starting };
+      this.runs.set(reusable.id, updated);
+      return { ...updated };
     }
     const created: ReviewRun = { ...run, ...starting, id: randomUUID(), createdAt: now };
     this.runs.set(created.id, created);
@@ -183,58 +199,15 @@ export class MemoryStore implements AppStore {
     pullNumber: number,
     headSha: string,
   ): Promise<ReviewRun | null> {
-    for (const r of this.runs.values()) {
-      if (
-        r.workspaceId === workspaceId &&
-        r.repoFullName === repoFullName &&
-        r.pullNumber === pullNumber &&
-        r.headSha === headSha &&
-        (r.status === 'queued' || r.status === 'running')
-      ) {
-        return { ...r };
-      }
-    }
-    return null;
+    const run = findActiveRun(this.runs.values(), { workspaceId, repoFullName, pullNumber, headSha });
+    return run ? { ...run } : null;
   }
 
   async listLatestFailedRuns(
     workspaceId: string,
-    options?: {
-      repo?: string[] | undefined;
-      from?: Date | undefined;
-      to?: Date | undefined;
-      limit?: number | undefined;
-    },
+    options?: LatestFailedRunsOptions,
   ): Promise<ReviewRun[]> {
-    const limit = options?.limit ?? 25;
-    let filtered = [...this.runs.values()].filter((r) => r.workspaceId === workspaceId);
-
-    if (options?.repo && options.repo.length > 0) {
-      const allowed = new Set(options.repo);
-      filtered = filtered.filter((r) => allowed.has(r.repoFullName));
-    }
-    if (options?.from) filtered = filtered.filter((r) => r.createdAt >= options.from!);
-    if (options?.to) filtered = filtered.filter((r) => r.createdAt <= options.to!);
-
-    const byPr = new Map<string, ReviewRun[]>();
-    for (const r of filtered) {
-      const key = `${r.repoFullName}#${r.pullNumber}`;
-      const list = byPr.get(key) ?? [];
-      list.push(r);
-      byPr.set(key, list);
-    }
-
-    const candidates: ReviewRun[] = [];
-    for (const list of byPr.values()) {
-      list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
-      const latest = list[0];
-      if (latest?.status === 'failed') candidates.push({ ...latest });
-    }
-
-    candidates.sort(
-      (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id),
-    );
-    return candidates.slice(0, limit);
+    return selectLatestFailedRuns(this.runs.values(), workspaceId, options);
   }
 
   async failStaleRuns(heartbeatBefore: Date): Promise<number> {
