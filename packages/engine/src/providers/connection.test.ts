@@ -235,4 +235,38 @@ describe('testConnection', () => {
       }
     });
   });
+
+  describe('thinking models (live bug: Test button failed with "answered without any reply text")', () => {
+    it('gives GLM (zai-coding) thinking room by default and with effort "on"', async () => {
+      for (const effort of [undefined, 'on'] as const) {
+        const { fetch, calls } = mockFetch(jsonResponse({ choices: [{ message: { content: 'OK' } }] }));
+        const result = await testConnection('zai-coding', KEY, 'glm-5.3', { fetch, ...(effort ? { effort } : {}) });
+        expect(result.ok).toBe(true);
+        expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBeGreaterThanOrEqual(16 + 8192);
+      }
+    });
+
+    it('counts a reasoning-only reply as a working connection', async () => {
+      const { fetch } = mockFetch(
+        jsonResponse({ choices: [{ message: { content: '', reasoning_content: 'The user wants OK' } }] }),
+      );
+      const result = await testConnection('zai-coding', KEY, 'glm-5.3', { fetch });
+      expect(result.ok).toBe(true);
+    });
+
+    it('gives Gemini 3.x thinking room with no effort configured', async () => {
+      const { fetch, calls } = mockFetch(jsonResponse({ candidates: [{ content: { parts: [{ text: 'OK' }] } }] }));
+      const result = await testConnection('gemini', KEY, 'gemini-3.8-flash', { fetch });
+      expect(result.ok).toBe(true);
+      const config = (calls[0]?.body as { generationConfig: { maxOutputTokens: number } }).generationConfig;
+      expect(config.maxOutputTokens).toBeGreaterThanOrEqual(16 + 8192);
+    });
+
+    it('keeps the tiny budget when thinking is explicitly off', async () => {
+      const { fetch, calls } = mockFetch(jsonResponse({ choices: [{ message: { content: 'OK' } }] }));
+      await testConnection('zai-coding', KEY, 'glm-5.3', { fetch, effort: 'off' });
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16);
+    });
+  });
 });
+
