@@ -275,3 +275,87 @@ export async function finishPgReviewRun(
     .set(updateValues)
     .where(and(eq(reviewRuns.id, id), eq(reviewRuns.workspaceId, workspaceId)));
 }
+
+export async function findPgActiveReviewRun(
+  db: AppDb,
+  workspaceId: string,
+  repoFullName: string,
+  pullNumber: number,
+  headSha: string,
+): Promise<ReviewRun | null> {
+  const rows = await db
+    .select()
+    .from(reviewRuns)
+    .where(
+      and(
+        eq(reviewRuns.workspaceId, workspaceId),
+        eq(reviewRuns.repoFullName, repoFullName),
+        eq(reviewRuns.pullNumber, pullNumber),
+        eq(reviewRuns.headSha, headSha),
+        inArray(reviewRuns.status, ['queued', 'running']),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  return row ? mapReviewRunRow(row) : null;
+}
+
+export async function listPgLatestFailedRuns(
+  db: AppDb,
+  workspaceId: string,
+  options?: {
+    repo?: string[] | undefined;
+    from?: Date | undefined;
+    to?: Date | undefined;
+    limit?: number | undefined;
+  },
+): Promise<ReviewRun[]> {
+  const limit = options?.limit ?? 25;
+  const conditions = [eq(reviewRuns.workspaceId, workspaceId)];
+  if (options?.repo && options.repo.length > 0) {
+    conditions.push(inArray(reviewRuns.repoFullName, options.repo));
+  }
+  if (options?.from) {
+    conditions.push(gte(reviewRuns.createdAt, options.from));
+  }
+  if (options?.to) {
+    conditions.push(lte(reviewRuns.createdAt, options.to));
+  }
+
+  const ranked = db
+    .select({
+      id: reviewRuns.id,
+      workspaceId: reviewRuns.workspaceId,
+      jobId: reviewRuns.jobId,
+      installationId: reviewRuns.installationId,
+      repoFullName: reviewRuns.repoFullName,
+      pullNumber: reviewRuns.pullNumber,
+      headSha: reviewRuns.headSha,
+      status: reviewRuns.status,
+      costUsd: reviewRuns.costUsd,
+      detail: reviewRuns.detail,
+      createdAt: reviewRuns.createdAt,
+      finishedAt: reviewRuns.finishedAt,
+      updatedAt: reviewRuns.updatedAt,
+      provider: reviewRuns.provider,
+      model: reviewRuns.model,
+      effort: reviewRuns.effort,
+      fallbackFrom: reviewRuns.fallbackFrom,
+      findingsCount: reviewRuns.findingsCount,
+      result: reviewRuns.result,
+      reviewUrl: reviewRuns.reviewUrl,
+      rn: sql<number>`row_number() over (partition by ${reviewRuns.repoFullName}, ${reviewRuns.pullNumber} order by ${reviewRuns.createdAt} desc, ${reviewRuns.id} desc)`.as('rn'),
+    })
+    .from(reviewRuns)
+    .where(and(...conditions))
+    .as('ranked');
+
+  const rows = await db
+    .select()
+    .from(ranked)
+    .where(and(eq(ranked.rn, 1), eq(ranked.status, 'failed')))
+    .orderBy(desc(ranked.createdAt), desc(ranked.id))
+    .limit(limit);
+
+  return rows.map((r) => mapReviewRunRow(r as typeof reviewRuns.$inferSelect));
+}

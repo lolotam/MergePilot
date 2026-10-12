@@ -1,13 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RunsPage } from './RunsPage.js';
 import { I18nProvider } from '../i18n/context.js';
+import { ToastProvider } from '../components/Toast.js';
 import * as hooks from '../api/hooks.js';
+import * as client from '../api/client.js';
 import type { ReviewRun } from '../api/client.js';
 
 vi.mock('../api/hooks.js');
+vi.mock('../api/client.js', async () => {
+  const actual = await vi.importActual('../api/client.js');
+  return {
+    ...actual,
+    fetchApi: vi.fn(),
+  };
+});
 
 const mockNavigate = vi.fn();
 vi.mock('react-router', async () => {
@@ -79,7 +89,18 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
     },
   ];
 
-  const renderComponent = (initialEntries = ['/w/ws-1/runs']) => {
+  const renderComponent = (
+    initialEntries = ['/w/ws-1/runs'],
+    role: 'owner' | 'admin' | 'member' = 'admin',
+  ) => {
+    vi.mocked(hooks.useMeQuery).mockReturnValue({
+      data: {
+        user: { id: 'u1', email: 'user@test.com', name: 'User', image: null, githubLinked: true },
+        workspaces: [{ id: 'ws-1', name: 'WS 1', slug: 'ws-1', role }],
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof hooks.useMeQuery>);
+
     vi.mocked(hooks.useRunReposQuery).mockReturnValue({
       data: { repos: ['acme/backend', 'acme/frontend', 'acme/mobile'] },
       isLoading: false,
@@ -90,14 +111,22 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
       isLoading: false,
     } as unknown as ReturnType<typeof hooks.useRunsQuery>);
 
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
     return render(
-      <I18nProvider initialLanguage="en">
-        <MemoryRouter initialEntries={initialEntries}>
-          <Routes>
-            <Route path="/w/:workspaceId/runs" element={<RunsPage />} />
-          </Routes>
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider initialLanguage="en">
+          <ToastProvider>
+            <MemoryRouter initialEntries={initialEntries}>
+              <Routes>
+                <Route path="/w/:workspaceId/runs" element={<RunsPage />} />
+              </Routes>
+            </MemoryRouter>
+          </ToastProvider>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
   };
 
@@ -173,5 +202,77 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
     expect(screen.getByPlaceholderText('Search by repo, PR #, model...')).toBeDefined();
     expect(screen.getByText('Repositories')).toBeDefined();
     expect(screen.getAllByText('Status').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders Actions column with Retry button for failed runs and disabled for members', () => {
+    renderComponent(['/w/ws-1/runs'], 'member');
+
+    expect(screen.getByText('Actions')).toBeDefined();
+
+    const retryButtons = screen.getAllByRole('button', { name: 'Retry' });
+    expect(retryButtons.length).toBe(1);
+    const memberRetryBtn = retryButtons[0]!;
+    expect(memberRetryBtn.hasAttribute('disabled')).toBe(true);
+    expect(memberRetryBtn.getAttribute('title')).toBe('Retrying requires admin or owner role');
+  });
+
+  it('admin can click Retry on a failed row to trigger retry and not navigate', async () => {
+    vi.mocked(client.fetchApi).mockResolvedValueOnce({ runId: 'run-new-999' });
+    renderComponent(['/w/ws-1/runs'], 'admin');
+
+    const retryButtons = screen.getAllByRole('button', { name: 'Retry' });
+    expect(retryButtons.length).toBe(1);
+    const adminRetryBtn = retryButtons[0]!;
+    expect(adminRetryBtn.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(adminRetryBtn);
+    expect(mockNavigate).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(client.fetchApi).toHaveBeenCalledWith('/api/workspaces/ws-1/runs/run-2/retry', {
+        method: 'POST',
+      });
+    });
+  });
+
+  it('shows Retry all failed button for admin, opens confirm dialog, and triggers retry-failed', async () => {
+    vi.mocked(client.fetchApi).mockResolvedValueOnce({ queued: 1, skipped: [] });
+    renderComponent(['/w/ws-1/runs'], 'admin');
+
+    const retryAllBtn = screen.getByRole('button', { name: 'Retry all failed' });
+    expect(retryAllBtn).toBeDefined();
+
+    fireEvent.click(retryAllBtn);
+
+    expect(screen.getByText(/Are you sure you want to retry 1 failed review runs\?/)).toBeDefined();
+
+    const dialogConfirmBtn = screen.getAllByRole('button', { name: 'Retry all failed' }).find(
+      (b) => b.closest('[role="dialog"]') !== null,
+    );
+    expect(dialogConfirmBtn).toBeDefined();
+
+    fireEvent.click(dialogConfirmBtn!);
+    await waitFor(() => {
+      expect(client.fetchApi).toHaveBeenCalledWith('/api/workspaces/ws-1/runs/retry-failed', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    });
+  });
+
+  it('does not render Retry all failed button for members', () => {
+    renderComponent(['/w/ws-1/runs'], 'member');
+
+    expect(screen.queryByRole('button', { name: 'Retry all failed' })).toBeNull();
+  });
+
+  it('can cancel the Retry all failed confirm dialog without calling API', () => {
+    renderComponent(['/w/ws-1/runs'], 'admin');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry all failed' }));
+    expect(screen.getByRole('dialog')).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(client.fetchApi).not.toHaveBeenCalled();
   });
 });

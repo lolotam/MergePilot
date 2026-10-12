@@ -177,6 +177,66 @@ export class MemoryStore implements AppStore {
     return [...repos].sort();
   }
 
+  async findActiveReviewRun(
+    workspaceId: string,
+    repoFullName: string,
+    pullNumber: number,
+    headSha: string,
+  ): Promise<ReviewRun | null> {
+    for (const r of this.runs.values()) {
+      if (
+        r.workspaceId === workspaceId &&
+        r.repoFullName === repoFullName &&
+        r.pullNumber === pullNumber &&
+        r.headSha === headSha &&
+        (r.status === 'queued' || r.status === 'running')
+      ) {
+        return { ...r };
+      }
+    }
+    return null;
+  }
+
+  async listLatestFailedRuns(
+    workspaceId: string,
+    options?: {
+      repo?: string[] | undefined;
+      from?: Date | undefined;
+      to?: Date | undefined;
+      limit?: number | undefined;
+    },
+  ): Promise<ReviewRun[]> {
+    const limit = options?.limit ?? 25;
+    let filtered = [...this.runs.values()].filter((r) => r.workspaceId === workspaceId);
+
+    if (options?.repo && options.repo.length > 0) {
+      const allowed = new Set(options.repo);
+      filtered = filtered.filter((r) => allowed.has(r.repoFullName));
+    }
+    if (options?.from) filtered = filtered.filter((r) => r.createdAt >= options.from!);
+    if (options?.to) filtered = filtered.filter((r) => r.createdAt <= options.to!);
+
+    const byPr = new Map<string, ReviewRun[]>();
+    for (const r of filtered) {
+      const key = `${r.repoFullName}#${r.pullNumber}`;
+      const list = byPr.get(key) ?? [];
+      list.push(r);
+      byPr.set(key, list);
+    }
+
+    const candidates: ReviewRun[] = [];
+    for (const list of byPr.values()) {
+      list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
+      const latest = list[0];
+      if (latest?.status === 'failed') candidates.push({ ...latest });
+    }
+
+    candidates.sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id),
+    );
+    return candidates.slice(0, limit);
+  }
+
   async failStaleRuns(heartbeatBefore: Date): Promise<number> {
     let count = 0;
     const now = new Date();

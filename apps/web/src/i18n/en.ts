@@ -206,7 +206,6 @@ export const en: I18nDictionary = {
   deleteWorkspaceConfirmButton: 'I understand the consequences, delete this workspace',
   deletingWorkspace: 'Deleting...',
   workspaceDeletedSuccess: 'Workspace deleted successfully',
-
   // Keys Section
   apiKeysTitle: 'Provider API Keys',
   apiKeysDesc: 'Keys are encrypted and securely stored; values are never echoed back after saving.',
@@ -227,7 +226,6 @@ export const en: I18nDictionary = {
   saveKeyButton: 'Save key',
   savingKey: 'Verifying and saving...',
   keySavedSuccess: 'API key verified and saved successfully',
-
   // Team Page
   teamTitle: 'Team Members & Permissions',
   teamDesc: 'Manage workspace members and pending invitations.',
@@ -246,7 +244,6 @@ export const en: I18nDictionary = {
   removeMemberButton: 'Remove member',
   removeMemberConfirm: 'Are you sure you want to remove this member?',
   cannotChangeOwnerRole: 'Owner role cannot be changed',
-
   // Runs Page
   runsTitle: 'Code Review Runs',
   runsDesc: 'All pull request reviews performed by MergePilot.',
@@ -315,7 +312,15 @@ export const en: I18nDictionary = {
   expandAll: 'Expand all',
   collapseAll: 'Collapse all',
   noFindingsMatchFilter: 'No findings match the current filter',
-
+  retry: 'Retry',
+  retrying: 'Retrying...',
+  retryAllFailed: 'Retry all failed',
+  retryAllFailedCount: 'Retry all failed ({count})',
+  retryMemberDisabled: 'Retrying requires admin or owner role',
+  retryRunSuccess: 'Review run retried successfully',
+  retryAllFailedConfirmTitle: 'Retry all failed review runs',
+  retryAllFailedConfirmDesc: 'Are you sure you want to retry {count} failed review runs?',
+  retryAllFailedSuccess: 'Queued {queued} review(s) (skipped {skipped})',
   // Install Redirect Page
   installTitle: 'Link GitHub Installation to Workspace',
   installDesc: 'MergePilot has been installed on GitHub. Choose the workspace to connect with this installation.',

@@ -18,7 +18,9 @@ import type {
 import {
   createPgReviewRun,
   failPgStaleRuns,
+  findPgActiveReviewRun,
   finishPgReviewRun,
+  listPgLatestFailedRuns,
   mapReviewRunRow,
   queryPgReviewRuns,
   touchPgReviewRun,
@@ -318,6 +320,27 @@ export class PgStore implements AppStore {
       .where(eq(reviewRuns.workspaceId, workspaceId))
       .orderBy(asc(reviewRuns.repoFullName));
     return rows.map((r) => r.repo);
+  }
+
+  async findActiveReviewRun(
+    workspaceId: string,
+    repoFullName: string,
+    pullNumber: number,
+    headSha: string,
+  ): Promise<ReviewRun | null> {
+    return findPgActiveReviewRun(this.db, workspaceId, repoFullName, pullNumber, headSha);
+  }
+
+  async listLatestFailedRuns(
+    workspaceId: string,
+    options?: {
+      repo?: string[] | undefined;
+      from?: Date | undefined;
+      to?: Date | undefined;
+      limit?: number | undefined;
+    },
+  ): Promise<ReviewRun[]> {
+    return listPgLatestFailedRuns(this.db, workspaceId, options);
   }
 
   async failStaleRuns(heartbeatBefore: Date): Promise<number> {

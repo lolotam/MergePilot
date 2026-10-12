@@ -201,6 +201,26 @@ export interface AppStore {
     limitOrOptions?: number | ListReviewRunsOptions,
   ): Promise<ReviewRun[] | ListReviewRunsResult>;
   listReviewRunRepos(workspaceId: string): Promise<string[]>;
+  /** Finds an active review run ('queued' or 'running') matching repo, PR, and headSha. */
+  findActiveReviewRun(
+    workspaceId: string,
+    repoFullName: string,
+    pullNumber: number,
+    headSha: string,
+  ): Promise<ReviewRun | null>;
+  /**
+   * Returns the latest review run for each (repo, PR) whose latest status is 'failed'.
+   * Ordered by createdAt descending, capped by options.limit (default 25).
+   */
+  listLatestFailedRuns(
+    workspaceId: string,
+    options?: {
+      repo?: string[] | undefined;
+      from?: Date | undefined;
+      to?: Date | undefined;
+      limit?: number | undefined;
+    },
+  ): Promise<ReviewRun[]>;
   /** Fails queued/running runs whose heartbeat (updatedAt) is older than `heartbeatBefore`. */
   failStaleRuns(heartbeatBefore: Date): Promise<number>;
   monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;

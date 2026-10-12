@@ -207,3 +207,32 @@ export const DeleteWorkspaceRequestSchema = z.object({
   confirmName: z.string().trim(),
 });
 export type DeleteWorkspaceRequest = z.infer<typeof DeleteWorkspaceRequestSchema>;
+
+/** POST (admin/owner) /api/workspaces/:workspaceId/runs/:runId/retry -> 202 */
+export const RetryRunResponseSchema = z.object({
+  runId: z.string(),
+});
+export type RetryRunResponse = z.infer<typeof RetryRunResponseSchema>;
+
+/** POST (admin/owner) /api/workspaces/:workspaceId/runs/retry-failed -> 200 */
+export const RetryFailedBodySchema = z
+  .object({
+    repo: z.array(z.string()).optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+  })
+  .optional();
+export type RetryFailedBody = z.infer<typeof RetryFailedBodySchema>;
+
+export const SkippedRetryItemSchema = z.object({
+  repo: z.string(),
+  pullNumber: z.number().int(),
+  reason: z.string(),
+});
+export type SkippedRetryItem = z.infer<typeof SkippedRetryItemSchema>;
+
+export const RetryFailedResponseSchema = z.object({
+  queued: z.number().int(),
+  skipped: z.array(SkippedRetryItemSchema),
+});
+export type RetryFailedResponse = z.infer<typeof RetryFailedResponseSchema>;
