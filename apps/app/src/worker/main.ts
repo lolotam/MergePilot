@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { App } from '@octokit/app';
+import { Octokit } from '@octokit/rest';
 import { Worker, type ConnectionOptions, type Job } from 'bullmq';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
@@ -24,6 +25,8 @@ export function createGitHubAppFactory(
       : new App({
           appId: config.appId,
           privateKey: config.privateKey,
+          // The bare App client has no `.rest` namespace; the review client needs `rest.pulls` etc.
+          Octokit,
         });
 
   return async (installationId: number) => {

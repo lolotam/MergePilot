@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../core/config.js';
@@ -103,6 +103,36 @@ describe('worker/main', { timeout: 20000 }, () => {
       expect(result.client).toBeDefined();
       expect(typeof result.client.getPullRequest).toBe('function');
       expect(mockApp.getInstallationOctokit).toHaveBeenCalledWith(100);
+    });
+
+    it('real App installation clients reach GitHub REST endpoints (no app mock)', async () => {
+      const { privateKey } = generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      });
+      const calls: string[] = [];
+      const fetchStub = vi.fn(async (input: string | URL | Request) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        calls.push(url);
+        const body = url.endsWith('/app/installations/100/access_tokens')
+          ? { token: 'ghs_t', expires_at: '2099-01-01T00:00:00Z', permissions: {}, repository_selection: 'all' }
+          : { number: 7, head: { sha: 'abc' }, base: { sha: 'def' } };
+        return new Response(JSON.stringify(body), {
+          status: url.endsWith('/access_tokens') ? 201 : 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+      vi.stubGlobal('fetch', fetchStub);
+      try {
+        const factory = createGitHubAppFactory({ appId: '1', privateKey, appSlug: 'my-bot-app' });
+        const { client } = await factory(100);
+        const pr = await client.getPullRequest({ owner: 'o', repo: 'r', pull_number: 7 });
+        expect(pr.number).toBe(7);
+        expect(calls.some((u) => u.endsWith('/repos/o/r/pulls/7'))).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
   });
 

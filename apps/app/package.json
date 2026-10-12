@@ -27,6 +27,7 @@
     "@mergepilot/engine": "workspace:*",
     "@mergepilot/github": "workspace:*",
     "@octokit/app": "^16.1.4",
+    "@octokit/rest": "^22.0.1",
     "better-auth": "^1.7.7",
     "bullmq": "^6.3.12",
     "drizzle-orm": "^0.45.4",
