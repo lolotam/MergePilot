@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { type ReactNode } from 'react';
 import type { MeResponse } from '@mergepilot/app/contract';
 import { api } from './client.js';
-import { useDeleteWorkspaceMutation, useMeQuery } from './hooks.js';
+import { ACTIVE_RUN_POLL_MS, useDeleteWorkspaceMutation, useMeQuery, useRunGroupsQuery } from './hooks.js';
 import { I18nProvider } from '../i18n/context.js';
 import { ToastProvider } from '../components/Toast.js';
 
@@ -73,5 +73,39 @@ describe('useDeleteWorkspaceMutation', () => {
     });
     expect(settled).toBe(true);
     expect(queryClient.getQueryData<MeResponse>(['me'])?.workspaces.map((w) => w.id)).toEqual(['ws-2']);
+  });
+});
+
+describe('useRunGroupsQuery polling', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('polls while a run is active and stops once every run has finished', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const group = (status: string) => ({
+      groups: [{ repoFullName: 'o/r', pullNumber: 1, runs: [{ id: 'r1', status }] }],
+      total: 1,
+      totalRuns: 1,
+    });
+    const getRunGroups = vi
+      .spyOn(api, 'getRunGroups')
+      .mockResolvedValueOnce(group('running') as never)
+      .mockResolvedValue(group('completed') as never);
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      React.createElement(QueryClientProvider, { client: queryClient }, children);
+
+    renderHook(() => useRunGroupsQuery('ws-1', {}), { wrapper });
+    await waitFor(() => expect(getRunGroups).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ACTIVE_RUN_POLL_MS);
+    });
+    await waitFor(() => expect(getRunGroups).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ACTIVE_RUN_POLL_MS * 3);
+    });
+    expect(getRunGroups).toHaveBeenCalledTimes(2);
   });
 });

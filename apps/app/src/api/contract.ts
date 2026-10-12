@@ -242,6 +242,8 @@ export const ReviewRunSchema = z.object({
   /** From the run's result usage; null when unknown. */
   inputTokens: z.number().nullable().optional(),
   outputTokens: z.number().nullable().optional(),
+  /** finishedAt - createdAt in ms; null while queued/running or when unknown. */
+  durationMs: z.number().nullable().optional(),
 });
 export type ReviewRun = z.infer<typeof ReviewRunSchema>;
 

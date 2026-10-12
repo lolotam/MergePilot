@@ -60,7 +60,9 @@ token columns and a color per repository that the workspace can choose.
    the sort key and the paging, so a PR's runs never split across pages. A group has its matching
    runs, newest first, plus summed cost and tokens; the response also has `totalRuns` (the
    `confirmCount` for "delete all matching"). The flat mode is unchanged. List items now carry
-   `inputTokens` / `outputTokens` from the result payload; both are sort keys.
+   `inputTokens` / `outputTokens` from the result payload; both are sort keys. They also carry
+   `durationMs` (`finished_at - created_at`; null while queued/running or when unknown), sorted by
+   the `duration` key with NULLs last in both directions; the web shows a live timer for active runs.
 8. **Repository colors.** A fixed palette of 10 keys; the web maps each key to literal Tailwind
    classes (leading-edge strip, light tint, chip). The default color is a 32-bit FNV-1a hash of the
    lowercased `owner/repo`. A workspace may override it per repo in

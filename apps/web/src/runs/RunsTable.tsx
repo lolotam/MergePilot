@@ -77,6 +77,7 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
             {sortHeader('runResultCol', 'findingsCount')}
             {sortHeader('runTokensInCol', 'inputTokens')}
             {sortHeader('runTokensOutCol', 'outputTokens')}
+            {sortHeader('duration', 'duration')}
             {sortHeader('runCostCol', 'costUsd')}
             {sortHeader('runDateCol', 'createdAt')}
             <th scope="col" className="py-3 px-4 text-center font-semibold">{t('actions')}</th>

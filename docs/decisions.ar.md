@@ -239,9 +239,16 @@
 - واجهة الموقع بتفتح بالإنجليزي (من الشمال لليمين) لأي زائر جديد؛ اللي اختار العربي قبل كده بيفضل عربي، وزرار تغيير اللغة زي ما هو.
 - لغة تعليقات المراجعة على GitHub ماتغيرتش (إعداد مساحة العمل).
 
+### س26: عمود مدة المراجعة
+
+**طلب صاحب المشروع (بنصّه):**
+«can u add new column on the review the timming for this review»
+
+**النتيجة:** عمود «المدة» في جدول المراجعات بعد «توكنات خارجة» وقبل التكلفة، بصيغة مختصرة (`45s`، `3m 12s`، `1h 04m`) وأرقام حسب لغة الواجهة. المدة = وقت الانتهاء ناقص وقت إنشاء المراجعة (من السيرفر `durationMs`). المراجعة اللي في الانتظار أو شغالة بيظهر لها عدّاد حي بيزيد كل ثانية، و«—» لو المدة مش معروفة. صف الـ PR بيعرض مدة آخر مراجعة، والصفوف الفرعية كل واحدة مدتها. العمود بيترتب من السيرفر (`sort=duration`) واللي ملهاش مدة في الآخر دايمًا، والمدة ظاهرة كمان في صفحة تفاصيل المراجعة.
+
 ## الدفعة 9 — 2026-10-13
 
-### س26: طبقة الحَكَم Jev (TypeSafe System One) مع 4 مزودين (Task V1)
+### س27: طبقة الحَكَم Jev (TypeSafe System One) مع 4 مزودين (Task V1)
 
 **أسئلة وطلبات صاحب المشروع (بنصّها):**
 - «i want to ask if i will implemt jev type sapce model will be added value and whay sugessted use case in this app to increase the task or what can get benifet from such this implemnt as ai model»
@@ -269,7 +276,7 @@
 - لو الحَكَم فشل، المراجعة بتتنشر من غير فلترة، والملخص بيقول «Jev judge unavailable: <code>».
 - توكنات الحَكَم وتكلفته (لو معروفة) بتتحسب على المراجعة وعلى الاستهلاك الشهري.
 
-### س27: سلسلة احتياطي للحَكَم Jev
+### س28: سلسلة احتياطي للحَكَم Jev
 
 **طلب صاحب المشروع (بنصّه):**
 «add jev layer fallback so if failed one provider can go to the next provider and the 3rd fallback so we can miss any jev request»
