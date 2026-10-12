@@ -11,7 +11,7 @@ const finding = (title: string, line: number) => ({
   side: 'RIGHT',
   title,
   body: `${title} body`,
-  severity: 'high',
+  severity: 'medium',
   category: 'correctness',
   evidence: 'b',
   confidence: 0.9,

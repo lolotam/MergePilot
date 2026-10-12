@@ -7,7 +7,7 @@ import { runReview } from './pipeline.js';
 
 const answer = JSON.stringify({
   summary: 'Two issues.',
-  findings: [validFindingJson({ id: 'a', title: 'Real bug', line: 2 }), validFindingJson({ id: 'b', title: 'Nitpick', line: 3 })],
+  findings: [validFindingJson({ id: 'a', title: 'Real bug', line: 2 }), validFindingJson({ id: 'b', title: 'Nitpick', line: 3, severity: 'medium' })],
 });
 
 function review(fetch: Parameters<typeof createJudge>[0]['fetch'], mode: 'filter' | 'annotate' | 'off') {
