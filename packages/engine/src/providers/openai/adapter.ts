@@ -5,7 +5,7 @@ import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
-import { openAIReasoningEffort, thinkingHeadroom } from '../effort.js';
+import { DEFAULT_THINKING_HEADROOM, openAIReasoningEffort, openAIThinksByDefault, thinkingHeadroom } from '../effort.js';
 import type { OpenAIAdapterOptions, OpenAILike } from './types.js';
 
 function extractHeaders(rawHeaders: unknown): Record<string, string | undefined> {
@@ -46,7 +46,11 @@ export class OpenAIAdapter extends LlmAdapter {
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
     const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
-    return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
+    if (options.effort !== undefined) {
+      return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
+    }
+    const thinksByDefault = openAIThinksByDefault(options.model);
+    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {

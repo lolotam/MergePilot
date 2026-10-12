@@ -171,7 +171,7 @@ I hope this helps!
     const parsed = parseVerifyAnswer('Not JSON at all');
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) {
-      expect(parsed.error).toContain('No JSON object found');
+      expect(parsed.code).toBe('invalid-json');
     }
   });
 
@@ -179,7 +179,7 @@ I hope this helps!
     const parsed = parseVerifyAnswer('{ "invalidKey": 123 }');
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) {
-      expect(parsed.error).toContain('Schema validation failed');
+      expect(parsed.code).toBe('invalid-json');
     }
   });
 
@@ -198,6 +198,43 @@ I hope this helps!
       expect(parsed.verdicts).toEqual([
         { id: 'f1', verdict: 'confirmed', reason: 'Valid' },
       ]);
+    }
+  });
+
+  // ── Reproduce & Error codes (P0.1) ───────────────────────────────────────
+
+  it('reports truncated error code when verify response ends mid-way with finishReason max-tokens', () => {
+    const truncated = '{"verdicts": [{"id": "f1", "verdict": "confirmed", "reason": "Looks';
+    const parsed = parseVerifyAnswer(truncated, { finishReason: 'max-tokens', outputTokens: 2048 });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.code).toBe('truncated');
+      expect(parsed.error).toContain('max-tokens');
+      expect(parsed.error).toContain('2048');
+    }
+  });
+
+  it('reports empty-response error code on empty text', () => {
+    const parsed = parseVerifyAnswer('   ');
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.code).toBe('empty-response');
+    }
+  });
+
+  it('picks valid verdict schema when verify response has multiple objects', () => {
+    const raw = [
+      'Metadata: {"step": "verification", "done": true}',
+      'Result: ' + JSON.stringify({
+        verdicts: [{ id: 'f1', verdict: 'confirmed', reason: 'Valid bug' }],
+      }),
+    ].join('\n\n');
+
+    const parsed = parseVerifyAnswer(raw);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.verdicts).toHaveLength(1);
+      expect(parsed.verdicts[0]?.id).toBe('f1');
     }
   });
 });

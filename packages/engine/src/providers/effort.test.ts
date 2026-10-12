@@ -103,3 +103,68 @@ describe('thinkingHeadroom', () => {
     expect(thinkingHeadroom(undefined)).toBe(0);
   });
 });
+
+describe('default thinking headroom (P0.1)', () => {
+  it('detects Gemini 2.5+ and 3.x models as thinking by default', async () => {
+    const { geminiThinksByDefault } = await import('./effort.js');
+    expect(geminiThinksByDefault('gemini-3.8-flash')).toBe(true);
+    expect(geminiThinksByDefault('gemini-3-flash')).toBe(true);
+    expect(geminiThinksByDefault('gemini-2.5-flash')).toBe(true);
+    expect(geminiThinksByDefault('gemini-2.5-pro')).toBe(true);
+    expect(geminiThinksByDefault('models/gemini-3.8-flash')).toBe(true);
+    expect(geminiThinksByDefault('gemini-2.0-flash-thinking-exp')).toBe(true);
+    // Non-thinking models
+    expect(geminiThinksByDefault('gemini-2.0-flash')).toBe(false);
+    expect(geminiThinksByDefault('gemini-1.5-pro')).toBe(false);
+    expect(geminiThinksByDefault('gemini-1.5-flash')).toBe(false);
+  });
+
+  it('detects compatible reasoning models as thinking by default', async () => {
+    const { isCompatibleReasoningModel } = await import('./effort.js');
+    expect(isCompatibleReasoningModel('deepseek', 'deepseek-reasoner')).toBe(true);
+    expect(isCompatibleReasoningModel('deepseek', 'deepseek-chat')).toBe(false);
+    expect(isCompatibleReasoningModel('openrouter', 'deepseek/deepseek-r1')).toBe(true);
+    expect(isCompatibleReasoningModel('openrouter', 'openai/o3-mini')).toBe(true);
+    expect(isCompatibleReasoningModel('openrouter', 'google/gemini-3-flash')).toBe(true);
+    expect(isCompatibleReasoningModel('openrouter', 'meta-llama/llama-3-70b')).toBe(false);
+    expect(isCompatibleReasoningModel('zai', 'glm-4.6', 'glm')).toBe(true);
+    expect(isCompatibleReasoningModel('zai-coding', 'glm-4.6', 'glm')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'nvidia/nemotron-3-super-120b-a12b')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'qwen/qwq-32b')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'deepseek-ai/deepseek-r1')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'some/model-reasoning')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'meta/llama-3.3-70b-instruct')).toBe(false);
+    expect(isCompatibleReasoningModel('openrouter', 'anthropic/claude-sonnet-5:thinking')).toBe(true);
+    expect(isCompatibleReasoningModel('openrouter', 'nvidia/llama-3.3-nemotron-super-49b')).toBe(true);
+    expect(isCompatibleReasoningModel('openrouter', 'qwen/qwq-32b')).toBe(true);
+  });
+
+  it('adds default thinking headroom to requestedOutputTokens when effort is undefined', async () => {
+    const { GeminiAdapter } = await import('./gemini/adapter.js');
+    const { OpenAIAdapter } = await import('./openai/adapter.js');
+    const { OpenAICompatibleAdapter } = await import('./compatible/adapter.js');
+    const { Secret } = await import('../credentials/secret.js');
+    const typeCast = <T>(val: unknown): T => val as T;
+
+    const fakeKey = new Secret('fake-test-key-12345');
+    const gemini = new GeminiAdapter({ apiKey: fakeKey, client: typeCast({}) });
+    // Gemini 3.8 Flash default thinking adds 8192
+    expect(gemini.requestedOutputTokens({ model: 'gemini-3.8-flash', maxOutputTokens: 4096 })).toBe(4096 + 8192);
+    // Gemini 2.0 Flash (non-thinking) does not add headroom
+    expect(gemini.requestedOutputTokens({ model: 'gemini-2.0-flash', maxOutputTokens: 4096 })).toBe(4096);
+
+    const openai = new OpenAIAdapter({ apiKey: fakeKey, client: typeCast({}) });
+    // OpenAI gpt-5 default thinking adds 8192
+    expect(openai.requestedOutputTokens({ model: 'gpt-5', maxOutputTokens: 4096 })).toBe(4096 + 8192);
+    // OpenAI o3-mini default thinking adds 8192
+    expect(openai.requestedOutputTokens({ model: 'o3-mini', maxOutputTokens: 4096 })).toBe(4096 + 8192);
+    // OpenAI gpt-4o does not add headroom
+    expect(openai.requestedOutputTokens({ model: 'gpt-4o', maxOutputTokens: 4096 })).toBe(4096);
+
+    const deepseek = new OpenAICompatibleAdapter({ provider: 'deepseek', apiKey: fakeKey });
+    // DeepSeek reasoner adds 8192
+    expect(deepseek.requestedOutputTokens({ model: 'deepseek-reasoner', maxOutputTokens: 4096 })).toBe(4096 + 8192);
+    // DeepSeek chat does not add headroom
+    expect(deepseek.requestedOutputTokens({ model: 'deepseek-chat', maxOutputTokens: 4096 })).toBe(4096);
+  });
+});

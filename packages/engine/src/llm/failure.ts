@@ -48,6 +48,8 @@ export interface HttpFailureInput {
 }
 
 const QUOTA_WORDING = /quota|billing|insufficient|credit balance|exceeded your|per ?day|daily|payment required|credits? (?:exhausted|remaining: 0)/i;
+/** A 400 that is really an empty balance (Anthropic: "Your credit balance is too low ..."). */
+const NO_CREDIT_400_WORDING = /credit balance (?:is )?too low|insufficient[_ ]quota/i;
 const CONTEXT_WORDING = /context (length|window)|too many tokens|prompt is too long|maximum context/i;
 const MAX_BODY_IN_MESSAGE = 300;
 
@@ -80,6 +82,7 @@ function codeFor(status: number, bodyText: string): LlmFailureCode {
   if (status === 401 || status === 403) return 'INVALID_CREDENTIAL';
   if (status === 402) return 'QUOTA';
   if (status === 429) return code429(bodyText);
+  if (status === 400 && NO_CREDIT_400_WORDING.test(bodyText)) return 'QUOTA';
   if (status === 413 || CONTEXT_WORDING.test(bodyText)) return 'CONTEXT_WINDOW_EXCEEDED';
   if (status === 408 || status === 504) return 'TIMEOUT';
   if (status >= 500) return 'SERVER';

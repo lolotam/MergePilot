@@ -183,4 +183,65 @@ describe('parseReviewAnswer', () => {
       expect(result.droppedInvalid).toBe(0);
     }
   });
+
+  // ── Reproduce & Error codes (P0.1) ───────────────────────────────────────
+
+  it('reproduces truncated JSON mid-way with finishReason max-tokens', () => {
+    const truncatedText = '{"summary": "Looks mostly good so far", "findings": [{"path": "src/foo.ts", "line": 10, "title": "Trunc';
+    const result = parseReviewAnswer(truncatedText, {
+      finishReason: 'max-tokens',
+      outputTokens: 4096,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('truncated');
+      expect(result.error).toContain('max-tokens');
+      expect(result.error).toContain('4096');
+    }
+  });
+
+  it('detects unclosed JSON object as truncated even without finishReason', () => {
+    const truncatedText = '{"summary": "Incomplete json", "findings": [';
+    const result = parseReviewAnswer(truncatedText);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('truncated');
+    }
+  });
+
+  it('returns empty-response error code for empty or whitespace-only response', () => {
+    const emptyResult = parseReviewAnswer('');
+    expect(emptyResult.ok).toBe(false);
+    if (!emptyResult.ok) {
+      expect(emptyResult.code).toBe('empty-response');
+    }
+
+    const whitespaceResult = parseReviewAnswer('   \n\t  ');
+    expect(whitespaceResult.ok).toBe(false);
+    if (!whitespaceResult.ok) {
+      expect(whitespaceResult.code).toBe('empty-response');
+    }
+  });
+
+  it('extracts valid review answer when response contains multiple objects', () => {
+    const twoObjects = [
+      'Here is metadata: {"step": "review", "status": "running"}',
+      'And here is the answer: ' + validAnswer(),
+    ].join('\n\n');
+
+    const result = parseReviewAnswer(twoObjects);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toBe('Looks mostly fine.');
+      expect(result.findings).toHaveLength(1);
+    }
+  });
+
+  it('returns invalid-json error code when text is not JSON and not truncated', () => {
+    const result = parseReviewAnswer('Just some random text with no braces at all');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe('invalid-json');
+    }
+  });
 });

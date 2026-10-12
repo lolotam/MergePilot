@@ -44,60 +44,123 @@ const ReviewAnswerLooseSchema = z.object({
 });
 
 
+export type ParseErrorCode = 'truncated' | 'invalid-json' | 'empty-response';
+
+export interface ParseAnswerOptions {
+  finishReason?: string | undefined;
+  outputTokens?: number | undefined;
+}
+
 export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
 
 // ---------------------------------------------------------------------------
 // Parser helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Finds the first balanced `{…}` object in `text`, tolerating surrounding prose
- * or a ```json … ``` code fence.
- */
-function extractFirstObject(text: string): string | null {
-  // Try fenced block first
-  const fenceMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  if (fenceMatch) {
-    return fenceMatch[1] ?? null;
-  }
+export interface ExtractedCandidates {
+  candidates: string[];
+  hasUnclosedObject: boolean;
+}
 
-  // Walk character by character to find first balanced top-level object
+const MAX_SCAN_RESTARTS = 20;
+
+/**
+ * Walks `text` from `from`, emitting every balanced top-level `{…}` span. String state is
+ * tracked only INSIDE an object: quotes in surrounding prose (e.g. `it's "odd" {`) must not
+ * flip it, and it is reset whenever an object closes so one object cannot leak into the next.
+ * Returns the index of an object that opened and never closed, or -1.
+ */
+function scanBalancedObjects(text: string, from: number, emit: (slice: string) => void): number {
   let depth = 0;
   let start = -1;
   let inString = false;
   let escape = false;
 
-  for (let i = 0; i < text.length; i++) {
+  for (let i = from; i < text.length; i++) {
     const ch = text[i];
+    if (depth === 0) {
+      if (ch === '{') {
+        start = i;
+        depth = 1;
+        inString = false;
+        escape = false;
+      }
+      continue;
+    }
     if (escape) {
       escape = false;
-      continue;
-    }
-    if (inString) {
-      if (ch === '\\') {
-        escape = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
+    } else if (inString) {
+      if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') {
       inString = true;
-      continue;
-    }
-    if (ch === '{') {
-      if (depth === 0) {
-        start = i;
-      }
+    } else if (ch === '{') {
       depth++;
     } else if (ch === '}') {
       depth--;
-      if (depth === 0 && start !== -1) {
-        return text.slice(start, i + 1);
+      if (depth === 0) {
+        emit(text.slice(start, i + 1));
+        start = -1;
+        inString = false;
       }
     }
   }
-  return null;
+  return depth > 0 ? start : -1;
+}
+
+/**
+ * Extracts candidate JSON object substrings from `text`, checking code fences
+ * first and then walking balanced `{…}` spans.
+ */
+export function extractCandidateObjects(text: string): ExtractedCandidates {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  // 1. Fenced code blocks
+  const fenceRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/g;
+  let fenceMatch: RegExpExecArray | null;
+  while ((fenceMatch = fenceRegex.exec(text)) !== null) {
+    const raw = fenceMatch[1];
+    if (raw && !seen.has(raw)) {
+      seen.add(raw);
+      candidates.push(raw);
+    }
+  }
+
+  // 2. Balanced-object scan. A stray `{` in prose that never closes would swallow every
+  //    object after it, so the scan resumes just past an unclosed opener (bounded).
+  const push = (slice: string): void => {
+    if (!seen.has(slice)) {
+      seen.add(slice);
+      candidates.push(slice);
+    }
+  };
+  let from = 0;
+  let hasUnclosedObject = false;
+  for (let attempt = 0; attempt < MAX_SCAN_RESTARTS && from < text.length; attempt++) {
+    const unclosedAt = scanBalancedObjects(text, from, push);
+    if (unclosedAt < 0) break;
+    hasUnclosedObject = true;
+    from = unclosedAt + 1;
+  }
+
+  return { candidates, hasUnclosedObject };
+}
+
+/**
+ * Whether an unparsable answer was cut off (worth a bigger-output retry) rather than wrong.
+ * The finish reason decides first: `max-tokens` / `length` mean truncated; `stop`, `end_turn`
+ * or any other explicit reason mean the model finished, so the answer is `invalid-json` even
+ * when it contains an unclosed `{` (prose, a stray brace). Only a stream that ended WITHOUT a
+ * finish reason (absent, or `error`, which `collectText` reports for a stream with no finish
+ * chunk) falls back to the structural check (an object that opened and never closed).
+ */
+export function isTruncatedAnswer(finishReason: string | undefined, hasUnclosedObject: boolean): boolean {
+  if (finishReason === 'max-tokens' || finishReason === 'length') return true;
+  if (finishReason === undefined || finishReason === '' || finishReason === 'error') {
+    return hasUnclosedObject;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,41 +169,72 @@ function extractFirstObject(text: string): string | null {
 
 export type ParseReviewAnswerResult =
   | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code: ParseErrorCode };
 
 /**
  * Parses the model's text output into structured findings.
  *
- * - Tolerates ```json fences and surrounding prose.
+ * - Tolerates ```json fences, surrounding prose, and multiple objects.
+ * - Picks the first balanced object matching the expected schema.
  * - Assigns stable ids `f1`, `f2`, …
  * - Drops individual findings that fail schema validation (counts them).
  * - Never throws.
+ * - Returns clear error codes: `truncated`, `invalid-json`, `empty-response`.
  */
-export function parseReviewAnswer(text: string): ParseReviewAnswerResult {
-  const raw = extractFirstObject(text);
-  if (raw === null) {
-    return { ok: false, error: 'No JSON object found in model response.' };
+export function parseReviewAnswer(
+  text: string,
+  options?: ParseAnswerOptions,
+): ParseReviewAnswerResult {
+  if (!text || text.trim().length === 0) {
+    return { ok: false, code: 'empty-response', error: 'empty-response: model returned no text' };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
+  const { candidates, hasUnclosedObject } = extractCandidateObjects(text);
+
+  let firstParseError: string | null = null;
+  let matchedAnswer: z.infer<typeof ReviewAnswerLooseSchema> | null = null;
+
+  for (const candidate of candidates) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch (err) {
+      if (!firstParseError) {
+        firstParseError = err instanceof Error ? err.message : String(err);
+      }
+      continue;
+    }
+
+    const loose = ReviewAnswerLooseSchema.safeParse(parsed);
+    if (loose.success) {
+      matchedAnswer = loose.data;
+      break;
+    } else if (!firstParseError) {
+      firstParseError = loose.error.message;
+    }
+  }
+
+  if (!matchedAnswer) {
+    const isTruncated = isTruncatedAnswer(options?.finishReason, hasUnclosedObject);
+
+    if (isTruncated) {
+      const finishDetail = options?.finishReason ? `finishReason: ${options.finishReason}` : 'unclosed JSON object';
+      const tokensDetail = options?.outputTokens !== undefined ? `, outputTokens: ${options.outputTokens}` : '';
+      return {
+        ok: false,
+        code: 'truncated',
+        error: `truncated (${finishDetail}${tokensDetail})`,
+      };
+    }
+
     return {
       ok: false,
-      error: `JSON parse error: ${err instanceof Error ? err.message : String(err)}`,
+      code: 'invalid-json',
+      error: `invalid-json: ${firstParseError ?? 'no valid JSON object found matching review schema'}`,
     };
   }
 
-  const topResult = ReviewAnswerLooseSchema.safeParse(parsed);
-  if (!topResult.success) {
-    return {
-      ok: false,
-      error: `Schema validation failed: ${topResult.error.message}`,
-    };
-  }
-
-  const answer = topResult.data;
+  const answer = matchedAnswer;
   const findings: Finding[] = [];
   let droppedInvalid = 0;
   let idCounter = 1;

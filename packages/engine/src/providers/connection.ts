@@ -8,8 +8,12 @@ import { failureKind, LlmFailure, type FailureKind } from '../llm/failure.js';
 import {
   anthropicThinking,
   compatibleEffortFields,
+  DEFAULT_THINKING_HEADROOM,
   geminiThinkingConfig,
+  geminiThinksByDefault,
+  isCompatibleReasoningModel,
   openAIReasoningEffort,
+  openAIThinksByDefault,
   thinkingHeadroom,
 } from './effort.js';
 import {
@@ -40,6 +44,16 @@ export type ConnectionResult =
 
 const PROMPT = 'Reply with the single word OK';
 const MAX_OUTPUT_TOKENS = 16;
+
+/**
+ * Room for thinking on top of the tiny answer. Models that think by default (Gemini 2.5+/3.x,
+ * OpenAI reasoning, DeepSeek reasoner, GLM) spend their output budget on thinking first, so a
+ * bare 16 tokens comes back with no reply text and the test wrongly reports a failure.
+ */
+function testHeadroom(effort: string | undefined, thinks: boolean, thinksByDefault: boolean): number {
+  if (thinks) return thinkingHeadroom(effort) || DEFAULT_THINKING_HEADROOM;
+  return thinksByDefault && !effort ? DEFAULT_THINKING_HEADROOM : 0;
+}
 const DEFAULT_TIMEOUT_MS = 30000;
 
 interface PlannedRequest {
@@ -57,9 +71,33 @@ function list(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(record) : [];
 }
 
+/** A leading `<think>…</think>` block (closed or cut off by the token limit) some NIM models put in `content`. */
+const LEADING_THINK_BLOCK = /^\s*<think>([\s\S]*?)(?:<\/think>|$)/i;
+
+/**
+ * The reply in `content`, without a leading think block. A reply that is ONLY a think block
+ * still proves the key, the model and the endpoint work, so its reasoning text is returned.
+ */
+export function contentReply(content: string): string {
+  const think = LEADING_THINK_BLOCK.exec(content);
+  if (!think) return content.trim();
+  const answer = content.slice(think[0].length).trim();
+  return answer || (think[1] ?? '').trim();
+}
+
 function chatReply(json: Record<string, unknown>): string {
-  const content = record(list(json.choices)[0]?.message).content;
-  return typeof content === 'string' ? content : '';
+  const message = record(list(json.choices)[0]?.message);
+  if (typeof message.content === 'string') {
+    const reply = contentReply(message.content);
+    if (reply) return reply;
+  }
+  // Reasoning models (GLM, DeepSeek reasoner, OpenRouter reasoning) may spend the tiny budget on
+  // thinking; reasoning text still proves the key, the model and the endpoint work.
+  for (const field of ['reasoning_content', 'reasoning']) {
+    const value = message[field];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '';
 }
 
 function plan(provider: ApiProviderId, key: KeyInput, model: string, options: TestConnectionOptions): PlannedRequest {
@@ -74,7 +112,7 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
       headers: { ...json, 'x-api-key': keyValue(key) ?? '', 'anthropic-version': '2023-06-01' },
       body: {
         model,
-        max_tokens: MAX_OUTPUT_TOKENS + (thinking ? thinkingHeadroom(options.effort) : 0),
+        max_tokens: MAX_OUTPUT_TOKENS + testHeadroom(options.effort, thinking !== undefined, false),
         messages,
         ...(thinking ?? {}),
       },
@@ -93,7 +131,7 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
       body: {
         contents: [{ role: 'user', parts: [{ text: PROMPT }] }],
         generationConfig: {
-          maxOutputTokens: MAX_OUTPUT_TOKENS + (thinkingConfig ? thinkingHeadroom(options.effort) : 0),
+          maxOutputTokens: MAX_OUTPUT_TOKENS + testHeadroom(options.effort, thinkingConfig !== undefined, geminiThinksByDefault(model)),
           ...(thinkingConfig ? { thinkingConfig } : {}),
         },
       },
@@ -111,13 +149,18 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
       body: {
         model,
         messages,
-        max_completion_tokens: MAX_OUTPUT_TOKENS + (effort ? thinkingHeadroom(effort) : 0),
+        max_completion_tokens: MAX_OUTPUT_TOKENS + testHeadroom(effort, effort !== undefined, openAIThinksByDefault(model)),
         ...(effort ? { reasoning_effort: effort } : {}),
       },
       reply: chatReply,
     };
   }
-  const effortFields = compatibleEffortFields(providerEntry(provider).thinkingStyle, options.effort);
+  const style = providerEntry(provider).thinkingStyle;
+  const effortFields = compatibleEffortFields(style, options.effort);
+  const disablesThinking = options.effort === 'off' || options.effort === 'none';
+  const compatibleHeadroom = disablesThinking
+    ? 0
+    : testHeadroom(options.effort, Object.keys(effortFields).length > 0, isCompatibleReasoningModel(provider, model, style));
   return {
     url: `${base}/chat/completions`,
     headers: {
@@ -128,7 +171,7 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
     body: {
       model,
       messages,
-      max_tokens: MAX_OUTPUT_TOKENS + (Object.keys(effortFields).length > 0 ? thinkingHeadroom(options.effort) : 0),
+      max_tokens: MAX_OUTPUT_TOKENS + compatibleHeadroom,
       ...effortFields,
     },
     reply: chatReply,
