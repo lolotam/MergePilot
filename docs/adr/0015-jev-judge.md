@@ -98,3 +98,16 @@ each, and later asked for a fallback chain so a failed judge provider does not l
   fallback. Fixing it is a one-line change in `JUDGE_PROVIDERS`.
 - **Shared summary line.** A judge failure never fails a review. It appears only as the summary
   line and the run record.
+
+## Amendment (2026-10-13): filter limits and disclosure
+
+- **Critical and high findings are never filtered.** The judge's state includes the reviewed code,
+  and that code could try to steer the answer. In `filter` mode, a critical or high finding below
+  the threshold stays published with its "Jev confidence" line. Only medium, low and info findings
+  can be filtered out, and every filtered finding is listed in the summary.
+- **A sticky fallback stays disclosed.** After a fallback answers, later requests in the same review
+  start at that fallback. `answeredBy.before` lists every entry that failed or was skipped during
+  the whole review, not only during the current request.
+- **The two judge failures are disclosed separately.** If the false-positive filter fails, the
+  summary says the review was published unfiltered. If only the semantic duplicate check fails, the
+  summary says "Jev duplicate check unavailable" instead.
