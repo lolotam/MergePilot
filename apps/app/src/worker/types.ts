@@ -6,7 +6,8 @@ import type {
   ReviewRunStatus,
 } from '../core/types.js';
 import type { GitHubClient } from '@mergepilot/github';
-import type { Secret } from '@mergepilot/engine';
+import type { FetchLike, Secret } from '@mergepilot/engine';
+import type { DnsLookupFn } from '../core/ssrf.js';
 
 export interface ProcessReviewCredentials {
   resolve(workspaceId: string, provider: ApiProvider): Promise<Secret>;
@@ -29,6 +30,9 @@ export interface ProcessReviewDeps {
   now?: () => Date;
   /** Heartbeat interval while a review runs (default RUN_HEARTBEAT_INTERVAL_MS, 60 s). */
   heartbeatIntervalMs?: number | undefined;
+  /** Test seams for the custom base URL SSRF guard (ADR-0010): DNS lookup and guarded fetch. */
+  ssrfLookup?: DnsLookupFn | undefined;
+  customFetch?: FetchLike | undefined;
 }
 
 export interface ProcessReviewResult {

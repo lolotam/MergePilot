@@ -118541,12 +118541,17 @@ ${instruction}`;
 };
 
 var CUSTOM_BASE_URL_MISSING = 'provider "custom" needs a trusted base URL (CUSTOM_LLM_BASE_URL / the custom-base-url input); .mergepilot.yml baseUrl is ignored';
-function createAdapter(provider, apiKey, customBaseUrl) {
+function createAdapter(provider, apiKey, customBaseUrl, customFetch) {
   const entry = providerEntry(provider);
   if (entry.kind === "openai-compatible") {
     if (provider === "custom" && !customBaseUrl?.trim())
       throw new Error(CUSTOM_BASE_URL_MISSING);
-    return new OpenAICompatibleAdapter({ provider, apiKey, ...provider === "custom" && customBaseUrl ? { baseUrl: customBaseUrl } : {} });
+    return new OpenAICompatibleAdapter({
+      provider,
+      apiKey,
+      ...provider === "custom" && customBaseUrl ? { baseUrl: customBaseUrl } : {},
+      ...provider === "custom" && customFetch ? { fetch: customFetch } : {}
+    });
   }
   if (!apiKey)
     throw new Error(`An API key is required for provider: ${provider}`);
@@ -118577,7 +118582,7 @@ async function resolveKey(store, provider) {
   }
   return store.resolve({ provider }, "review");
 }
-async function resolveFallbacks(config2, store, customBaseUrl) {
+async function resolveFallbacks(config2, store, customBaseUrl, customFetch) {
   const resolved = { models: [], secrets: [], skipped: [] };
   for (const entry of config2.fallback ?? []) {
     const label = `${entry.provider}:${entry.model}`;
@@ -118595,7 +118600,7 @@ async function resolveFallbacks(config2, store, customBaseUrl) {
       continue;
     }
     try {
-      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl), entry.model, entry.effort));
+      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch), entry.model, entry.effort));
     } catch {
       resolved.skipped.push({ label, reason: "the provider could not be set up" });
     }
@@ -118623,19 +118628,19 @@ async function createReviewModel(config2, store, opts) {
       ...config2.model ? { model: config2.model } : {},
       ...opts.configDir ? { configDir: opts.configDir } : {}
     });
-    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store, opts.customBaseUrl)));
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch)));
   }
   if (!isApiProviderId(config2.provider)) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
   }
   const provider = config2.provider;
   const apiKey = provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
-  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl);
+  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch);
   if (!config2.model) {
     throw new Error(`Model is required for provider: ${config2.provider}`);
   }
   const model = withRetries(adapter, config2.model, config2.effort);
-  return { ...model, ...attachments(apiKey, await resolveFallbacks(config2, store, opts.customBaseUrl)) };
+  return { ...model, ...attachments(apiKey, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch)) };
 }
 
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([

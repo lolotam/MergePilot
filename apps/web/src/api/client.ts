@@ -9,6 +9,7 @@ import type {
   ReviewRunResult,
   ReviewRunFinding,
   SeverityCounts,
+  ApiProvider,
 } from '@mergepilot/app/contract';
 
 export type {
@@ -19,9 +20,8 @@ export type {
   ReviewRunResult,
   ReviewRunFinding,
   SeverityCounts,
+  ApiProvider,
 };
-
-export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
 
 /** GET /api/me plus the platform-operator flag (false for everyone not in MERGEPILOT_PLATFORM_ADMINS). */
 export interface MeResponseWithAdmin extends MeResponse {
@@ -33,6 +33,26 @@ export interface KeyItem {
   last4: string;
   createdAt: string;
   createdBy: string;
+  baseUrl?: string | null;
+}
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  efforts: string[];
+  contextWindow?: number;
+}
+
+export interface ModelsResponse {
+  models: CatalogModel[];
+}
+
+export interface TestConnectionResponse {
+  ok: boolean;
+  ms?: number;
+  model?: string;
+  code?: string;
+  message?: string;
 }
 
 export interface KeysResponse {
@@ -143,11 +163,35 @@ export const api = {
     }),
   getKeys: (workspaceId: string) =>
     fetchApi<KeysResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys`),
-  saveKey: (workspaceId: string, provider: ApiProvider, apiKey: string) =>
+  saveKey: (workspaceId: string, provider: ApiProvider, apiKey: string, baseUrl?: string | undefined) =>
     fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys/${encodeURIComponent(provider)}`, {
       method: 'PUT',
-      body: JSON.stringify({ apiKey }),
+      body: JSON.stringify({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
     }),
+  getModels: (workspaceId: string, provider: ApiProvider, refresh = false) =>
+    fetchApi<ModelsResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(provider)}/models${refresh ? '?refresh=true' : ''}`,
+    ),
+  testModelsUnsaved: (workspaceId: string, provider: ApiProvider, apiKey: string, baseUrl?: string | undefined) =>
+    fetchApi<ModelsResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(provider)}/models`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
+      },
+    ),
+  testConnection: (
+    workspaceId: string,
+    provider: ApiProvider,
+    options?: { apiKey?: string | undefined; baseUrl?: string | undefined; model?: string | undefined; effort?: string | undefined } | undefined,
+  ) =>
+    fetchApi<TestConnectionResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/credentials/${encodeURIComponent(provider)}/test`,
+      {
+        method: 'POST',
+        body: JSON.stringify(options ?? {}),
+      },
+    ),
   deleteKey: (workspaceId: string, provider: ApiProvider) =>
     fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys/${encodeURIComponent(provider)}`, {
       method: 'DELETE',

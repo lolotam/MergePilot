@@ -1,0 +1,156 @@
+import { describe, expect, it } from 'vitest';
+import { assertSafeBaseUrl, isPrivateIp, SsrFValidationError } from './ssrf.js';
+
+describe('isPrivateIp', () => {
+  it('identifies loopback addresses', () => {
+    expect(isPrivateIp('127.0.0.1')).toBe(true);
+    expect(isPrivateIp('127.1.2.3')).toBe(true);
+    expect(isPrivateIp('::1')).toBe(true);
+    expect(isPrivateIp('0:0:0:0:0:0:0:1')).toBe(true);
+  });
+
+  it('identifies private IPv4 ranges (RFC 1918)', () => {
+    expect(isPrivateIp('10.0.0.1')).toBe(true);
+    expect(isPrivateIp('10.255.255.255')).toBe(true);
+    expect(isPrivateIp('172.16.0.1')).toBe(true);
+    expect(isPrivateIp('172.31.255.255')).toBe(true);
+    expect(isPrivateIp('172.32.0.1')).toBe(false);
+    expect(isPrivateIp('192.168.0.1')).toBe(true);
+    expect(isPrivateIp('192.168.255.255')).toBe(true);
+  });
+
+  it('identifies link-local and cloud metadata addresses', () => {
+    expect(isPrivateIp('169.254.169.254')).toBe(true);
+    expect(isPrivateIp('169.254.1.1')).toBe(true);
+    expect(isPrivateIp('fe80::1')).toBe(true);
+  });
+
+  it('identifies IPv6 unique local (fc00::/7)', () => {
+    expect(isPrivateIp('fc00::1')).toBe(true);
+    expect(isPrivateIp('fd12:3456:789a::1')).toBe(true);
+  });
+
+  it('identifies IPv4-mapped IPv6 addresses', () => {
+    expect(isPrivateIp('::ffff:127.0.0.1')).toBe(true);
+    expect(isPrivateIp('::ffff:10.1.2.3')).toBe(true);
+    expect(isPrivateIp('::ffff:169.254.169.254')).toBe(true);
+    expect(isPrivateIp('::ffff:8.8.8.8')).toBe(false);
+  });
+
+  it('identifies hex-form IPv4-mapped, CGNAT, NAT64, 6to4, Teredo and reserved ranges', () => {
+    expect(isPrivateIp('::ffff:7f00:1')).toBe(true); // 127.0.0.1
+    expect(isPrivateIp('::ffff:a9fe:a9fe')).toBe(true); // 169.254.169.254
+    expect(isPrivateIp('100.64.0.1')).toBe(true);
+    expect(isPrivateIp('100.127.255.254')).toBe(true);
+    expect(isPrivateIp('64:ff9b::7f00:1')).toBe(true);
+    expect(isPrivateIp('2002:7f00:1::1')).toBe(true);
+    expect(isPrivateIp('2001:0:4136:e378::1')).toBe(true);
+    expect(isPrivateIp('fd00:ec2::254')).toBe(true);
+    expect(isPrivateIp('::')).toBe(true);
+    expect(isPrivateIp('0.0.0.0')).toBe(true);
+    expect(isPrivateIp('198.18.0.1')).toBe(true);
+    expect(isPrivateIp('255.255.255.255')).toBe(true);
+    expect(isPrivateIp('not-an-ip')).toBe(true);
+  });
+
+  it('allows public IPv4 and IPv6 addresses', () => {
+    expect(isPrivateIp('8.8.8.8')).toBe(false);
+    expect(isPrivateIp('1.1.1.1')).toBe(false);
+    expect(isPrivateIp('142.250.190.46')).toBe(false);
+    expect(isPrivateIp('2606:4700:4700::1111')).toBe(false);
+  });
+});
+
+describe('assertSafeBaseUrl', () => {
+  it('rejects non-https URLs', async () => {
+    await expect(assertSafeBaseUrl('http://api.openai.com/v1')).rejects.toThrow(SsrFValidationError);
+    await expect(assertSafeBaseUrl('ftp://api.openai.com/v1')).rejects.toThrow('HTTPS only');
+    await expect(assertSafeBaseUrl('file:///etc/passwd')).rejects.toThrow('HTTPS only');
+  });
+
+  it('rejects loopback hostname and IPs', async () => {
+    await expect(assertSafeBaseUrl('https://127.0.0.1:8080')).rejects.toThrow('private or loopback');
+    await expect(assertSafeBaseUrl('https://localhost:8080')).rejects.toThrow('private or loopback');
+    await expect(assertSafeBaseUrl('https://[::1]:8080')).rejects.toThrow('private or loopback');
+  });
+
+  it('rejects private IPv4 addresses', async () => {
+    await expect(assertSafeBaseUrl('https://10.0.0.5/v1')).rejects.toThrow('private or loopback');
+    await expect(assertSafeBaseUrl('https://192.168.1.1/v1')).rejects.toThrow('private or loopback');
+    await expect(assertSafeBaseUrl('https://172.20.0.1/v1')).rejects.toThrow('private or loopback');
+  });
+
+  it('rejects link-local / cloud metadata IP 169.254.169.254', async () => {
+    await expect(assertSafeBaseUrl('https://169.254.169.254/latest/meta-data/')).rejects.toThrow(
+      'private or loopback',
+    );
+  });
+
+  it('rejects domains that resolve to private or loopback IPs', async () => {
+    const mockLookup = async () => [{ address: '127.0.0.1', family: 4 }];
+    await expect(assertSafeBaseUrl('https://evil.local/v1', mockLookup)).rejects.toThrow(
+      'private or loopback',
+    );
+  });
+
+  it('rejects a host when ANY resolved address is private (mixed answers)', async () => {
+    const mixed = async () => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.8', family: 4 },
+    ];
+    await expect(assertSafeBaseUrl('https://llm.example.com/v1', mixed)).rejects.toThrow('private or loopback');
+  });
+
+  it('rejects user info, metadata host names and unresolvable hosts', async () => {
+    const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+    await expect(assertSafeBaseUrl('https://user:pw@llm.example.com/v1', lookup)).rejects.toThrow('user name');
+    await expect(assertSafeBaseUrl('https://metadata.google.internal/v1', lookup)).rejects.toThrow('private');
+    await expect(assertSafeBaseUrl('https://localhost./v1', lookup)).rejects.toThrow('private');
+    const failing = async () => {
+      throw new Error('ENOTFOUND');
+    };
+    await expect(assertSafeBaseUrl('https://nope.example.com', failing)).rejects.toThrow('Could not resolve');
+  });
+
+  it('accepts safe public HTTPS URLs and trims trailing slashes', async () => {
+    const mockLookup = async () => [{ address: '104.18.2.1', family: 4 }];
+    const sanitized = await assertSafeBaseUrl('https://api.custom-model.com/v1///', mockLookup);
+    expect(sanitized).toBe('https://api.custom-model.com/v1');
+  });
+
+  it('sees through numeric, octal, hex, uppercase, backslash and trailing-dot spellings of private hosts', async () => {
+    const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+    for (const url of [
+      'https://2130706433/v1',
+      'https://0x7f.1/v1',
+      'https://0177.0.0.1/v1',
+      'https://0x7f000001/v1',
+      'https://127.1/v1',
+      'https://127.0.0.1./v1',
+      'HTTPS://169.254.169.254/latest',
+      'https://[::ffff:127.0.0.1]/v1',
+      'https://[::1]:8443/v1',
+      'https:\\\\127.0.0.1\\v1',
+      'https://LOCALHOST/v1',
+      'https://api.LocalHost./v1',
+    ]) {
+      await expect(assertSafeBaseUrl(url, lookup), url).rejects.toThrow(SsrFValidationError);
+    }
+  });
+
+  it('rejects user info hiding the real host, zone ids, queries and fragments', async () => {
+    const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+    await expect(assertSafeBaseUrl('https://llm.example.com@127.0.0.1/v1', lookup)).rejects.toThrow();
+    await expect(assertSafeBaseUrl('https://[fe80::1%25eth0]/v1', lookup)).rejects.toThrow(SsrFValidationError);
+    await expect(assertSafeBaseUrl('https://llm.example.com/v1?x=1', lookup)).rejects.toThrow('query');
+    await expect(assertSafeBaseUrl('https://llm.example.com/v1#@127.0.0.1', lookup)).rejects.toThrow('fragment');
+  });
+
+  it('stores the normalized URL: lowercase, punycode, explicit port, no trailing slash', async () => {
+    const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
+    expect(await assertSafeBaseUrl('HTTPS://LLM.Example.com:8443/V1/', lookup)).toBe('https://llm.example.com:8443/V1');
+    expect(await assertSafeBaseUrl('https://bücher.example/v1', lookup)).toBe('https://xn--bcher-kva.example/v1');
+    expect(await assertSafeBaseUrl('https://llm.example.com:443/v1', lookup)).toBe('https://llm.example.com/v1');
+  });
+});
+

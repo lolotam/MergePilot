@@ -50,10 +50,12 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     const authSql = readFileSync(join(__dirname, '../../migrations/0002_auth.sql'), 'utf-8');
     const detailsSql = readFileSync(join(__dirname, '../../migrations/0003_review_run_details.sql'), 'utf-8');
     const activeRunSql = readFileSync(join(__dirname, '../../migrations/0004_active_run_unique.sql'), 'utf-8');
+    const settingsModelsSql = readFileSync(join(__dirname, '../../migrations/0005_settings_models.sql'), 'utf-8');
     await pglite.exec(appSql);
     await pglite.exec(authSql);
     await pglite.exec(detailsSql);
     await pglite.exec(activeRunSql);
+    await pglite.exec(settingsModelsSql);
 
     const schema = { ...authSchema, ...dbSchema };
     db = drizzle(pglite, { schema });
@@ -157,7 +159,19 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     });
     expect(adminPut.statusCode).toBe(200);
     expect(adminPut.json()).toEqual({
-      settings: { provider: 'anthropic', model: 'claude-3-5-sonnet-latest', language: 'ar', monthlyBudgetUsd: 150 },
+      settings: {
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet-latest',
+        language: 'ar',
+        monthlyBudgetUsd: 150,
+        effort: null,
+        heavyProvider: null,
+        heavyModel: null,
+        heavyEffort: null,
+        heavyThresholdLines: null,
+        fallback: [],
+        minSeverity: 'medium',
+      },
     });
 
     // Verify GET now returns saved settings

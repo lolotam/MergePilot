@@ -119,6 +119,13 @@ export function describeStoreContract(
           model: 'claude-3-5-sonnet-latest',
           language: 'ar',
           monthlyBudgetUsd: 50.0,
+          effort: 'high',
+          heavyProvider: 'openai',
+          heavyModel: 'gpt-5',
+          heavyEffort: 'medium',
+          heavyThresholdLines: 1200,
+          fallback: [{ provider: 'gemini', model: 'gemini-3.8-flash', effort: 'low' }],
+          minSeverity: 'high',
         };
         await store.saveSettings(initial);
 
@@ -130,20 +137,37 @@ export function describeStoreContract(
         expect(loaded?.language).toBe('ar');
         expect(loaded?.monthlyBudgetUsd).toBe(50.0);
         expect(typeof loaded?.monthlyBudgetUsd).toBe('number');
+        expect(loaded?.effort).toBe('high');
+        expect(loaded?.heavyProvider).toBe('openai');
+        expect(loaded?.heavyModel).toBe('gpt-5');
+        expect(loaded?.heavyEffort).toBe('medium');
+        expect(loaded?.heavyThresholdLines).toBe(1200);
+        expect(loaded?.fallback).toEqual([{ provider: 'gemini', model: 'gemini-3.8-flash', effort: 'low' }]);
+        expect(loaded?.minSeverity).toBe('high');
 
-        // Update settings with null budget
+        // Update settings with null budget and reset optional fields
         const updated: WorkspaceSettings = {
           ...initial,
           provider: 'openai',
           model: 'gpt-4o',
           language: 'en',
           monthlyBudgetUsd: null,
+          effort: null,
+          heavyModel: null,
+          heavyProvider: null,
+          heavyEffort: null,
+          fallback: [],
+          minSeverity: 'medium',
         };
         await store.saveSettings(updated);
 
         const reloaded = await store.getSettings('ws-settings-test');
         expect(reloaded?.provider).toBe('openai');
         expect(reloaded?.monthlyBudgetUsd).toBeNull();
+        expect(reloaded?.effort).toBeNull();
+        expect(reloaded?.heavyModel).toBeNull();
+        expect(reloaded?.fallback).toEqual([]);
+        expect(reloaded?.minSeverity).toBe('medium');
       } finally {
         await cleanup?.();
       }
@@ -155,12 +179,13 @@ export function describeStoreContract(
         const cred1: StoredCredential = {
           id: '11111111-1111-4111-8111-111111111111',
           workspaceId: 'ws-cred-test',
-          provider: 'anthropic',
+          provider: 'custom',
           ciphertext: 'enc:secret-cipher-text-1',
           keyVersion: 1,
           last4: 'sk-1',
           createdBy: 'user-1',
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          baseUrl: 'https://custom-ai.internal/v1',
         };
         const cred2: StoredCredential = {
           id: '22222222-2222-4222-8222-222222222222',
@@ -176,21 +201,24 @@ export function describeStoreContract(
         await store.saveCredential(cred1);
         await store.saveCredential(cred2);
 
-        const fetched1 = await store.getCredential('ws-cred-test', 'anthropic');
+        const fetched1 = await store.getCredential('ws-cred-test', 'custom');
         expect(fetched1).not.toBeNull();
         expect(fetched1?.ciphertext).toBe('enc:secret-cipher-text-1');
         expect(fetched1?.last4).toBe('sk-1');
+        expect(fetched1?.baseUrl).toBe('https://custom-ai.internal/v1');
 
-        // listCredentials MUST omit ciphertext
+        // listCredentials MUST omit ciphertext and include baseUrl
         const listed = await store.listCredentials('ws-cred-test');
         expect(listed).toHaveLength(2);
         for (const item of listed) {
           expect(item).not.toHaveProperty('ciphertext');
         }
+        const customListed = listed.find((k) => k.provider === 'custom');
+        expect(customListed?.baseUrl).toBe('https://custom-ai.internal/v1');
 
         // Delete credential
-        await store.deleteCredential('ws-cred-test', 'anthropic');
-        const deleted = await store.getCredential('ws-cred-test', 'anthropic');
+        await store.deleteCredential('ws-cred-test', 'custom');
+        const deleted = await store.getCredential('ws-cred-test', 'custom');
         expect(deleted).toBeNull();
 
         const listedAfter = await store.listCredentials('ws-cred-test');

@@ -51,10 +51,12 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
     const authSql = readFileSync(join(__dirname, '../../migrations/0002_auth.sql'), 'utf-8');
     const detailsSql = readFileSync(join(__dirname, '../../migrations/0003_review_run_details.sql'), 'utf-8');
     const activeRunSql = readFileSync(join(__dirname, '../../migrations/0004_active_run_unique.sql'), 'utf-8');
+    const settingsModelsSql = readFileSync(join(__dirname, '../../migrations/0005_settings_models.sql'), 'utf-8');
     await pglite.exec(appSql);
     await pglite.exec(authSql);
     await pglite.exec(detailsSql);
     await pglite.exec(activeRunSql);
+    await pglite.exec(settingsModelsSql);
 
     const schema = { ...authSchema, ...dbSchema };
     db = drizzle(pglite, { schema });

@@ -41,6 +41,10 @@ export interface ExecuteReviewOutcome {
   publish: PublishReviewResult;
   reviewUrl?: string | null;
   runResult?: ReviewRunResult | undefined;
+  /** Label (`provider:model`) of the model that answered, when the engine reports it. */
+  modelUsed?: string | undefined;
+  /** Label of the configured model, set only when an explicit fallback took over (ADR-0008). */
+  fallbackFrom?: string | undefined;
 }
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
@@ -92,6 +96,16 @@ export async function executeReview(
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
 
+  // ADR-0008: when an explicit fallback model answered, the summary names it and says why.
+  const disclosure = reviewResult.status === 'skipped-budget' ? undefined : reviewResult;
+  const fallbackSummary =
+    disclosure?.fallbackFrom && disclosure.fallbackCode
+      ? {
+          modelLabel: disclosure.modelUsed ?? model.label,
+          fallback: { from: disclosure.fallbackFrom, code: disclosure.fallbackCode },
+        }
+      : {};
+
   const envVar = PROVIDER_ENV_MAP[config.provider] ?? 'API key';
   let summaryMarkdown: string;
   let inlineFindings: Finding[];
@@ -111,6 +125,7 @@ export async function executeReview(
       complete: reviewResult.complete,
       incompleteReasons: reviewResult.result.incompleteReasons,
       modelLabel: model.label,
+      ...fallbackSummary,
       outcome: 'completed',
       ...(reviewResult.costUsd !== undefined ? { costUsd: reviewResult.costUsd } : {}),
       ...(reviewResult.usage?.inputTokens !== undefined
@@ -160,6 +175,7 @@ export async function executeReview(
       complete: false,
       incompleteReasons: [reason],
       modelLabel: model.label,
+      ...fallbackSummary,
       outcome: 'failed',
       reason,
     });
@@ -206,5 +222,7 @@ export async function executeReview(
     publish,
     reviewUrl,
     runResult: reviewResult,
+    ...(disclosure?.modelUsed ? { modelUsed: disclosure.modelUsed } : {}),
+    ...(disclosure?.fallbackFrom ? { fallbackFrom: disclosure.fallbackFrom } : {}),
   };
 }

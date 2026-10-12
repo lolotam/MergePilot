@@ -1,3 +1,4 @@
+import { resolveBaseUrl, type FetchLike } from '@mergepilot/engine';
 import type { ApiProvider } from '../core/types.js';
 
 export class ValidateKeyError extends Error {
@@ -7,14 +8,30 @@ export class ValidateKeyError extends Error {
   }
 }
 
+/**
+ * A cheap "list models" call that proves a key works before it is saved. For `custom` the
+ * caller MUST pass the SSRF-guarded fetch (core/safe-fetch.ts) with the already-checked URL.
+ */
 export async function validateKey(
   provider: ApiProvider,
   apiKey: string,
-  fetchFn: typeof fetch = globalThis.fetch,
+  fetchFnOrBaseUrl?: FetchLike | string,
+  maybeFetchFn?: FetchLike,
 ): Promise<void> {
   const trimmed = apiKey.trim();
   if (trimmed.length === 0) {
     throw new ValidateKeyError('API key cannot be empty');
+  }
+
+  let baseUrl: string | undefined;
+  let fetchFn: FetchLike;
+  const globalFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
+
+  if (typeof fetchFnOrBaseUrl === 'string') {
+    baseUrl = fetchFnOrBaseUrl;
+    fetchFn = maybeFetchFn ?? globalFetch;
+  } else {
+    fetchFn = fetchFnOrBaseUrl ?? globalFetch;
   }
 
   let url: string;
@@ -35,8 +52,13 @@ export async function validateKey(
       headers['x-goog-api-key'] = trimmed;
       break;
     default: {
-      const exhaustiveCheck: never = provider;
-      throw new ValidateKeyError(`Unsupported provider: ${String(exhaustiveCheck)}`);
+      if (provider === 'custom' && !baseUrl) {
+        throw new ValidateKeyError('Base URL is required for custom provider');
+      }
+      const base = resolveBaseUrl(provider, baseUrl);
+      url = `${base}/models`;
+      headers['Authorization'] = `Bearer ${trimmed}`;
+      break;
     }
   }
 
@@ -45,6 +67,7 @@ export async function validateKey(
     response = await fetchFn(url, {
       method: 'GET',
       headers,
+      redirect: 'manual',
     });
   } catch {
     // Network errors -> "could not verify"; never leak the key

@@ -9,7 +9,11 @@ import { z } from 'zod';
  * `:workspaceId` and enforce the role noted next to them (ADR-0007).
  */
 
-export const ApiProviderSchema = z.enum(['anthropic', 'openai', 'gemini']);
+import { API_PROVIDER_IDS, SeveritySchema } from '@mergepilot/engine';
+
+export const ApiProviderSchema = z.enum(API_PROVIDER_IDS);
+export type ApiProvider = z.infer<typeof ApiProviderSchema>;
+export type Severity = z.infer<typeof SeveritySchema>;
 
 export const ErrorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
@@ -31,25 +35,114 @@ export const MeResponseSchema = z.object({
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 
+/** A thinking effort as providers name it (off / on / minimal / low / medium / high / xhigh / max ...). */
+export const EffortSchema = z.string().regex(/^[a-z0-9_-]{1,24}$/, 'Invalid effort');
+const ModelIdSchema = z.string().trim().min(1).max(200);
+
+export const MAX_FALLBACK_MODELS = 3;
+
+export const FallbackEntrySchema = z.object({
+  provider: ApiProviderSchema,
+  model: ModelIdSchema,
+  effort: EffortSchema.nullable().optional(),
+});
+export type FallbackEntry = z.infer<typeof FallbackEntrySchema>;
+
 /** GET (member) / PUT (admin) /api/workspaces/:workspaceId/settings */
 export const SettingsSchema = z.object({
   provider: ApiProviderSchema,
-  model: z.string().min(1),
+  model: ModelIdSchema,
   language: z.enum(['ar', 'en']),
-  monthlyBudgetUsd: z.number().positive().nullable(),
+  monthlyBudgetUsd: z.number().positive().nullable().optional(),
+  effort: EffortSchema.nullable().optional(),
+  heavyProvider: ApiProviderSchema.nullable().optional(),
+  heavyModel: ModelIdSchema.nullable().optional(),
+  heavyEffort: EffortSchema.nullable().optional(),
+  /** Changed lines (additions + deletions) from which the heavy model reviews the PR. */
+  heavyThresholdLines: z.number().int().positive().max(1_000_000).nullable().optional(),
+  fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).optional().default([]),
+  minSeverity: SeveritySchema.optional().default('medium'),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
+
+/**
+ * PUT body: provider, model and language are required; every other field is a patch. Left out
+ * (undefined) keeps the stored value, so an older client that only sends the budget does not
+ * wipe the J2 fields; an explicit `null` clears it (fallback → [], minSeverity → medium).
+ */
+export const SettingsUpdateSchema = SettingsSchema.extend({
+  fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).nullable().optional(),
+  minSeverity: SeveritySchema.nullable().optional(),
+});
+export type SettingsUpdate = z.infer<typeof SettingsUpdateSchema>;
 export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable() });
 
 /** GET (admin) /api/workspaces/:workspaceId/keys */
 export const KeysResponseSchema = z.object({
   keys: z.array(
-    z.object({ provider: ApiProviderSchema, last4: z.string(), createdAt: z.string(), createdBy: z.string() }),
+    z.object({
+      provider: ApiProviderSchema,
+      last4: z.string(),
+      createdAt: z.string(),
+      createdBy: z.string(),
+      baseUrl: z.string().nullable().optional(),
+    }),
   ),
 });
 /** PUT (admin) /api/workspaces/:workspaceId/keys/:provider — validated with a cheap provider call before saving. */
-export const SaveKeyRequestSchema = z.object({ apiKey: z.string().min(8).max(500) });
+export const SaveKeyRequestSchema = z.object({
+  apiKey: z.string().min(8).max(500),
+  baseUrl: z.string().url().optional(),
+});
 /** DELETE (admin) /api/workspaces/:workspaceId/keys/:provider → 204 */
+
+export const CatalogModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  efforts: z.array(z.string()),
+  contextWindow: z.number().optional(),
+});
+
+export const ModelsResponseSchema = z.object({
+  models: z.array(CatalogModelSchema),
+});
+export type ModelsResponse = z.infer<typeof ModelsResponseSchema>;
+
+/**
+ * POST (admin) /api/workspaces/:workspaceId/providers/:provider/models — a key typed in the
+ * "add key" dialog, used for this one call: never stored, logged or echoed. `baseUrl` is for
+ * `custom` only (https, public addresses; ADR-0010).
+ */
+export const ListModelsBodySchema = z.object({
+  apiKey: z.string().min(1).max(500),
+  baseUrl: z.string().url().max(500).optional(),
+});
+
+/**
+ * POST (admin) /api/workspaces/:workspaceId/credentials/:provider/test — the stored key, or an
+ * unsaved `apiKey` (test before saving); rate-limited to 10 per minute per workspace.
+ */
+export const TestConnectionBodySchema = z.object({
+  apiKey: z.string().max(500).optional(),
+  baseUrl: z.string().url().max(500).optional(),
+  model: z.string().max(200).optional(),
+  effort: EffortSchema.optional(),
+});
+
+export const TestConnectionResponseSchema = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    ms: z.number(),
+    model: z.string(),
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: z.string(),
+    message: z.string(),
+    ms: z.number().optional(),
+  }),
+]);
+export type TestConnectionResponse = z.infer<typeof TestConnectionResponseSchema>;
 
 export const InstallationSchema = z.object({
   id: z.number().int(),

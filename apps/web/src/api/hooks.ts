@@ -51,8 +51,8 @@ export function useSaveKeyMutation(workspaceId: string) {
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: ({ provider, apiKey }: { provider: ApiProvider; apiKey: string }) =>
-      api.saveKey(workspaceId, provider, apiKey),
+    mutationFn: ({ provider, apiKey, baseUrl }: { provider: ApiProvider; apiKey: string; baseUrl?: string | undefined }) =>
+      api.saveKey(workspaceId, provider, apiKey, baseUrl),
     onSuccess: () => {
       showToast(t('keySavedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });

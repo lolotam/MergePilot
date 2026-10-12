@@ -9,6 +9,7 @@ import { AnthropicAdapter } from './anthropic/adapter.js';
 import { ClaudeCodeRunner } from './claude-code/runner.js';
 import { OpenAICompatibleAdapter } from './compatible/adapter.js';
 import { GeminiAdapter } from './gemini/adapter.js';
+import type { FetchLike } from './http.js';
 import { isApiProviderId, type ApiProviderId } from './ids.js';
 import { OpenAIAdapter } from './openai/adapter.js';
 import { providerEntry } from './registry.js';
@@ -23,6 +24,12 @@ export interface CreateReviewModelOptions {
    * `baseUrl` is ignored, so a key is never sent to a URL that came from repository content.
    */
   customBaseUrl?: string | undefined;
+  /**
+   * `custom` only: the fetch used to call the custom server. A shell that takes the URL from
+   * its users (the SaaS) passes a guarded fetch here that re-checks the address on every call
+   * and never follows redirects (SSRF / DNS rebinding). Presets always use the global fetch.
+   */
+  customFetch?: FetchLike | undefined;
 }
 
 export const CUSTOM_BASE_URL_MISSING =
@@ -33,11 +40,21 @@ export const CUSTOM_BASE_URL_MISSING =
  * always call their fixed registry URL; `customBaseUrl` is used for `custom` only and must be
  * trusted (see CreateReviewModelOptions).
  */
-export function createAdapter(provider: ApiProviderId, apiKey: Secret | undefined, customBaseUrl?: string): LlmAdapter {
+export function createAdapter(
+  provider: ApiProviderId,
+  apiKey: Secret | undefined,
+  customBaseUrl?: string,
+  customFetch?: FetchLike,
+): LlmAdapter {
   const entry = providerEntry(provider);
   if (entry.kind === 'openai-compatible') {
     if (provider === 'custom' && !customBaseUrl?.trim()) throw new Error(CUSTOM_BASE_URL_MISSING);
-    return new OpenAICompatibleAdapter({ provider, apiKey, ...(provider === 'custom' && customBaseUrl ? { baseUrl: customBaseUrl } : {}) });
+    return new OpenAICompatibleAdapter({
+      provider,
+      apiKey,
+      ...(provider === 'custom' && customBaseUrl ? { baseUrl: customBaseUrl } : {}),
+      ...(provider === 'custom' && customFetch ? { fetch: customFetch } : {}),
+    });
   }
   if (!apiKey) throw new Error(`An API key is required for provider: ${provider}`);
   if (provider === 'anthropic') return new AnthropicAdapter({ apiKey });
@@ -96,6 +113,7 @@ export async function resolveFallbacks(
   config: MergePilotConfig,
   store: AnyCredentialStore,
   customBaseUrl?: string,
+  customFetch?: FetchLike,
 ): Promise<ResolvedFallbacks> {
   const resolved: ResolvedFallbacks = { models: [], secrets: [], skipped: [] };
   for (const entry of config.fallback ?? []) {
@@ -113,7 +131,7 @@ export async function resolveFallbacks(
       continue;
     }
     try {
-      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl), entry.model, entry.effort));
+      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch), entry.model, entry.effort));
     } catch {
       resolved.skipped.push({ label, reason: 'the provider could not be set up' });
     }
@@ -162,7 +180,7 @@ export async function createReviewModel(
       ...(config.model ? { model: config.model } : {}),
       ...(opts.configDir ? { configDir: opts.configDir } : {}),
     });
-    return Object.assign(runner, attachments(token, await resolveFallbacks(config, store, opts.customBaseUrl)));
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch)));
   }
 
   if (!isApiProviderId(config.provider)) {
@@ -172,11 +190,11 @@ export async function createReviewModel(
   const apiKey =
     provider === 'custom' ? await resolveKey(store, provider) : await store.resolve({ provider }, 'review');
   // `config.baseUrl` is deliberately NOT read: it comes from the repository (ADR-0008 amendment).
-  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl);
+  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch);
 
   if (!config.model) {
     throw new Error(`Model is required for provider: ${config.provider}`);
   }
   const model = withRetries(adapter, config.model, config.effort);
-  return { ...model, ...attachments(apiKey, await resolveFallbacks(config, store, opts.customBaseUrl)) };
+  return { ...model, ...attachments(apiKey, await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch)) };
 }

@@ -211,6 +211,32 @@ data: [DONE]
     expect(model.skippedFallbacks).toEqual([{ label: 'custom:local', reason: expect.stringContaining('CUSTOM_LLM_BASE_URL') }]);
   });
 
+  it('custom: a shell-provided customFetch carries the primary and a custom fallback call, never a preset', async () => {
+    const guarded: string[] = [];
+    const global: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (global.push(url), okStream())));
+    try {
+      const store = new EnvCredentialStore({ CUSTOM_LLM_API_KEY: FALLBACK_KEY, OPENAI_API_KEY: 'k1' });
+      const customFetch = async (url: string) => (guarded.push(url), okStream());
+      const primary = await createReviewModel(config({ provider: 'custom', model: 'local' }), store, {
+        cwd: CWD,
+        customBaseUrl: 'https://llm.example/v1',
+        customFetch,
+      });
+      await primary.generate({ system: 's', user: 'u', maxOutputTokens: 10 });
+      const withFallback = await createReviewModel(
+        config({ provider: 'openai', model: 'gpt-5', fallback: [{ provider: 'custom', model: 'local' }] }),
+        store,
+        { cwd: CWD, customBaseUrl: 'https://llm.example/v1', customFetch },
+      );
+      await withFallback.fallbacks?.[0]?.generate({ system: 's', user: 'u', maxOutputTokens: 10 });
+      expect(guarded).toEqual(['https://llm.example/v1/chat/completions', 'https://llm.example/v1/chat/completions']);
+      expect(global).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('a preset adapter always calls its fixed registry URL, whatever baseUrl is passed', async () => {
     const urls: string[] = [];
     const adapter = new OpenAICompatibleAdapter({

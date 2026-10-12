@@ -167,32 +167,40 @@ export class PgStore implements AppStore {
   }
 
   async getSettings(workspaceId: string): Promise<WorkspaceSettings | null> {
-    const rows = await this.db
-      .select()
-      .from(workspaceSettings)
-      .where(eq(workspaceSettings.workspaceId, workspaceId));
+    const rows = await this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
     const row = rows[0];
-    if (!row) {
-      return null;
-    }
+    if (!row) return null;
     return {
       workspaceId: row.workspaceId,
       provider: row.provider as ApiProvider,
       model: row.model,
       language: row.language as 'ar' | 'en',
-      monthlyBudgetUsd:
-        row.monthlyBudgetUsd !== null ? Number(row.monthlyBudgetUsd) : null,
+      monthlyBudgetUsd: row.monthlyBudgetUsd !== null ? Number(row.monthlyBudgetUsd) : null,
+      effort: row.effort ?? null,
+      heavyProvider: (row.heavyProvider as ApiProvider) ?? null,
+      heavyModel: row.heavyModel ?? null,
+      heavyEffort: row.heavyEffort ?? null,
+      heavyThresholdLines: row.heavyThresholdLines !== null ? Number(row.heavyThresholdLines) : 800,
+      fallback: Array.isArray(row.fallback) ? (row.fallback as WorkspaceSettings['fallback']) : [],
+      minSeverity: (row.minSeverity as WorkspaceSettings['minSeverity']) ?? 'medium',
     };
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
-    const budgetStr =
-      settings.monthlyBudgetUsd !== null ? String(settings.monthlyBudgetUsd) : null;
+    const budgetStr = settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined
+      ? String(settings.monthlyBudgetUsd) : null;
     const values = {
       provider: settings.provider,
       model: settings.model,
       language: settings.language,
       monthlyBudgetUsd: budgetStr,
+      effort: settings.effort ?? null,
+      heavyProvider: settings.heavyProvider ?? null,
+      heavyModel: settings.heavyModel ?? null,
+      heavyEffort: settings.heavyEffort ?? null,
+      heavyThresholdLines: settings.heavyThresholdLines ?? 800,
+      fallback: settings.fallback ?? [],
+      minSeverity: settings.minSeverity ?? 'medium',
       updatedAt: new Date(),
     };
     await withLiveWorkspace(this.db, settings.workspaceId, async (tx) => {
@@ -211,6 +219,7 @@ export class PgStore implements AppStore {
       last4: credential.last4,
       createdBy: credential.createdBy,
       createdAt: credential.createdAt,
+      baseUrl: credential.baseUrl ?? null,
     };
     await withLiveWorkspace(this.db, credential.workspaceId, async (tx) => {
       await tx
@@ -223,23 +232,13 @@ export class PgStore implements AppStore {
     });
   }
 
-  async getCredential(
-    workspaceId: string,
-    provider: ApiProvider,
-  ): Promise<StoredCredential | null> {
+  async getCredential(workspaceId: string, provider: ApiProvider): Promise<StoredCredential | null> {
     const rows = await this.db
       .select()
       .from(providerCredentials)
-      .where(
-        and(
-          eq(providerCredentials.workspaceId, workspaceId),
-          eq(providerCredentials.provider, provider),
-        ),
-      );
+      .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
     const row = rows[0];
-    if (!row) {
-      return null;
-    }
+    if (!row) return null;
     return {
       id: row.id,
       workspaceId: row.workspaceId,
@@ -249,12 +248,11 @@ export class PgStore implements AppStore {
       last4: row.last4,
       createdBy: row.createdBy,
       createdAt: new Date(row.createdAt),
+      baseUrl: row.baseUrl ?? null,
     };
   }
 
-  async listCredentials(
-    workspaceId: string,
-  ): Promise<Array<Omit<StoredCredential, 'ciphertext'>>> {
+  async listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>> {
     const rows = await this.db
       .select({
         id: providerCredentials.id,
@@ -264,6 +262,7 @@ export class PgStore implements AppStore {
         last4: providerCredentials.last4,
         createdBy: providerCredentials.createdBy,
         createdAt: providerCredentials.createdAt,
+        baseUrl: providerCredentials.baseUrl,
       })
       .from(providerCredentials)
       .where(eq(providerCredentials.workspaceId, workspaceId));
@@ -275,6 +274,7 @@ export class PgStore implements AppStore {
       last4: row.last4,
       createdBy: row.createdBy,
       createdAt: new Date(row.createdAt),
+      baseUrl: row.baseUrl ?? null,
     }));
   }
 

@@ -1,4 +1,4 @@
-import type { MergePilotConfig, ReviewModel, CredentialStore } from '@mergepilot/engine';
+import type { MergePilotConfig, ReviewModel, CredentialStore, ApiProviderId, Severity } from '@mergepilot/engine';
 
 /** Workspace roles (ADR-0007). Order matters: each role includes everything below it. */
 export const ROLES = ['member', 'admin', 'owner'] as const;
@@ -38,7 +38,13 @@ export class ActiveRunExistsError extends Error {
 /** Only these statuses count as active for the one-active-run-per-head rule. */
 export const ACTIVE_RUN_STATUSES: readonly ReviewRunStatus[] = ['queued', 'running'];
 
-export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
+export type ApiProvider = ApiProviderId;
+
+export interface FallbackSetting {
+  provider: ApiProvider;
+  model: string;
+  effort?: string | null | undefined;
+}
 
 export interface Installation {
   /** GitHub installation id. */
@@ -56,6 +62,13 @@ export interface WorkspaceSettings {
   model: string;
   language: 'ar' | 'en';
   monthlyBudgetUsd: number | null;
+  effort?: string | null | undefined;
+  heavyProvider?: ApiProvider | null | undefined;
+  heavyModel?: string | null | undefined;
+  heavyEffort?: string | null | undefined;
+  heavyThresholdLines?: number | null | undefined;
+  fallback?: FallbackSetting[] | undefined;
+  minSeverity?: Severity | undefined;
 }
 
 export interface StoredCredential {
@@ -69,6 +82,7 @@ export interface StoredCredential {
   last4: string;
   createdBy: string;
   createdAt: Date;
+  baseUrl?: string | null | undefined;
 }
 
 export type ReviewRunStatus = 'queued' | 'running' | 'completed' | 'skipped' | 'failed';
