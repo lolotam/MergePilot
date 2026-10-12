@@ -201,16 +201,25 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   // one that finishes starting later is closed as soon as it appears. Each scheduler closes once.
   let stopping = false;
   let started: MaintenanceScheduler | undefined;
-  const lateClose = maintenanceStart.then(async (scheduler) => {
-    started = scheduler;
-    if (stopping) await scheduler?.close();
-  });
+  // maintenanceStart never rejects (a failed start resolves undefined); a failing close is logged.
+  const logCloseError = (err: unknown) => {
+    const name = err instanceof Error ? err.name : 'unknown error';
+    workerLog.warn({ event: 'worker.retention_close_failed', errorName: name }, `Failed to close run retention: ${name}`);
+  };
+  const lateClose = maintenanceStart
+    .then(async (scheduler) => {
+      started = scheduler;
+      if (stopping) await scheduler?.close();
+    })
+    .catch(logCloseError);
   const closeMaintenance = async (): Promise<void> => {
     if (started) {
-      await started.close();
+      await started.close().catch(logCloseError);
       return;
     }
-    await Promise.race([lateClose, new Promise<void>((resolve) => setTimeout(resolve, 5_000).unref?.())]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([lateClose, new Promise<void>((resolve) => (timer = setTimeout(resolve, 5_000)))]);
+    clearTimeout(timer);
   };
 
   const stop = async () => {
