@@ -94,12 +94,13 @@ export async function finishPgReviewRun(
     // A run finished twice (e.g. failed by the stale sweep, then finished by its worker) replaces
     // its earlier usage instead of counting twice.
     const before = await tx
-      .select({ status: reviewRuns.status, costUsd: reviewRuns.costUsd, result: reviewRuns.result, createdAt: reviewRuns.createdAt })
+      .select({ status: reviewRuns.status, finishedAt: reviewRuns.finishedAt, costUsd: reviewRuns.costUsd, result: reviewRuns.result, createdAt: reviewRuns.createdAt })
       .from(reviewRuns)
       .where(and(eq(reviewRuns.id, id), eq(reviewRuns.workspaceId, workspaceId)))
       .for('update');
     const prior = before[0];
-    if (prior && FINISHED_RUN_STATUSES.includes(prior.status as ReviewRunStatus)) {
+    // Only a run that was finished before (finishedAt set) was counted; one created finished was not.
+    if (prior?.finishedAt && FINISHED_RUN_STATUSES.includes(prior.status as ReviewRunStatus)) {
       const usage = (prior.result as { usage?: { inputTokens: number; outputTokens: number } } | null)?.usage;
       const d = deltaFor(workspaceId, new Date(prior.createdAt), prior.status as ReviewRunStatus, prior.costUsd === null ? null : Number(prior.costUsd), usage);
       await addUsage(tx, negate(d));

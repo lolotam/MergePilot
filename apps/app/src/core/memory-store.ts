@@ -211,7 +211,7 @@ export class MemoryStore implements AppStore {
     this.runs.set(id, finished);
     // A run finished twice (e.g. failed by the stale sweep, then finished by its worker) replaces
     // its earlier usage instead of counting twice.
-    addMemoryUsage(this.usage, run, -1);
+    if (run.finishedAt) addMemoryUsage(this.usage, run, -1);
     addMemoryUsage(this.usage, finished);
   }
 
