@@ -7,6 +7,7 @@ import type {
   GitHubPullRequest,
 } from './client.js';
 import { buildMarker } from './marker.js';
+import { computeFindingFingerprint } from './dedupe.js';
 import {
   loadRepoConfig,
   reviewPullRequest,
@@ -217,13 +218,33 @@ describe('reviewPullRequest', () => {
     expect(review?.comments?.[0]?.path).toBe('src/app.ts');
   });
 
-  it('detects duplicate review and returns skipped-duplicate', async () => {
+  it('skips without a model call when this head was already reviewed', async () => {
     const { ctx, fakeClient, createdReviews } = createSetup();
+    const generate = vi.spyOn(ctx.model, 'generate');
 
     fakeClient.listReviewsPage = async () => [
       {
         id: 999,
         body: `Previous review\n\n${buildMarker({ headSha, configHash: ctx.configHash })}`,
+        user: { login: 'mergepilot[bot]' },
+      },
+    ];
+
+    const result = await reviewPullRequest(ctx);
+
+    expect(result.outcome).toBe('skipped');
+    expect(result.publish.status).toBe('skipped-no-changes');
+    expect(generate).not.toHaveBeenCalled();
+    expect(createdReviews).toHaveLength(0);
+  });
+
+  it('still skips publishing a duplicate when only a partial review exists for this head', async () => {
+    const { ctx, fakeClient, createdReviews } = createSetup();
+
+    fakeClient.listReviewsPage = async () => [
+      {
+        id: 999,
+        body: buildMarker({ headSha, configHash: ctx.configHash, status: 'partial' }),
         user: { login: 'mergepilot[bot]' },
       },
     ];
@@ -258,5 +279,109 @@ describe('reviewPullRequest', () => {
     expect(createdReviews).toHaveLength(1);
     expect(createdReviews[0]?.comments).toHaveLength(0);
     expect(createdReviews[0]?.body).toContain('maxInputTokens');
+  });
+
+  it('incremental review: reviews only new commits and states commit count in summary', async () => {
+    const { ctx, fakeClient, createdReviews } = createSetup();
+    const oldHeadSha = 'old-head-sha-888';
+
+    fakeClient.listReviewsPage = async () => [
+      {
+        id: 501,
+        body: `Previous review\n\n${buildMarker({ headSha: oldHeadSha, configHash: ctx.configHash })}`,
+        user: { login: 'mergepilot[bot]' },
+      },
+    ];
+
+    fakeClient.compareCommits = async ({ base, head }) => {
+      expect(base).toBe(oldHeadSha);
+      expect(head).toBe(headSha);
+      return {
+        status: 'ahead',
+        totalCommits: 2,
+        files: [
+          {
+            filename: 'src/app.ts',
+            status: 'modified',
+            additions: 1,
+            deletions: 0,
+            changes: 1,
+            patch: '@@ -1,1 +1,2 @@\n existing\n+new line',
+          },
+        ],
+      };
+    };
+
+    const result = await reviewPullRequest(ctx);
+
+    expect(result.outcome).toBe('completed');
+    expect(createdReviews).toHaveLength(1);
+    expect(createdReviews[0]?.body).toContain('Reviewed 2 new commits since');
+    expect(createdReviews[0]?.body).toContain(oldHeadSha.slice(0, 7));
+  });
+
+  it('deduplicates findings against existing review comments before publishing', async () => {
+    const { ctx, fakeClient, createdReviews } = createSetup();
+
+    const findingFingerprint = computeFindingFingerprint({
+      id: 'f-1',
+      path: 'src/app.ts',
+      line: 2,
+      side: 'RIGHT',
+      title: 'Check added line',
+      body: 'Verify this logic.',
+      severity: 'medium',
+      category: 'correctness',
+      evidence: '+new line',
+      confidence: 0.95,
+    });
+
+    // Simulate existing inline comment from MergePilot
+    fakeClient.listReviewCommentsPage = async () => [
+      {
+        id: 9001,
+        path: 'src/app.ts',
+        line: 2,
+        body: `### Check added line\n\nExisting body\n\n<!-- mp:f=${findingFingerprint} -->`,
+        user: { login: 'mergepilot[bot]' },
+      },
+    ];
+
+    const result = await reviewPullRequest(ctx);
+
+    expect(result.outcome).toBe('completed');
+    expect(createdReviews).toHaveLength(1);
+    // Inline comment should have been dropped as duplicate
+    expect(createdReviews[0]?.comments).toHaveLength(0);
+    // Summary line should reflect 0 inline comments
+    expect(createdReviews[0]?.body).toContain('Inline comments: 0');
+  });
+
+  it('pauses: skips review and posts one-time notice when PR has mergepilot:paused label', async () => {
+    const { ctx, fakeClient, createdReviews } = createSetup();
+
+    const createdIssueComments: Array<{ body: string }> = [];
+    fakeClient.createIssueComment = async ({ body }) => {
+      createdIssueComments.push({ body });
+      return { id: 1001 };
+    };
+    fakeClient.listIssueCommentsPage = async () => [];
+
+    // PR has paused label
+    fakeClient.getPullRequest = async () =>
+      ({
+        head: { sha: headSha },
+        labels: [{ name: 'mergepilot:paused' }],
+      }) as unknown as GitHubPullRequest;
+
+    const result = await reviewPullRequest(ctx);
+
+    expect(result.outcome).toBe('skipped');
+    expect(result.detail).toContain('paused');
+    // Did not post review
+    expect(createdReviews).toHaveLength(0);
+    // Posted one-time notice
+    expect(createdIssueComments).toHaveLength(1);
+    expect(createdIssueComments[0]?.body).toContain('<!-- mergepilot:pause-notice -->');
   });
 });

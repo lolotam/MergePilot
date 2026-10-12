@@ -14,6 +14,15 @@ export {
   type CompareCommitsParams,
   type CompareCommitsResult,
   type CompareCommitsStatus,
+  type GitHubReviewComment,
+  type ListReviewCommentsParams,
+  type GitHubIssueComment,
+  type ListIssueCommentsParams,
+  type CreateIssueCommentParams,
+  type AddLabelsParams,
+  type RemoveLabelParams,
+  type GetCollaboratorPermissionParams,
+  type GitHubCollaboratorPermission,
 } from './client.js';
 
 export {
@@ -47,11 +56,40 @@ export {
 } from './contents.js';
 export {
   findLastReviewedHead,
+  findLastReviewedMarker,
+  hasNothingNewToReview,
+  NOTHING_NEW_DETAIL,
+  reviewScopeOf,
   selectIncrementalFiles,
   type FindLastReviewedHeadOptions,
   type SelectIncrementalFilesOptions,
   type SelectIncrementalFilesResult,
 } from './incremental.js';
+export {
+  computeFindingFingerprint,
+  normalizeTitle,
+  parseFingerprintFromComment,
+  parseTitleFromComment,
+  areTitlesSimilar,
+  deduplicateFindings,
+  type DeduplicateFindingsParams,
+  type DeduplicateFindingsResult,
+} from './dedupe.js';
+export {
+  parsePauseCommand,
+  parsePauseCommandWithLanguage,
+  isAuthorizedToControlPause,
+  isPrPaused,
+  hasPauseNoticeBeenPosted,
+  postPauseNoticeOnce,
+  executePauseCommand,
+  PAUSE_LABEL,
+  type PauseCommand,
+  type PauseCommandParams,
+  type ExecutePauseCommandResult,
+  type CheckPauseParams,
+  type PauseNoticeParams,
+} from './pause.js';
 export * from './summary.js';
 export {
   loadRepoConfig,

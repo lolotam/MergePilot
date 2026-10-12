@@ -53,6 +53,7 @@ budget:
     configYaml?: string;
     env?: Record<string, string | undefined>;
     workspaceFiles?: string[];
+    eventPayload?: object;
     modelGenerateMock?: (req: unknown) => Promise<{
       text: string;
       finishReason: 'stop';
@@ -62,7 +63,7 @@ budget:
 
   function setupTest(options: TestSetupOptions = {}) {
     const configYaml = options.configYaml ?? claudeCodeConfigYaml;
-    const eventJson = JSON.stringify(createValidEventPayload());
+    const eventJson = JSON.stringify(options.eventPayload ?? createValidEventPayload());
     const logs: string[] = [];
     const log = (msg: string): void => {
       logs.push(msg);
@@ -89,6 +90,7 @@ budget:
     };
 
     const createdReviews: CreateReviewParams[] = [];
+    const createdIssueComments: Array<{ body: string }> = [];
 
     const fakeClient: GitHubClient = {
       async getFileContent(params: GetFileContentParams): Promise<string | null> {
@@ -116,6 +118,13 @@ budget:
       async createReview(params: CreateReviewParams) {
         createdReviews.push(params);
         return { id: 1001 };
+      },
+      async listIssueCommentsPage() {
+        return [];
+      },
+      async createIssueComment(params) {
+        createdIssueComments.push(params);
+        return { id: 2001, body: params.body };
       },
     };
 
@@ -170,6 +179,7 @@ budget:
       deps,
       logs,
       createdReviews,
+      createdIssueComments,
       createModel,
       getCapturedModelOpts: () => capturedModelOpts,
       getCleanupCalled: () => cleanupCalled,
@@ -312,4 +322,51 @@ review:
     expect(prompts[0]).not.toContain(fallbackKey);
     expect(prompts[0]).toContain('[REDACTED:known]');
   });
+
+  it('skips review and posts a one-time notice when PR is paused via label', async () => {
+    const payload = createValidEventPayload();
+    (payload.pull_request as { labels?: Array<{ name: string }> }).labels = [
+      { name: 'mergepilot:paused' },
+    ];
+
+    const { deps, logs, createdReviews, createdIssueComments, createModel } = setupTest({
+      eventPayload: payload,
+    });
+
+    await runPullRequestReview(deps);
+
+    expect(createdReviews).toHaveLength(0);
+    expect(createModel).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.includes('automatic reviews are paused'))).toBe(true);
+    expect(createdIssueComments).toHaveLength(1);
+    expect(createdIssueComments[0]?.body).toContain('<!-- mergepilot:pause-notice -->');
+    expect(createdIssueComments[0]?.body).toContain('Automatic reviews are paused on this PR');
+  });
+
+  it('skips review without posting duplicate notice if pause notice already exists', async () => {
+    const payload = createValidEventPayload();
+    (payload.pull_request as { labels?: Array<{ name: string }> }).labels = [
+      { name: 'mergepilot:paused' },
+    ];
+
+    const { deps, logs, createdReviews, createdIssueComments, fakeClient } = setupTest({
+      eventPayload: payload,
+    });
+
+    fakeClient.listIssueCommentsPage = async () => [
+      {
+        id: 999,
+        body: 'Earlier notice\n<!-- mergepilot:pause-notice -->',
+        user: { login: 'github-actions[bot]' },
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    await runPullRequestReview(deps);
+
+    expect(createdReviews).toHaveLength(0);
+    expect(logs.some((l) => l.includes('automatic reviews are paused'))).toBe(true);
+    expect(createdIssueComments).toHaveLength(0);
+  });
 });
+

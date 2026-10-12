@@ -1,113 +1,34 @@
 import { Octokit } from '@octokit/rest';
 
-export interface GitHubPullRequestFile {
-  filename: string;
-  status: string;
-  patch?: string;
-  additions: number;
-  deletions: number;
-  changes: number;
-  previous_filename?: string;
-}
+import type {
+  AddLabelsParams,
+  CompareCommitsParams,
+  CompareCommitsResult,
+  CompareCommitsStatus,
+  CreateIssueCommentParams,
+  CreateIssueParams,
+  CreateReviewParams,
+  GetCollaboratorPermissionParams,
+  GetFileContentParams,
+  GetPullRequestParams,
+  GitHubClient,
+  GitHubCollaboratorPermission,
+  GitHubCreatedIssue,
+  GitHubCreatedReview,
+  GitHubIssueComment,
+  GitHubPullRequest,
+  GitHubPullRequestFile,
+  GitHubReview,
+  GitHubReviewComment,
+  ListFilesPageParams,
+  ListIssueCommentsParams,
+  ListReviewCommentsParams,
+  ListReviewsPageParams,
+  RemoveLabelParams,
+} from './client-types.js';
 
-export interface GitHubPullRequest {
-  head: {
-    sha: string;
-  };
-}
+export * from './client-types.js';
 
-export interface GitHubReview {
-  id: number;
-  body?: string | null;
-  user?: { login: string } | null;
-}
-
-export interface GitHubDraftReviewComment {
-  path: string;
-  line: number;
-  side: 'LEFT' | 'RIGHT';
-  body: string;
-}
-
-export interface ListFilesPageParams {
-  owner: string;
-  repo: string;
-  pull_number: number;
-  page: number;
-  per_page: number;
-}
-
-export interface GetPullRequestParams {
-  owner: string;
-  repo: string;
-  pull_number: number;
-}
-
-export interface ListReviewsPageParams {
-  owner: string;
-  repo: string;
-  pull_number: number;
-  page?: number;
-  per_page?: number;
-}
-
-export interface CreateReviewParams {
-  owner: string;
-  repo: string;
-  pull_number: number;
-  commit_id: string;
-  body: string;
-  event: 'COMMENT';
-  comments?: GitHubDraftReviewComment[];
-}
-
-export interface GitHubCreatedReview {
-  id: number;
-}
-
-export interface GetFileContentParams {
-  owner: string;
-  repo: string;
-  path: string;
-  ref: string;
-}
-
-export type CompareCommitsStatus = 'ahead' | 'behind' | 'identical' | 'diverged';
-
-export interface CompareCommitsParams {
-  owner: string;
-  repo: string;
-  base: string;
-  head: string;
-}
-
-export interface CompareCommitsResult {
-  status: CompareCommitsStatus;
-  files: GitHubPullRequestFile[];
-}
-
-export interface CreateIssueParams {
-  owner: string;
-  repo: string;
-  title: string;
-  body: string;
-}
-
-export interface GitHubCreatedIssue {
-  id: number;
-  number: number;
-  html_url?: string;
-}
-
-export interface GitHubClient {
-  listPullRequestFilesPage(params: ListFilesPageParams): Promise<GitHubPullRequestFile[]>;
-  getPullRequest(params: GetPullRequestParams): Promise<GitHubPullRequest>;
-  listReviewsPage(params: ListReviewsPageParams): Promise<GitHubReview[]>;
-  createReview(params: CreateReviewParams): Promise<GitHubCreatedReview>;
-  getFileContent(params: GetFileContentParams): Promise<string | null>;
-  compareCommits(params: CompareCommitsParams): Promise<CompareCommitsResult | null>;
-  createIssue?(params: CreateIssueParams): Promise<GitHubCreatedIssue>;
-}
 
 function redactToken(str: string, token: string): string {
   if (!token) {
@@ -248,6 +169,8 @@ export function createOctokitClient(token: string): GitHubClient {
           let status: CompareCommitsStatus = 'identical';
           const allFiles: GitHubPullRequestFile[] = [];
 
+          let totalCommits: number | undefined;
+
           while (true) {
             const response = await octokit.rest.repos.compareCommitsWithBasehead({
               owner: params.owner,
@@ -258,6 +181,9 @@ export function createOctokitClient(token: string): GitHubClient {
             });
 
             status = response.data.status as CompareCommitsStatus;
+            if (response.data.total_commits !== undefined) {
+              totalCommits = response.data.total_commits;
+            }
             const pageFiles = (response.data.files ?? []) as GitHubPullRequestFile[];
             allFiles.push(...pageFiles);
 
@@ -270,6 +196,7 @@ export function createOctokitClient(token: string): GitHubClient {
           return {
             status,
             files: allFiles,
+            ...(totalCommits !== undefined ? { totalCommits } : {}),
           };
         } catch (error: unknown) {
           if (
@@ -297,6 +224,97 @@ export function createOctokitClient(token: string): GitHubClient {
             number: response.data.number,
             html_url: response.data.html_url,
           };
+        } catch (error) {
+          sanitizeError(error, token);
+        }
+      },
+
+      async listReviewCommentsPage(params: ListReviewCommentsParams): Promise<GitHubReviewComment[]> {
+        try {
+          const response = await octokit.rest.pulls.listReviewComments({
+            owner: params.owner,
+            repo: params.repo,
+            pull_number: params.pull_number,
+            ...(params.page !== undefined ? { page: params.page } : {}),
+            ...(params.per_page !== undefined ? { per_page: params.per_page } : {}),
+          });
+          return response.data as GitHubReviewComment[];
+        } catch (error) {
+          sanitizeError(error, token);
+        }
+      },
+
+      async listIssueCommentsPage(params: ListIssueCommentsParams): Promise<GitHubIssueComment[]> {
+        try {
+          const response = await octokit.rest.issues.listComments({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.issue_number,
+            ...(params.page !== undefined ? { page: params.page } : {}),
+            ...(params.per_page !== undefined ? { per_page: params.per_page } : {}),
+          });
+          return response.data as GitHubIssueComment[];
+        } catch (error) {
+          sanitizeError(error, token);
+        }
+      },
+
+      async createIssueComment(params: CreateIssueCommentParams): Promise<{ id: number }> {
+        try {
+          const response = await octokit.rest.issues.createComment({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.issue_number,
+            body: params.body,
+          });
+          return { id: response.data.id };
+        } catch (error) {
+          sanitizeError(error, token);
+        }
+      },
+
+      async addLabels(params: AddLabelsParams): Promise<void> {
+        try {
+          await octokit.rest.issues.addLabels({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.issue_number,
+            labels: params.labels,
+          });
+        } catch (error) {
+          sanitizeError(error, token);
+        }
+      },
+
+      async removeLabel(params: RemoveLabelParams): Promise<void> {
+        try {
+          await octokit.rest.issues.removeLabel({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.issue_number,
+            name: params.name,
+          });
+        } catch (error: unknown) {
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'status' in error &&
+            (error as { status: unknown }).status === 404
+          ) {
+            return;
+          }
+          sanitizeError(error, token);
+        }
+      },
+
+      async getCollaboratorPermission(params: GetCollaboratorPermissionParams): Promise<GitHubCollaboratorPermission> {
+        try {
+          const response = await octokit.rest.repos.getCollaboratorPermissionLevel({
+            owner: params.owner,
+            repo: params.repo,
+            username: params.username,
+          });
+          return { permission: response.data.permission };
         } catch (error) {
           sanitizeError(error, token);
         }

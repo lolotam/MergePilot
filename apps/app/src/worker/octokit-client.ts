@@ -1,18 +1,27 @@
 import type {
+  AddLabelsParams,
   CompareCommitsParams,
   CompareCommitsResult,
   CompareCommitsStatus,
+  CreateIssueCommentParams,
   CreateReviewParams,
+  GetCollaboratorPermissionParams,
   GetFileContentParams,
   GetPullRequestParams,
   GitHubClient,
+  GitHubCollaboratorPermission,
   GitHubCreatedReview,
   GitHubDraftReviewComment,
+  GitHubIssueComment,
   GitHubPullRequest,
   GitHubPullRequestFile,
   GitHubReview,
+  GitHubReviewComment,
   ListFilesPageParams,
+  ListIssueCommentsParams,
+  ListReviewCommentsParams,
   ListReviewsPageParams,
+  RemoveLabelParams,
 } from '@mergepilot/github';
 
 export interface OctokitLike {
@@ -31,6 +40,13 @@ export interface OctokitLike {
         pull_number: number;
       }): Promise<{ data: unknown }>;
       listReviews(params: {
+        owner: string;
+        repo: string;
+        pull_number: number;
+        page?: number;
+        per_page?: number;
+      }): Promise<{ data: unknown[] }>;
+      listReviewComments?(params: {
         owner: string;
         repo: string;
         pull_number: number;
@@ -60,15 +76,45 @@ export interface OctokitLike {
         basehead: string;
         page?: number;
         per_page?: number;
-      }): Promise<{ data: { status: string; files?: unknown[] } }>;
+      }): Promise<{ data: { status: string; total_commits?: number; files?: unknown[] } }>;
+      getCollaboratorPermissionLevel?(params: {
+        owner: string;
+        repo: string;
+        username: string;
+      }): Promise<{ data: { permission?: string } }>;
     };
     issues?: {
-      create(params: {
+      create?(params: {
         owner: string;
         repo: string;
         title: string;
         body?: string;
       }): Promise<{ data: { id: number; number: number; html_url?: string } }>;
+      listComments?(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        page?: number;
+        per_page?: number;
+      }): Promise<{ data: unknown[] }>;
+      createComment?(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        body: string;
+      }): Promise<{ data: { id: number; body?: string } }>;
+      addLabels?(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        labels: string[];
+      }): Promise<{ data: unknown }>;
+      removeLabel?(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        name: string;
+      }): Promise<{ data: unknown }>;
     };
   };
 }
@@ -164,6 +210,7 @@ export function wrapOctokit(octokit: OctokitLike): GitHubClient {
         const PAGE_SIZE = 100;
         let page = 1;
         let status: CompareCommitsStatus = 'identical';
+        let totalCommits: number | undefined;
         const allFiles: GitHubPullRequestFile[] = [];
 
         while (true) {
@@ -176,6 +223,9 @@ export function wrapOctokit(octokit: OctokitLike): GitHubClient {
           });
 
           status = response.data.status as CompareCommitsStatus;
+          if (response.data.total_commits !== undefined) {
+            totalCommits = response.data.total_commits;
+          }
           const pageFiles = (response.data.files ?? []) as GitHubPullRequestFile[];
           allFiles.push(...pageFiles);
 
@@ -188,6 +238,7 @@ export function wrapOctokit(octokit: OctokitLike): GitHubClient {
         return {
           status,
           files: allFiles,
+          ...(totalCommits !== undefined ? { totalCommits } : {}),
         };
       } catch (error: unknown) {
         if (
@@ -202,8 +253,84 @@ export function wrapOctokit(octokit: OctokitLike): GitHubClient {
       }
     },
 
+    async listReviewCommentsPage(params: ListReviewCommentsParams): Promise<GitHubReviewComment[]> {
+      if (!octokit.rest.pulls.listReviewComments) return [];
+      const response = await octokit.rest.pulls.listReviewComments({
+        owner: params.owner,
+        repo: params.repo,
+        pull_number: params.pull_number,
+        ...(params.page !== undefined ? { page: params.page } : {}),
+        ...(params.per_page !== undefined ? { per_page: params.per_page } : {}),
+      });
+      return response.data as GitHubReviewComment[];
+    },
+
+    async listIssueCommentsPage(params: ListIssueCommentsParams): Promise<GitHubIssueComment[]> {
+      if (!octokit.rest.issues?.listComments) return [];
+      const response = await octokit.rest.issues.listComments({
+        owner: params.owner,
+        repo: params.repo,
+        issue_number: params.issue_number,
+        ...(params.page !== undefined ? { page: params.page } : {}),
+        ...(params.per_page !== undefined ? { per_page: params.per_page } : {}),
+      });
+      return response.data as GitHubIssueComment[];
+    },
+
+    async createIssueComment(params: CreateIssueCommentParams) {
+      if (!octokit.rest.issues?.createComment) {
+        throw new Error('issues.createComment is not supported');
+      }
+      const response = await octokit.rest.issues.createComment({
+        owner: params.owner,
+        repo: params.repo,
+        issue_number: params.issue_number,
+        body: params.body,
+      });
+      return {
+        id: response.data.id,
+        ...(response.data.body ? { body: response.data.body } : {}),
+      };
+    },
+
+    async addLabels(params: AddLabelsParams): Promise<void> {
+      if (!octokit.rest.issues?.addLabels) return;
+      await octokit.rest.issues.addLabels({
+        owner: params.owner,
+        repo: params.repo,
+        issue_number: params.issue_number,
+        labels: params.labels,
+      });
+    },
+
+    async removeLabel(params: RemoveLabelParams): Promise<void> {
+      if (!octokit.rest.issues?.removeLabel) return;
+      await octokit.rest.issues.removeLabel({
+        owner: params.owner,
+        repo: params.repo,
+        issue_number: params.issue_number,
+        name: params.name,
+      });
+    },
+
+    async getCollaboratorPermission(
+      params: GetCollaboratorPermissionParams,
+    ): Promise<GitHubCollaboratorPermission> {
+      if (!octokit.rest.repos.getCollaboratorPermissionLevel) return { permission: 'none' };
+      try {
+        const response = await octokit.rest.repos.getCollaboratorPermissionLevel({
+          owner: params.owner,
+          repo: params.repo,
+          username: params.username,
+        });
+        return { permission: response.data.permission ?? 'none' };
+      } catch {
+        return { permission: 'none' };
+      }
+    },
+
     async createIssue(params: { owner: string; repo: string; title: string; body?: string }) {
-      if (!octokit.rest.issues) {
+      if (!octokit.rest.issues?.create) {
         throw new Error('issues.create is not supported by this Octokit instance');
       }
       const response = await octokit.rest.issues.create({

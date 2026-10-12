@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import { classifyFile } from '../diff/classify-file.js';
-import { parsePatch } from '../diff/parse-patch.js';
+import { parsePatch, type ParsedPatch } from '../diff/parse-patch.js';
 import type { LlmFailure } from '../llm/failure.js';
 import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
@@ -51,6 +51,8 @@ export interface RunReviewInput {
   config: MergePilotConfig;
   pr: { title: string; body: string };
   files: PrFile[];
+  /** Optional full PR files to anchor inline findings to PR patch lines (used during incremental review). */
+  anchorFiles?: PrFile[] | undefined;
   rulesFiles: RulesFile[];
   model: ReviewModel;
   /** Explicit fallback models (ADR-0008); defaults to `model.fallbacks`, else none. */
@@ -290,12 +292,16 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     minSeverity: reviewCfg.minSeverity as Severity,
   });
 
-  // Build patch index for anchoring
-  const patchIndex = new Map(
-    redactedReviewableFiles
-      .filter((f) => f.patch)
-      .map((f) => [f.path, parsePatch(f.patch)]),
-  );
+  // Build patch index for anchoring. An incremental review passes the full PR diff as
+  // `anchorFiles`: inline comments must land on lines of the PR's own patch, and only on its
+  // RIGHT side (the reviewed patch's LEFT lines belong to the previous head, not the PR base).
+  const anchorSource = input.anchorFiles ?? redactedReviewableFiles;
+  const patchIndex = new Map<string, ParsedPatch>();
+  for (const f of anchorSource) {
+    if (!f.patch) continue;
+    const parsed = parsePatch(f.patch);
+    patchIndex.set(f.path, input.anchorFiles ? { ...parsed, leftLines: new Set<number>() } : parsed);
+  }
 
   const { inline, summaryOnly } = anchorFindings(selected, patchIndex);
 

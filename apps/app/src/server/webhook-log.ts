@@ -13,10 +13,18 @@ export function webhookPayloadFields(payload: unknown): {
   const obj = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {};
   const repository = obj.repository as { full_name?: unknown } | undefined;
   const pullRequest = obj.pull_request as { number?: unknown } | undefined;
+  // An issue_comment on a PR carries the PR number as `issue.number` (with `issue.pull_request` set).
+  const issue = obj.issue as { number?: unknown; pull_request?: unknown } | undefined;
+  const prNumber =
+    typeof pullRequest?.number === 'number'
+      ? pullRequest.number
+      : issue?.pull_request && typeof issue.number === 'number'
+        ? issue.number
+        : null;
   return {
     action: typeof obj.action === 'string' ? obj.action : null,
     repo: typeof repository?.full_name === 'string' ? repository.full_name : null,
-    pr: typeof pullRequest?.number === 'number' ? pullRequest.number : null,
+    pr: prNumber,
   };
 }
 
@@ -35,6 +43,8 @@ export function webhookOutcomeFields(result: WebhookResult): Record<string, stri
   switch (result.status) {
     case 'enqueued':
       return { outcome: 'queued' };
+    case 'command_queued':
+      return { outcome: 'queued', command: result.job.command };
     case 'duplicate':
       return { outcome: 'duplicate' };
     case 'ignored':

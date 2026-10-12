@@ -9,6 +9,14 @@ import {
 } from '@mergepilot/engine';
 import type { GitHubClient } from './client.js';
 import { readFilesAtRef, type FileContent } from './contents.js';
+import { deduplicateFindings } from './dedupe.js';
+import {
+  hasNothingNewToReview,
+  NOTHING_NEW_DETAIL,
+  reviewScopeOf,
+  selectIncrementalFiles,
+} from './incremental.js';
+import { isPrPaused, postPauseNoticeOnce } from './pause.js';
 import { listPullRequestFiles } from './pr-files.js';
 import { publishReview, type PublishReviewResult } from './publish.js';
 import { renderReviewSummary } from './summary.js';
@@ -76,7 +84,7 @@ export interface ReviewPullRequestContext {
 }
 
 export interface ReviewPullRequestResult {
-  outcome: 'completed' | 'skipped-budget' | 'failed';
+  outcome: 'completed' | 'skipped' | 'skipped-budget' | 'failed';
   costUsd?: number | undefined;
   detail?: string | undefined;
   publish: PublishReviewResult;
@@ -113,6 +121,33 @@ export async function reviewPullRequest(
     log,
   } = ctx;
 
+  // 1. Check pause state before running review or calling model
+  const pr = await client.getPullRequest({ owner, repo, pull_number: pullNumber });
+  const prLabels = pr.labels?.map((l) => l.name) ?? [];
+  const paused = await isPrPaused(client, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    publisherLogin,
+    labels: prLabels,
+  });
+
+  if (paused) {
+    log?.('MergePilot skipped: automatic reviews are paused on this PR');
+    await postPauseNoticeOnce(client, {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      publisherLogin,
+      language: config.language,
+    });
+    return {
+      outcome: 'skipped',
+      detail: 'automatic reviews are paused on this PR',
+      publish: { status: 'skipped-paused' },
+    };
+  }
+
   log?.(`Listing files for pull request #${pullNumber}...`);
   const { files: prFiles } = await listPullRequestFiles(client, {
     owner,
@@ -121,6 +156,27 @@ export async function reviewPullRequest(
   });
   log?.(`Found ${prFiles.length} files in PR diff`);
 
+  const selection = await selectIncrementalFiles(client, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    headSha,
+    publisherLogin,
+    prFiles,
+    configHash,
+  });
+
+  const filesToReview = selection.files;
+  log?.(
+    selection.mode === 'incremental'
+      ? `Incremental review: ${filesToReview.length} files changed since ${selection.sinceSha.slice(0, 7)}`
+      : `Full review: ${selection.reason}`,
+  );
+  if (hasNothingNewToReview(selection)) {
+    log?.(`MergePilot skipped: ${NOTHING_NEW_DETAIL}`);
+    return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL, publish: { status: 'skipped-no-changes' } };
+  }
+
   log?.('Running review...');
   const reviewResult = await runReview({
     config,
@@ -128,7 +184,8 @@ export async function reviewPullRequest(
       title: prTitle,
       body: prBody,
     },
-    files: prFiles,
+    files: filesToReview,
+    anchorFiles: prFiles,
     rulesFiles,
     model,
     knownSecrets,
@@ -144,6 +201,8 @@ export async function reviewPullRequest(
         }
       : {};
 
+  const scope = reviewScopeOf(selection);
+
   const envVar = PROVIDER_ENV_MAP[config.provider] ?? 'API key';
   let summaryMarkdown: string;
   let inlineFindings: Finding[];
@@ -154,16 +213,29 @@ export async function reviewPullRequest(
   if (reviewResult.status === 'completed') {
     outcome = 'completed';
     costUsd = reviewResult.costUsd;
-    inlineFindings = reviewResult.inline;
+
+    const deduped = await deduplicateFindings(client, {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      publisherLogin,
+      findings: reviewResult.inline,
+    });
+    inlineFindings = deduped.kept;
+    if (deduped.dropped.length > 0) {
+      log?.(`Dropped ${deduped.dropped.length} duplicate findings already commented on this PR`);
+    }
+
     summaryMarkdown = renderReviewSummary({
       language: config.language,
       summary: reviewResult.summary,
       summaryOnly: reviewResult.summaryOnly,
-      inlineCount: reviewResult.inline.length,
+      inlineCount: inlineFindings.length,
       complete: reviewResult.complete,
       incompleteReasons: reviewResult.result.incompleteReasons,
       modelLabel: model.label,
       ...fallbackSummary,
+      scope,
       outcome: 'completed',
       ...(reviewResult.costUsd !== undefined ? { costUsd: reviewResult.costUsd } : {}),
       ...(reviewResult.usage?.inputTokens !== undefined
@@ -185,6 +257,7 @@ export async function reviewPullRequest(
       complete: false,
       incompleteReasons: [reviewResult.reason],
       modelLabel: model.label,
+      scope,
       outcome: 'skipped-budget',
       reason: reviewResult.reason,
     });
@@ -214,6 +287,7 @@ export async function reviewPullRequest(
       incompleteReasons: [reason],
       modelLabel: model.label,
       ...fallbackSummary,
+      scope,
       outcome: 'failed',
       reason,
     });
@@ -231,6 +305,8 @@ export async function reviewPullRequest(
     language: config.language,
     suggestionsAsCode: false,
     publisherLogin,
+    partial: outcome !== 'completed',
+    alreadyDeduplicated: true,
   });
   log?.(`Review publication outcome: ${publish.status}`);
 

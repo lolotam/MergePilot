@@ -1,4 +1,5 @@
 import type { Finding } from '@mergepilot/engine';
+import { computeFindingFingerprint } from './dedupe.js';
 
 export interface RenderFindingOptions {
   language: 'ar' | 'en';
@@ -56,6 +57,9 @@ export function renderFindingComment(
       sections.push(`**${labels.suggestion}:**\n${finding.suggestion}`);
     }
   }
+
+  const fingerprint = computeFindingFingerprint(finding);
+  sections.push(`<!-- mp:f=${fingerprint} -->`);
 
   return sections.join('\n\n');
 }

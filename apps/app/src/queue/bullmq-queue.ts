@@ -1,6 +1,11 @@
 import { Queue, type ConnectionOptions } from 'bullmq';
 import { Redis } from 'ioredis';
-import type { ReviewJob, ReviewQueue } from '../core/types.js';
+import type { PauseCommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
+
+/** Job name of a pause/resume command on the shared 'reviews' queue (reviews use 'review'). */
+export const PAUSE_COMMAND_JOB_NAME = 'pause-command';
+
+export type QueueJobData = ReviewJob | PauseCommandJob;
 
 /**
  * Creates an ioredis client configured for BullMQ (maxRetriesPerRequest: null).
@@ -16,25 +21,25 @@ export function createQueueConnection(redisUrl: string): Redis {
 export interface BullMqReviewQueueOptions {
   connection?: Redis | ConnectionOptions;
   redisUrl?: string;
-  queue?: Queue<ReviewJob>;
+  queue?: Queue<QueueJobData>;
 }
 
 export class BullMqReviewQueue implements ReviewQueue {
-  readonly queue: Queue<ReviewJob>;
+  readonly queue: Queue<QueueJobData>;
 
   constructor(options?: string | BullMqReviewQueueOptions) {
     if (typeof options === 'string') {
-      this.queue = new Queue<ReviewJob>('reviews', {
+      this.queue = new Queue<QueueJobData>('reviews', {
         connection: createQueueConnection(options),
       });
     } else if (options?.queue) {
       this.queue = options.queue;
     } else if (options?.connection) {
-      this.queue = new Queue<ReviewJob>('reviews', {
+      this.queue = new Queue<QueueJobData>('reviews', {
         connection: options.connection,
       });
     } else if (options?.redisUrl) {
-      this.queue = new Queue<ReviewJob>('reviews', {
+      this.queue = new Queue<QueueJobData>('reviews', {
         connection: createQueueConnection(options.redisUrl),
       });
     } else {
@@ -50,6 +55,15 @@ export class BullMqReviewQueue implements ReviewQueue {
         type: 'exponential',
         delay: 1000,
       },
+      removeOnComplete: 1000,
+    });
+  }
+
+  async enqueueCommand(job: PauseCommandJob): Promise<void> {
+    await this.queue.add(PAUSE_COMMAND_JOB_NAME, job, {
+      jobId: `cmd-${job.deliveryId}`,
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 1000 },
       removeOnComplete: 1000,
     });
   }

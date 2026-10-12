@@ -366,5 +366,61 @@ describe('renderReviewSummary', () => {
       expect(renderedEn).not.toContain('Fallback model');
     });
   });
+
+  describe('review scope (incremental vs full)', () => {
+    it('renders English incremental scope line for multiple commits', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        language: 'en',
+        scope: { mode: 'incremental', sinceSha: 'abcdef1234567890', commitCount: 3 },
+      });
+      expect(rendered).toContain('> Reviewed 3 new commits since `abcdef1`');
+    });
+
+    it('renders English incremental scope line for single commit', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        language: 'en',
+        scope: { mode: 'incremental', sinceSha: 'abcdef1234567890', commitCount: 1 },
+      });
+      expect(rendered).toContain('> Reviewed 1 new commit since `abcdef1`');
+    });
+
+    it('renders Arabic incremental scope line', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        language: 'ar',
+        scope: { mode: 'incremental', sinceSha: 'abcdef1234567890', commitCount: 4 },
+      });
+      expect(rendered).toContain('> تمت مراجعة 4 من الالتزامات الجديدة منذ `abcdef1`');
+    });
+
+    it('renders English full review scope line', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        language: 'en',
+        scope: { mode: 'full' },
+      });
+      expect(rendered).toContain('> Full review');
+    });
+
+    it('renders English full review scope line with reason', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        language: 'en',
+        scope: { mode: 'full', reason: 'history rewritten since last review' },
+      });
+      expect(rendered).toContain('> Full review (history rewritten since last review)');
+    });
+
+    it('renders Arabic full review scope line', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        language: 'ar',
+        scope: { mode: 'full' },
+      });
+      expect(rendered).toContain('> مراجعة كاملة');
+    });
+  });
 });
 
