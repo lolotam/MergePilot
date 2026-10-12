@@ -109,6 +109,14 @@ export function registerDashboardApi(
       if (problem) return sendError(reply, 400, problem.code, problem.message);
 
       await deps.store.saveSettings(merged);
+      request.log.info(
+        {
+          event: 'settings.changed',
+          workspaceId,
+          changedFields: Object.keys(parsed.data),
+        },
+        'Workspace settings updated',
+      );
       const { workspaceId: _ws, ...settings } = merged;
       return reply.status(200).send({ settings });
     },
@@ -191,6 +199,14 @@ export function registerDashboardApi(
           baseUrl,
         });
         invalidateModelsCache(workspaceId, provider);
+        request.log.info(
+          {
+            event: 'credential.key_saved',
+            workspaceId,
+            provider,
+          },
+          'Provider API key saved',
+        );
 
         return reply.status(200).send({
           provider: saved.provider,
@@ -223,6 +239,14 @@ export function registerDashboardApi(
 
       await deps.credentials.deleteKey(workspaceId, providerParse.data);
       invalidateModelsCache(workspaceId, providerParse.data);
+      request.log.info(
+        {
+          event: 'credential.key_deleted',
+          workspaceId,
+          provider: providerParse.data,
+        },
+        'Provider API key deleted',
+      );
       return reply.status(204).send();
     },
   );

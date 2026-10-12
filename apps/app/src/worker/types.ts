@@ -27,6 +27,7 @@ export interface ProcessReviewDeps {
     secret: Secret,
   ) => Promise<ReviewModel> | ReviewModel;
   log?: (message: string) => void;
+  logger?: import('pino').Logger | undefined;
   now?: () => Date;
   /** Heartbeat interval while a review runs (default RUN_HEARTBEAT_INTERVAL_MS, 60 s). */
   heartbeatIntervalMs?: number | undefined;

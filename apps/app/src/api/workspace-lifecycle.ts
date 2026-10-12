@@ -37,6 +37,13 @@ export function registerWorkspaceLifecycleRoutes(
       }
 
       await orgAdapter.updateOrganization(workspaceId, { name });
+      request.log.info(
+        {
+          event: 'workspace.renamed',
+          workspaceId,
+        },
+        'Workspace renamed',
+      );
 
       return reply.status(200).send({ id: workspaceId, name });
     },
@@ -74,6 +81,14 @@ export function registerWorkspaceLifecycleRoutes(
         // Local-dev MemoryStore keeps no auth tables; remove the organization through Better Auth.
         await orgAdapter.deleteOrganization(workspaceId);
       }
+
+      request.log.info(
+        {
+          event: 'workspace.deleted',
+          workspaceId,
+        },
+        'Workspace deleted',
+      );
 
       return reply.status(204).send();
     },

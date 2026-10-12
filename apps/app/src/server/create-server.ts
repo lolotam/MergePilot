@@ -1,11 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import fastify, {
+  LogController,
   type FastifyBaseLogger,
   type FastifyHttpOptions,
   type FastifyInstance,
-  type FastifyRequest,
   type RawServerDefault,
 } from 'fastify';
+import { redactSecrets } from '@mergepilot/engine';
 import type { AppConfig } from '../core/config.js';
+import { createLogger } from '../core/logger.js';
 import type { AppStore, ReviewQueue } from '../core/types.js';
 import { handleWebhook } from '../webhooks/handle.js';
 import { verifyGitHubSignature } from '../webhooks/verify.js';
@@ -40,28 +43,152 @@ export function createServer({
     bodyLimit: DEFAULT_BODY_LIMIT,
   };
 
-  if (log === false) {
+  const isLoggingDisabled = log === false;
+  if (isLoggingDisabled) {
     serverOptions.logger = false;
-  } else if (typeof log === 'object' && log !== null) {
-    serverOptions.loggerInstance = log;
   } else {
-    serverOptions.logger = {
-      level: 'info',
-      serializers: {
-        req(req: FastifyRequest) {
-          // Request logging that never logs bodies or headers with secrets
-          return {
-            method: req.method,
-            url: req.url,
-            hostname: req.hostname ?? '',
-            remoteAddress: req.ip ?? '',
-          };
-        },
-      },
+    serverOptions.loggerInstance =
+      typeof log === 'object' && log !== null ? log : createLogger({ service: 'web' });
+    serverOptions.logController = new LogController({
+      disableRequestLogging: true,
+      requestIdLogLabel: 'reqId',
+    });
+    serverOptions.genReqId = (req) => {
+      const incoming = req.headers['x-request-id'];
+      const val = Array.isArray(incoming) ? incoming[0] : incoming;
+      if (typeof val === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(val.trim())) {
+        return val.trim();
+      }
+      return randomUUID();
     };
   }
 
   const app = fastify(serverOptions);
+
+  if (!isLoggingDisabled) {
+    app.addHook('onSend', async (request, reply, payload) => {
+      reply.header('x-request-id', request.id);
+      if (reply.statusCode >= 400 && reply.statusCode < 500 && typeof payload === 'string') {
+        try {
+          const parsed = JSON.parse(payload) as Record<string, unknown>;
+          const errObj = parsed?.error as Record<string, unknown> | undefined;
+          const c = errObj?.code ?? parsed?.code;
+          if (typeof c === 'string') {
+            (request as unknown as { _errorCode?: string })._errorCode = c;
+          }
+        } catch {
+          // payload is not json
+        }
+      }
+      return payload;
+    });
+
+    app.addHook('onError', async (request, _reply, error) => {
+      (request as unknown as { _routeError?: Error })._routeError = error;
+    });
+
+    app.addHook('onResponse', async (request, reply) => {
+      const url = request.url ?? '';
+      const path = url.split('?')[0] ?? '';
+      const route = request.routeOptions?.url ?? path;
+      const reqId = request.id;
+      const method = request.method;
+      const statusCode = reply.statusCode;
+      const durationMs = Math.round(reply.elapsedTime * 100) / 100;
+      const clientIp = request.ip ?? '';
+
+      const params = request.params as { workspaceId?: string } | undefined;
+      const workspaceId = params?.workspaceId;
+
+      const authReq = request as unknown as {
+        auth?: { userId?: string };
+        session?: { user?: { id?: string } };
+        user?: { id?: string };
+      };
+      const userId = authReq.auth?.userId ?? authReq.session?.user?.id ?? authReq.user?.id;
+
+      const isStatic =
+        path.startsWith('/assets/') ||
+        /\.(js|css|png|svg|ico|woff2|woff|ttf|json|map)$/.test(path);
+      const isHealth = path === '/health';
+
+      if (statusCode >= 500) {
+        const err = (request as unknown as { _routeError?: Error })._routeError;
+        request.log.error(
+          {
+            reqId,
+            method,
+            route,
+            path,
+            statusCode,
+            durationMs,
+            ...(userId ? { userId } : {}),
+            ...(workspaceId ? { workspaceId } : {}),
+            clientIp,
+            ...(err
+              ? {
+                  err: {
+                    type: err.name,
+                    message: redactSecrets(err.message).text,
+                    stack: redactSecrets(err.stack ?? '').text,
+                  },
+                }
+              : {}),
+          },
+          'request completed',
+        );
+      } else if (statusCode >= 400) {
+        const code =
+          (request as unknown as { _errorCode?: string })._errorCode ??
+          (request as unknown as { _routeError?: { code?: string } })._routeError?.code;
+        request.log.warn(
+          {
+            reqId,
+            method,
+            route,
+            path,
+            statusCode,
+            durationMs,
+            ...(userId ? { userId } : {}),
+            ...(workspaceId ? { workspaceId } : {}),
+            clientIp,
+            ...(code ? { code } : {}),
+          },
+          'request completed',
+        );
+      } else if (isHealth || isStatic) {
+        request.log.debug(
+          {
+            reqId,
+            method,
+            route,
+            path,
+            statusCode,
+            durationMs,
+            ...(userId ? { userId } : {}),
+            ...(workspaceId ? { workspaceId } : {}),
+            clientIp,
+          },
+          'request completed',
+        );
+      } else {
+        request.log.info(
+          {
+            reqId,
+            method,
+            route,
+            path,
+            statusCode,
+            durationMs,
+            ...(userId ? { userId } : {}),
+            ...(workspaceId ? { workspaceId } : {}),
+            clientIp,
+          },
+          'request completed',
+        );
+      }
+    });
+  }
 
   // Keep raw Buffer for /webhooks/github; parse JSON for other routes
   app.addContentTypeParser(
@@ -94,6 +221,21 @@ export function createServer({
 
     // Verify signature first before parsing JSON
     if (!verifyGitHubSignature(rawBody, signature, config.github.webhookSecret)) {
+      const rawEvent = request.headers['x-github-event'];
+      const event = (Array.isArray(rawEvent) ? rawEvent[0] : rawEvent) ?? '';
+      const rawDelivery = request.headers['x-github-delivery'];
+      const deliveryId = (Array.isArray(rawDelivery) ? rawDelivery[0] : rawDelivery) ?? '';
+      request.log.warn(
+        {
+          event,
+          action: null,
+          deliveryId,
+          repo: null,
+          pr: null,
+          outcome: 'invalid-signature',
+        },
+        'webhook received',
+      );
       return reply.status(401).send({ error: 'Invalid signature' });
     }
 
@@ -114,9 +256,46 @@ export function createServer({
       return reply.status(400).send({ error: 'Missing X-GitHub-Delivery' });
     }
 
+    const payloadObj = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {};
+    const action = typeof payloadObj.action === 'string' ? payloadObj.action : null;
+    const repo = typeof (payloadObj.repository as { full_name?: string } | undefined)?.full_name === 'string'
+      ? (payloadObj.repository as { full_name: string }).full_name
+      : null;
+    const pr = typeof (payloadObj.pull_request as { number?: number } | undefined)?.number === 'number'
+      ? (payloadObj.pull_request as { number: number }).number
+      : null;
+
     const result = await handleWebhook(
       { event, deliveryId, payload },
       { store, queue, log: request.log },
+    );
+
+    const outcome = result.status === 'enqueued'
+      ? 'queued'
+      : result.status === 'duplicate'
+        ? 'duplicate'
+        : 'ignored';
+
+    if (result.status === 'installation_deleted') {
+      request.log.info(
+        {
+          event: 'installation.unlinked',
+          installationId: result.installationId,
+        },
+        'Installation unlinked',
+      );
+    }
+
+    request.log.info(
+      {
+        event,
+        action,
+        deliveryId,
+        repo,
+        pr,
+        outcome,
+      },
+      'webhook received',
     );
 
     return reply.status(202).send(result);

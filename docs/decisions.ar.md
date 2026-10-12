@@ -153,3 +153,18 @@
 - «in Provider API Keys in the tabel recoords for evcery model add test icon to test if sucesfull connected or failed»
 - «yes add all these suggestion make the user slect the model for heavy duty» (الاقتراحات: effort high، نموذج أقوى للـ PRs الكبيرة، تحديد الحد الأدنى للخطورة)
 
+## الدفعة 6 — 2026-10-12
+
+### س18: تسجيل الطلبات وسجلات النظام المهيكلة (Structured Logging)
+
+**طلب صاحب المشروع (بنصّه):**
+«i want the server to log these requests and any reequests so in the future any issue will appear in the log»
+
+**القرار والنتيجة:**
+- بناء نظام تسجيل موحد (`core/logger.ts`) باستخدام Pino يخرج JSON Lines مع طوابع زمنية ISO وتحديد الخدمة (`service: 'web' | 'worker'`).
+- تفعيل التسجيل في بيئة الإنتاج لخادم الويب (`web`) ومعالج المهام (`worker`) مع مستوى تسجيل افتراضي `info` قابل للتغيير عبر `LOG_LEVEL`.
+- تسجيل كل طلب HTTP بسطر اكتمال مهيكل يتضمن `reqId`، المسار، كود الحالة، زمن التنفيذ، ومعرفات المستخدم ومساحة العمل وعنوان الـ IP، مع تعتيم كافة الأسرار والمفاتيح والهيدرز الحساسة.
+- تسجيل أحداث النطاق (Domain Events) وأحداث معالجة المهام ومراجعة الـ PRs بالكامل.
+- تدوير السجلات تلقائياً في Docker (`max-size: 10m, max-file: 5`).
+
+

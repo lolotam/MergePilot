@@ -6,6 +6,7 @@ export const RUN_HEARTBEAT_INTERVAL_MS = 60 * 1000;
 export interface RunHeartbeatOptions {
   intervalMs?: number | undefined;
   log?: ((message: string) => void) | undefined;
+  logger?: import('pino').Logger | undefined;
 }
 
 /**
@@ -24,6 +25,10 @@ export function startRunHeartbeat(
       // Only the error name: a driver message could echo connection details.
       const name = error instanceof Error ? error.name : 'unknown error';
       options.log?.(`Heartbeat for review run ${runId} failed: ${name}`);
+      options.logger?.warn(
+        { event: 'run.heartbeat_failed', runId, workspaceId, errName: name },
+        `Heartbeat for review run ${runId} failed: ${name}`,
+      );
     });
   }, intervalMs);
   timer.unref?.();
