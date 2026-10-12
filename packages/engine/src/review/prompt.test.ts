@@ -23,6 +23,12 @@ function makeFile(path: string, patch: string) {
 // ---------------------------------------------------------------------------
 
 describe('buildReviewPrompt', () => {
+  it('tells the model that escaped delimiters in code are not typos', () => {
+    const { system } = buildReviewPrompt(MINIMAL_INPUT);
+    expect(system).toContain('‹‹‹ and ››› are the escaped forms of <<< and >>>');
+    expect(system).toContain('never report them as typos');
+  });
+
   it('returns non-empty system and user strings', () => {
     const { system, user } = buildReviewPrompt(MINIMAL_INPUT);
     expect(system.length).toBeGreaterThan(0);
