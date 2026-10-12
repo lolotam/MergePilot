@@ -82,9 +82,7 @@ describe('i18n keys and parity', () => {
     expect(localStorage.getItem('mergepilot_lang')).toBe('ar');
   });
 
-  it('loads saved language from localStorage on initialization', () => {
-    localStorage.setItem('mergepilot_lang', 'en');
-
+  it('opens in English by default when nothing is saved', () => {
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       React.createElement(I18nProvider, null, children)
     );
@@ -92,6 +90,18 @@ describe('i18n keys and parity', () => {
     const { result } = renderHook(() => useI18n(), { wrapper });
     expect(result.current.language).toBe('en');
     expect(result.current.dir).toBe('ltr');
+  });
+
+  it('loads saved language from localStorage on initialization', () => {
+    localStorage.setItem('mergepilot_lang', 'ar');
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      React.createElement(I18nProvider, null, children)
+    );
+
+    const { result } = renderHook(() => useI18n(), { wrapper });
+    expect(result.current.language).toBe('ar');
+    expect(result.current.dir).toBe('rtl');
   });
 
   it('gracefully handles localStorage failures without throwing', () => {
