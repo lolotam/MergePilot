@@ -23,10 +23,14 @@ function makeFile(path: string, patch: string) {
 // ---------------------------------------------------------------------------
 
 describe('buildReviewPrompt', () => {
-  it('tells the model that escaped delimiters in code are not typos', () => {
-    const { system } = buildReviewPrompt(MINIMAL_INPUT);
-    expect(system).toContain('‹‹‹ and ››› are the escaped forms of <<< and >>>');
-    expect(system).toContain('never report them as typos');
+  it('leaves ordinary operators untouched and explains neutralised markers', () => {
+    const patch = '@@ -1,2 +1,2 @@\n+const h = Math.imul(a, b) >>> 0;\n+const m = new Map<string, Set<string>>>();';
+    const { system, user } = buildReviewPrompt({ ...MINIMAL_INPUT, files: [makeFile('src/a.ts', patch)] });
+    expect(user).toContain('Math.imul(a, b) >>> 0');
+    expect(user).toContain('Set<string>>>()');
+    expect(user).not.toContain('›››()');
+    expect(system).toContain('never a block boundary');
+    expect(system).not.toContain('Read them as <<<');
   });
 
   it('returns non-empty system and user strings', () => {
