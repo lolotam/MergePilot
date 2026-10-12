@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import React from 'react';
 import { ar } from './ar.js';
@@ -6,6 +6,14 @@ import { en } from './en.js';
 import { I18nProvider, useI18n } from './context.js';
 
 describe('i18n keys and parity', () => {
+  beforeEach(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      // ignore
+    }
+  });
+
   it('every key exists in both languages with identical keys', () => {
     const arKeys = Object.keys(ar).sort();
     const enKeys = Object.keys(en).sort();
@@ -52,5 +60,58 @@ describe('i18n keys and parity', () => {
     const { result } = renderHook(() => useI18n(), { wrapper });
     const formatted = result.current.t('deleteKeyConfirm', { provider: 'Anthropic' });
     expect(formatted).toContain('Anthropic');
+  });
+
+  it('persists language selection in localStorage', () => {
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      React.createElement(I18nProvider, null, children)
+    );
+
+    const { result } = renderHook(() => useI18n(), { wrapper });
+
+    act(() => {
+      result.current.setLanguage('en');
+    });
+
+    expect(localStorage.getItem('mergepilot_lang')).toBe('en');
+
+    act(() => {
+      result.current.toggleLanguage();
+    });
+
+    expect(localStorage.getItem('mergepilot_lang')).toBe('ar');
+  });
+
+  it('loads saved language from localStorage on initialization', () => {
+    localStorage.setItem('mergepilot_lang', 'en');
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      React.createElement(I18nProvider, null, children)
+    );
+
+    const { result } = renderHook(() => useI18n(), { wrapper });
+    expect(result.current.language).toBe('en');
+    expect(result.current.dir).toBe('ltr');
+  });
+
+  it('gracefully handles localStorage failures without throwing', () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceeded');
+    });
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      React.createElement(I18nProvider, { initialLanguage: 'ar' }, children)
+    );
+
+    const { result } = renderHook(() => useI18n(), { wrapper });
+
+    expect(() => {
+      act(() => {
+        result.current.setLanguage('en');
+      });
+    }).not.toThrow();
+
+    expect(result.current.language).toBe('en');
+    setItemSpy.mockRestore();
   });
 });

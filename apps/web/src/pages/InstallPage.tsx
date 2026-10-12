@@ -41,10 +41,10 @@ export function InstallPage() {
 
   if (!installationIdStr || Number.isNaN(installationId)) {
     return (
-      <div className="max-w-md mx-auto my-12 p-6 bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 text-center">
+      <div className="max-w-md mx-auto my-12 p-6 bg-white dark:bg-ink-900 rounded-xl shadow-md border border-gray-200 dark:border-ink-800 text-center">
         <ShieldAlert className="w-12 h-12 text-amber-500 mx-auto mb-3" />
         <h1 className="text-lg font-bold mb-2">{t('missingInstallId')}</h1>
-        <Link to="/" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+        <Link to="/" className="text-sm text-brand-600 dark:text-brand-400 hover:underline">
           {t('goToWorkspaceDashboard')}
         </Link>
       </div>
@@ -61,11 +61,11 @@ export function InstallPage() {
 
   if (linkedSuccess) {
     return (
-      <div className="max-w-md mx-auto my-12 p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 text-center animate-in fade-in">
-        <div className="p-3 bg-green-100 dark:bg-green-900/50 rounded-full text-green-600 dark:text-green-400 w-16 h-16 flex items-center justify-center mx-auto mb-4">
+      <div className="max-w-md mx-auto my-12 p-8 bg-white dark:bg-ink-900 rounded-2xl shadow-xl border border-gray-200 dark:border-ink-800 text-center animate-in fade-in">
+        <div className="p-3 bg-brand-100 dark:bg-brand-950/60 rounded-full text-brand-600 dark:text-brand-400 w-16 h-16 flex items-center justify-center mx-auto mb-4">
           <CheckCircle2 className="w-10 h-10" />
         </div>
-        <h1 className="text-2xl font-bold mb-2 text-gray-900 dark:text-gray-100">
+        <h1 className="text-2xl font-bold mb-2 text-ink-900 dark:text-ink-100">
           {t('installSuccessTitle')}
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
@@ -73,7 +73,7 @@ export function InstallPage() {
         </p>
         <Link
           to={`/w/${selectedWorkspaceId}`}
-          className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium text-sm transition-colors"
+          className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-medium text-sm transition-colors"
         >
           <span>{t('goToWorkspaceDashboard')}</span>
           <ArrowRight className="w-4 h-4" />
@@ -83,9 +83,9 @@ export function InstallPage() {
   }
 
   return (
-    <div className="max-w-md mx-auto my-12 p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700">
+    <div className="max-w-md mx-auto my-12 p-8 bg-white dark:bg-ink-900 rounded-2xl shadow-xl border border-gray-200 dark:border-ink-800">
       <div className="flex items-center gap-3 mb-6">
-        <div className="p-2.5 bg-blue-100 dark:bg-blue-900/50 rounded-xl text-blue-600 dark:text-blue-400">
+        <div className="p-2.5 bg-brand-100 dark:bg-brand-950/60 rounded-xl text-brand-600 dark:text-brand-400">
           <GitPullRequest className="w-6 h-6" />
         </div>
         <div>
@@ -94,7 +94,7 @@ export function InstallPage() {
         </div>
       </div>
 
-      <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-xs font-mono text-gray-600 dark:text-gray-300">
+      <div className="mb-4 p-3 bg-gray-50 dark:bg-ink-800 rounded-lg text-xs font-mono text-gray-600 dark:text-gray-300">
         <span>{t('installIdLabel')}: </span>
         <span className="font-bold">{installationId}</span>
       </div>
@@ -107,7 +107,7 @@ export function InstallPage() {
           <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
             {t('noAdminWorkspacesDesc')}
           </p>
-          <Link to="/" className="inline-block mt-4 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">
+          <Link to="/" className="inline-block mt-4 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
             {t('createWorkspace')}
           </Link>
         </div>
@@ -122,7 +122,7 @@ export function InstallPage() {
               required
               value={selectedWorkspaceId}
               onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               <option value="">{t('selectWorkspacePlaceholder')}</option>
               {adminWorkspaces.map((ws) => (
@@ -136,7 +136,7 @@ export function InstallPage() {
           <button
             type="submit"
             disabled={isSubmitting || !selectedWorkspaceId}
-            className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors focus:ring-2 focus:ring-blue-500 focus:outline-hidden mt-2"
+            className="w-full py-2.5 px-4 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden mt-2"
           >
             {isSubmitting ? t('linkingInstallation') : t('linkWorkspaceAction')}
           </button>

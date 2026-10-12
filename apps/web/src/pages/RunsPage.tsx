@@ -33,7 +33,7 @@ export function RunsPage() {
         );
       case 'running':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-brand-100 text-brand-800 dark:bg-brand-950/50 dark:text-brand-300">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
             <span>{t('statusRunning')}</span>
           </span>
@@ -47,7 +47,7 @@ export function RunsPage() {
         );
       case 'skipped':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800 dark:bg-ink-800 dark:text-gray-300">
             <SkipForward className="w-3.5 h-3.5" />
             <span>{t('statusSkipped')}</span>
           </span>
@@ -66,13 +66,13 @@ export function RunsPage() {
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+        <h1 className="text-2xl font-bold tracking-tight text-ink-900 dark:text-ink-100">
           {t('runsTitle')}
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('runsDesc')}</p>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xs overflow-hidden">
+      <div className="bg-white dark:bg-ink-900 rounded-xl border border-gray-200 dark:border-ink-800 shadow-xs overflow-hidden">
         {isLoading ? (
           <div className="py-12 text-center text-sm text-gray-400">{t('loading')}</div>
         ) : runs.length === 0 ? (
@@ -82,7 +82,7 @@ export function RunsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-start text-sm">
-              <thead className="bg-gray-50/75 dark:bg-gray-750/50 border-b border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
+              <thead className="bg-gray-50/75 dark:bg-ink-800/50 border-b border-gray-200 dark:border-ink-800 text-xs text-gray-500 dark:text-gray-400">
                 <tr>
                   <th className="py-3 px-4 text-start">{t('runStatusCol')}</th>
                   <th className="py-3 px-4 text-start">{t('runRepoCol')}</th>
@@ -93,9 +93,9 @@ export function RunsPage() {
                   <th className="py-3 px-4 text-start">{t('runDetailCol')}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
+              <tbody className="divide-y divide-gray-100 dark:divide-ink-800/60">
                 {runs.map((run) => (
-                  <tr key={run.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-750 transition-colors">
+                  <tr key={run.id} className="hover:bg-gray-50/50 dark:hover:bg-ink-800/40 transition-colors">
                     <td className="py-3 px-4">{getStatusBadge(run.status)}</td>
                     <td className="py-3 px-4 font-medium truncate max-w-[220px]">{run.repoFullName}</td>
                     <td className="py-3 px-4">
@@ -103,7 +103,7 @@ export function RunsPage() {
                         href={`https://github.com/${run.repoFullName}/pull/${run.pullNumber}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-mono text-xs font-semibold"
+                        className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 hover:underline font-mono text-xs font-semibold"
                         title={t('viewPrOnGitHub')}
                       >
                         #{run.pullNumber}
@@ -133,7 +133,7 @@ export function RunsPage() {
                             <HelpCircle className="w-4 h-4" />
                           </button>
                           {activeTooltipId === run.id && (
-                            <div className="absolute end-0 bottom-full mb-2 w-64 p-3 bg-gray-900 text-white dark:bg-gray-700 text-xs rounded-lg shadow-xl z-50">
+                            <div className="absolute end-0 bottom-full mb-2 w-64 p-3 bg-ink-900 text-white dark:bg-ink-800 text-xs rounded-lg shadow-xl z-50">
                               <p className="whitespace-pre-wrap">{run.detail}</p>
                             </div>
                           )}
