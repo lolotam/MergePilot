@@ -14,6 +14,8 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    // No real network in tests: model listing (used to pick a test model) fails fast unless a test mocks it.
+    vi.mocked(listModels).mockRejectedValue(new Error('offline in tests'));
     h = await createProviderHarness(customFetch);
   }, 30000);
 
