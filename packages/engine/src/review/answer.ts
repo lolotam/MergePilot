@@ -44,28 +44,49 @@ const ReviewAnswerLooseSchema = z.object({
 });
 
 
+export type ParseErrorCode = 'truncated' | 'invalid-json' | 'empty-response';
+
+export interface ParseAnswerOptions {
+  finishReason?: string | undefined;
+  outputTokens?: number | undefined;
+}
+
 export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
 
 // ---------------------------------------------------------------------------
 // Parser helpers
 // ---------------------------------------------------------------------------
 
+export interface ExtractedCandidates {
+  candidates: string[];
+  hasUnclosedObject: boolean;
+}
+
 /**
- * Finds the first balanced `{…}` object in `text`, tolerating surrounding prose
- * or a ```json … ``` code fence.
+ * Extracts candidate JSON object substrings from `text`, checking code fences
+ * first and then walking balanced `{…}` spans.
  */
-function extractFirstObject(text: string): string | null {
-  // Try fenced block first
-  const fenceMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  if (fenceMatch) {
-    return fenceMatch[1] ?? null;
+export function extractCandidateObjects(text: string): ExtractedCandidates {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  // 1. Fenced code blocks
+  const fenceRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/g;
+  let fenceMatch: RegExpExecArray | null;
+  while ((fenceMatch = fenceRegex.exec(text)) !== null) {
+    const raw = fenceMatch[1];
+    if (raw && !seen.has(raw)) {
+      seen.add(raw);
+      candidates.push(raw);
+    }
   }
 
-  // Walk character by character to find first balanced top-level object
+  // 2. Character-by-character scan for balanced objects
   let depth = 0;
   let start = -1;
   let inString = false;
   let escape = false;
+  let hasStarted = false;
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -88,16 +109,27 @@ function extractFirstObject(text: string): string | null {
     if (ch === '{') {
       if (depth === 0) {
         start = i;
+        hasStarted = true;
       }
       depth++;
     } else if (ch === '}') {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        return text.slice(start, i + 1);
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          const slice = text.slice(start, i + 1);
+          if (!seen.has(slice)) {
+            seen.add(slice);
+            candidates.push(slice);
+          }
+          start = -1;
+        }
       }
     }
   }
-  return null;
+
+  const hasUnclosedObject = depth > 0 || (start !== -1 && hasStarted) || inString;
+
+  return { candidates, hasUnclosedObject };
 }
 
 // ---------------------------------------------------------------------------
@@ -106,41 +138,75 @@ function extractFirstObject(text: string): string | null {
 
 export type ParseReviewAnswerResult =
   | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code: ParseErrorCode };
 
 /**
  * Parses the model's text output into structured findings.
  *
- * - Tolerates ```json fences and surrounding prose.
+ * - Tolerates ```json fences, surrounding prose, and multiple objects.
+ * - Picks the first balanced object matching the expected schema.
  * - Assigns stable ids `f1`, `f2`, …
  * - Drops individual findings that fail schema validation (counts them).
  * - Never throws.
+ * - Returns clear error codes: `truncated`, `invalid-json`, `empty-response`.
  */
-export function parseReviewAnswer(text: string): ParseReviewAnswerResult {
-  const raw = extractFirstObject(text);
-  if (raw === null) {
-    return { ok: false, error: 'No JSON object found in model response.' };
+export function parseReviewAnswer(
+  text: string,
+  options?: ParseAnswerOptions,
+): ParseReviewAnswerResult {
+  if (!text || text.trim().length === 0) {
+    return { ok: false, code: 'empty-response', error: 'empty-response: model returned no text' };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
+  const { candidates, hasUnclosedObject } = extractCandidateObjects(text);
+
+  let firstParseError: string | null = null;
+  let matchedAnswer: z.infer<typeof ReviewAnswerLooseSchema> | null = null;
+
+  for (const candidate of candidates) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch (err) {
+      if (!firstParseError) {
+        firstParseError = err instanceof Error ? err.message : String(err);
+      }
+      continue;
+    }
+
+    const loose = ReviewAnswerLooseSchema.safeParse(parsed);
+    if (loose.success) {
+      matchedAnswer = loose.data;
+      break;
+    } else if (!firstParseError) {
+      firstParseError = loose.error.message;
+    }
+  }
+
+  if (!matchedAnswer) {
+    const isTruncated =
+      options?.finishReason === 'max-tokens' ||
+      options?.finishReason === 'length' ||
+      hasUnclosedObject;
+
+    if (isTruncated) {
+      const finishDetail = options?.finishReason ? `finishReason: ${options.finishReason}` : 'unclosed JSON object';
+      const tokensDetail = options?.outputTokens !== undefined ? `, outputTokens: ${options.outputTokens}` : '';
+      return {
+        ok: false,
+        code: 'truncated',
+        error: `truncated (${finishDetail}${tokensDetail})`,
+      };
+    }
+
     return {
       ok: false,
-      error: `JSON parse error: ${err instanceof Error ? err.message : String(err)}`,
+      code: 'invalid-json',
+      error: `invalid-json: ${firstParseError ?? 'no valid JSON object found matching review schema'}`,
     };
   }
 
-  const topResult = ReviewAnswerLooseSchema.safeParse(parsed);
-  if (!topResult.success) {
-    return {
-      ok: false,
-      error: `Schema validation failed: ${topResult.error.message}`,
-    };
-  }
-
-  const answer = topResult.data;
+  const answer = matchedAnswer;
   const findings: Finding[] = [];
   let droppedInvalid = 0;
   let idCounter = 1;

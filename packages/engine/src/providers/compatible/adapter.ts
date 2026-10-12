@@ -9,7 +9,7 @@ import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
-import { compatibleEffortFields, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
+import { DEFAULT_THINKING_HEADROOM, compatibleEffortFields, isCompatibleReasoningModel, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
 import { bearerHeaders, failureFromResponse, failureFromThrown, redactKey, type FetchLike, type KeyInput } from '../http.js';
 import type { ApiProviderId } from '../ids.js';
 import { providerEntry, resolveBaseUrl } from '../registry.js';
@@ -23,6 +23,15 @@ export interface OpenAICompatibleAdapterOptions {
   baseUrl?: string;
   fetch?: FetchLike;
 }
+
+/** Presets known to support response_format: { type: "json_object" }. */
+const JSON_OBJECT_SUPPORTED_PRESETS = new Set<string>([
+  'openrouter',
+  'deepseek',
+  'xai',
+  'zai',
+  'zai-coding',
+]);
 
 /** OpenCode (Zen and Go) routes by a stable conversation id and rejects requests without one. */
 const OPENCODE = /^https:\/\/opencode\.ai\//;
@@ -80,13 +89,26 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
   }
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
-    const thinks = Object.keys(compatibleEffortFields(this.#style, options.effort)).length > 0;
-    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+    if (options.effort !== undefined) {
+      const isOff = options.effort === 'off' || options.effort === 'none';
+      const effortFields = compatibleEffortFields(this.#style, options.effort);
+      const thinks = Object.keys(effortFields).length > 0 && !isOff;
+      // `on` (GLM) and other non-graded switches enable thinking without a size: use the default.
+      const headroom = thinks ? thinkingHeadroom(options.effort) || DEFAULT_THINKING_HEADROOM : 0;
+      return options.maxOutputTokens + headroom;
+    }
+    const thinksByDefault = isCompatibleReasoningModel(this.provider, options.model, this.#style);
+    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
   }
 
   /** The JSON request body; exposed for tests of the effort mapping. */
-  requestBody(options: GenerateOptions): Record<string, unknown> {
+  requestBody(options: GenerateOptions & { omitResponseFormat?: boolean }): Record<string, unknown> {
     const messages = options.messages.map((m) => ({ role: m.role, content: m.content }));
+    const sendsJsonObject =
+      !options.omitResponseFormat &&
+      options.responseSchema !== undefined &&
+      JSON_OBJECT_SUPPORTED_PRESETS.has(this.provider);
+
     if (options.responseSchema) {
       // Compatible servers differ on `response_format`; the schema in the prompt works everywhere.
       const instruction = `Respond with a single JSON object matching this JSON schema:\n${JSON.stringify(options.responseSchema)}`;
@@ -102,6 +124,7 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
       stream: true,
       ...(this.#streamUsage ? { stream_options: { include_usage: true } } : {}),
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(sendsJsonObject ? { response_format: { type: 'json_object' } } : {}),
       ...effortFields,
     };
   }
@@ -154,6 +177,10 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
   }
 
   async #post(options: GenerateOptions): Promise<Response> {
+    const sendsJsonObject =
+      options.responseSchema !== undefined &&
+      JSON_OBJECT_SUPPORTED_PRESETS.has(this.provider);
+
     let response: Response;
     try {
       response = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
@@ -170,6 +197,30 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
     } catch (error) {
       throw failureFromThrown(error, this.provider, this.#key, options.signal);
     }
+
+    // If server rejected response_format with 400, retry once without response_format (prompt-only fallback)
+    if (!response.ok && response.status === 400 && sendsJsonObject) {
+      try {
+        const retryResponse = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+            ...bearerHeaders(this.#key),
+            ...(OPENCODE.test(this.#baseUrl) ? { 'x-opencode-session': this.#sessionId } : {}),
+          },
+          body: JSON.stringify(this.requestBody({ ...options, omitResponseFormat: true })),
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
+        if (retryResponse.ok) {
+          return retryResponse;
+        }
+        response = retryResponse;
+      } catch (retryError) {
+        throw failureFromThrown(retryError, this.provider, this.#key, options.signal);
+      }
+    }
+
     if (!response.ok) throw await failureFromResponse(response, this.provider, this.#key);
     return response;
   }

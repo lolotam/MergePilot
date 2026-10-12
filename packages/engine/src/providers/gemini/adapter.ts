@@ -4,7 +4,7 @@ import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import type { FinishReason, GenerateOptions, StreamChunk } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
-import { geminiThinkingConfig, thinkingHeadroom } from '../effort.js';
+import { DEFAULT_THINKING_HEADROOM, geminiThinkingConfig, geminiThinksByDefault, thinkingHeadroom } from '../effort.js';
 import type {
   GeminiAdapterOptions,
   GeminiLike,
@@ -46,8 +46,12 @@ export class GeminiAdapter extends LlmAdapter {
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
     const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
-    const thinks = thinkingConfig !== undefined && !('thinkingBudget' in thinkingConfig && thinkingConfig.thinkingBudget === 0);
-    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+    if (options.effort !== undefined) {
+      const thinks = thinkingConfig !== undefined && !('thinkingBudget' in thinkingConfig && thinkingConfig.thinkingBudget === 0);
+      return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+    }
+    const thinksByDefault = geminiThinksByDefault(options.model);
+    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
   }
 
   async *stream(options: GenerateOptions): AsyncGenerator<StreamChunk> {

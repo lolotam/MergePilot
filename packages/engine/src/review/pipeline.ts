@@ -31,6 +31,14 @@ import {
   parseVerifyAnswer,
   VerifyAnswerSchema,
 } from './verify.js';
+import {
+  makeRedactionFinding,
+  buildPatchLineToNewLineMap,
+} from './patch-helpers.js';
+import {
+  combineUsage,
+  recoverReviewTruncation,
+} from './split.js';
 
 // ── Input types ──
 
@@ -82,78 +90,7 @@ export type ReviewRunResult =
       detail?: string | undefined;
     } & Partial<FallbackDisclosure>);
 
-// ── Internal helpers ──
-
-/** Builds a security Finding for a redacted secret on an added line. */
-function makeRedactionFinding(
-  path: string,
-  line: number,
-  kind: string,
-  idIndex: number,
-): Finding {
-  return {
-    id: `sec${idIndex}`,
-    path,
-    line,
-    side: 'RIGHT',
-    title: 'Secret detected in patch',
-    body: `A secret of kind "${kind}" was detected in this added line and redacted before review.`,
-    severity: 'high',
-    category: 'security',
-    evidence: `[REDACTED:${kind}]`,
-    confidence: 1,
-  };
-}
-
-/**
- * Builds a map from 1-based patch-text line number → new-side file line number
- * for every added or context line in the patch. Used to correlate `redactSecrets`
- * findings (which use patch-text line numbers) with file line numbers.
- */
-function buildPatchLineToNewLineMap(patch: string): Map<number, number> {
-  const result = new Map<number, number>();
-  const lines = patch.split('\n');
-  let patchLineNum = 1; // 1-based line number within the patch text
-  let newLine = 0;
-  const HUNK_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
-
-  for (const line of lines) {
-    if (line.startsWith('@@')) {
-      const m = line.match(HUNK_RE);
-      if (m) {
-        newLine = parseInt(m[1] ?? '1', 10);
-      }
-      patchLineNum++;
-      continue;
-    }
-    if (line.startsWith('+')) {
-      result.set(patchLineNum, newLine);
-      newLine++;
-    } else if (line.startsWith('-')) {
-      // removed lines don't have a new-side line number
-    } else if (line.startsWith(' ')) {
-      result.set(patchLineNum, newLine);
-      newLine++;
-    }
-    patchLineNum++;
-  }
-  return result;
-}
-
 const VERIFY_MAX_OUTPUT_TOKENS = 2048;
-
-/** Combines token usage from multiple model calls into a single TokenUsage. */
-function combineUsage(u1?: TokenUsage, u2?: TokenUsage): TokenUsage | undefined {
-  if (!u1 && !u2) return undefined;
-  if (!u1) return u2;
-  if (!u2) return u1;
-  return {
-    inputTokens: u1.inputTokens + u2.inputTokens,
-    outputTokens: u1.outputTokens + u2.outputTokens,
-    cacheReadTokens: u1.cacheReadTokens + u2.cacheReadTokens,
-    cacheWriteTokens: u1.cacheWriteTokens + u2.cacheWriteTokens,
-  };
-}
 
 // ── Pipeline ──
 
@@ -273,6 +210,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
 
   // ── Step d: call the model ─────────────────────────────────────────────
+  let totalUsage: TokenUsage | undefined;
   let modelResponse: Awaited<ReturnType<typeof model.generate>>;
   try {
     modelResponse = await model.generate({
@@ -282,6 +220,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
       ...(signal ? { signal } : {}),
     });
+    totalUsage = modelResponse.usage;
   } catch (err) {
     const failure = err as LlmFailure;
     const disclosure = model.disclosure();
@@ -292,8 +231,33 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     return { status: 'failed', reason: String(err), ...disclosure };
   }
 
-  // ── Step e: parse answer ───────────────────────────────────────────────
-  const parseResult = parseReviewAnswer(modelResponse.text);
+  // ── Step e: parse answer + truncation recovery ─────────────────────────
+  let parseResult = parseReviewAnswer(modelResponse.text, {
+    finishReason: modelResponse.finishReason,
+    outputTokens: modelResponse.usage?.outputTokens,
+  });
+
+  const recovery = await recoverReviewTruncation({
+    parseResult,
+    modelResponse,
+    prompt,
+    promptTokens,
+    maxOutputTokens,
+    reviewOutputTokens,
+    model,
+    config,
+    redactedPrTitle,
+    redactedPrBody,
+    redactedRulesFiles,
+    redactedReviewableFiles,
+    libraryDocs: input.libraryDocs,
+    signal,
+    totalUsage,
+  });
+  parseResult = recovery.parseResult;
+  totalUsage = recovery.totalUsage;
+  incompleteReasons.push(...recovery.incompleteReasons);
+
   if (!parseResult.ok) {
     return { status: 'failed', reason: parseResult.error };
   }
@@ -301,7 +265,6 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // ── Step e2: verification pass ─────────────────────────────────────────
   let modelFindings = parseResult.findings;
   let verification: { checked: number; rejected: number } | undefined;
-  let totalUsage = modelResponse.usage;
 
   if (reviewCfg.verify && modelFindings.length > 0) {
     const verifyPrompt = buildVerifyPrompt({
@@ -323,7 +286,33 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
         totalUsage = combineUsage(totalUsage, verifyResponse.usage);
       }
 
-      const verifyParsed = parseVerifyAnswer(verifyResponse.text);
+      let verifyParsed = parseVerifyAnswer(verifyResponse.text, {
+        finishReason: verifyResponse.finishReason,
+        outputTokens: verifyResponse.usage?.outputTokens,
+      });
+
+      if (!verifyParsed.ok && (verifyParsed.code === 'truncated' || verifyResponse.finishReason === 'max-tokens')) {
+        const verifyRetryTokens = Math.min(VERIFY_MAX_OUTPUT_TOKENS * 2, 8192);
+        try {
+          const verifyRetryRes = await model.generate({
+            system: verifyPrompt.system,
+            user: verifyPrompt.user,
+            maxOutputTokens: verifyRetryTokens,
+            responseSchema: z.toJSONSchema(VerifyAnswerSchema) as Record<string, unknown>,
+            ...(signal ? { signal } : {}),
+          });
+          if (verifyRetryRes.usage) {
+            totalUsage = combineUsage(totalUsage, verifyRetryRes.usage);
+          }
+          verifyParsed = parseVerifyAnswer(verifyRetryRes.text, {
+            finishReason: verifyRetryRes.finishReason,
+            outputTokens: verifyRetryRes.usage?.outputTokens,
+          });
+        } catch {
+          // Verify retry failed
+        }
+      }
+
       if (!verifyParsed.ok) {
         incompleteReasons.push(`verification skipped: ${verifyParsed.error}`);
       } else {

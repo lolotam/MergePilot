@@ -70462,15 +70462,23 @@ var ReviewAnswerLooseSchema = external_exports.object({
   summary: external_exports.string().min(1),
   findings: external_exports.array(external_exports.unknown())
 });
-function extractFirstObject(text) {
-  const fenceMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  if (fenceMatch) {
-    return fenceMatch[1] ?? null;
+function extractCandidateObjects(text) {
+  const candidates = [];
+  const seen = /* @__PURE__ */ new Set();
+  const fenceRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/g;
+  let fenceMatch;
+  while ((fenceMatch = fenceRegex.exec(text)) !== null) {
+    const raw = fenceMatch[1];
+    if (raw && !seen.has(raw)) {
+      seen.add(raw);
+      candidates.push(raw);
+    }
   }
   let depth = 0;
   let start = -1;
   let inString = false;
   let escape2 = false;
+  let hasStarted = false;
   for (let i2 = 0; i2 < text.length; i2++) {
     const ch = text[i2];
     if (escape2) {
@@ -70492,39 +70500,69 @@ function extractFirstObject(text) {
     if (ch === "{") {
       if (depth === 0) {
         start = i2;
+        hasStarted = true;
       }
       depth++;
     } else if (ch === "}") {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        return text.slice(start, i2 + 1);
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          const slice = text.slice(start, i2 + 1);
+          if (!seen.has(slice)) {
+            seen.add(slice);
+            candidates.push(slice);
+          }
+          start = -1;
+        }
       }
     }
   }
-  return null;
+  const hasUnclosedObject = depth > 0 || start !== -1 && hasStarted || inString;
+  return { candidates, hasUnclosedObject };
 }
-function parseReviewAnswer(text) {
-  const raw = extractFirstObject(text);
-  if (raw === null) {
-    return { ok: false, error: "No JSON object found in model response." };
+function parseReviewAnswer(text, options) {
+  if (!text || text.trim().length === 0) {
+    return { ok: false, code: "empty-response", error: "empty-response: model returned no text" };
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
+  const { candidates, hasUnclosedObject } = extractCandidateObjects(text);
+  let firstParseError = null;
+  let matchedAnswer = null;
+  for (const candidate of candidates) {
+    let parsed;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch (err) {
+      if (!firstParseError) {
+        firstParseError = err instanceof Error ? err.message : String(err);
+      }
+      continue;
+    }
+    const loose = ReviewAnswerLooseSchema.safeParse(parsed);
+    if (loose.success) {
+      matchedAnswer = loose.data;
+      break;
+    } else if (!firstParseError) {
+      firstParseError = loose.error.message;
+    }
+  }
+  if (!matchedAnswer) {
+    const isTruncated = options?.finishReason === "max-tokens" || options?.finishReason === "length" || hasUnclosedObject;
+    if (isTruncated) {
+      const finishDetail = options?.finishReason ? `finishReason: ${options.finishReason}` : "unclosed JSON object";
+      const tokensDetail = options?.outputTokens !== void 0 ? `, outputTokens: ${options.outputTokens}` : "";
+      return {
+        ok: false,
+        code: "truncated",
+        error: `truncated (${finishDetail}${tokensDetail})`
+      };
+    }
     return {
       ok: false,
-      error: `JSON parse error: ${err instanceof Error ? err.message : String(err)}`
+      code: "invalid-json",
+      error: `invalid-json: ${firstParseError ?? "no valid JSON object found matching review schema"}`
     };
   }
-  const topResult = ReviewAnswerLooseSchema.safeParse(parsed);
-  if (!topResult.success) {
-    return {
-      ok: false,
-      error: `Schema validation failed: ${topResult.error.message}`
-    };
-  }
-  const answer = topResult.data;
+  const answer = matchedAnswer;
   const findings = [];
   let droppedInvalid = 0;
   let idCounter = 1;
@@ -71316,66 +71354,50 @@ var VerifyAnswerSchema = external_exports.object({
 var VerifyAnswerLooseSchema = external_exports.object({
   verdicts: external_exports.array(external_exports.unknown())
 });
-function extractFirstObject2(text) {
-  const fenceMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  if (fenceMatch)
-    return fenceMatch[1] ?? null;
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escape2 = false;
-  for (let i2 = 0; i2 < text.length; i2++) {
-    const ch = text[i2];
-    if (escape2) {
-      escape2 = false;
+function parseVerifyAnswer(text, options) {
+  if (!text || text.trim().length === 0) {
+    return { ok: false, code: "empty-response", error: "empty-response: model returned no text" };
+  }
+  const { candidates, hasUnclosedObject } = extractCandidateObjects(text);
+  let firstParseError = null;
+  let matchedAnswer = null;
+  for (const candidate of candidates) {
+    let parsed;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch (err) {
+      if (!firstParseError) {
+        firstParseError = err instanceof Error ? err.message : String(err);
+      }
       continue;
     }
-    if (inString) {
-      if (ch === "\\")
-        escape2 = true;
-      else if (ch === '"')
-        inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === "{") {
-      if (depth === 0)
-        start = i2;
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      if (depth === 0 && start !== -1)
-        return text.slice(start, i2 + 1);
+    const loose = VerifyAnswerLooseSchema.safeParse(parsed);
+    if (loose.success) {
+      matchedAnswer = loose.data;
+      break;
+    } else if (!firstParseError) {
+      firstParseError = loose.error.message;
     }
   }
-  return null;
-}
-function parseVerifyAnswer(text) {
-  const raw = extractFirstObject2(text);
-  if (raw === null) {
-    return { ok: false, error: "No JSON object found in model response." };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
+  if (!matchedAnswer) {
+    const isTruncated = options?.finishReason === "max-tokens" || options?.finishReason === "length" || hasUnclosedObject;
+    if (isTruncated) {
+      const finishDetail = options?.finishReason ? `finishReason: ${options.finishReason}` : "unclosed JSON object";
+      const tokensDetail = options?.outputTokens !== void 0 ? `, outputTokens: ${options.outputTokens}` : "";
+      return {
+        ok: false,
+        code: "truncated",
+        error: `truncated (${finishDetail}${tokensDetail})`
+      };
+    }
     return {
       ok: false,
-      error: `JSON parse error: ${err instanceof Error ? err.message : String(err)}`
-    };
-  }
-  const topResult = VerifyAnswerLooseSchema.safeParse(parsed);
-  if (!topResult.success) {
-    return {
-      ok: false,
-      error: `Schema validation failed: ${topResult.error.message}`
+      code: "invalid-json",
+      error: `invalid-json: ${firstParseError ?? "no valid JSON object found matching verify schema"}`
     };
   }
   const verdicts = [];
-  for (const rawVerdict of topResult.data.verdicts) {
+  for (const rawVerdict of matchedAnswer.verdicts) {
     const result = FindingVerdictSchema.safeParse(rawVerdict);
     if (result.success)
       verdicts.push(result.data);
@@ -71446,7 +71468,7 @@ function buildPatchLineToNewLineMap(patch) {
   }
   return result;
 }
-var VERIFY_MAX_OUTPUT_TOKENS = 2048;
+
 function combineUsage(u1, u2) {
   if (!u1 && !u2)
     return void 0;
@@ -71457,10 +71479,206 @@ function combineUsage(u1, u2) {
   return {
     inputTokens: u1.inputTokens + u2.inputTokens,
     outputTokens: u1.outputTokens + u2.outputTokens,
-    cacheReadTokens: u1.cacheReadTokens + u2.cacheReadTokens,
-    cacheWriteTokens: u1.cacheWriteTokens + u2.cacheWriteTokens
+    cacheReadTokens: (u1.cacheReadTokens ?? 0) + (u2.cacheReadTokens ?? 0),
+    cacheWriteTokens: (u1.cacheWriteTokens ?? 0) + (u2.cacheWriteTokens ?? 0)
   };
 }
+function batchFilesBySize(files, maxBatchTokens) {
+  if (files.length <= 1)
+    return [files.map((f3) => ({ ...f3 }))];
+  const fileTokens = files.map((f3) => ({ file: f3, tokens: estimateTokens(f3.patch) }));
+  const totalTokens = fileTokens.reduce((sum, item) => sum + item.tokens, 0);
+  const targetBatchTokens = maxBatchTokens ?? Math.max(100, Math.floor(totalTokens / 2));
+  const batches = [];
+  let currentBatch = [];
+  let currentTokens = 0;
+  for (const item of fileTokens) {
+    if (currentBatch.length > 0 && currentTokens + item.tokens > targetBatchTokens) {
+      batches.push(currentBatch);
+      currentBatch = [{ ...item.file }];
+      currentTokens = item.tokens;
+    } else {
+      currentBatch.push({ ...item.file });
+      currentTokens += item.tokens;
+    }
+  }
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+  if (batches.length === 1 && files.length >= 2) {
+    const mid = Math.ceil(files.length / 2);
+    return [
+      files.slice(0, mid).map((f3) => ({ ...f3 })),
+      files.slice(mid).map((f3) => ({ ...f3 }))
+    ];
+  }
+  return batches;
+}
+function dedupeFindings(findings) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  let idCounter = 1;
+  for (const f3 of findings) {
+    const key = `${f3.path}:${f3.line}:${f3.title.toLowerCase().trim()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push({
+        ...f3,
+        id: `f${idCounter++}`
+      });
+    }
+  }
+  return result;
+}
+async function executeBatchedReview(input2) {
+  const { batches, config: config2, pr, rulesFiles, model, maxOutputTokens, retryOutputTokens, reviewOutputTokens, libraryDocs, signal } = input2;
+  const budgetCfg = config2.budget;
+  const reviewCfg = config2.review;
+  let totalUsage = input2.initialUsage;
+  const batchSummaries = [];
+  const batchFindings = [];
+  const incompleteReasons = [];
+  for (let bIdx = 0; bIdx < batches.length; bIdx++) {
+    const batchFiles = batches[bIdx];
+    const batchPrompt = buildReviewPrompt({
+      language: config2.language,
+      maxFindings: reviewCfg.maxFindings,
+      pr,
+      rulesFiles,
+      pathInstructions: reviewCfg.pathInstructions,
+      files: batchFiles,
+      ...libraryDocs ? { libraryDocs } : {}
+    });
+    const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
+    if (budgetCfg.pricing) {
+      const currentSpent = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : 0;
+      const bCost = estimateCostUsd({ inputTokens: bPromptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing);
+      if (currentSpent + bCost > budgetCfg.perReviewUsd) {
+        incompleteReasons.push(`batch ${bIdx + 1}: budget limit reached`);
+        break;
+      }
+    }
+    try {
+      const bRes = await model.generate({
+        system: batchPrompt.system,
+        user: batchPrompt.user,
+        maxOutputTokens,
+        responseSchema: external_exports.toJSONSchema(ReviewAnswerSchema),
+        ...signal ? { signal } : {}
+      });
+      totalUsage = combineUsage(totalUsage, bRes.usage);
+      let bParsed = parseReviewAnswer(bRes.text, {
+        finishReason: bRes.finishReason,
+        outputTokens: bRes.usage?.outputTokens
+      });
+      if (!bParsed.ok && (bParsed.code === "truncated" || bRes.finishReason === "max-tokens")) {
+        const canRetry = !budgetCfg.pricing || (() => {
+          const currentSpent = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : 0;
+          const retryRequested = model.outputTokensFor ? model.outputTokensFor(retryOutputTokens) : retryOutputTokens;
+          const bRetryCost = estimateCostUsd({ inputTokens: bPromptTokens, maxOutputTokens: retryRequested }, budgetCfg.pricing);
+          return currentSpent + bRetryCost <= budgetCfg.perReviewUsd;
+        })();
+        if (canRetry) {
+          const bRetryRes = await model.generate({
+            system: batchPrompt.system,
+            user: batchPrompt.user,
+            maxOutputTokens: retryOutputTokens,
+            responseSchema: external_exports.toJSONSchema(ReviewAnswerSchema),
+            ...signal ? { signal } : {}
+          });
+          totalUsage = combineUsage(totalUsage, bRetryRes.usage);
+          bParsed = parseReviewAnswer(bRetryRes.text, {
+            finishReason: bRetryRes.finishReason,
+            outputTokens: bRetryRes.usage?.outputTokens
+          });
+        }
+      }
+      if (bParsed.ok) {
+        if (bParsed.summary && bParsed.summary.trim().length > 0) {
+          batchSummaries.push(bParsed.summary.trim());
+        }
+        batchFindings.push(...bParsed.findings);
+      } else {
+        incompleteReasons.push(`batch ${bIdx + 1}: ${bParsed.error}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      incompleteReasons.push(`batch ${bIdx + 1}: ${msg}`);
+    }
+  }
+  if (batchSummaries.length === 0 && batchFindings.length === 0) {
+    return null;
+  }
+  return {
+    summary: batchSummaries.join("\n\n") || "Review completed across file batches.",
+    findings: dedupeFindings(batchFindings),
+    totalUsage,
+    incompleteReasons
+  };
+}
+async function recoverReviewTruncation(input2) {
+  let { parseResult, totalUsage } = input2;
+  const { modelResponse, prompt, promptTokens, maxOutputTokens, reviewOutputTokens, model, config: config2, redactedPrTitle, redactedPrBody, redactedRulesFiles, redactedReviewableFiles, libraryDocs, signal } = input2;
+  const budgetCfg = config2.budget;
+  const incompleteReasons = [];
+  const isTruncated = !parseResult.ok && (parseResult.code === "truncated" || modelResponse.finishReason === "max-tokens");
+  if (!isTruncated) {
+    return { parseResult, totalUsage, incompleteReasons };
+  }
+  const retryOutputTokens = Math.min(maxOutputTokens * 2, 16384);
+  const retryRequested = model.outputTokensFor ? model.outputTokensFor(retryOutputTokens) : retryOutputTokens;
+  const currentCost = totalUsage && budgetCfg.pricing ? costUsd(totalUsage, budgetCfg.pricing) : 0;
+  const retryCost = budgetCfg.pricing ? estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: retryRequested }, budgetCfg.pricing) : 0;
+  if (!budgetCfg.pricing || currentCost + retryCost <= budgetCfg.perReviewUsd) {
+    try {
+      const retryResponse = await model.generate({
+        system: prompt.system,
+        user: prompt.user,
+        maxOutputTokens: retryOutputTokens,
+        responseSchema: external_exports.toJSONSchema(ReviewAnswerSchema),
+        ...signal ? { signal } : {}
+      });
+      totalUsage = combineUsage(totalUsage, retryResponse.usage);
+      const retryParse = parseReviewAnswer(retryResponse.text, {
+        finishReason: retryResponse.finishReason,
+        outputTokens: retryResponse.usage?.outputTokens
+      });
+      if (retryParse.ok) {
+        parseResult = retryParse;
+      }
+    } catch {
+    }
+  }
+  if (!parseResult.ok && redactedReviewableFiles.length > 1) {
+    const batches = batchFilesBySize(redactedReviewableFiles);
+    const batchResult = await executeBatchedReview({
+      batches,
+      config: config2,
+      pr: { title: redactedPrTitle, body: redactedPrBody },
+      rulesFiles: redactedRulesFiles,
+      model,
+      maxOutputTokens,
+      retryOutputTokens,
+      reviewOutputTokens,
+      libraryDocs,
+      signal,
+      initialUsage: totalUsage
+    });
+    if (batchResult) {
+      totalUsage = batchResult.totalUsage;
+      incompleteReasons.push(...batchResult.incompleteReasons);
+      parseResult = {
+        ok: true,
+        summary: batchResult.summary,
+        findings: batchResult.findings,
+        droppedInvalid: 0
+      };
+    }
+  }
+  return { parseResult, totalUsage, incompleteReasons };
+}
+
+var VERIFY_MAX_OUTPUT_TOKENS = 2048;
 async function runReview(input2) {
   const { config: config2, pr, files, rulesFiles, signal } = input2;
   const fallbackModels = input2.fallbackModels ?? input2.model.fallbacks ?? [];
@@ -71535,6 +71753,7 @@ async function runReview(input2) {
       };
     }
   }
+  let totalUsage;
   let modelResponse;
   try {
     modelResponse = await model.generate({
@@ -71544,6 +71763,7 @@ async function runReview(input2) {
       responseSchema: external_exports.toJSONSchema(ReviewAnswerSchema),
       ...signal ? { signal } : {}
     });
+    totalUsage = modelResponse.usage;
   } catch (err) {
     const failure2 = err;
     const disclosure2 = model.disclosure();
@@ -71553,13 +71773,35 @@ async function runReview(input2) {
     }
     return { status: "failed", reason: String(err), ...disclosure2 };
   }
-  const parseResult = parseReviewAnswer(modelResponse.text);
+  let parseResult = parseReviewAnswer(modelResponse.text, {
+    finishReason: modelResponse.finishReason,
+    outputTokens: modelResponse.usage?.outputTokens
+  });
+  const recovery = await recoverReviewTruncation({
+    parseResult,
+    modelResponse,
+    prompt,
+    promptTokens,
+    maxOutputTokens,
+    reviewOutputTokens,
+    model,
+    config: config2,
+    redactedPrTitle,
+    redactedPrBody,
+    redactedRulesFiles,
+    redactedReviewableFiles,
+    libraryDocs: input2.libraryDocs,
+    signal,
+    totalUsage
+  });
+  parseResult = recovery.parseResult;
+  totalUsage = recovery.totalUsage;
+  incompleteReasons.push(...recovery.incompleteReasons);
   if (!parseResult.ok) {
     return { status: "failed", reason: parseResult.error };
   }
   let modelFindings = parseResult.findings;
   let verification;
-  let totalUsage = modelResponse.usage;
   if (reviewCfg.verify && modelFindings.length > 0) {
     const verifyPrompt = buildVerifyPrompt({
       language: config2.language,
@@ -71577,7 +71819,30 @@ async function runReview(input2) {
       if (verifyResponse.usage) {
         totalUsage = combineUsage(totalUsage, verifyResponse.usage);
       }
-      const verifyParsed = parseVerifyAnswer(verifyResponse.text);
+      let verifyParsed = parseVerifyAnswer(verifyResponse.text, {
+        finishReason: verifyResponse.finishReason,
+        outputTokens: verifyResponse.usage?.outputTokens
+      });
+      if (!verifyParsed.ok && (verifyParsed.code === "truncated" || verifyResponse.finishReason === "max-tokens")) {
+        const verifyRetryTokens = Math.min(VERIFY_MAX_OUTPUT_TOKENS * 2, 8192);
+        try {
+          const verifyRetryRes = await model.generate({
+            system: verifyPrompt.system,
+            user: verifyPrompt.user,
+            maxOutputTokens: verifyRetryTokens,
+            responseSchema: external_exports.toJSONSchema(VerifyAnswerSchema),
+            ...signal ? { signal } : {}
+          });
+          if (verifyRetryRes.usage) {
+            totalUsage = combineUsage(totalUsage, verifyRetryRes.usage);
+          }
+          verifyParsed = parseVerifyAnswer(verifyRetryRes.text, {
+            finishReason: verifyRetryRes.finishReason,
+            outputTokens: verifyRetryRes.usage?.outputTokens
+          });
+        } catch {
+        }
+      }
       if (!verifyParsed.ok) {
         incompleteReasons.push(`verification skipped: ${verifyParsed.error}`);
       } else {
@@ -94370,6 +94635,7 @@ var THINKING_BUDGET_TOKENS = Object.freeze({
   xhigh: 24576,
   max: 32e3
 });
+var DEFAULT_THINKING_HEADROOM = 8192;
 function normalize(effort) {
   return (effort ?? "").trim().toLowerCase();
 }
@@ -94378,6 +94644,9 @@ function thinkingHeadroom(effort) {
 }
 var OPENAI_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
 var OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
+function openAIThinksByDefault(model) {
+  return OPENAI_REASONING_MODEL.test(model);
+}
 function openAIReasoningEffort(model, effort) {
   const value = normalize(effort);
   return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : void 0;
@@ -94421,6 +94690,28 @@ function geminiThinkingConfig(model, effort) {
   }
   return GEMINI_LEVELS.has(value) ? { thinkingLevel: value.toUpperCase() } : void 0;
 }
+function geminiThinksByDefault(model) {
+  const id = model.replace(/^models\//, "").toLowerCase();
+  return /^gemini-(?:[3-9]|\d{2,}|2\.[5-9])/.test(id) || id.includes("-thinking");
+}
+function isCompatibleReasoningModel(provider, model, style) {
+  const lowerModel = model.toLowerCase();
+  if (provider === "deepseek" && (lowerModel.includes("reasoner") || lowerModel.includes("r1"))) {
+    return true;
+  }
+  if (lowerModel.includes("reasoner") || lowerModel.includes("r1")) {
+    return true;
+  }
+  if (style === "glm" || provider === "zai" || provider === "zai-coding") {
+    return true;
+  }
+  if (provider === "openrouter") {
+    if (lowerModel.includes("reasoner") || lowerModel.includes("r1") || lowerModel.includes("thinking") || /\b(?:o1|o3|o4|gpt-5)\b/.test(lowerModel) || /gemini-(?:[3-9]|2\.[5-9])/.test(lowerModel)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function extractHeaders(rawHeaders) {
   const result = {};
@@ -94455,7 +94746,11 @@ var OpenAIAdapter = class extends LlmAdapter {
   }
   requestedOutputTokens(options) {
     const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
-    return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
+    if (options.effort !== void 0) {
+      return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
+    }
+    const thinksByDefault = openAIThinksByDefault(options.model);
+    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
   }
   async *stream(options) {
     if (options.signal?.aborted) {
@@ -118141,8 +118436,12 @@ var GeminiAdapter = class extends LlmAdapter {
   }
   requestedOutputTokens(options) {
     const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
-    const thinks = thinkingConfig !== void 0 && !("thinkingBudget" in thinkingConfig && thinkingConfig.thinkingBudget === 0);
-    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+    if (options.effort !== void 0) {
+      const thinks = thinkingConfig !== void 0 && !("thinkingBudget" in thinkingConfig && thinkingConfig.thinkingBudget === 0);
+      return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+    }
+    const thinksByDefault = geminiThinksByDefault(options.model);
+    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
   }
   async *stream(options) {
     if (options.signal?.aborted) {
@@ -118391,6 +118690,13 @@ async function* readSse(body) {
   }
 }
 
+var JSON_OBJECT_SUPPORTED_PRESETS = /* @__PURE__ */ new Set([
+  "openrouter",
+  "deepseek",
+  "xai",
+  "zai",
+  "zai-coding"
+]);
 var OPENCODE = /^https:\/\/opencode\.ai\//;
 function mapFinish(reason) {
   if (reason === "length")
@@ -118431,12 +118737,20 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
     this.#streamUsage = entry.streamUsage;
   }
   requestedOutputTokens(options) {
-    const thinks = Object.keys(compatibleEffortFields(this.#style, options.effort)).length > 0;
-    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+    if (options.effort !== void 0) {
+      const isOff = options.effort === "off" || options.effort === "none";
+      const effortFields = compatibleEffortFields(this.#style, options.effort);
+      const thinks = Object.keys(effortFields).length > 0 && !isOff;
+      const headroom = thinks ? thinkingHeadroom(options.effort) || DEFAULT_THINKING_HEADROOM : 0;
+      return options.maxOutputTokens + headroom;
+    }
+    const thinksByDefault = isCompatibleReasoningModel(this.provider, options.model, this.#style);
+    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
   }
   /** The JSON request body; exposed for tests of the effort mapping. */
   requestBody(options) {
     const messages = options.messages.map((m2) => ({ role: m2.role, content: m2.content }));
+    const sendsJsonObject = !options.omitResponseFormat && options.responseSchema !== void 0 && JSON_OBJECT_SUPPORTED_PRESETS.has(this.provider);
     if (options.responseSchema) {
       const instruction = `Respond with a single JSON object matching this JSON schema:
 ${JSON.stringify(options.responseSchema)}`;
@@ -118456,6 +118770,7 @@ ${instruction}`;
       stream: true,
       ...this.#streamUsage ? { stream_options: { include_usage: true } } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
+      ...sendsJsonObject ? { response_format: { type: "json_object" } } : {},
       ...effortFields
     };
   }
@@ -118507,6 +118822,7 @@ ${instruction}`;
     yield { type: "finish", reason: finish ?? "stop" };
   }
   async #post(options) {
+    const sendsJsonObject = options.responseSchema !== void 0 && JSON_OBJECT_SUPPORTED_PRESETS.has(this.provider);
     let response;
     try {
       response = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
@@ -118522,6 +118838,27 @@ ${instruction}`;
       });
     } catch (error62) {
       throw failureFromThrown(error62, this.provider, this.#key, options.signal);
+    }
+    if (!response.ok && response.status === 400 && sendsJsonObject) {
+      try {
+        const retryResponse = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            ...bearerHeaders(this.#key),
+            ...OPENCODE.test(this.#baseUrl) ? { "x-opencode-session": this.#sessionId } : {}
+          },
+          body: JSON.stringify(this.requestBody({ ...options, omitResponseFormat: true })),
+          ...options.signal ? { signal: options.signal } : {}
+        });
+        if (retryResponse.ok) {
+          return retryResponse;
+        }
+        response = retryResponse;
+      } catch (retryError) {
+        throw failureFromThrown(retryError, this.provider, this.#key, options.signal);
+      }
     }
     if (!response.ok)
       throw await failureFromResponse(response, this.provider, this.#key);
@@ -118909,7 +119246,35 @@ async function runAudit(input2) {
         totalUsage.cacheReadTokens += modelResponse.usage.cacheReadTokens ?? 0;
         totalUsage.cacheWriteTokens += modelResponse.usage.cacheWriteTokens ?? 0;
       }
-      const parseResult = parseReviewAnswer(modelResponse.text);
+      let parseResult = parseReviewAnswer(modelResponse.text, {
+        finishReason: modelResponse.finishReason,
+        outputTokens: modelResponse.usage?.outputTokens
+      });
+      if (!parseResult.ok && (parseResult.code === "truncated" || modelResponse.finishReason === "max-tokens")) {
+        try {
+          const retryResponse = await model.generate({
+            system: prompt.system,
+            user: prompt.user,
+            maxOutputTokens: 8192,
+            responseSchema: external_exports.toJSONSchema(ReviewAnswerSchema),
+            ...signal ? { signal } : {}
+          });
+          if (retryResponse.usage) {
+            totalUsage.inputTokens += retryResponse.usage.inputTokens;
+            totalUsage.outputTokens += retryResponse.usage.outputTokens;
+            totalUsage.cacheReadTokens += retryResponse.usage.cacheReadTokens ?? 0;
+            totalUsage.cacheWriteTokens += retryResponse.usage.cacheWriteTokens ?? 0;
+          }
+          const retryParse = parseReviewAnswer(retryResponse.text, {
+            finishReason: retryResponse.finishReason,
+            outputTokens: retryResponse.usage?.outputTokens
+          });
+          if (retryParse.ok) {
+            parseResult = retryParse;
+          }
+        } catch {
+        }
+      }
       if (!parseResult.ok) {
         summaryByChunk.push({
           chunkIndex: i2,

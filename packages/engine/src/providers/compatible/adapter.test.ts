@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Secret } from '../../credentials/secret.js';
 import { collectText } from '../../llm/collect.js';
 import { LlmFailure } from '../../llm/failure.js';
@@ -79,14 +79,37 @@ describe('OpenAICompatibleAdapter', () => {
     expect(body.max_tokens).toBe(100);
   });
 
-  it('adds the response schema to the system message instead of response_format', () => {
-    const adapter = new OpenAICompatibleAdapter({ provider: 'openrouter', apiKey: KEY });
-    const body = adapter.requestBody({ ...base, responseSchema: { type: 'object' } });
-    const messages = body.messages as Array<{ role: string; content: string }>;
-    expect(messages).toHaveLength(2);
-    expect(messages[0]?.content).toContain('You review code.');
-    expect(messages[0]?.content).toContain('{"type":"object"}');
-    expect(body).not.toHaveProperty('response_format');
+  it('adds response_format: { type: "json_object" } for supported presets and keeps prompt instruction', () => {
+    const openrouter = new OpenAICompatibleAdapter({ provider: 'openrouter', apiKey: KEY });
+    const openrouterBody = openrouter.requestBody({ ...base, responseSchema: { type: 'object' } });
+    const openrouterMessages = openrouterBody.messages as Array<{ role: string; content: string }>;
+    expect(openrouterMessages[0]?.content).toContain('{"type":"object"}');
+    expect(openrouterBody).toMatchObject({ response_format: { type: 'json_object' } });
+
+    const deepseek = new OpenAICompatibleAdapter({ provider: 'deepseek', apiKey: KEY });
+    expect(deepseek.requestBody({ ...base, responseSchema: { type: 'object' } })).toMatchObject({
+      response_format: { type: 'json_object' },
+    });
+
+    const nvidia = new OpenAICompatibleAdapter({ provider: 'nvidia', apiKey: KEY });
+    expect(nvidia.requestBody({ ...base, responseSchema: { type: 'object' } })).not.toHaveProperty('response_format');
+  });
+
+  it('retries silently without response_format when server rejects with 400', async () => {
+    let attempts = 0;
+    const fetch = vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      attempts++;
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      if (body.response_format) {
+        return jsonResponse({ error: { message: 'unsupported parameter: response_format' } }, 400);
+      }
+      return okStream();
+    });
+
+    const adapter = new OpenAICompatibleAdapter({ provider: 'openrouter', apiKey: KEY, fetch });
+    const result = await collectText(adapter.stream({ ...base, responseSchema: { type: 'object' } }));
+    expect(attempts).toBe(2);
+    expect(result.text).toBe('Hello');
   });
 
   it('sends a stable x-opencode-session header to OpenCode only', async () => {
@@ -171,4 +194,15 @@ describe('parseSseChunk', () => {
     ]);
     expect(rest).toBe('data: par');
   });
+
+  it('gives GLM thinking "on" the default thinking headroom so the answer is not truncated', () => {
+    const zaiCoding = new OpenAICompatibleAdapter({ provider: 'zai-coding', apiKey: KEY });
+    const on = zaiCoding.requestedOutputTokens({ model: 'glm-5.3', effort: 'on', maxOutputTokens: 2048 });
+    const off = zaiCoding.requestedOutputTokens({ model: 'glm-5.3', effort: 'off', maxOutputTokens: 2048 });
+    expect(on).toBeGreaterThanOrEqual(2048 + 8192);
+    expect(off).toBe(2048);
+    const body = zaiCoding.requestBody({ ...base, model: 'glm-5.3', effort: 'on', maxOutputTokens: 2048 });
+    expect(body.max_tokens).toBe(on);
+  });
 });
+

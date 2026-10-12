@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Secret } from '../credentials/secret.js';
 import { LlmFailure } from '../llm/failure.js';
 import { makeAnswerJson, makeConfig, makeFailingModel, makeModel, SIMPLE_PATCH, validFindingJson } from './pipeline.fixtures.js';
+import type { ReviewModel, ReviewModelRequest } from './model.js';
 import { runReview } from './pipeline.js';
 
 describe('runReview', () => {
@@ -320,6 +321,5 @@ describe('runReview', () => {
       expect(allInlineIds).not.toContain(summaryFinding?.id);
     }
   });
-
-  // ── Truncated file marks result incomplete ─────────────────────────────────
 });
+

@@ -109,7 +109,38 @@ export async function runAudit(input: RunAuditInput): Promise<AuditResult> {
         totalUsage.cacheWriteTokens += modelResponse.usage.cacheWriteTokens ?? 0;
       }
 
-      const parseResult = parseReviewAnswer(modelResponse.text);
+      let parseResult = parseReviewAnswer(modelResponse.text, {
+        finishReason: modelResponse.finishReason,
+        outputTokens: modelResponse.usage?.outputTokens,
+      });
+
+      if (!parseResult.ok && (parseResult.code === 'truncated' || modelResponse.finishReason === 'max-tokens')) {
+        try {
+          const retryResponse = await model.generate({
+            system: prompt.system,
+            user: prompt.user,
+            maxOutputTokens: 8192,
+            responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
+            ...(signal ? { signal } : {}),
+          });
+          if (retryResponse.usage) {
+            totalUsage.inputTokens += retryResponse.usage.inputTokens;
+            totalUsage.outputTokens += retryResponse.usage.outputTokens;
+            totalUsage.cacheReadTokens += retryResponse.usage.cacheReadTokens ?? 0;
+            totalUsage.cacheWriteTokens += retryResponse.usage.cacheWriteTokens ?? 0;
+          }
+          const retryParse = parseReviewAnswer(retryResponse.text, {
+            finishReason: retryResponse.finishReason,
+            outputTokens: retryResponse.usage?.outputTokens,
+          });
+          if (retryParse.ok) {
+            parseResult = retryParse;
+          }
+        } catch {
+          // Retry failed, keep original parseResult
+        }
+      }
+
       if (!parseResult.ok) {
         summaryByChunk.push({
           chunkIndex: i,
