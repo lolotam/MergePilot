@@ -197,10 +197,15 @@ export async function processReviewJob(
       // In the SaaS the workspace's dashboard settings choose the provider and model (the repo file
       // may target the GitHub Action, e.g. `provider: claude-code`); the repo still supplies its
       // review rules, language and other settings.
+      const repoConfig = repoConfigResult.config;
+      const sameModel =
+        repoConfig.provider === settings.provider && repoConfig.model === settings.model;
       effectiveConfig = {
-        ...repoConfigResult.config,
+        ...repoConfig,
         provider: settings.provider,
         model: settings.model,
+        // Prices in the repo file describe the repo's own model; keep them only when it matches.
+        budget: sameModel ? repoConfig.budget : { ...repoConfig.budget, pricing: undefined },
       };
       rulesFiles = repoConfigResult.rulesFiles;
       configHash = createHash('sha256')

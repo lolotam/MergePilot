@@ -207,6 +207,10 @@ provider: claude-code
 language: en
 review:
   maxFindings: 5
+budget:
+  pricing:
+    inputPerMTok: 99
+    outputPerMTok: 99
 `;
     const { deps, job, store, createModelForProvider } = createTestSetup({
       filesAtRef: {
@@ -219,12 +223,19 @@ review:
     expect(result.status).toBe('completed');
     expect(createModelForProvider).toHaveBeenCalledTimes(1);
     const [config] = createModelForProvider.mock.calls[0] as unknown as [
-      { provider: string; model?: string; language: string; review: { maxFindings: number } },
+      {
+        provider: string;
+        model?: string;
+        language: string;
+        review: { maxFindings: number };
+        budget: { pricing?: unknown };
+      },
     ];
     expect(config.provider).toBe('anthropic');
     expect(config.model).toBe('claude-3-5-sonnet');
     expect(config.language).toBe('en');
     expect(config.review.maxFindings).toBe(5);
+    expect(config.budget.pricing).toBeUndefined();
     const runs = await store.listReviewRuns(workspaceId, 10);
     expect(runs[0]?.status).toBe('completed');
   });
