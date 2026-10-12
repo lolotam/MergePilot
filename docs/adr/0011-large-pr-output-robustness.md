@@ -60,3 +60,12 @@ server rejected JSON mode or an unknown/unsupported request field (`response_for
 "additional properties"). Any other 400 (context too long, invalid model) is a real error: it is not
 retried and keeps its original message. The first response body is read before the retry so its
 connection is released.
+
+## Amendment (2026-10-13): invalid JSON escapes
+
+Models that quote code in `evidence` or `body` (regexes, Windows paths) sometimes write escapes JSON
+does not allow, such as `\d` or `C:\Dev`. One of them used to fail the whole answer as
+`invalid-json`. The answer and verify parsers now retry once through `review/json-lenient.ts`: a
+backslash that does not start a valid JSON escape is taken literally (doubled), then the text is
+parsed again. The repair runs only after `JSON.parse` has failed. Valid escapes, including `\`,
+are consumed pair by pair and left unchanged, so text that already parses is never altered.
