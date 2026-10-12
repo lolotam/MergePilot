@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Plus,
   User,
+  Shield,
 } from 'lucide-react';
 import { useI18n } from '../i18n/context.js';
 import { useMeQuery } from '../api/hooks.js';
@@ -113,8 +114,9 @@ export function Layout() {
             )}
           </div>
 
-          {/* Right actions: Language toggle, User menu */}
+          {/* Right actions: Language toggle, Platform Admin, User menu */}
           <div className="flex items-center gap-2">
+
             <button
               type="button"
               onClick={toggleLanguage}
@@ -131,6 +133,7 @@ export function Layout() {
                   type="button"
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
                   aria-expanded={userMenuOpen}
+                  aria-haspopup="menu"
                   aria-label={t('signedInAs')}
                   className="flex items-center gap-2 p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-ink-800 transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
                 >
@@ -148,13 +151,28 @@ export function Layout() {
                 </button>
 
                 {userMenuOpen && (
-                  <div className="absolute end-0 mt-2 w-56 rounded-md shadow-lg bg-white dark:bg-ink-900 border border-gray-200 dark:border-ink-800 py-1 z-50 animate-in fade-in">
+                  <div
+                    role="menu"
+                    className="absolute end-0 mt-2 w-56 rounded-md shadow-lg bg-white dark:bg-ink-900 border border-gray-200 dark:border-ink-800 py-1 z-50 animate-in fade-in"
+                  >
                     <div className="px-3 py-2 text-xs border-b border-gray-200 dark:border-ink-800">
                       <p className="font-semibold truncate">{meData.user.name || meData.user.email}</p>
                       <p className="text-gray-500 dark:text-gray-400 truncate">{meData.user.email}</p>
                     </div>
+                    {meData.isPlatformAdmin && (
+                      <Link
+                        to="/admin"
+                        role="menuitem"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="flex items-center gap-2 px-3 py-2 text-sm text-brand-700 dark:text-brand-300 hover:bg-gray-100 dark:hover:bg-ink-800 transition-colors"
+                      >
+                        <Shield className="w-4 h-4" />
+                        <span>{t('navAdmin')}</span>
+                      </Link>
+                    )}
                     <button
                       type="button"
+                      role="menuitem"
                       onClick={handleSignOut}
                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-ink-800 text-start transition-colors"
                     >

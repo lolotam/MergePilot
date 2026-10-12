@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Auth } from '../auth/auth.js';
+import { isUserPlatformAdmin } from '../admin/guard.js';
 import { requireRole } from '../auth/guard.js';
 import { listUserInstallations, type UserInstallation } from '../auth/github-installations.js';
 import type { AppConfig } from '../core/config.js';
@@ -42,6 +43,8 @@ export function registerDashboardApi(
     const githubAccount = await getUserGitHubAccount(deps.auth, session.user.id);
     const workspaces = await getUserWorkspaces(deps.auth, session.user.id);
 
+    const isPlatformAdmin = isUserPlatformAdmin(session.user, deps.config.platformAdmins);
+
     return reply.status(200).send({
       user: {
         id: session.user.id,
@@ -51,6 +54,7 @@ export function registerDashboardApi(
         githubLinked: githubAccount.linked,
       },
       workspaces,
+      isPlatformAdmin,
     });
   });
 

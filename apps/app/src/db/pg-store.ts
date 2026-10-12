@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { InstallationAlreadyLinkedError } from '../core/types.js';
-import { organization } from '../auth/schema.js';
-import { withLiveWorkspace } from './workspace-lock.js';
+import { deleteWorkspaceInTx, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
@@ -366,16 +365,8 @@ export class PgStore implements AppStore {
   }
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
-    await this.db.transaction(async (tx) => {
-      // Organization first (members/invitations cascade): writes holding its share lock
-      // (withLiveWorkspace) finish before this proceeds; later ones see it gone and throw.
-      await tx.delete(organization).where(eq(organization.id, workspaceId));
-      await tx.delete(providerCredentials).where(eq(providerCredentials.workspaceId, workspaceId));
-      await tx.delete(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
-      await tx.delete(reviewRuns).where(eq(reviewRuns.workspaceId, workspaceId));
-      await tx.update(installations).set({ workspaceId: null, updatedAt: new Date() })
-        .where(eq(installations.workspaceId, workspaceId));
-    });
+    // Organization row first, then the workspace data, in one transaction (see deleteWorkspaceInTx).
+    await this.db.transaction((tx) => deleteWorkspaceInTx(tx, workspaceId));
     return { organizationDeleted: true };
   }
 }

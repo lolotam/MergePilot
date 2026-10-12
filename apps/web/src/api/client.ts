@@ -2,6 +2,11 @@ import type { MeResponse, Settings, ErrorBody } from '@mergepilot/app/contract';
 
 export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
 
+/** GET /api/me plus the platform-operator flag (false for everyone not in MERGEPILOT_PLATFORM_ADMINS). */
+export interface MeResponseWithAdmin extends MeResponse {
+  isPlatformAdmin?: boolean;
+}
+
 export interface KeyItem {
   provider: ApiProvider;
   last4: string;
@@ -65,6 +70,8 @@ export class ApiClientError extends Error {
     message: string,
     public readonly code: string = 'UNKNOWN',
     public readonly status: number = 500,
+    /** Extra fields of the error body beyond `code` and `message`, when the server sent any. */
+    public readonly details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = 'ApiClientError';
@@ -84,16 +91,20 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
   if (!res.ok) {
     let code = `HTTP_${res.status}`;
     let message = res.statusText || 'Request failed';
+    let details: Record<string, unknown> = {};
     try {
       const data = (await res.json()) as ErrorBody;
       if (data?.error?.message) {
-        message = data.error.message;
-        code = data.error.code;
+        const { code: bodyCode, message: bodyMessage, ...rest } = data.error as ErrorBody['error'] &
+          Record<string, unknown>;
+        message = bodyMessage;
+        code = bodyCode;
+        details = rest;
       }
     } catch {
       // Fallback to HTTP status text
     }
-    throw new ApiClientError(message, code, res.status);
+    throw new ApiClientError(message, code, res.status, details);
   }
 
   if (res.status === 204) {
@@ -104,7 +115,7 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
 }
 
 export const api = {
-  getMe: () => fetchApi<MeResponse>('/api/me'),
+  getMe: () => fetchApi<MeResponseWithAdmin>('/api/me'),
   getSettings: (workspaceId: string) =>
     fetchApi<SettingsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
   updateSettings: (workspaceId: string, settings: Settings) =>
