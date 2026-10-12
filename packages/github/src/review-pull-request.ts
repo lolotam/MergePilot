@@ -135,6 +135,15 @@ export async function reviewPullRequest(
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
 
+  // ADR-0008: when an explicit fallback model answered, the summary names it and says why.
+  const fallbackSummary =
+    reviewResult.status !== 'skipped-budget' && reviewResult.fallbackFrom && reviewResult.fallbackCode
+      ? {
+          modelLabel: reviewResult.modelUsed ?? model.label,
+          fallback: { from: reviewResult.fallbackFrom, code: reviewResult.fallbackCode },
+        }
+      : {};
+
   const envVar = PROVIDER_ENV_MAP[config.provider] ?? 'API key';
   let summaryMarkdown: string;
   let inlineFindings: Finding[];
@@ -154,6 +163,7 @@ export async function reviewPullRequest(
       complete: reviewResult.complete,
       incompleteReasons: reviewResult.result.incompleteReasons,
       modelLabel: model.label,
+      ...fallbackSummary,
       outcome: 'completed',
       ...(reviewResult.costUsd !== undefined ? { costUsd: reviewResult.costUsd } : {}),
       ...(reviewResult.usage?.inputTokens !== undefined
@@ -203,6 +213,7 @@ export async function reviewPullRequest(
       complete: false,
       incompleteReasons: [reason],
       modelLabel: model.label,
+      ...fallbackSummary,
       outcome: 'failed',
       reason,
     });

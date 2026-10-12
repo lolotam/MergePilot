@@ -21,6 +21,7 @@ import { parseReviewAnswer } from './answer.js';
 import { ReviewAnswerSchema } from './answer.js';
 import { checkBudget, estimateTokens } from './budget.js';
 import { costUsd, estimateCostUsd } from '../budget/cost.js';
+import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import type { ReviewModel } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
@@ -53,6 +54,8 @@ export interface RunReviewInput {
   files: PrFile[];
   rulesFiles: RulesFile[];
   model: ReviewModel;
+  /** Explicit fallback models (ADR-0008); defaults to `model.fallbacks`, else none. */
+  fallbackModels?: readonly ReviewModel[] | undefined;
   knownSecrets: Secret[];
   libraryDocs?: LibraryDoc[] | undefined;
   signal?: AbortSignal | undefined;
@@ -63,7 +66,7 @@ export interface RunReviewInput {
 // ---------------------------------------------------------------------------
 
 export type ReviewRunResult =
-  | {
+  | ({
       status: 'completed';
       summary: string;
       inline: Finding[];
@@ -74,14 +77,14 @@ export type ReviewRunResult =
       droppedInvalid: number;
       complete: boolean;
       verification?: { checked: number; rejected: number } | undefined;
-    }
+    } & Partial<FallbackDisclosure>)
   | { status: 'skipped-budget'; reason: string }
-  | {
+  | ({
       status: 'failed';
       reason: string;
       /** Provider message, already secret-redacted by the adapter; for logs and the summary. */
       detail?: string | undefined;
-    };
+    } & Partial<FallbackDisclosure>);
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -166,7 +169,9 @@ function combineUsage(u1?: TokenUsage, u2?: TokenUsage): TokenUsage | undefined 
  * Runs the full single-pass review pipeline described in PRD v0.2 §7 steps 2–8.
  */
 export async function runReview(input: RunReviewInput): Promise<ReviewRunResult> {
-  const { config, pr, files, rulesFiles, model, knownSecrets, signal } = input;
+  const { config, pr, files, rulesFiles, knownSecrets, signal } = input;
+  // One chain per review, so a fallback lasts for the rest of this review only (ADR-0008).
+  const model = new FallbackChain(input.model, input.fallbackModels ?? input.model.fallbacks ?? []);
   const reviewCfg = config.review;
   const budgetCfg = config.budget;
 
@@ -280,11 +285,12 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     });
   } catch (err) {
     const failure = err as LlmFailure;
+    const disclosure = model.disclosure();
     if (failure && typeof failure === 'object' && 'code' in failure) {
       const detail = redactSecrets(String(failure.message ?? ''), knownSecrets).text.slice(0, 500);
-      return { status: 'failed', reason: failure.code as string, ...(detail ? { detail } : {}) };
+      return { status: 'failed', reason: failure.code as string, ...(detail ? { detail } : {}), ...disclosure };
     }
-    return { status: 'failed', reason: String(err) };
+    return { status: 'failed', reason: String(err), ...disclosure };
   }
 
   // ── Step e: parse answer ───────────────────────────────────────────────
@@ -366,8 +372,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     incompleteReasons,
   };
 
+  // Pricing belongs to the configured model; after a fallback the cost is unknown (tokens still count).
+  const disclosure = model.disclosure();
   let reviewCostUsd: number | undefined;
-  if (budgetCfg.pricing) {
+  if (budgetCfg.pricing && !disclosure.fallbackFrom) {
     reviewCostUsd = totalUsage
       ? costUsd(totalUsage, budgetCfg.pricing)
       : (estimatedCostUsd ??
@@ -385,5 +393,6 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     droppedInvalid: parseResult.droppedInvalid,
     complete,
     ...(verification !== undefined ? { verification } : {}),
+    ...disclosure,
   };
 }

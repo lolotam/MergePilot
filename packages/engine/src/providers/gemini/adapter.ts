@@ -4,6 +4,7 @@ import { LlmAdapter } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import type { FinishReason, GenerateOptions, StreamChunk } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
+import { geminiThinkingConfig, thinkingHeadroom } from '../effort.js';
 import type {
   GeminiAdapterOptions,
   GeminiLike,
@@ -65,8 +66,11 @@ export class GeminiAdapter extends LlmAdapter {
         parts: [{ text: m.content }],
       }));
 
+    const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
+    const thinks = thinkingConfig !== undefined && !('thinkingBudget' in thinkingConfig && thinkingConfig.thinkingBudget === 0);
     const config: Record<string, unknown> = {
-      maxOutputTokens: options.maxOutputTokens,
+      maxOutputTokens: options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0),
+      ...(thinkingConfig ? { thinkingConfig } : {}),
       ...(options.signal ? { abortSignal: options.signal } : {}),
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       ...(systemInstruction !== undefined ? { systemInstruction } : {}),

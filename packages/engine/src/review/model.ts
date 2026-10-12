@@ -12,6 +12,11 @@ export interface ReviewModel {
   /** Stable label for logs and the review footer, e.g. `anthropic:claude-sonnet-5-5`. */
   readonly label: string;
   generate(request: ReviewModelRequest): Promise<ReviewModelResponse>;
+  /**
+   * Explicit fallback models from the config (ADR-0008), tried in order by the pipeline when
+   * this model fails after its retries with quota / rate-limit / server / network / auth.
+   */
+  readonly fallbacks?: readonly ReviewModel[];
 }
 
 export interface ReviewModelRequest {
@@ -30,8 +35,8 @@ export interface ReviewModelResponse {
   finishReason: FinishReason;
 }
 
-/** Adapts any API `LlmAdapter` to the orchestrator's `ReviewModel`. */
-export function modelFromAdapter(adapter: LlmAdapter, model: string): ReviewModel {
+/** Adapts any API `LlmAdapter` to the orchestrator's `ReviewModel`; `effort` is the configured thinking effort. */
+export function modelFromAdapter(adapter: LlmAdapter, model: string, effort?: string): ReviewModel {
   return {
     label: `${adapter.provider}:${model}`,
     async generate(request) {
@@ -43,6 +48,7 @@ export function modelFromAdapter(adapter: LlmAdapter, model: string): ReviewMode
             { role: 'user', content: request.user },
           ],
           maxOutputTokens: request.maxOutputTokens,
+          ...(effort ? { effort } : {}),
           ...(request.responseSchema ? { responseSchema: request.responseSchema } : {}),
           ...(request.signal ? { signal: request.signal } : {}),
         }),

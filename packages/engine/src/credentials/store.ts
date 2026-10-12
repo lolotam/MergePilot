@@ -1,5 +1,12 @@
+import { PROVIDER_REGISTRY } from '../providers/registry.js';
 import { Secret } from './secret.js';
-import type { CredentialInfo, CredentialProvider, CredentialRef, RequestPurpose } from './types.js';
+import type {
+  AnyCredentialProvider,
+  CredentialInfo,
+  CredentialProvider,
+  CredentialRef,
+  RequestPurpose,
+} from './types.js';
 
 export class MissingCredentialError extends Error {
   readonly envName: string;
@@ -11,28 +18,43 @@ export class MissingCredentialError extends Error {
   }
 }
 
-export interface CredentialStore {
-  info(ref: CredentialRef): Promise<CredentialInfo>;
-  resolve(ref: CredentialRef, purpose: RequestPurpose): Promise<Secret>;
+/**
+ * Where the engine gets keys (ADR-0002). `P` is the set of providers a store serves; stores
+ * written for the first three providers keep the default and still fit wherever the engine
+ * asks for any provider (method parameters are bivariant), so they simply report the newer
+ * providers as not configured.
+ */
+export interface CredentialStore<P extends AnyCredentialProvider = CredentialProvider> {
+  info(ref: CredentialRef<P>): Promise<CredentialInfo<P>>;
+  resolve(ref: CredentialRef<P>, purpose: RequestPurpose): Promise<Secret>;
 }
 
-const PROVIDER_ENV_MAP: Record<CredentialProvider, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  gemini: 'GEMINI_API_KEY',
+/** A store that may be asked for any provider id. */
+export type AnyCredentialStore = CredentialStore<AnyCredentialProvider>;
+
+const PROVIDER_ENV_MAP: Record<AnyCredentialProvider, string> = {
+  ...(Object.fromEntries(Object.values(PROVIDER_REGISTRY).map((entry) => [entry.id, entry.envName])) as Record<
+    Exclude<AnyCredentialProvider, 'claude-code'>,
+    string
+  >),
   'claude-code': 'CLAUDE_CODE_OAUTH_TOKEN',
 };
 
+/** The environment variable that holds a provider's key in the Action. */
+export function credentialEnvName(provider: AnyCredentialProvider): string {
+  return PROVIDER_ENV_MAP[provider];
+}
+
 export type EnvRecord = Record<string, string | undefined>;
 
-export class EnvCredentialStore implements CredentialStore {
+export class EnvCredentialStore implements CredentialStore<AnyCredentialProvider> {
   readonly #env: EnvRecord;
 
   constructor(env: EnvRecord = process.env) {
     this.#env = env;
   }
 
-  async info(ref: CredentialRef): Promise<CredentialInfo> {
+  async info<P extends AnyCredentialProvider>(ref: CredentialRef<P>): Promise<CredentialInfo<P>> {
     const envName = PROVIDER_ENV_MAP[ref.provider];
     const raw = this.#env[envName];
     const trimmed = raw !== undefined ? raw.trim() : '';
@@ -46,7 +68,7 @@ export class EnvCredentialStore implements CredentialStore {
     };
   }
 
-  async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
+  async resolve(ref: CredentialRef<AnyCredentialProvider>, _purpose: RequestPurpose): Promise<Secret> {
     const envName = PROVIDER_ENV_MAP[ref.provider];
     const raw = this.#env[envName];
     const trimmed = raw !== undefined ? raw.trim() : '';

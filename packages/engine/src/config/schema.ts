@@ -1,8 +1,34 @@
 import { z } from 'zod';
+import { API_PROVIDER_IDS, PROVIDER_IDS } from '../providers/ids.js';
 import { SeveritySchema } from '../review/types.js';
 
-export const ProviderSchema = z.enum(['anthropic', 'openai', 'gemini', 'claude-code']);
+export const ProviderSchema = z.enum(PROVIDER_IDS);
 export type Provider = z.infer<typeof ProviderSchema>;
+
+/** Providers called with a customer-owned API key; everything except `claude-code`. */
+export const ApiProviderSchema = z.enum(API_PROVIDER_IDS);
+
+const BaseUrlSchema = z.url({ protocol: /^https?$/ });
+
+/**
+ * One explicit fallback model (ADR-0008). Tried in order, only when the model before it failed
+ * after its retries with quota / rate-limit / server / network / auth, and always disclosed.
+ */
+export const FallbackEntrySchema = z
+  .strictObject({
+    provider: ApiProviderSchema,
+    model: z.string().min(1),
+    effort: z.string().min(1).optional(),
+    baseUrl: BaseUrlSchema.optional(),
+  })
+  .superRefine((entry, ctx) => {
+    if (entry.provider === 'custom' && entry.baseUrl === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['baseUrl'], message: 'required when provider is custom' });
+    }
+  });
+export type FallbackEntry = z.infer<typeof FallbackEntrySchema>;
+
+export const MAX_FALLBACK_MODELS = 3;
 
 const PathInstructionSchema = z.strictObject({
   path: z.string().min(1),
@@ -71,6 +97,12 @@ export const MergePilotConfigSchema = z
   .strictObject({
     provider: ProviderSchema,
     model: z.string().min(1).optional(),
+    /** Thinking effort for `model` (e.g. low / medium / high / off); ignored where unknown. */
+    effort: z.string().min(1).optional(),
+    /** API root; required for `custom`, an override for the other compatible presets. */
+    baseUrl: BaseUrlSchema.optional(),
+    /** Explicit, disclosed fallback models (ADR-0008); empty means no fallback at all. */
+    fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).default([]),
     language: z.enum(['ar', 'en']).default('ar'),
     review: ReviewSettingsSchema.prefault({}),
     budget: BudgetSchema.prefault({}),
@@ -83,6 +115,9 @@ export const MergePilotConfigSchema = z
         path: ['model'],
         message: `required when provider is ${config.provider}`,
       });
+    }
+    if (config.provider === 'custom' && config.baseUrl === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['baseUrl'], message: 'required when provider is custom' });
     }
   });
 

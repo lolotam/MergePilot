@@ -15,6 +15,11 @@ export interface GenerateOptions {
   messages: readonly ChatMessage[];
   maxOutputTokens: number;
   temperature?: number;
+  /**
+   * Thinking effort as configured (e.g. `low`, `high`, `off`). Each adapter maps it to its own
+   * reasoning parameter and ignores a value it does not know (providers/effort.ts).
+   */
+  effort?: string;
   signal?: AbortSignal;
   /** JSON schema the provider should constrain its output to, when it supports that. */
   responseSchema?: Record<string, unknown>;

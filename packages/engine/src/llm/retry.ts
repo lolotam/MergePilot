@@ -11,7 +11,7 @@ export const DEFAULT_RETRY_POLICY: Readonly<RetryPolicy> = Object.freeze({
   maxAttempts: 3,
   baseDelayMs: 1000,
   maxDelayMs: 30000,
-  retryableCodes: ['RATE_LIMIT', 'SERVER', 'TIMEOUT'] as const,
+  retryableCodes: ['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'NETWORK'] as const,
 });
 
 export interface RetryDeps {

@@ -5,6 +5,7 @@ import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import type { FinishReason, GenerateOptions, StreamChunk, TokenUsage } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
+import { anthropicThinking, thinkingHeadroom } from '../effort.js';
 import type {
   AnthropicAdapterOptions,
   AnthropicLike,
@@ -85,12 +86,16 @@ export class AnthropicAdapter extends LlmAdapter {
       .filter((m) => m.role !== 'system')
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
+    // Thinking tokens count against max_tokens, so the answer keeps its own budget on top;
+    // Anthropic rejects a custom temperature while thinking is on.
+    const thinking = anthropicThinking(options.model, options.effort);
     const streamParams: AnthropicStreamParams = {
       model: options.model,
-      max_tokens: options.maxOutputTokens,
+      max_tokens: options.maxOutputTokens + (thinking ? thinkingHeadroom(options.effort) : 0),
       messages,
       ...(system ? { system } : {}),
-      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(options.temperature !== undefined && !thinking ? { temperature: options.temperature } : {}),
+      ...(thinking ?? {}),
     };
 
     const requestOptions = options.signal ? { signal: options.signal } : undefined;

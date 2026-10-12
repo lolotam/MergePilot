@@ -5,6 +5,7 @@ import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
+import { openAIReasoningEffort, thinkingHeadroom } from '../effort.js';
 import type { OpenAIAdapterOptions, OpenAILike } from './types.js';
 
 function extractHeaders(rawHeaders: unknown): Record<string, string | undefined> {
@@ -57,10 +58,14 @@ export class OpenAIAdapter extends LlmAdapter {
       content: m.content,
     }));
 
+    const reasoningEffort = openAIReasoningEffort(options.effort);
     const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming = {
       model: options.model,
       messages,
-      max_completion_tokens: options.maxOutputTokens,
+      max_completion_tokens: options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0),
+      ...(reasoningEffort
+        ? { reasoning_effort: reasoningEffort as NonNullable<OpenAI.Chat.ChatCompletionCreateParams['reasoning_effort']> }
+        : {}),
       stream: true,
       stream_options: {
         include_usage: true,

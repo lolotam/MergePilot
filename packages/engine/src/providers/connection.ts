@@ -1,0 +1,179 @@
+/**
+ * Connection test: one tiny, non-streaming request that proves a key, a model and an effort
+ * work together. The result never carries the key; failures come back as a short category
+ * (`quota`, `auth`, ...) plus a redacted message instead of a thrown error.
+ */
+import { randomUUID } from 'node:crypto';
+import { failureKind, LlmFailure, type FailureKind } from '../llm/failure.js';
+import {
+  anthropicThinking,
+  compatibleEffortFields,
+  geminiThinkingConfig,
+  openAIReasoningEffort,
+  thinkingHeadroom,
+} from './effort.js';
+import {
+  bearerHeaders,
+  failureFromResponse,
+  failureFromThrown,
+  keyValue,
+  redactKey,
+  type FetchLike,
+  type KeyInput,
+} from './http.js';
+import type { ApiProviderId } from './ids.js';
+import { providerEntry, resolveBaseUrl } from './registry.js';
+
+export interface TestConnectionOptions {
+  baseUrl?: string;
+  effort?: string;
+  fetch?: FetchLike;
+  timeoutMs?: number;
+}
+
+export type ConnectionResult =
+  | { ok: true; ms: number; model: string; reply: string }
+  | { ok: false; ms: number; code: FailureKind; message: string };
+
+const PROMPT = 'Reply with the single word OK';
+const MAX_OUTPUT_TOKENS = 16;
+const DEFAULT_TIMEOUT_MS = 30000;
+
+interface PlannedRequest {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+  reply: (json: Record<string, unknown>) => string;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function list(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(record) : [];
+}
+
+function chatReply(json: Record<string, unknown>): string {
+  const content = record(list(json.choices)[0]?.message).content;
+  return typeof content === 'string' ? content : '';
+}
+
+function plan(provider: ApiProviderId, key: KeyInput, model: string, options: TestConnectionOptions): PlannedRequest {
+  const base = resolveBaseUrl(provider, options.baseUrl);
+  const messages = [{ role: 'user', content: PROMPT }];
+  const json = { 'Content-Type': 'application/json' };
+
+  if (provider === 'anthropic') {
+    const thinking = anthropicThinking(model, options.effort);
+    return {
+      url: `${base}/messages`,
+      headers: { ...json, 'x-api-key': keyValue(key) ?? '', 'anthropic-version': '2023-06-01' },
+      body: {
+        model,
+        max_tokens: MAX_OUTPUT_TOKENS + (thinking ? thinkingHeadroom(options.effort) : 0),
+        messages,
+        ...(thinking ?? {}),
+      },
+      reply: (res) =>
+        list(res.content)
+          .filter((block) => block.type === 'text' && typeof block.text === 'string')
+          .map((block) => String(block.text))
+          .join(''),
+    };
+  }
+  if (provider === 'gemini') {
+    const thinkingConfig = geminiThinkingConfig(model, options.effort);
+    return {
+      url: `${base}/models/${encodeURIComponent(model.replace(/^models\//, ''))}:generateContent`,
+      headers: { ...json, 'x-goog-api-key': keyValue(key) ?? '' },
+      body: {
+        contents: [{ role: 'user', parts: [{ text: PROMPT }] }],
+        generationConfig: {
+          maxOutputTokens: MAX_OUTPUT_TOKENS + (thinkingConfig ? thinkingHeadroom(options.effort) : 0),
+          ...(thinkingConfig ? { thinkingConfig } : {}),
+        },
+      },
+      reply: (res) =>
+        list(record(list(res.candidates)[0]?.content).parts)
+          .map((part) => (typeof part.text === 'string' ? part.text : ''))
+          .join(''),
+    };
+  }
+  if (provider === 'openai') {
+    const effort = openAIReasoningEffort(options.effort);
+    return {
+      url: `${base}/chat/completions`,
+      headers: { ...json, ...bearerHeaders(key) },
+      body: {
+        model,
+        messages,
+        max_completion_tokens: MAX_OUTPUT_TOKENS + (effort ? thinkingHeadroom(effort) : 0),
+        ...(effort ? { reasoning_effort: effort } : {}),
+      },
+      reply: chatReply,
+    };
+  }
+  const effortFields = compatibleEffortFields(providerEntry(provider).thinkingStyle, options.effort);
+  return {
+    url: `${base}/chat/completions`,
+    headers: {
+      ...json,
+      ...bearerHeaders(key),
+      ...(/^https:\/\/opencode\.ai\//.test(base) ? { 'x-opencode-session': randomUUID() } : {}),
+    },
+    body: {
+      model,
+      messages,
+      max_tokens: MAX_OUTPUT_TOKENS + (Object.keys(effortFields).length > 0 ? thinkingHeadroom(options.effort) : 0),
+      ...effortFields,
+    },
+    reply: chatReply,
+  };
+}
+
+/** Sends one tiny request and reports whether `provider` answered with `model` and this key. */
+export async function testConnection(
+  provider: ApiProviderId,
+  apiKey: KeyInput,
+  model: string,
+  options: TestConnectionOptions = {},
+): Promise<ConnectionResult> {
+  const started = Date.now();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const doFetch = options.fetch ?? ((input, init) => fetch(input, init));
+  const elapsed = () => Date.now() - started;
+
+  try {
+    const request = plan(provider, apiKey, model, options);
+    let res: Response;
+    try {
+      res = await doFetch(request.url, {
+        method: 'POST',
+        headers: request.headers,
+        body: JSON.stringify(request.body),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw failureFromThrown(error, provider, apiKey, controller.signal);
+    }
+    if (!res.ok) throw await failureFromResponse(res, provider, apiKey);
+    const reply = request.reply(record(await res.json())).trim();
+    return { ok: true, ms: elapsed(), model, reply };
+  } catch (error) {
+    if (timedOut) {
+      return { ok: false, ms: elapsed(), code: 'network', message: `${provider} did not answer within ${timeoutMs} ms` };
+    }
+    const failure =
+      error instanceof LlmFailure ? error : failureFromThrown(error, provider, apiKey, controller.signal);
+    return { ok: false, ms: elapsed(), code: failureKind(failure.code), message: redactKey(failure.message, apiKey) };
+  } finally {
+    clearTimeout(timer);
+  }
+}

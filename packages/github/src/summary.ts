@@ -17,6 +17,11 @@ export interface ReviewSummaryInput {
   costUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * Set when an explicit fallback model answered instead of the configured one (ADR-0008);
+   * `modelLabel` is then the fallback model. Always disclosed in the summary.
+   */
+  fallback?: { from: string; code: string };
 }
 
 /**
@@ -62,6 +67,15 @@ function renderNotCompletedNotice(
     return `> **السبب:** ${effectiveReason}\n>\n> لم تتم مراجعة أي كود.`;
   }
   return `> **Reason:** ${effectiveReason}\n>\n> No code was reviewed.`;
+}
+
+function renderFallbackLine(input: ReviewSummaryInput, isArabic: boolean): string {
+  const used = neutralize(input.modelLabel);
+  const from = neutralize(input.fallback?.from ?? '');
+  const code = neutralize(input.fallback?.code ?? '');
+  return isArabic
+    ? `> ⚠️ استُخدم النموذج الاحتياطي \`${used}\` لأن \`${from}\` فشل (${code})`
+    : `> ⚠️ Fallback model \`${used}\` was used because \`${from}\` failed (${code})`;
 }
 
 function renderFindingsOutsideDiff(findings: Finding[], isArabic: boolean): string {
@@ -145,6 +159,10 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
   const sections: string[] = [];
 
   sections.push(renderHeader(input.outcome, isArabic));
+
+  if (input.fallback) {
+    sections.push(renderFallbackLine(input, isArabic));
+  }
 
   if (input.outcome !== 'completed') {
     sections.push(renderNotCompletedNotice(input.outcome, input.reason, isArabic));
