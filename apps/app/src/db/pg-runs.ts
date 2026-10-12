@@ -141,7 +141,10 @@ export async function queryPgReviewRuns(
       break;
   }
 
-  const primaryOrder = isAsc ? asc(sortColumn) : desc(sortColumn);
+  // Nullable columns (runs from before migration 0003) go last in both directions.
+  const primaryOrder = isAsc
+    ? sql`${sortColumn} asc nulls last`
+    : sql`${sortColumn} desc nulls last`;
   const tieBreaker = isAsc ? asc(reviewRuns.id) : desc(reviewRuns.id);
 
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);

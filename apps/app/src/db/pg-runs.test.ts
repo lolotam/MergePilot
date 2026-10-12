@@ -65,4 +65,31 @@ describe('PgStore stale-run sweep uses the heartbeat, not created_at', { timeout
       await close();
     }
   });
+
+  it('puts runs with no provider last when sorting by provider in either direction', async () => {
+    const { store, client, close } = await createTestDb(undefined, { workspaces: [WS] });
+    try {
+      const base = {
+        workspaceId: WS,
+        installationId: 1,
+        pullNumber: 1,
+        headSha: 'sha',
+        status: 'completed' as const,
+        costUsd: null,
+        detail: null,
+      };
+      const legacy = await store.createReviewRun({ ...base, repoFullName: 'org/legacy' });
+      const withProvider = await store.createReviewRun({ ...base, repoFullName: 'org/new' });
+      await client.query(`UPDATE review_runs SET provider = NULL WHERE id = $1;`, [legacy.id]);
+      await client.query(`UPDATE review_runs SET provider = 'gemini' WHERE id = $1;`, [withProvider.id]);
+
+      for (const dir of ['asc', 'desc'] as const) {
+        const page = await store.listReviewRuns(WS, { sort: 'provider', dir, limit: 10, offset: 0 });
+        const ids = (page as { runs: Array<{ id: string }> }).runs.map((r) => r.id);
+        expect(ids).toEqual([withProvider.id, legacy.id]);
+      }
+    } finally {
+      await close();
+    }
+  });
 });
