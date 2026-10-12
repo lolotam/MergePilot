@@ -195,6 +195,11 @@ describe('core/logger sanitizing never mutates caller values', () => {
     expect(lines[0]?.workspace).toBe(workspace);
     expect(lines[0]?.runId).toBe(runId);
     expect(String(lines[0]?.detail)).not.toContain(fake);
+
+    // A key that ends up in an id field by mistake is still hidden.
+    log.info({ userId: fake, targetId: ['g', 'hp_', 'q'.repeat(36)].join('') }, 'oops');
+    expect(String(lines[1]?.userId)).not.toContain(fake);
+    expect(String(lines[1]?.targetId)).toMatch(/REDACTED/);
   });
 });
 

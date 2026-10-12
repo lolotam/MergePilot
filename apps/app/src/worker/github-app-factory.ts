@@ -8,10 +8,12 @@ import type { GitHubAppClientFactory } from './types.js';
 
 /** Octokit's own request lines go to the structured logger (debug) instead of plain stdout. */
 const octokitLog = {
-  debug: (message: string) => workerLogger.debug({ source: 'octokit' }, message),
-  info: (message: string) => workerLogger.debug({ source: 'octokit' }, message),
-  warn: (message: string) => workerLogger.warn({ source: 'octokit' }, message),
-  error: (message: string) => workerLogger.error({ source: 'octokit' }, message),
+  // Octokit passes request metadata (method, url, status) as a second argument; keep it, the
+  // logger redacts it like any other field.
+  debug: (message: string, details?: unknown) => workerLogger.debug({ source: 'octokit', details }, message),
+  info: (message: string, details?: unknown) => workerLogger.debug({ source: 'octokit', details }, message),
+  warn: (message: string, details?: unknown) => workerLogger.warn({ source: 'octokit', details }, message),
+  error: (message: string, details?: unknown) => workerLogger.error({ source: 'octokit', details }, message),
 };
 
 export function createGitHubAppFactory(

@@ -81,6 +81,15 @@ const ID_FIELDS = new Set([
 ]);
 const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+/**
+ * An id field keeps its value only when the generic entropy rule is the sole reason it would be
+ * hidden; known key formats and exact known secrets are still redacted in id fields too.
+ */
+function keepIdUnlessSecret(value: string, secrets: Secret[]): string {
+  const redacted = redactText(value, secrets);
+  return /^\[REDACTED:entropy[^\]]*\]$/.test(redacted) ? value : redacted;
+}
+
 function sanitizeValue(val: unknown, secrets: Secret[], depth: number): unknown {
   if (typeof val === 'string') return redactText(val, secrets);
   if (val instanceof Error) return sanitizeError(val, secrets);
@@ -93,7 +102,7 @@ function sanitizeValue(val: unknown, secrets: Secret[], depth: number): unknown 
       // pattern; they are not secrets and are what an operator searches the logs by.
       copy[key] =
         ID_FIELDS.has(key) && typeof item === 'string' && SAFE_ID.test(item)
-          ? item
+          ? keepIdUnlessSecret(item, secrets)
           : sanitizeValue(item, secrets, depth + 1);
     }
     return copy;
