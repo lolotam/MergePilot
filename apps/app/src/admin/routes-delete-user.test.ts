@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import * as authSchema from '../auth/schema.js';
+import { WorkspaceDeletedError } from '../core/types.js';
 import * as dbSchema from '../db/schema.js';
 import { createSeededAdminApp, type AdminTestDb } from './admin.fixtures.js';
 
@@ -29,6 +30,20 @@ describe('DELETE /api/admin/users/:userId — shared workspaces', () => {
     await db
       .insert(authSchema.member)
       .values({ id: `m-${userId}-${workspaceId}`, organizationId: workspaceId, userId, role });
+  }
+
+  /** A late worker write for the workspace, as the review pipeline would make it. */
+  function lateWorkerRun(workspaceId: string) {
+    return handle.store.createReviewRun({
+      workspaceId,
+      installationId: 101,
+      repoFullName: 'acme/backend',
+      pullNumber: 99,
+      headSha: 'sha99',
+      status: 'running',
+      costUsd: null,
+      detail: null,
+    });
   }
 
   function deleteUser(userId: string) {
@@ -93,5 +108,31 @@ describe('DELETE /api/admin/users/:userId — shared workspaces', () => {
     expect(orgs.map((o) => o.id).sort()).toEqual(['ws-1', 'ws-2']);
     const members = await db.select().from(authSchema.member);
     expect(members.map((m) => m.userId)).toEqual(['u-regular', 'u-regular']);
+  });
+
+  it('admin workspace delete makes later worker writes fail with WorkspaceDeletedError', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/admin/workspaces/ws-1',
+      headers: { cookie: adminCookie },
+    });
+    expect(res.statusCode).toBe(204);
+
+    await expect(lateWorkerRun('ws-1')).rejects.toBeInstanceOf(WorkspaceDeletedError);
+    const runs = await db.select().from(dbSchema.reviewRuns);
+    expect(runs.some((r) => r.workspaceId === 'ws-1')).toBe(false);
+    // The other workspace is untouched and still accepts writes.
+    await expect(lateWorkerRun('ws-2')).resolves.toMatchObject({ workspaceId: 'ws-2' });
+  });
+
+  it('orphan purge on user delete makes later worker writes fail with WorkspaceDeletedError', async () => {
+    const res = await deleteUser('u-regular');
+    expect(res.statusCode).toBe(204);
+
+    await expect(lateWorkerRun('ws-1')).rejects.toBeInstanceOf(WorkspaceDeletedError);
+    await expect(lateWorkerRun('ws-2')).rejects.toBeInstanceOf(WorkspaceDeletedError);
+    expect(await db.select().from(dbSchema.reviewRuns)).toHaveLength(0);
+    const members = await db.select().from(authSchema.member);
+    expect(members).toHaveLength(0);
   });
 });

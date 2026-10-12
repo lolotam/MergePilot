@@ -317,7 +317,6 @@ export const ar = {
   deleteWorkspaceConfirmTitle: 'حذف مساحة العمل',
   deleteWorkspaceConfirmDesc: 'سيؤدي هذا الإجراء إلى حذف جميع بيانات ومفاتيح وسجلات المساحة نهائيًا. لتأكيد الحذف، يرجى كتابة اسم مساحة العمل:',
   typeWorkspaceNameToConfirm: 'اكتب اسم مساحة العمل للتأكيد',
-  workspaceDeletedSuccess: 'تم حذف مساحة العمل بنجاح',
   noWorkspacesFound: 'لم يتم العثور على مساحات عمل.',
   filterWorkspace: 'تصفية حسب اسم مساحة العمل...',
   colRepo: 'المستودع',

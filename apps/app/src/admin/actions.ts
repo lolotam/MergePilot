@@ -1,7 +1,7 @@
 import { and, asc, count, eq, ne } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import * as authSchema from '../auth/schema.js';
-import * as dbSchema from '../db/schema.js';
+import { deleteWorkspaceInTx } from '../db/workspace-lock.js';
 import type { AdminDb } from './queries.js';
 
 type AdminTx = Parameters<Parameters<AdminDb['transaction']>[0]>[0];
@@ -17,29 +17,6 @@ export type ActionResult =
   | { ok: true }
   | { ok: false; status: 400 | 404; code: string; message: string }
   | { ok: false; status: 409; code: string; message: string; workspaces: WorkspaceRef[] };
-
-/**
- * Removes every workspace-scoped row (these tables have no foreign key to `organization`),
- * unlinks its installations, then deletes the organization (members and invitations cascade).
- */
-async function purgeWorkspace(tx: AdminTx, workspaceId: string): Promise<void> {
-  await tx
-    .delete(dbSchema.providerCredentials)
-    .where(eq(dbSchema.providerCredentials.workspaceId, workspaceId));
-  await tx
-    .delete(dbSchema.workspaceSettings)
-    .where(eq(dbSchema.workspaceSettings.workspaceId, workspaceId));
-  await tx.delete(dbSchema.reviewRuns).where(eq(dbSchema.reviewRuns.workspaceId, workspaceId));
-  await tx
-    .update(dbSchema.installations)
-    .set({ workspaceId: null, updatedAt: new Date() })
-    .where(eq(dbSchema.installations.workspaceId, workspaceId));
-  await tx.delete(authSchema.member).where(eq(authSchema.member.organizationId, workspaceId));
-  await tx
-    .delete(authSchema.invitation)
-    .where(eq(authSchema.invitation.organizationId, workspaceId));
-  await tx.delete(authSchema.organization).where(eq(authSchema.organization.id, workspaceId));
-}
 
 /**
  * Workspaces the user solely owns that still have other members. Deleting the user would leave
@@ -70,7 +47,7 @@ async function findSoleOwnedSharedWorkspaces(
 
 /**
  * Deletes a user (sessions, accounts, memberships and sent invitations cascade). Any workspace
- * left with no members is purged in the same transaction. Refused with 409 when the user is the
+ * left with no members is purged in the same transaction (via deleteWorkspaceInTx). Refused with 409 when the user is the
  * sole owner of a workspace that still has other members.
  */
 export async function deleteUser(
@@ -112,7 +89,7 @@ export async function deleteUser(
         .from(authSchema.member)
         .where(eq(authSchema.member.organizationId, wsId));
       if (Number(remaining[0]?.n ?? 0) === 0) {
-        await purgeWorkspace(tx, wsId);
+        await deleteWorkspaceInTx(tx, wsId);
         orphaned.push(wsId);
       }
     }
@@ -140,7 +117,11 @@ export async function deleteUser(
   return { ok: true };
 }
 
-/** Deletes a workspace's data and the organization in one transaction. */
+/**
+ * Deletes a workspace exactly like PgStore.deleteWorkspace: organization row first, then its data,
+ * in one transaction. In-flight worker writes (withLiveWorkspace) then fail with
+ * WorkspaceDeletedError, and the worker re-checks the installation link before publishing.
+ */
 export async function deleteWorkspace(
   db: AdminDb,
   adminUserId: string,
@@ -153,7 +134,7 @@ export async function deleteWorkspace(
       .from(authSchema.organization)
       .where(eq(authSchema.organization.id, workspaceId));
     if (existing.length === 0) return false;
-    await purgeWorkspace(tx, workspaceId);
+    await deleteWorkspaceInTx(tx, workspaceId);
     return true;
   });
 

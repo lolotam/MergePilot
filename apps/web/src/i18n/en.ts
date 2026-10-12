@@ -319,7 +319,6 @@ export const en: I18nDictionary = {
   deleteWorkspaceConfirmTitle: 'Delete Workspace',
   deleteWorkspaceConfirmDesc: 'This action will permanently delete all workspace credentials, settings, review runs, and unlink installations. To confirm, please type the workspace name below:',
   typeWorkspaceNameToConfirm: 'Type workspace name to confirm',
-  workspaceDeletedSuccess: 'Workspace deleted successfully',
   noWorkspacesFound: 'No workspaces found.',
   filterWorkspace: 'Filter by workspace name...',
   colRepo: 'Repository',
