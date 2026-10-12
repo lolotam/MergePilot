@@ -201,14 +201,14 @@ describe('processReviewJob', () => {
     expect(runs[0]?.detail).toBe('workspace not configured');
   });
 
-  it('rejects claude-code override in repo config and records skipped', async () => {
+  it('uses the workspace provider and model even when the repo config targets claude-code', async () => {
     const claudeCodeYaml = `
 provider: claude-code
 language: en
 review:
   maxFindings: 5
 `;
-    const { deps, job, store } = createTestSetup({
+    const { deps, job, store, createModelForProvider } = createTestSetup({
       filesAtRef: {
         [`${baseSha}:.mergepilot.yml`]: claudeCodeYaml,
       },
@@ -216,13 +216,17 @@ review:
 
     const result = await processReviewJob(job, deps);
 
-    expect(result.status).toBe('skipped');
-    expect(result.detail).toBe('subscription mode is not available in the SaaS');
-
+    expect(result.status).toBe('completed');
+    expect(createModelForProvider).toHaveBeenCalledTimes(1);
+    const [config] = createModelForProvider.mock.calls[0] as unknown as [
+      { provider: string; model?: string; language: string; review: { maxFindings: number } },
+    ];
+    expect(config.provider).toBe('anthropic');
+    expect(config.model).toBe('claude-3-5-sonnet');
+    expect(config.language).toBe('en');
+    expect(config.review.maxFindings).toBe(5);
     const runs = await store.listReviewRuns(workspaceId, 10);
-    expect(runs).toHaveLength(1);
-    expect(runs[0]?.status).toBe('skipped');
-    expect(runs[0]?.detail).toBe('subscription mode is not available in the SaaS');
+    expect(runs[0]?.status).toBe('completed');
   });
 
   it('publishes summary-only and makes no model call when monthly budget reached', async () => {

@@ -194,16 +194,14 @@ export async function processReviewJob(
     } else if ('errors' in repoConfigResult) {
       throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
     } else {
-      if (repoConfigResult.config.provider === 'claude-code') {
-        await deps.store.finishReviewRun(workspaceId, run.id, {
-          status: 'skipped',
-          costUsd: null,
-          detail: 'subscription mode is not available in the SaaS',
-        });
-        deps.log?.('Skipping job: subscription mode is not available in the SaaS');
-        return { status: 'skipped', detail: 'subscription mode is not available in the SaaS' };
-      }
-      effectiveConfig = repoConfigResult.config;
+      // In the SaaS the workspace's dashboard settings choose the provider and model (the repo file
+      // may target the GitHub Action, e.g. `provider: claude-code`); the repo still supplies its
+      // review rules, language and other settings.
+      effectiveConfig = {
+        ...repoConfigResult.config,
+        provider: settings.provider,
+        model: settings.model,
+      };
       rulesFiles = repoConfigResult.rulesFiles;
       configHash = createHash('sha256')
         .update(repoConfigResult.configText)
