@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import { extractCandidateObjects, isTruncatedAnswer } from './answer.js';
 import type { Finding } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -211,71 +212,74 @@ const VerifyAnswerLooseSchema = z.object({
   verdicts: z.array(z.unknown()),
 });
 
-export type ParseVerifyAnswerResult =
-  | { ok: true; verdicts: FindingVerdict[] }
-  | { ok: false; error: string };
+export type ParseVerifyErrorCode = 'truncated' | 'invalid-json' | 'empty-response';
 
-function extractFirstObject(text: string): string | null {
-  const fenceMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  if (fenceMatch) return fenceMatch[1] ?? null;
-
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escape = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (inString) {
-      if (ch === '\\') escape = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === '{') {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth === 0 && start !== -1) return text.slice(start, i + 1);
-    }
-  }
-  return null;
+export interface ParseVerifyAnswerOptions {
+  finishReason?: string | undefined;
+  outputTokens?: number | undefined;
 }
 
-export function parseVerifyAnswer(text: string): ParseVerifyAnswerResult {
-  const raw = extractFirstObject(text);
-  if (raw === null) {
-    return { ok: false, error: 'No JSON object found in model response.' };
+export type ParseVerifyAnswerResult =
+  | { ok: true; verdicts: FindingVerdict[] }
+  | { ok: false; error: string; code: ParseVerifyErrorCode };
+
+
+
+export function parseVerifyAnswer(
+  text: string,
+  options?: ParseVerifyAnswerOptions,
+): ParseVerifyAnswerResult {
+  if (!text || text.trim().length === 0) {
+    return { ok: false, code: 'empty-response', error: 'empty-response: model returned no text' };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    return {
-      ok: false,
-      error: `JSON parse error: ${err instanceof Error ? err.message : String(err)}`,
-    };
+  const { candidates, hasUnclosedObject } = extractCandidateObjects(text);
+
+  let firstParseError: string | null = null;
+  let matchedAnswer: z.infer<typeof VerifyAnswerLooseSchema> | null = null;
+
+  for (const candidate of candidates) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch (err) {
+      if (!firstParseError) {
+        firstParseError = err instanceof Error ? err.message : String(err);
+      }
+      continue;
+    }
+
+    const loose = VerifyAnswerLooseSchema.safeParse(parsed);
+    if (loose.success) {
+      matchedAnswer = loose.data;
+      break;
+    } else if (!firstParseError) {
+      firstParseError = loose.error.message;
+    }
   }
 
-  const topResult = VerifyAnswerLooseSchema.safeParse(parsed);
-  if (!topResult.success) {
+  if (!matchedAnswer) {
+    const isTruncated = isTruncatedAnswer(options?.finishReason, hasUnclosedObject);
+
+    if (isTruncated) {
+      const finishDetail = options?.finishReason ? `finishReason: ${options.finishReason}` : 'unclosed JSON object';
+      const tokensDetail = options?.outputTokens !== undefined ? `, outputTokens: ${options.outputTokens}` : '';
+      return {
+        ok: false,
+        code: 'truncated',
+        error: `truncated (${finishDetail}${tokensDetail})`,
+      };
+    }
+
     return {
       ok: false,
-      error: `Schema validation failed: ${topResult.error.message}`,
+      code: 'invalid-json',
+      error: `invalid-json: ${firstParseError ?? 'no valid JSON object found matching verify schema'}`,
     };
   }
 
   const verdicts: FindingVerdict[] = [];
-  for (const rawVerdict of topResult.data.verdicts) {
+  for (const rawVerdict of matchedAnswer.verdicts) {
     const result = FindingVerdictSchema.safeParse(rawVerdict);
     if (result.success) verdicts.push(result.data);
   }

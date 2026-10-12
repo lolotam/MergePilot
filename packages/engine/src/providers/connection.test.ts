@@ -186,6 +186,30 @@ describe('testConnection', () => {
       }
     });
 
+    it('returns code quota when Anthropic answers 400 "credit balance is too low"', async () => {
+      const { fetch } = mockFetch(
+        jsonResponse(
+          {
+            type: 'error',
+            error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' },
+          },
+          400,
+        ),
+      );
+      const result = await testConnection('anthropic', KEY, 'claude-sonnet-5-5', { fetch });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe('quota');
+    });
+
+    it('returns code quota on OpenAI insufficient_quota 429', async () => {
+      const { fetch } = mockFetch(
+        jsonResponse({ error: { message: 'You exceeded your current quota.', code: 'insufficient_quota' } }, 429),
+      );
+      const result = await testConnection('openai', KEY, 'gpt-5', { fetch });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe('quota');
+    });
+
     it('returns code quota on 402 error', async () => {
       const { fetch } = mockFetch(jsonResponse({ error: { message: 'Insufficient balance' } }, 402));
 
@@ -235,4 +259,77 @@ describe('testConnection', () => {
       }
     });
   });
+
+  describe('thinking models (live bug: Test button failed with "answered without any reply text")', () => {
+    it('gives NVIDIA Nemotron (default model) thinking room with no effort', async () => {
+      const { fetch, calls } = mockFetch(jsonResponse({ choices: [{ message: { content: 'OK' } }] }));
+      const result = await testConnection('nvidia', KEY, 'nvidia/nemotron-3-super-120b-a12b', { fetch });
+      expect(result.ok).toBe(true);
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16 + 8192);
+    });
+
+    it('gives gpt-5 the default headroom with no effort configured (openAIThinksByDefault)', async () => {
+      const { fetch, calls } = mockFetch(jsonResponse({ choices: [{ message: { content: 'OK' } }] }));
+      const result = await testConnection('openai', KEY, 'gpt-5', { fetch });
+      expect(result.ok).toBe(true);
+      const body = calls[0]?.body as { max_completion_tokens: number; reasoning_effort?: string };
+      expect(body.max_completion_tokens).toBe(16 + 8192);
+      expect(body.reasoning_effort).toBeUndefined();
+    });
+
+    it('strips a leading <think> block from content (NIM models)', async () => {
+      const { fetch } = mockFetch(
+        jsonResponse({ choices: [{ message: { content: '<think>The user wants OK.</think>\n\nOK' } }] }),
+      );
+      const result = await testConnection('nvidia', KEY, 'nvidia/nemotron-3-super-120b-a12b', { fetch });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.reply).toBe('OK');
+    });
+
+    it('counts a think-only content (closed or cut off) as a working connection', async () => {
+      for (const content of ['<think>The user wants OK.</think>', '<think>The user wants OK, so I']) {
+        const { fetch } = mockFetch(jsonResponse({ choices: [{ message: { content } }] }));
+        const result = await testConnection('nvidia', KEY, 'nvidia/nemotron-3-super-120b-a12b', { fetch });
+        expect(result.ok).toBe(true);
+      }
+    });
+
+    it('still fails an empty think block with no reply', async () => {
+      const { fetch } = mockFetch(jsonResponse({ choices: [{ message: { content: '<think></think>' } }] }));
+      const result = await testConnection('nvidia', KEY, 'nvidia/nemotron-3-super-120b-a12b', { fetch });
+      expect(result.ok).toBe(false);
+    });
+
+    it('gives GLM (zai-coding) thinking room by default and with effort "on"', async () => {
+      for (const effort of [undefined, 'on'] as const) {
+        const { fetch, calls } = mockFetch(jsonResponse({ choices: [{ message: { content: 'OK' } }] }));
+        const result = await testConnection('zai-coding', KEY, 'glm-5.3', { fetch, ...(effort ? { effort } : {}) });
+        expect(result.ok).toBe(true);
+        expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBeGreaterThanOrEqual(16 + 8192);
+      }
+    });
+
+    it('counts a reasoning-only reply as a working connection', async () => {
+      const { fetch } = mockFetch(
+        jsonResponse({ choices: [{ message: { content: '', reasoning_content: 'The user wants OK' } }] }),
+      );
+      const result = await testConnection('zai-coding', KEY, 'glm-5.3', { fetch });
+      expect(result.ok).toBe(true);
+    });
+
+    it('gives Gemini 3.x thinking room with no effort configured', async () => {
+      const { fetch, calls } = mockFetch(jsonResponse({ candidates: [{ content: { parts: [{ text: 'OK' }] } }] }));
+      const result = await testConnection('gemini', KEY, 'gemini-3.8-flash', { fetch });
+      expect(result.ok).toBe(true);
+      const config = (calls[0]?.body as { generationConfig: { maxOutputTokens: number } }).generationConfig;
+      expect(config.maxOutputTokens).toBeGreaterThanOrEqual(16 + 8192);
+    });
+
+    it('keeps the tiny budget when thinking is explicitly off', async () => {
+      const { fetch, calls } = mockFetch(jsonResponse({ choices: [{ message: { content: 'OK' } }] }));
+      await testConnection('zai-coding', KEY, 'glm-5.3', { fetch, effort: 'off' });
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16);
+    });
+  });
 });
+

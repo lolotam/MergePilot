@@ -43,6 +43,9 @@ export const THINKING_BUDGET_TOKENS: Readonly<Record<string, number>> = Object.f
   max: 32000,
 });
 
+/** Default output tokens added for models that think by default when no effort is configured. */
+export const DEFAULT_THINKING_HEADROOM = 8192;
+
 function normalize(effort: string | undefined): string {
   return (effort ?? '').trim().toLowerCase();
 }
@@ -59,7 +62,11 @@ const OPENAI_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
  * OpenAI reasoning models (o-series and GPT-5 family, except the `-chat` variants). Other models
  * (gpt-4o, gpt-4.1, chatgpt-*) reject `reasoning_effort`, so nothing is sent for them.
  */
-const OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
+export const OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
+
+export function openAIThinksByDefault(model: string): boolean {
+  return OPENAI_REASONING_MODEL.test(model);
+}
 
 /**
  * OpenAI native: the `reasoning_effort` value to send, or undefined to send nothing: for a
@@ -127,4 +134,51 @@ export function geminiThinkingConfig(model: string, effort: string | undefined):
     return GEMINI_LEVELS.has(value) ? { thinkingBudget: thinkingHeadroom(value) } : undefined;
   }
   return GEMINI_LEVELS.has(value) ? { thinkingLevel: value.toUpperCase() } : undefined;
+}
+
+/**
+ * Models that have reasoning/thinking turned on by default in Gemini:
+ * Gemini 2.5+, Gemini 3.x, and models with `-thinking` in their ID.
+ */
+export function geminiThinksByDefault(model: string): boolean {
+  const id = model.replace(/^models\//, '').toLowerCase();
+  return /^gemini-(?:[3-9]|\d{2,}|2\.[5-9])/.test(id) || id.includes('-thinking');
+}
+
+/**
+ * Compatible presets / models that think by default without explicit effort parameter.
+ */
+const R1_TOKEN = /(?:^|[/:._-])r1(?:$|[/:._-])/;
+
+export function isCompatibleReasoningModel(
+  provider: string,
+  model: string,
+  style?: ThinkingStyle,
+): boolean {
+  const lowerModel = model.toLowerCase();
+  // `r1` only as its own token (deepseek-r1, r1-distill), never inside another word.
+  if (lowerModel.includes('reasoner') || R1_TOKEN.test(lowerModel)) {
+    return true;
+  }
+  if (style === 'glm' || provider === 'zai' || provider === 'zai-coding') {
+    return true;
+  }
+  // NVIDIA NIM reasoning models (Nemotron, R1 / QwQ distills, `-reasoning` / `thinking` ids).
+  if (provider === 'nvidia' && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
+    return true;
+  }
+  if (provider === 'openrouter') {
+    if (
+      lowerModel.includes(':thinking') ||
+      /nemotron|qwq|deepseek-r1/.test(lowerModel) ||
+      lowerModel.includes('reasoner') ||
+      lowerModel.includes('r1') ||
+      lowerModel.includes('thinking') ||
+      /\b(?:o1|o3|o4|gpt-5)\b/.test(lowerModel) ||
+      /gemini-(?:[3-9]|2\.[5-9])/.test(lowerModel)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

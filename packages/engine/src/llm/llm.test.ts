@@ -56,6 +56,30 @@ describe('failureFromHttp', () => {
     ).toBe('QUOTA');
   });
 
+  it('maps an Anthropic "credit balance is too low" 400 to QUOTA, other 400s stay BAD_REQUEST', () => {
+    const body = JSON.stringify({
+      type: 'error',
+      error: {
+        type: 'invalid_request_error',
+        message: 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+      },
+    });
+    expect(failureFromHttp({ ...base, status: 400, bodyText: body }).code).toBe('QUOTA');
+    expect(failureFromHttp({ ...base, status: 400, bodyText: 'messages: field required' }).code).toBe('BAD_REQUEST');
+    // "billing" alone in a 400 is not enough to call it quota.
+    expect(failureFromHttp({ ...base, status: 400, bodyText: 'invalid billing_tag field' }).code).toBe('BAD_REQUEST');
+  });
+
+  it('maps OpenAI insufficient_quota (429) to QUOTA', () => {
+    const body = JSON.stringify({
+      error: { message: 'You exceeded your current quota.', type: 'insufficient_quota', code: 'insufficient_quota' },
+    });
+    expect(failureFromHttp({ ...base, provider: 'openai', status: 429, bodyText: body }).code).toBe('QUOTA');
+    expect(
+      failureFromHttp({ ...base, provider: 'openai', status: 429, bodyText: '{"error":{"code":"insufficient_quota"}}' }).code,
+    ).toBe('QUOTA');
+  });
+
   it('detects context overflow reported as a 400', () => {
     const failure = failureFromHttp({
       ...base,

@@ -236,4 +236,48 @@ describe('runAudit', () => {
     // 1 chunk * maxFindings 2 = cap of 2
     expect(result.findings).toHaveLength(2);
   });
+
+  it('retries truncated chunk with 8192 maxOutputTokens and sums usage on success', async () => {
+    let callCount = 0;
+    const requestedMaxTokens: number[] = [];
+
+    const fakeModel: ReviewModel = {
+      label: 'anthropic:claude-3-5-sonnet',
+      generate: vi.fn(async (opts) => {
+        callCount++;
+        requestedMaxTokens.push(opts.maxOutputTokens);
+        if (callCount === 1) {
+          return {
+            text: '{"summary": "incomplete...',
+            finishReason: 'max-tokens' as const,
+            usage: { inputTokens: 100, outputTokens: 4096 },
+          };
+        }
+        return {
+          text: JSON.stringify({
+            summary: 'Recovered chunk summary',
+            findings: [],
+          }),
+          finishReason: 'stop' as const,
+          usage: { inputTokens: 100, outputTokens: 500 },
+        };
+      }),
+    };
+
+    const result = await runAudit({
+      config: baseConfig,
+      rulesFiles: [],
+      readFile: async () => 'const x = 1;',
+      files: [{ path: 'src/a.ts', size: 50 }],
+      model: fakeModel,
+    });
+
+    expect(callCount).toBe(2);
+    expect(requestedMaxTokens).toEqual([4096, 8192]);
+    expect(result.failedChunks).toHaveLength(0);
+    expect(result.summaryByChunk[0]?.summary).toBe('Recovered chunk summary');
+    expect(result.usage.inputTokens).toBe(200);
+    expect(result.usage.outputTokens).toBe(4596);
+  });
 });
+
