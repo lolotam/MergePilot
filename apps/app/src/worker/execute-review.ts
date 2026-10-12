@@ -153,6 +153,9 @@ export async function executeReview(
         publisherLogin,
       });
       deduplicated = dedupeResult.kept;
+      if (dedupeResult.skipped) {
+        log?.('Could not read existing review comments; publishing without duplicate filtering');
+      }
       if (deduplicated.length < reviewResult.inline.length) {
         log?.(
           `Dropped ${reviewResult.inline.length - deduplicated.length} duplicate findings (${deduplicated.length} remaining)`,

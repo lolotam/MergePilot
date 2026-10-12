@@ -325,3 +325,35 @@ describe('deduplicateFindings', () => {
     expect(dropped).toHaveLength(1);
   });
 });
+
+describe('deduplicateFindings when existing comments cannot be read', () => {
+  it('keeps every finding and reports skipped instead of throwing', async () => {
+    const finding: Finding = {
+      id: 'f-x',
+      path: 'src/a.ts',
+      line: 3,
+      side: 'RIGHT',
+      title: 'Unchecked input',
+      body: 'Validate it.',
+      severity: 'medium',
+      category: 'correctness',
+      evidence: 'x',
+      confidence: 0.9,
+    };
+    const client = {
+      listReviewCommentsPage: async () => {
+        throw new Error('HTTP 502');
+      },
+    } as unknown as GitHubClient;
+    const result = await deduplicateFindings(client, {
+      owner: 'o',
+      repo: 'r',
+      pull_number: 1,
+      publisherLogin: 'mergepilot[bot]',
+      findings: [finding],
+    });
+    expect(result.kept).toEqual([finding]);
+    expect(result.dropped).toEqual([]);
+    expect(result.skipped).toBe(true);
+  });
+});

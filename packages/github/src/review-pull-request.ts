@@ -222,6 +222,9 @@ export async function reviewPullRequest(
       findings: reviewResult.inline,
     });
     inlineFindings = deduped.kept;
+    if (deduped.skipped) {
+      log?.('Could not read existing review comments; publishing without duplicate filtering');
+    }
     if (deduped.dropped.length > 0) {
       log?.(`Dropped ${deduped.dropped.length} duplicate findings already commented on this PR`);
     }

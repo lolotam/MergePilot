@@ -13,6 +13,8 @@ export interface DeduplicateFindingsParams {
 export interface DeduplicateFindingsResult {
   kept: Finding[];
   dropped: Finding[];
+  /** True when existing comments could not be read, so nothing was filtered. */
+  skipped?: boolean;
 }
 
 const COMMENTS_PAGE_SIZE = 100;
@@ -137,13 +139,19 @@ export async function deduplicateFindings(
   const existingComments: GitHubReviewComment[] = [];
 
   while (true) {
-    const comments = await client.listReviewCommentsPage({
-      owner,
-      repo,
-      pull_number,
-      page,
-      per_page: COMMENTS_PAGE_SIZE,
-    });
+    let comments: GitHubReviewComment[];
+    try {
+      comments = await client.listReviewCommentsPage({
+        owner,
+        repo,
+        pull_number,
+        page,
+        per_page: COMMENTS_PAGE_SIZE,
+      });
+    } catch {
+      // Dedupe is best-effort: losing it must never lose a review the model already paid for.
+      return { kept: [...findings], dropped: [], skipped: true };
+    }
 
     for (const comment of comments) {
       if (isMergePilotComment(comment, publisherLogin)) {

@@ -124026,13 +124026,18 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
   let page = 1;
   const existingComments = [];
   while (true) {
-    const comments = await client.listReviewCommentsPage({
-      owner,
-      repo,
-      pull_number,
-      page,
-      per_page: COMMENTS_PAGE_SIZE
-    });
+    let comments;
+    try {
+      comments = await client.listReviewCommentsPage({
+        owner,
+        repo,
+        pull_number,
+        page,
+        per_page: COMMENTS_PAGE_SIZE
+      });
+    } catch {
+      return { kept: [...findings], dropped: [], skipped: true };
+    }
     for (const comment of comments) {
       if (isMergePilotComment(comment, publisherLogin)) {
         existingComments.push(comment);
@@ -124841,6 +124846,9 @@ async function reviewPullRequest(ctx) {
       findings: reviewResult.inline
     });
     inlineFindings = deduped.kept;
+    if (deduped.skipped) {
+      log?.("Could not read existing review comments; publishing without duplicate filtering");
+    }
     if (deduped.dropped.length > 0) {
       log?.(`Dropped ${deduped.dropped.length} duplicate findings already commented on this PR`);
     }
