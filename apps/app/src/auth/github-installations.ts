@@ -21,6 +21,15 @@ function sanitizeMessage(message: string, secret: string): string {
   return message.replaceAll(secret, '[REDACTED]');
 }
 
+/** An installation of this GitHub App that the signed-in user can access, as GitHub reports it. */
+export interface UserInstallation {
+  id: number;
+  accountLogin: string;
+  accountType: 'User' | 'Organization';
+  repositorySelection: 'all' | 'selected';
+  suspended: boolean;
+}
+
 /**
  * Lists the installation IDs a signed-in GitHub user can access.
  * Paginates GET /user/installations and never exposes or leaks the accessToken.
@@ -29,7 +38,19 @@ export async function listUserInstallationIds(
   accessToken: string,
   fetchFn: typeof fetch = globalThis.fetch,
 ): Promise<number[]> {
-  const installationIds: number[] = [];
+  return (await listUserInstallations(accessToken, fetchFn)).map((i) => i.id);
+}
+
+/**
+ * Lists the installations a signed-in GitHub user can access, with the account details GitHub
+ * reports. Linking uses these when the `installation` webhook never reached us (for example,
+ * the App was installed before its webhook URL was configured).
+ */
+export async function listUserInstallations(
+  accessToken: string,
+  fetchFn: typeof fetch = globalThis.fetch,
+): Promise<UserInstallation[]> {
+  const installations: UserInstallation[] = [];
   let nextUrl: string | null = 'https://api.github.com/user/installations?per_page=100';
 
   while (nextUrl) {
@@ -69,13 +90,24 @@ export async function listUserInstallationIds(
 
     const payload = (await response.json()) as {
       total_count?: number;
-      installations?: Array<{ id: number }>;
+      installations?: Array<{
+        id: number;
+        account?: { login?: string; type?: string } | null;
+        repository_selection?: string;
+        suspended_at?: string | null;
+      }>;
     };
 
     if (Array.isArray(payload.installations)) {
       for (const inst of payload.installations) {
         if (typeof inst.id === 'number') {
-          installationIds.push(inst.id);
+          installations.push({
+            id: inst.id,
+            accountLogin: inst.account?.login ?? '',
+            accountType: inst.account?.type === 'Organization' ? 'Organization' : 'User',
+            repositorySelection: inst.repository_selection === 'all' ? 'all' : 'selected',
+            suspended: Boolean(inst.suspended_at),
+          });
         }
       }
     }
@@ -84,7 +116,7 @@ export async function listUserInstallationIds(
     nextUrl = parseNextLink(linkHeader);
   }
 
-  return installationIds;
+  return installations;
 }
 
 export interface AccountTokenReader {

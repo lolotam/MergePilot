@@ -210,7 +210,17 @@ describe('dashboard api - auth and github routes (me, installations, link)', () 
         return new Response(
           JSON.stringify({
             total_count: 3,
-            installations: [{ id: 501 }, { id: 502 }, { id: 503 }],
+            installations: [
+              { id: 501 },
+              { id: 502 },
+              { id: 503 },
+              {
+                id: 504,
+                account: { login: 'lolotam', type: 'User' },
+                repository_selection: 'selected',
+                suspended_at: null,
+              },
+            ],
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -268,6 +278,22 @@ describe('dashboard api - auth and github routes (me, installations, link)', () 
       headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
     });
     expect(resSameLink.statusCode).toBe(204);
+
+    // 7. Installation 504 never arrived by webhook but GitHub confirms it to the user -> recorded and linked
+    expect(await store.getInstallation(504)).toBeNull();
+    const resNoWebhook = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces/ws-A/installations/504/link',
+      headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
+    });
+    expect(resNoWebhook.statusCode).toBe(204);
+    expect(await store.getInstallation(504)).toMatchObject({
+      workspaceId: 'ws-A',
+      accountLogin: 'lolotam',
+      accountType: 'User',
+      repositorySelection: 'selected',
+      suspended: false,
+    });
   });
 
   it('GET /api/github/installations returns 409 github_not_linked or lists installations with linkedWorkspaceId and installUrl', async () => {
