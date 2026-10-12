@@ -60,8 +60,7 @@ describe('LoginPage', () => {
 
   it('renders product name, tagline and Logo with dir="ltr"', () => {
     renderComponent();
-    expect(screen.getByText('Merge')).toBeDefined();
-    expect(screen.getByText('Pilot')).toBeDefined();
+    expect(screen.getAllByAltText('MergePilot').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/مراجعة طلبات السحب/i)).toBeDefined();
   });
 

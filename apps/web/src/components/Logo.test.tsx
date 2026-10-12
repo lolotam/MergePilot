@@ -1,39 +1,31 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import React from 'react';
 import { Logo } from './Logo.js';
 
 describe('Logo Component', () => {
-  it('renders mark SVG with dir="ltr"', () => {
+  it('renders the original wordmark artwork for light and dark mode, always LTR', () => {
     const { container } = render(React.createElement(Logo, null));
-    const logoWrapper = container.firstElementChild as HTMLElement;
-    expect(logoWrapper.getAttribute('dir')).toBe('ltr');
-
-    const svg = container.querySelector('svg');
-    expect(svg).toBeDefined();
-    expect(svg?.getAttribute('viewBox')).toBe('90 74 1090 1090');
-
-    const paths = container.querySelectorAll('svg path');
-    expect(paths.length).toBe(2);
+    expect((container.firstElementChild as HTMLElement).getAttribute('dir')).toBe('ltr');
+    const imgs = container.querySelectorAll('img');
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0]?.getAttribute('src')).toBe('/brand/logo.png');
+    expect(imgs[0]?.getAttribute('alt')).toBe('MergePilot');
+    const source = container.querySelector('source');
+    expect(source?.getAttribute('srcset')).toBe('/brand/logo-dark.png');
+    expect(source?.getAttribute('media')).toBe('(prefers-color-scheme: dark)');
   });
 
-  it('renders wordmark with Merge and Pilot by default', () => {
-    render(React.createElement(Logo, null));
-    expect(screen.getByText('Merge')).toBeDefined();
-    expect(screen.getByText('Pilot')).toBeDefined();
+  it('renders only the mark when showWordmark is false', () => {
+    const { container } = render(React.createElement(Logo, { showWordmark: false }));
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/brand/mark.png');
+    expect(container.querySelector('source')?.getAttribute('srcset')).toBe('/brand/mark-dark.png');
   });
 
-  it('hides wordmark when showWordmark is false', () => {
-    render(React.createElement(Logo, { showWordmark: false }));
-    expect(screen.queryByText('Merge')).toBeNull();
-    expect(screen.queryByText('Pilot')).toBeNull();
-  });
-
-  it('applies sizing classes correctly', () => {
-    const { container: smContainer } = render(React.createElement(Logo, { size: 'sm' }));
-    expect(smContainer.querySelector('svg')?.classList.contains('w-6')).toBe(true);
-
-    const { container: lgContainer } = render(React.createElement(Logo, { size: 'lg' }));
-    expect(lgContainer.querySelector('svg')?.classList.contains('w-10')).toBe(true);
+  it('applies sizing classes', () => {
+    const { container: sm } = render(React.createElement(Logo, { size: 'sm' }));
+    expect(sm.querySelector('img')?.classList.contains('h-5')).toBe(true);
+    const { container: lg } = render(React.createElement(Logo, { size: 'lg' }));
+    expect(lg.querySelector('img')?.classList.contains('sm:h-11')).toBe(true);
   });
 });
