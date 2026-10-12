@@ -1,6 +1,6 @@
 import type {
-  ApiProvider,
   AppStore,
+  KeyProvider,
   MergePilotConfig,
   ReviewModel,
   ReviewRunStatus,
@@ -10,7 +10,7 @@ import type { FetchLike, Secret } from '@mergepilot/engine';
 import type { DnsLookupFn } from '../core/ssrf.js';
 
 export interface ProcessReviewCredentials {
-  resolve(workspaceId: string, provider: ApiProvider): Promise<Secret>;
+  resolve(workspaceId: string, provider: KeyProvider): Promise<Secret>;
 }
 
 export type GitHubAppClientFactory = (installationId: number) => Promise<{
@@ -34,6 +34,8 @@ export interface ProcessReviewDeps {
   /** Test seams for the custom base URL SSRF guard (ADR-0010): DNS lookup and guarded fetch. */
   ssrfLookup?: DnsLookupFn | undefined;
   customFetch?: FetchLike | undefined;
+  /** Test seam: the fetch the Jev judge uses (its endpoints are fixed preset URLs). */
+  judgeFetch?: FetchLike | undefined;
 }
 
 export interface ProcessReviewResult {

@@ -4,7 +4,7 @@ import { deleteWorkspaceInTx, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
-  ApiProvider,
+  KeyProvider,
   AppStore,
   DeleteRunsTarget,
   FinishReviewRunOptions,
@@ -210,7 +210,7 @@ export class PgStore implements AppStore {
     });
   }
 
-  async getCredential(workspaceId: string, provider: ApiProvider): Promise<StoredCredential | null> {
+  async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
     const rows = await this.db
       .select()
       .from(providerCredentials)
@@ -220,7 +220,7 @@ export class PgStore implements AppStore {
     return {
       id: row.id,
       workspaceId: row.workspaceId,
-      provider: row.provider as ApiProvider,
+      provider: row.provider as KeyProvider,
       ciphertext: row.ciphertext,
       keyVersion: row.keyVersion,
       last4: row.last4,
@@ -247,7 +247,7 @@ export class PgStore implements AppStore {
     return rows.map((row) => ({
       id: row.id,
       workspaceId: row.workspaceId,
-      provider: row.provider as ApiProvider,
+      provider: row.provider as KeyProvider,
       keyVersion: row.keyVersion,
       last4: row.last4,
       createdBy: row.createdBy,
@@ -256,7 +256,7 @@ export class PgStore implements AppStore {
     }));
   }
 
-  async deleteCredential(workspaceId: string, provider: ApiProvider): Promise<void> {
+  async deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void> {
     await this.db
       .delete(providerCredentials)
       .where(

@@ -1,5 +1,6 @@
+import { isJevModel, jevModelIds } from '@mergepilot/engine';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
-import type { ApiProvider, AppStore, WorkspaceSettings } from '../core/types.js';
+import type { ApiProvider, AppStore, JudgeSettings, WorkspaceSettings } from '../core/types.js';
 import type { Settings, SettingsUpdate } from './contract.js';
 
 /** Applies a PUT body to the stored settings: undefined keeps, null clears (see contract). */
@@ -29,6 +30,8 @@ export function mergeSettings(
         ? update.runRetentionDays
         : current?.runRetentionDays !== undefined ? current.runRetentionDays : DEFAULT_RUN_RETENTION_DAYS,
     repoColors: update.repoColors ?? current?.repoColors ?? {},
+    // Undefined keeps the stored judge; null turns it off and clears it.
+    judge: update.judge !== undefined ? update.judge : (current?.judge ?? null),
   };
 }
 
@@ -81,6 +84,33 @@ export async function validateSettings(
     seen.add(id);
     const problem = await keyProblem(entry.provider, 'fallback_key_missing', 'fallback');
     if (problem) return problem;
+  }
+  return settings.judge ? validateJudge(store, workspaceId, settings.judge) : null;
+}
+
+/**
+ * The judge and every fallback must name one of the provider's Jev models (the owner's rule: only
+ * Jev is offered), no entry may repeat, and an enabled judge needs its own key. A fallback without
+ * a key is allowed: the worker skips it and discloses it.
+ */
+async function validateJudge(store: AppStore, workspaceId: string, judge: JudgeSettings): Promise<SettingsProblem | null> {
+  const seen = new Set<string>();
+  for (const [index, entry] of [judge, ...judge.fallback].entries()) {
+    const role = index === 0 ? 'judge' : `judge fallback ${index}`;
+    if (!isJevModel(entry.provider, entry.model)) {
+      return {
+        code: 'judge_model_invalid',
+        message: `${role}: ${entry.provider} offers only these Jev models: ${jevModelIds(entry.provider).join(', ')}`,
+      };
+    }
+    const id = `${entry.provider}\u0000${entry.model}`;
+    if (seen.has(id)) {
+      return { code: 'judge_fallback_duplicate', message: `${role} repeats ${entry.provider}:${entry.model}` };
+    }
+    seen.add(id);
+  }
+  if (judge.enabled && !(await store.getCredential(workspaceId, judge.provider))) {
+    return { code: 'judge_key_missing', message: `Stored API key required for the judge provider: ${judge.provider}` };
   }
   return null;
 }

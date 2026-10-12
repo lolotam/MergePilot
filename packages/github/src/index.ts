@@ -74,6 +74,8 @@ export {
   deduplicateFindings,
   type DeduplicateFindingsParams,
   type DeduplicateFindingsResult,
+  type SemanticDedupeResult,
+  SEMANTIC_LINE_WINDOW,
 } from './dedupe.js';
 export {
   parsePauseCommand,
@@ -91,10 +93,12 @@ export {
   type PauseNoticeParams,
 } from './pause.js';
 export * from './summary.js';
+export * from './judge-summary.js';
 export {
   loadRepoConfig,
   type LoadRepoConfigResult,
   reviewPullRequest,
+  judgeBudgetLeft,
   type ReviewPullRequestContext,
   type ReviewPullRequestResult,
 } from './review-pull-request.js';

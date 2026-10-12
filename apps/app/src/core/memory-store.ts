@@ -19,7 +19,7 @@ import {
 } from './memory-maintenance.js';
 import { DEFAULT_RUN_RETENTION_DAYS, usageMonth } from './run-types.js';
 import type {
-  ApiProvider,
+  KeyProvider,
   AppStore,
   DeleteRunsTarget,
   FinishReviewRunOptions,
@@ -109,12 +109,13 @@ export class MemoryStore implements AppStore {
       minSeverity: s.minSeverity ?? 'medium',
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
+      judge: s.judge ? { ...s.judge, fallback: [...s.judge.fallback] } : null,
     };
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
     this.assertLive(settings.workspaceId);
-    // Like the Postgres store: undefined keeps the stored retention and colors.
+    // Like the Postgres store: undefined keeps the stored retention, colors and judge.
     const stored = this.settings.get(settings.workspaceId);
     this.settings.set(settings.workspaceId, {
       ...settings,
@@ -123,6 +124,7 @@ export class MemoryStore implements AppStore {
           ? settings.runRetentionDays
           : stored?.runRetentionDays !== undefined ? stored.runRetentionDays : DEFAULT_RUN_RETENTION_DAYS,
       repoColors: { ...(settings.repoColors ?? stored?.repoColors ?? {}) },
+      judge: settings.judge !== undefined ? settings.judge : (stored?.judge ?? null),
     });
   }
 
@@ -131,7 +133,7 @@ export class MemoryStore implements AppStore {
     this.credentials.set(`${credential.workspaceId}:${credential.provider}`, { ...credential });
   }
 
-  async getCredential(workspaceId: string, provider: ApiProvider): Promise<StoredCredential | null> {
+  async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
     return this.credentials.get(`${workspaceId}:${provider}`) ?? null;
   }
 
@@ -141,7 +143,7 @@ export class MemoryStore implements AppStore {
       .map(({ ciphertext: _ciphertext, ...rest }) => rest);
   }
 
-  async deleteCredential(workspaceId: string, provider: ApiProvider): Promise<void> {
+  async deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void> {
     this.credentials.delete(`${workspaceId}:${provider}`);
   }
 

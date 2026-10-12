@@ -62,3 +62,32 @@ jobs:
 - Only users with **write, maintain or admin** access to the repository can pause or resume (checked with the collaborator permission API). Anyone else gets a short reply and nothing changes.
 - While paused, each push is skipped and a notice is posted once per pause.
 - Comments from bots, edited comments and comments on plain issues are ignored.
+
+## Jev judge (optional)
+
+A "System One" decision model ([TypeSafe Jev](https://docs.typesafe.ai/introduction/coding-agents), ADR-0015) can check every finding before it is published and spot comments that repeat an existing MergePilot comment. It only answers typed questions and is billed on input tokens only.
+
+```yaml
+# .mergepilot.yml
+judge:
+  provider: openrouter        # typesafe | openrouter | vercel-gateway | opencode-zen
+  model: ~typesafe/jev-latest # optional; defaults to the provider's first Jev model
+  mode: filter                # off (duplicate check only) | annotate | filter
+  threshold: 0.35             # filter: drop findings whose Jev confidence is below this
+  fallback:                   # optional, at most 3, tried in order when the judge before fails
+    - provider: opencode-zen
+      model: jev-1.13-free
+```
+
+| Provider | Jev models offered | Key (env) |
+|---|---|---|
+| `typesafe` | `jev-latest` | `TYPESAFE_API_KEY` |
+| `openrouter` | `~typesafe/jev-latest`, `typesafe/jev-1.13` | `OPENROUTER_API_KEY` |
+| `vercel-gateway` | `typesafe-ai/jev` | `AI_GATEWAY_API_KEY` |
+| `opencode-zen` | `jev-1.13-free`, `jev-1.13` | `OPENCODE_API_KEY` |
+
+- Only Jev models are accepted, and the endpoints are fixed (`baseUrl` is rejected).
+- `annotate` adds `Jev confidence: 0.82` to each comment; `filter` drops findings below `threshold` and lists them under "Filtered by Jev (n)" in the summary.
+- A fallback is used only after auth, rate limit / overload (after one retry), 5xx, network, timeout (20 s), or a wrong model id (422 / 404); a valid low-confidence answer is final. An entry without its key is skipped. All attempts share 60 s. The summary names the judge that answered, e.g. `Jev: opencode-zen:jev-1.13-free (fallback 1; openrouter failed: rate-limited)`.
+- If every entry fails, the review is published unfiltered and the summary says `Jev judge unavailable: <code>`.
+- Pass the keys as secrets, e.g. `OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}`. The log gets one `judge.call` line per attempt (provider, model, question count, time, result, tokens), never the code under review.

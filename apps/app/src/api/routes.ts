@@ -6,10 +6,10 @@ import type { FetchLike } from '@mergepilot/engine';
 import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
-import type { ApiProvider, AppStore, ReviewQueue } from '../core/types.js';
+import type { AppStore, KeyProvider, ReviewQueue } from '../core/types.js';
 import type { CredentialService } from '../credentials/service.js';
 import type { GitHubAppClientFactory } from '../worker/types.js';
-import { ApiProviderSchema, SettingsUpdateSchema, SaveKeyRequestSchema } from './contract.js';
+import { KeyProviderSchema, SettingsUpdateSchema, SaveKeyRequestSchema } from './contract.js';
 import { validateKey as defaultValidateKey } from './validate-key.js';
 import {
   sendError,
@@ -18,6 +18,7 @@ import {
   getUserWorkspaces,
 } from './helpers.js';
 import { registerInstallationRoutes } from './installation-routes.js';
+import { registerJudgeRoutes } from './judge-routes.js';
 import { invalidateModelsCache, registerProviderRoutes } from './provider-routes.js';
 import { registerRunsRoutes } from './runs-routes.js';
 import { mergeSettings, validateSettings } from './settings-validation.js';
@@ -27,7 +28,7 @@ export interface DashboardApiDeps {
   auth: Auth;
   store: AppStore;
   credentials: CredentialService;
-  validateKey?: (provider: ApiProvider, apiKey: string, baseUrl?: string) => Promise<void>;
+  validateKey?: (provider: KeyProvider, apiKey: string, baseUrl?: string) => Promise<void>;
   githubFetch?: typeof fetch;
   config: AppConfig;
   now?: () => Date;
@@ -155,7 +156,7 @@ export function registerDashboardApi(
         workspaceId: string;
         provider: string;
       };
-      const providerParse = ApiProviderSchema.safeParse(rawProvider);
+      const providerParse = KeyProviderSchema.safeParse(rawProvider);
       if (!providerParse.success) {
         return sendError(reply, 400, 'invalid_provider', `Invalid provider: ${rawProvider}`);
       }
@@ -238,7 +239,7 @@ export function registerDashboardApi(
         workspaceId: string;
         provider: string;
       };
-      const providerParse = ApiProviderSchema.safeParse(rawProvider);
+      const providerParse = KeyProviderSchema.safeParse(rawProvider);
       if (!providerParse.success) {
         return sendError(reply, 400, 'invalid_provider', `Invalid provider: ${rawProvider}`);
       }
@@ -280,5 +281,6 @@ export function registerDashboardApi(
   registerInstallationRoutes(app, deps);
   registerRunsRoutes(app, deps);
   registerProviderRoutes(app, deps);
+  registerJudgeRoutes(app, deps);
   registerWorkspaceLifecycleRoutes(app, deps);
 }

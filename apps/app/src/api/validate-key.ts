@@ -1,5 +1,5 @@
-import { resolveBaseUrl, type FetchLike } from '@mergepilot/engine';
-import type { ApiProvider } from '../core/types.js';
+import { isJudgeKeyOnlyProviderId, resolveBaseUrl, testJudgeConnection, type FetchLike } from '@mergepilot/engine';
+import type { KeyProvider } from '../core/types.js';
 
 export class ValidateKeyError extends Error {
   constructor(message: string) {
@@ -13,7 +13,7 @@ export class ValidateKeyError extends Error {
  * caller MUST pass the SSRF-guarded fetch (core/safe-fetch.ts) with the already-checked URL.
  */
 export async function validateKey(
-  provider: ApiProvider,
+  provider: KeyProvider,
   apiKey: string,
   fetchFnOrBaseUrl?: FetchLike | string,
   maybeFetchFn?: FetchLike,
@@ -32,6 +32,11 @@ export async function validateKey(
     fetchFn = maybeFetchFn ?? globalFetch;
   } else {
     fetchFn = fetchFnOrBaseUrl ?? globalFetch;
+  }
+
+  if (isJudgeKeyOnlyProviderId(provider)) {
+    await validateJudgeKey(provider, trimmed, fetchFn);
+    return;
   }
 
   let url: string;
@@ -81,4 +86,15 @@ export async function validateKey(
   if (!response.ok) {
     throw new ValidateKeyError('could not verify');
   }
+}
+
+/** Judge answers that prove the key authenticated even though the tiny question did not pass. */
+const KEY_ACCEPTED_CODES = new Set(['invalid-request', 'model-not-found', 'rate-limited', 'quota']);
+
+/** A Jev-only key (ADR-0015) is proven with one tiny `noul` question: auth failure = invalid key. */
+async function validateJudgeKey(provider: 'typesafe' | 'vercel-gateway', apiKey: string, fetchFn: FetchLike): Promise<void> {
+  const result = await testJudgeConnection(provider, apiKey, { fetch: fetchFn });
+  if (result.ok || KEY_ACCEPTED_CODES.has(result.code)) return;
+  if (result.code === 'auth') throw new ValidateKeyError(`invalid key for ${provider}`);
+  throw new ValidateKeyError('could not verify');
 }

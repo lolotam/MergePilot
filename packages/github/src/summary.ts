@@ -1,4 +1,5 @@
 import type { Finding } from '@mergepilot/engine';
+import type { JudgeSummaryInput } from './judge-summary.js';
 
 export type ReviewScope =
   | { mode: 'incremental'; sinceSha: string; commitCount?: number }
@@ -28,6 +29,8 @@ export interface ReviewSummaryInput {
   fallback?: { from: string; code: string };
   /** Review scope (incremental vs full). */
   scope?: ReviewScope;
+  /** The Jev judge's disclosure (ADR-0015): who answered, failures, filtered findings. */
+  judge?: JudgeSummaryInput | undefined;
 }
 
 /**
@@ -133,6 +136,36 @@ function renderIncompleteWarning(reasons: string[], isArabic: boolean): string {
   return `${heading}\n\n${list}`;
 }
 
+function renderJudge(judge: JudgeSummaryInput, isArabic: boolean): string | undefined {
+  const lines: string[] = [];
+  if (judge.answeredBy) lines.push(`> Jev: \`${neutralize(judge.answeredBy)}\``);
+  if (judge.unavailable) {
+    const code = neutralize(judge.unavailable);
+    lines.push(
+      isArabic
+        ? `> ⚠️ حَكَم Jev غير متاح: ${code} — نُشرت الملاحظات من غير فلترة`
+        : `> ⚠️ Jev judge unavailable: ${code} — findings were published unfiltered`,
+    );
+  }
+  if (judge.duplicatesUnavailable) {
+    const code = neutralize(judge.duplicatesUnavailable);
+    lines.push(
+      isArabic
+        ? `> ⚠️ فحص التكرار بالمعنى (Jev) غير متاح: ${code}`
+        : `> ⚠️ Jev duplicate check unavailable: ${code}`,
+    );
+  }
+  const filtered = judge.filtered ?? [];
+  if (filtered.length > 0) {
+    const label = isArabic ? `استبعدها Jev (${filtered.length})` : `Filtered by Jev (${filtered.length})`;
+    const items = filtered.map(
+      (f) => `- ${neutralize(f.title.trim())} · \`${neutralize(f.path)}:${f.line}\` · ${f.noul.toFixed(2)}`,
+    );
+    lines.push(`<details>\n<summary>${label}</summary>\n\n${items.join('\n')}\n</details>`);
+  }
+  return lines.length > 0 ? lines.join('\n\n') : undefined;
+}
+
 function renderFooter(input: ReviewSummaryInput, isArabic: boolean): string {
   const modelText = isArabic
     ? `النموذج: \`${input.modelLabel}\``
@@ -202,6 +235,9 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
   if (!input.complete) {
     sections.push(renderIncompleteWarning(input.incompleteReasons, isArabic));
   }
+
+  const judge = input.judge ? renderJudge(input.judge, isArabic) : undefined;
+  if (judge) sections.push(judge);
 
   if (input.summaryOnly && input.summaryOnly.length > 0) {
     sections.push(renderFindingsOutsideDiff(input.summaryOnly, isArabic));

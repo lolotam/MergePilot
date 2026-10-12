@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { JudgeConfigSchema } from '../judge/config.js';
 import { API_PROVIDER_IDS, PROVIDER_IDS } from '../providers/ids.js';
 import { SeveritySchema } from '../review/types.js';
 
@@ -146,6 +147,8 @@ export const MergePilotConfigSchema = z
     review: ReviewSettingsSchema.prefault({}),
     budget: BudgetSchema.prefault({}),
     audit: AuditSchema.prefault({}),
+    /** Optional Jev judge (ADR-0015): false-positive filter and semantic duplicate check. */
+    judge: JudgeConfigSchema.optional(),
   })
   .superRefine((config, ctx) => {
     if (config.provider !== 'claude-code' && config.model === undefined) {

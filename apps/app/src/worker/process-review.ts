@@ -3,12 +3,7 @@ import {
   createReviewModel,
   MergePilotConfigSchema,
   redactSecrets,
-  Secret,
-  type CredentialInfo,
-  type CredentialRef,
-  type CredentialStore,
   type MergePilotConfig,
-  type RequestPurpose,
   type ReviewModel,
 } from '@mergepilot/engine';
 import {
@@ -29,44 +24,17 @@ import {
 import { workerLogger } from '../core/logger.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { executeReview } from './execute-review.js';
+import { judgeRunParts, workspaceJudge } from './judge-setup.js';
 import { pausedWithNotice, PAUSED_DETAIL } from './pause-check.js';
 import { changedLinesOf, chooseModel, fallbackChain, skippedFallbacksNote, customBaseUrlFor, usedModel, type ModelChoice } from './model-choice.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { startRunHeartbeat } from './run-heartbeat.js';
+import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
-import type { ProcessReviewCredentials, ProcessReviewDeps, ProcessReviewResult } from './types.js';
+import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
 
 const WORKSPACE_DELETED = 'workspace_deleted';
 const DUPLICATE = 'duplicate';
-
-class WorkspaceCredentialStore implements CredentialStore {
-  private readonly secrets = new Map<string, Secret>();
-
-  constructor(
-    private readonly workspaceId: string,
-    private readonly credentials: ProcessReviewCredentials,
-    primaryProvider: ApiProvider,
-    primarySecret: Secret,
-  ) {
-    this.secrets.set(primaryProvider, primarySecret);
-  }
-
-  getKnownSecrets(): Secret[] {
-    return Array.from(this.secrets.values());
-  }
-
-  async info(ref: CredentialRef): Promise<CredentialInfo> {
-    return { provider: ref.provider, configured: true, source: 'env', envName: 'DATABASE' };
-  }
-
-  async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
-    const existing = this.secrets.get(ref.provider);
-    if (existing) return existing;
-    const resolved = await this.credentials.resolve(this.workspaceId, ref.provider as ApiProvider);
-    this.secrets.set(ref.provider, resolved);
-    return resolved;
-  }
-}
 
 export async function processReviewJob(
   job: ReviewJob,
@@ -242,15 +210,9 @@ export async function processReviewJob(
 
       if (currentMonthCost >= settings.monthlyBudgetUsd) {
         const summaryMarkdown = renderReviewSummary({
-          language: effectiveConfig.language,
-          summary: '',
-          summaryOnly: [],
-          inlineCount: 0,
-          complete: false,
-          incompleteReasons: ['monthly budget reached'],
-          modelLabel: effectiveConfig.model ?? effectiveConfig.provider,
-          outcome: 'skipped-budget',
-          reason: 'monthly budget reached',
+          language: effectiveConfig.language, summary: '', summaryOnly: [], inlineCount: 0, complete: false,
+          incompleteReasons: ['monthly budget reached'], modelLabel: effectiveConfig.model ?? effectiveConfig.provider,
+          outcome: 'skipped-budget', reason: 'monthly budget reached',
         });
 
         const publishResult = await publishReview(client, {
@@ -290,6 +252,12 @@ export async function processReviewJob(
 
     const primarySecret = await deps.credentials.resolve(workspaceId, chosenProvider as ApiProvider);
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, chosenProvider as ApiProvider, primarySecret);
+    const judgeSetup = await workspaceJudge(settings, workspaceId, deps.credentials, logger, {
+      jobId: job.deliveryId,
+      runId: run.id,
+      fetch: deps.judgeFetch,
+    });
+    credStore.addKnownSecrets(judgeSetup.secrets);
 
     let model: ReviewModel;
     if (deps.createModelForProvider) {
@@ -323,6 +291,7 @@ export async function processReviewJob(
       knownSecrets: credStore.getKnownSecrets(),
       publisherLogin,
       ...(deps.log ? { log: deps.log } : {}),
+      judge: judgeSetup.judge,
     });
 
     const status: ReviewRunStatus =
@@ -333,25 +302,29 @@ export async function processReviewJob(
           : 'failed';
 
     const costUsd = reviewResult.costUsd ?? null;
-    const detail = reviewResult.detail ?? skippedNote ?? null;
     let payload: ReviewRunResultPayload | null = null;
     let findingsCount: number | null = null;
+    let judgeNote: string | undefined;
 
     if (reviewResult.runResult && reviewResult.runResult.status === 'completed') {
       const rr = reviewResult.runResult;
+      const judged = judgeRunParts(judgeSetup, rr.usage, rr.judge, reviewResult.judgeSemantic);
+      judgeNote = judged.note;
       payload = prepareRunResult({
         summary: rr.summary,
         inlineFindings: rr.inline,
         summaryOnlyFindings: rr.summaryOnly,
         language: effectiveConfig.language,
-        usage: rr.usage,
+        usage: judged.usage,
         verification: rr.verification,
+        judge: judged.judge,
         knownSecrets: credStore.getKnownSecrets(),
       });
       findingsCount = rr.inline.length + rr.summaryOnly.length;
     } else if (status === 'skipped') {
       findingsCount = 0;
     }
+    const detail = reviewResult.detail ?? skippedNote ?? judgeNote ?? null;
 
     const used = usedModel(choice, settings, reviewResult.modelUsed, reviewResult.fallbackFrom);
     await deps.store.finishReviewRun(workspaceId, run.id, {

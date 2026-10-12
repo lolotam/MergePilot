@@ -21,6 +21,8 @@ import { buildBatchPrompt } from './batch-run.js';
 import { checkBudget, estimateTokens } from './budget.js';
 import { ReviewDeadline, withCallTimeout } from './call.js';
 import { estimateCostUsd } from '../budget/cost.js';
+import { runFalsePositiveFilter, type FalsePositiveOutcome, type JudgeMode } from '../judge/false-positive.js';
+import type { Judge } from '../judge/judge.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
@@ -61,7 +63,12 @@ export interface RunReviewInput {
   knownSecrets: Secret[];
   libraryDocs?: LibraryDoc[] | undefined;
   signal?: AbortSignal | undefined;
+  /** Optional Jev judge (ADR-0015); its false-positive filter runs after the verify pass. */
+  judge?: { judge: Judge; mode: JudgeMode; threshold: number } | undefined;
 }
+
+/** What the Jev false-positive filter did (the kept findings are the result's findings). */
+export type JudgeFilterSummary = Omit<FalsePositiveOutcome, 'findings'>;
 
 // ── Output types ──
 
@@ -77,6 +84,7 @@ export type ReviewRunResult =
       droppedInvalid: number;
       complete: boolean;
       verification?: { checked: number; rejected: number } | undefined;
+      judge?: JudgeFilterSummary | undefined;
     } & Partial<FallbackDisclosure>)
   | { status: 'skipped-budget'; reason: string }
   | ({
@@ -286,6 +294,23 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     incompleteReasons.push(...verified.incompleteReasons);
   }
 
+  // ── Step e3: Jev false-positive filter (ADR-0015) ──────────────────────
+  // A failed judge leaves the findings unchanged; the outcome carries its code for disclosure.
+  let judge: JudgeFilterSummary | undefined;
+  if (input.judge && input.judge.mode !== 'off' && modelFindings.length > 0) {
+    const { findings: judged, ...summary } = await runFalsePositiveFilter({
+      ...input.judge,
+      findings: modelFindings,
+      files: redactedReviewableFiles,
+      knownSecrets,
+      language: config.language,
+      signal,
+      maxUsd: spend.remainingUsd,
+    });
+    modelFindings = judged;
+    judge = summary;
+  }
+
   // ── Step f: select + anchor ────────────────────────────────────────────
   const allFindings = [...securityFindings, ...modelFindings];
 
@@ -336,6 +361,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     droppedInvalid: pass.droppedInvalid,
     complete,
     ...(verification !== undefined ? { verification } : {}),
+    ...(judge ? { judge } : {}),
     ...disclosure,
   };
 }

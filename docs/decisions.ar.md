@@ -245,3 +245,55 @@
 «can u add new column on the review the timming for this review»
 
 **النتيجة:** عمود «المدة» في جدول المراجعات بعد «توكنات خارجة» وقبل التكلفة، بصيغة مختصرة (`45s`، `3m 12s`، `1h 04m`) وأرقام حسب لغة الواجهة. المدة = وقت الانتهاء ناقص وقت إنشاء المراجعة (من السيرفر `durationMs`). المراجعة اللي في الانتظار أو شغالة بيظهر لها عدّاد حي بيزيد كل ثانية، و«—» لو المدة مش معروفة. صف الـ PR بيعرض مدة آخر مراجعة، والصفوف الفرعية كل واحدة مدتها. العمود بيترتب من السيرفر (`sort=duration`) واللي ملهاش مدة في الآخر دايمًا، والمدة ظاهرة كمان في صفحة تفاصيل المراجعة.
+
+## الدفعة 9 — 2026-10-13
+
+### س27: طبقة الحَكَم Jev (TypeSafe System One) مع 4 مزودين (Task V1)
+
+**أسئلة وطلبات صاحب المشروع (بنصّها):**
+- «i want to ask if i will implemt jev type sapce model will be added value and whay sugessted use case in this app to increase the task or what can get benifet from such this implemnt as ai model»
+- «i think u undestand me it i mean this https://docs.typesafe.ai/introduction/coding-agents»
+- «this model can be find in open router paid model very cheap zero output but paid for input only and also in zen plane open code and in versel payment gateway»
+- «start add this jev layer model with 3 providers (typesave and openrouter and versel gatway ai and opencode (all these provider will show only the jev model only»
+- المرجع اللي بعته: https://docs.typesafe.ai/concepts/how-to-build-with-system-one
+
+**القرار والنتيجة (ADR-0015):**
+- الحَكَم Jev بيجاوب على أسئلة محددة بنوعها (`noul` احتمال من 0 لـ 1، `choice`، `score`)، وكل الأسئلة بتروح في طلب واحد. الكود هو اللي بيقرر، ومش بيكتب نص.
+- 4 مزودين بروابط ثابتة، وكل مزود بيعرض نماذج Jev بس:
+  - TypeSafe: `jev-latest`.
+  - OpenRouter: `~typesafe/jev-latest` و`typesafe/jev-1.13` (المعرّف الأول محتاج تأكيد من الـ API الحقيقي).
+  - Vercel AI Gateway: `typesafe-ai/jev`.
+  - OpenCode Zen: `jev-1.13-free` و`jev-1.13`.
+- مفتاحا TypeSafe وVercel نوعان جديدان للمفاتيح، بيُستخدموا للحَكَم بس، ومش مزودين للمراجعة.
+- الاستخدام الأول، فلترة الملاحظات الغلط بعد المراجعة والتحقق:
+  - الحَكَم بيسأل سؤال واحد عن كل ملاحظة.
+  - وضع «إضافة الثقة» بيكتب «Jev confidence: 0.82» على التعليق.
+  - وضع «الفلترة» بيشيل الملاحظات اللي ثقتها أقل من الحد (0.35)، ويكتبها في الملخص تحت «Filtered by Jev (n)».
+  - الوضع الافتراضي لأي مساحة عمل جديدة: متوقف.
+- الاستخدام التاني، فحص التكرار بالمعنى:
+  - بيقارن الملاحظة الجديدة بتعليقات MergePilot القريبة منها (±10 سطور)، لو البصمة والعنوان ما اتطابقوش.
+  - لو الحَكَم قال إنهم نفس المشكلة بثقة 0.8 أو أكتر، الملاحظة الجديدة ما بتتنشرش.
+- لو الحَكَم فشل، المراجعة بتتنشر من غير فلترة، والملخص بيقول «Jev judge unavailable: <code>».
+- توكنات الحَكَم وتكلفته (لو معروفة) بتتحسب على المراجعة وعلى الاستهلاك الشهري.
+
+### س28: سلسلة احتياطي للحَكَم Jev
+
+**طلب صاحب المشروع (بنصّه):**
+«add jev layer fallback so if failed one provider can go to the next provider and the 3rd fallback so we can miss any jev request»
+
+**القرار والنتيجة (ADR-0015، على نفس قاعدة ADR-0008):**
+- **السلسلة:** لحد 3 احتياطيين بالترتيب، كل واحد مزود ونموذج Jev بس. ده غير الحَكَم الأساسي، فالمجموع أقصاه 4 محاولات.
+- **بنروح للي بعده لو حصل:**
+  - خطأ في المفتاح؛
+  - تجاوز حد الطلبات أو ضغط على الخادم، بعد إعادة محاولة واحدة؛
+  - خطأ 5xx أو مشكلة في الشبكة؛
+  - مهلة 20 ثانية خلصت؛
+  - نموذج غلط (422 أو 404).
+- **مش بنروح للي بعده** لو الحَكَم رجّع إجابة صحيحة بثقة قليلة، لأن دي إجابة حقيقية.
+- **مزود من غير مفتاح** بيتخطى، وده بيتقال صراحة («no-key»).
+- **الوقت:** كل المحاولات مع بعض ليها 60 ثانية بس.
+- **الإفصاح:**
+  - الملخص بيقول مين جاوب، مثلًا «Jev: opencode-zen:jev-1.13-free (fallback 2; openrouter failed: rate-limited)».
+  - تفاصيل المراجعة بتحفظ كل محاولة.
+  - كل محاولة ليها سطر `judge.call` في السجلات.
+- **لو كله فشل:** المراجعة بتتنشر من غير فلترة، والملخص بيقول «Jev judge unavailable».

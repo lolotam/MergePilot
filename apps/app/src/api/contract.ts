@@ -10,9 +10,11 @@ import { z } from 'zod';
  */
 
 import { API_PROVIDER_IDS, SeveritySchema } from '@mergepilot/engine';
+import { JudgeRunSchema, JudgeSettingsSchema, KeyProviderSchema } from './contract-judge.js';
 import { RepoColorsSchema, RunRetentionDaysSchema } from './contract-runs.js';
 
 export * from './contract-runs.js';
+export * from './contract-judge.js';
 
 export const ApiProviderSchema = z.enum(API_PROVIDER_IDS);
 export type ApiProvider = z.infer<typeof ApiProviderSchema>;
@@ -69,6 +71,8 @@ export const SettingsSchema = z.object({
   runRetentionDays: RunRetentionDaysSchema.optional(),
   /** `owner/repo` -> palette key for the runs table; left out on PUT keeps the stored map. */
   repoColors: RepoColorsSchema.optional(),
+  /** The Jev judge (ADR-0015); null = off and cleared. Left out on PUT keeps the stored judge. */
+  judge: JudgeSettingsSchema.nullable().optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -88,7 +92,7 @@ export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullab
 export const KeysResponseSchema = z.object({
   keys: z.array(
     z.object({
-      provider: ApiProviderSchema,
+      provider: KeyProviderSchema,
       last4: z.string(),
       createdAt: z.string(),
       createdBy: z.string(),
@@ -214,6 +218,7 @@ export const ReviewRunResultSchema = z.object({
       dropped: z.number(),
     })
     .optional(),
+  judge: JudgeRunSchema.optional(),
 });
 export type ReviewRunResult = z.infer<typeof ReviewRunResultSchema>;
 

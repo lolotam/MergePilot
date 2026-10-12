@@ -1,4 +1,13 @@
-import type { MergePilotConfig, ReviewModel, CredentialStore, ApiProviderId, Severity } from '@mergepilot/engine';
+import type {
+  ApiProviderId,
+  CredentialStore,
+  JudgeKeyOnlyProviderId,
+  JudgeMode,
+  JudgeProviderId,
+  MergePilotConfig,
+  ReviewModel,
+  Severity,
+} from '@mergepilot/engine';
 import type { RepoColorKey, RunMaintenanceStore } from './run-types.js';
 
 export * from './run-types.js';
@@ -43,6 +52,9 @@ export const ACTIVE_RUN_STATUSES: readonly ReviewRunStatus[] = ['queued', 'runni
 
 export type ApiProvider = ApiProviderId;
 
+/** Every provider a workspace may store a key for: review providers plus the Jev-only key types (ADR-0015). */
+export type KeyProvider = ApiProviderId | JudgeKeyOnlyProviderId;
+
 export interface FallbackSetting {
   provider: ApiProvider;
   model: string;
@@ -79,12 +91,24 @@ export interface WorkspaceSettings {
   runRetentionDays?: number | null | undefined;
   /** Chosen palette color per `owner/repo`; repos left out use the default (hashed) color. */
   repoColors?: Record<string, RepoColorKey> | undefined;
+  /** The Jev judge (ADR-0015); null / undefined = never configured (off). */
+  judge?: JudgeSettings | null | undefined;
+}
+
+/** The Jev judge of a workspace: the configured provider plus up to three explicit fallbacks. */
+export interface JudgeSettings {
+  enabled: boolean;
+  provider: JudgeProviderId;
+  model: string;
+  mode: JudgeMode;
+  threshold: number;
+  fallback: Array<{ provider: JudgeProviderId; model: string }>;
 }
 
 export interface StoredCredential {
   id: string;
   workspaceId: string;
-  provider: ApiProvider;
+  provider: KeyProvider;
   /** Envelope-encrypted secret (see Vault). Never the plaintext. */
   ciphertext: string;
   keyVersion: number;
@@ -123,6 +147,22 @@ export interface ReviewRunResultPayload {
   verify?: {
     dropped: number;
   };
+  /** What the Jev judge did on this run (ADR-0015); its tokens are also in `usage`. */
+  judge?: ReviewRunJudge | undefined;
+}
+
+export interface ReviewRunJudge {
+  mode: JudgeMode;
+  threshold: number;
+  checked: number;
+  filtered: Array<{ title: string; path: string; line: number; noul: number }>;
+  duplicatesDropped: number;
+  answeredBy?: string | undefined;
+  unavailable?: string | undefined;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd?: number | undefined;
+  attempts: Array<{ provider: string; model: string; ok: boolean; code?: string | undefined; ms: number; skipped?: boolean | undefined }>;
 }
 
 export interface ReviewRun {
@@ -223,9 +263,9 @@ export interface AppStore extends RunMaintenanceStore {
   saveSettings(settings: WorkspaceSettings): Promise<void>;
 
   saveCredential(credential: StoredCredential): Promise<void>;
-  getCredential(workspaceId: string, provider: ApiProvider): Promise<StoredCredential | null>;
+  getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null>;
   listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>>;
-  deleteCredential(workspaceId: string, provider: ApiProvider): Promise<void>;
+  deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void>;
 
   /**
    * Throws WorkspaceDeletedError when the workspace is gone, so a late worker cannot write orphan rows.
@@ -290,8 +330,8 @@ export interface AppStore extends RunMaintenanceStore {
 /** Envelope encryption of customer secrets (ADR-0007). */
 export interface Vault {
   readonly keyVersion: number;
-  encrypt(plaintext: string, context: { workspaceId: string; provider: ApiProvider }): Promise<string>;
-  decrypt(ciphertext: string, context: { workspaceId: string; provider: ApiProvider }): Promise<string>;
+  encrypt(plaintext: string, context: { workspaceId: string; provider: KeyProvider }): Promise<string>;
+  decrypt(ciphertext: string, context: { workspaceId: string; provider: KeyProvider }): Promise<string>;
 }
 
 export interface ReviewJob {

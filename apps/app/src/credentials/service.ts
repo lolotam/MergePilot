@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Secret } from '@mergepilot/engine';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
-import type { ApiProvider, AppStore, StoredCredential, Vault } from '../core/types.js';
+import type { KeyProvider, AppStore, StoredCredential, Vault } from '../core/types.js';
 
-export type ValidateApiKeyFn = (provider: ApiProvider, apiKey: string, baseUrl?: string) => Promise<boolean | void>;
+export type ValidateApiKeyFn = (provider: KeyProvider, apiKey: string, baseUrl?: string) => Promise<boolean | void>;
 
 export interface CredentialServiceOptions {
   store: AppStore;
@@ -15,7 +15,7 @@ export interface CredentialServiceOptions {
 
 export interface SaveKeyParams {
   workspaceId: string;
-  provider: ApiProvider;
+  provider: KeyProvider;
   apiKey: string;
   userId: string;
   baseUrl?: string | null | undefined;
@@ -96,11 +96,11 @@ export class CredentialService {
     return items.map((item) => ({ ...item }));
   }
 
-  async deleteKey(workspaceId: string, provider: ApiProvider): Promise<void> {
+  async deleteKey(workspaceId: string, provider: KeyProvider): Promise<void> {
     await this.#store.deleteCredential(workspaceId, provider);
   }
 
-  async resolve(workspaceId: string, provider: ApiProvider): Promise<Secret> {
+  async resolve(workspaceId: string, provider: KeyProvider): Promise<Secret> {
     const cred = await this.#store.getCredential(workspaceId, provider);
     if (!cred) {
       throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
@@ -112,7 +112,7 @@ export class CredentialService {
 
   async resolveCredential(
     workspaceId: string,
-    provider: ApiProvider,
+    provider: KeyProvider,
   ): Promise<{ secret: Secret; baseUrl?: string | null }> {
     const cred = await this.#store.getCredential(workspaceId, provider);
     if (!cred) {
@@ -123,7 +123,7 @@ export class CredentialService {
     return { secret: new Secret(plaintext), baseUrl: cred.baseUrl ?? null };
   }
 
-  async getCredential(workspaceId: string, provider: ApiProvider): Promise<StoredCredential | null> {
+  async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
     return this.#store.getCredential(workspaceId, provider);
   }
 }

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { api, type ApiProvider, type CatalogModel } from '../api/client.js';
+import { api, type ApiProvider, type CatalogModel, type KeyProvider } from '../api/client.js';
 import type { I18nKey } from '../i18n/ar.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -22,7 +22,17 @@ export const SAAS_PROVIDERS: readonly ApiProvider[] = [
   'custom',
 ];
 
-const LABEL_KEYS: Record<ApiProvider, I18nKey> = {
+/** Key types that serve only the Jev judge (ADR-0015): never review providers. */
+export const JUDGE_KEY_ONLY_PROVIDERS = ['typesafe', 'vercel-gateway'] as const satisfies readonly KeyProvider[];
+
+export function isJudgeKeyOnly(provider: KeyProvider): provider is (typeof JUDGE_KEY_ONLY_PROVIDERS)[number] {
+  return (JUDGE_KEY_ONLY_PROVIDERS as readonly KeyProvider[]).includes(provider);
+}
+
+/** Every provider a key can be saved for: the review providers, then the Jev-only key types. */
+export const KEY_PROVIDERS: readonly KeyProvider[] = [...SAAS_PROVIDERS, ...JUDGE_KEY_ONLY_PROVIDERS];
+
+const LABEL_KEYS: Record<KeyProvider, I18nKey> = {
   anthropic: 'providerAnthropic',
   openai: 'providerOpenai',
   gemini: 'providerGemini',
@@ -38,6 +48,8 @@ const LABEL_KEYS: Record<ApiProvider, I18nKey> = {
   'xiaomi-token-plan': 'providerXiaomiTokenPlan',
   'xiaomi-token-plan-cn': 'providerXiaomiTokenPlanCn',
   custom: 'providerCustom',
+  typesafe: 'providerTypesafe',
+  'vercel-gateway': 'providerVercelGateway',
 };
 
 export const PROVIDER_KEY_HINTS: Partial<Record<ApiProvider, string>> = {
@@ -53,7 +65,7 @@ export const PROVIDER_KEY_HINTS: Partial<Record<ApiProvider, string>> = {
   'xiaomi-token-plan-cn': 'tp-',
 };
 
-export function useProviderLabel(): (provider: ApiProvider) => string {
+export function useProviderLabel(): (provider: KeyProvider) => string {
   const { t } = useI18n();
   return (provider) => t(LABEL_KEYS[provider]);
 }
@@ -83,19 +95,20 @@ export const fieldClass =
 
 export const labelClass = 'block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300';
 
-export interface ProviderSelectProps {
+export interface ProviderSelectProps<P extends KeyProvider = ApiProvider> {
   id: string;
   label: string;
-  value: ApiProvider;
-  /** Providers to offer; the current value is always kept in the list. */
-  options?: readonly ApiProvider[] | undefined;
-  onChange: (provider: ApiProvider) => void;
+  value: P;
+  /** Providers to offer (default: the review providers); the current value is always kept in the list. */
+  options?: readonly P[] | undefined;
+  onChange: (provider: P) => void;
   disabled?: boolean | undefined;
 }
 
-export function ProviderSelect({ id, label, value, options = SAAS_PROVIDERS, onChange, disabled }: ProviderSelectProps) {
+export function ProviderSelect<P extends KeyProvider = ApiProvider>({ id, label, value, options, onChange, disabled }: ProviderSelectProps<P>) {
   const providerLabel = useProviderLabel();
-  const list = options.includes(value) ? options : [value, ...options];
+  const offered = options ?? (SAAS_PROVIDERS as readonly KeyProvider[] as readonly P[]);
+  const list = offered.includes(value) ? offered : [value, ...offered];
   return (
     <div>
       <label htmlFor={id} className={labelClass}>
@@ -105,7 +118,7 @@ export function ProviderSelect({ id, label, value, options = SAAS_PROVIDERS, onC
         id={id}
         disabled={disabled}
         value={value}
-        onChange={(e) => onChange(e.target.value as ApiProvider)}
+        onChange={(e) => onChange(e.target.value as P)}
         className={fieldClass}
       >
         {list.map((p) => (
