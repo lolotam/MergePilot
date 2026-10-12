@@ -23,8 +23,7 @@ describe('LandingPage', () => {
 
   it('renders hero with logo and value proposition', () => {
     renderLandingPage('ar');
-    expect(screen.getAllByText('Merge').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('Pilot').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByAltText('MergePilot').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('heading', { level: 1 })).toBeDefined();
   });
 

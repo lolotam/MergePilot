@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="90 74 1090 1090" role="img" aria-label="MergePilot">
-  <style>
-    .m { fill: #0B9B63; }
-    .p { fill: #2D333C; }
-    @media (prefers-color-scheme: dark) { .p { fill: #E6E9EE; } .m { fill: #16B97A; } }
-  </style>
-  <path class="m" d="M123 395 Q123 382 135 375 L198 340 Q210 334 222 342 L575 606 L742 514 Q765 503 765 528 L765 822 Q765 832 756 838 L643 925 Q624 938 624 915 L624 740 L556 786 Q546 792 536 785 L268 563 L268 862 Q268 885 248 872 L135 797 Q123 789 123 775 Z"/>
-  <path class="p" d="M480 470 Q472 464 480 457 L690 308 L962 308 A207 207 0 0 1 962 722 L822 722 Q812 722 812 712 L812 600 Q812 590 822 590 L940 590 A75 75 0 0 0 940 440 L752 440 L586 548 Q572 557 560 547 Z"/>
-</svg>
