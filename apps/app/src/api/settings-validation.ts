@@ -1,5 +1,29 @@
-import type { ApiProvider, AppStore } from '../core/types.js';
-import type { Settings } from './contract.js';
+import type { ApiProvider, AppStore, WorkspaceSettings } from '../core/types.js';
+import type { Settings, SettingsUpdate } from './contract.js';
+
+/** Applies a PUT body to the stored settings: undefined keeps, null clears (see contract). */
+export function mergeSettings(
+  workspaceId: string,
+  current: WorkspaceSettings | null,
+  update: SettingsUpdate,
+): WorkspaceSettings {
+  const keep = <T>(next: T | null | undefined, stored: T | null | undefined): T | null =>
+    next === undefined ? (stored ?? null) : next;
+  return {
+    workspaceId,
+    provider: update.provider,
+    model: update.model,
+    language: update.language,
+    monthlyBudgetUsd: keep(update.monthlyBudgetUsd, current?.monthlyBudgetUsd),
+    effort: keep(update.effort, current?.effort),
+    heavyProvider: keep(update.heavyProvider, current?.heavyProvider),
+    heavyModel: keep(update.heavyModel, current?.heavyModel),
+    heavyEffort: keep(update.heavyEffort, current?.heavyEffort),
+    heavyThresholdLines: keep(update.heavyThresholdLines, current?.heavyThresholdLines),
+    fallback: keep(update.fallback, current?.fallback) ?? [],
+    minSeverity: keep(update.minSeverity, current?.minSeverity) ?? 'medium',
+  };
+}
 
 export interface SettingsProblem {
   code: string;
@@ -15,7 +39,7 @@ export interface SettingsProblem {
 export async function validateSettings(
   store: AppStore,
   workspaceId: string,
-  settings: Settings,
+  settings: Settings | WorkspaceSettings,
 ): Promise<SettingsProblem | null> {
   const keyProblem = async (provider: ApiProvider, code: string, role: string): Promise<SettingsProblem | null> => {
     const cred = await store.getCredential(workspaceId, provider);

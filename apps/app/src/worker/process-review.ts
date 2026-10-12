@@ -28,7 +28,7 @@ import {
 } from '../core/types.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { executeReview } from './execute-review.js';
-import { changedLinesOf, chooseModel, customBaseUrlFor, usedModel, type ModelChoice } from './model-choice.js';
+import { changedLinesOf, chooseModel, fallbackChain, skippedFallbacksNote, customBaseUrlFor, usedModel, type ModelChoice } from './model-choice.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { startRunHeartbeat } from './run-heartbeat.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
@@ -160,11 +160,7 @@ export async function processReviewJob(
 
     // Fallback entries never carry a URL: a `custom` entry uses the workspace's one custom
     // server URL, passed to the engine as the trusted `customBaseUrl` (ADR-0008 amendment).
-    const fallbackList = (settings.fallback ?? []).map((f) => ({
-      provider: f.provider,
-      model: f.model,
-      ...(f.effort ? { effort: f.effort } : {}),
-    }));
+    const fallbackList = fallbackChain(settings.fallback ?? [], choice);
     const customBaseUrl = await customBaseUrlFor(
       deps.store,
       workspaceId,
@@ -286,6 +282,10 @@ export async function processReviewJob(
           : {}),
       });
     }
+    // A configured fallback left out (no key, or a custom URL that failed the SSRF check) is
+    // disclosed in the log and on the run record; it is never called.
+    const skippedNote = skippedFallbacksNote(model);
+    if (skippedNote) deps.log?.(skippedNote);
 
     const reviewResult = await executeReview({
       client,
@@ -313,7 +313,7 @@ export async function processReviewJob(
           : 'failed';
 
     const costUsd = reviewResult.costUsd ?? null;
-    const detail = reviewResult.detail ?? null;
+    const detail = reviewResult.detail ?? skippedNote ?? null;
     let payload: ReviewRunResultPayload | null = null;
     let findingsCount: number | null = null;
 

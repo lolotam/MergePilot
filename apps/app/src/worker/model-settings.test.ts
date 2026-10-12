@@ -89,6 +89,24 @@ describe('worker: heavy-duty model, effort, fallback and minimum severity (J2)',
     expect(config?.baseUrl).toBeUndefined();
   });
 
+  it('never lists the chosen model as its own fallback, and drops repeated entries', async () => {
+    const h = createHarness({
+      settings: {
+        ...heavySettings,
+        fallback: [
+          { provider: 'openai', model: 'gpt-5-pro', effort: 'high' },
+          { provider: 'gemini', model: 'gemini-3.8-flash' },
+          { provider: 'gemini', model: 'gemini-3.8-flash' },
+        ],
+      },
+      additions: 900,
+      deletions: 0,
+    });
+    await processReviewJob(h.job, h.deps);
+    expect(h.getCapturedConfig()?.model).toBe('gpt-5-pro');
+    expect(h.getCapturedConfig()?.fallback).toEqual([{ provider: 'gemini', model: 'gemini-3.8-flash' }]);
+  });
+
   it('records the fallback that answered and discloses it in the published summary', async () => {
     const fallback: ReviewModel = { label: 'openai:gpt-4o', generate: vi.fn(okAnswer) };
     const primary: ReviewModel = {
@@ -146,4 +164,23 @@ describe('worker: custom base URL comes only from the workspace key and is re-ch
     expect(customFetch).not.toHaveBeenCalled();
     expect(result.detail).not.toContain(keyFor('custom'));
   });
+
+  it('leaves out a custom fallback whose stored URL now fails the check, discloses it and finishes the review', async () => {
+    const customFetch = vi.fn(async () => reviewStream());
+    vi.stubGlobal('fetch', vi.fn(async () => reviewStream()));
+    try {
+      const h = createHarness({
+        settings: { provider: 'openrouter', model: 'openai/gpt-5', fallback: [{ provider: 'custom', model: 'llama-3.3' }] },
+        customBaseUrl: 'https://llm.example.com/v1',
+        engine: { customFetch, publicIp: '10.0.0.9' },
+      });
+      const result = await processReviewJob(h.job, h.deps);
+      expect(result.status).toBe('completed');
+      expect(customFetch).not.toHaveBeenCalled();
+      expect((await h.latestRun())?.detail).toContain('fallback custom:llama-3.3 skipped');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
+

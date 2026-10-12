@@ -10,6 +10,7 @@ import {
 } from '@mergepilot/engine';
 import { requireRole } from '../auth/guard.js';
 import { DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
+import type { WorkspaceSettings } from '../core/types.js';
 import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } from './contract.js';
 import { sendError } from './helpers.js';
 import { engineOptions, storedTarget, unsavedTarget, type TargetResult } from './provider-target.js';
@@ -94,6 +95,18 @@ function routeSignal(reply: FastifyReply): AbortSignal {
     if (!reply.raw.writableFinished) controller.abort();
   });
   return controller.signal;
+}
+
+/**
+ * The model a connection test uses when the request names none: the workspace's primary model,
+ * then its heavy model, then its first fallback for this provider, then the registry default
+ * (`custom` has none, so a custom key used only as heavy/fallback still tests its own model).
+ */
+export function testModelFor(settings: WorkspaceSettings | null, provider: ApiProviderId): string {
+  if (settings?.provider === provider && settings.model) return settings.model;
+  if (settings?.heavyProvider === provider && settings.heavyModel) return settings.heavyModel;
+  const fallback = settings?.fallback?.find((f) => f.provider === provider && f.model);
+  return fallback?.model ?? providerEntry(provider).defaultModel;
 }
 
 function sendTargetError(reply: FastifyReply, result: Exclude<TargetResult, { ok: true }>): FastifyReply {
@@ -187,10 +200,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       if (!result.ok) return sendTargetError(reply, result);
 
       const settings = await deps.store.getSettings(workspaceId);
-      const model =
-        body.model?.trim() ||
-        (settings?.provider === provider ? settings.model : '') ||
-        providerEntry(provider).defaultModel;
+      const model = body.model?.trim() || testModelFor(settings, provider);
       if (!model) return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
       const effort = body.effort?.trim();
       const { target } = result;

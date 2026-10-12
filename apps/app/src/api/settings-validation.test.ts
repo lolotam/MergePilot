@@ -86,4 +86,55 @@ describe('PUT settings validation and key base URLs (J2)', { timeout: 25000 }, (
     expect(saved.body).not.toContain(keyFor('c'));
     expect((await put({ fallback: [{ provider: 'custom', model: 'llama-3.3' }] })).statusCode).toBe(200);
   });
+
+  it('PUT is a patch: omitted J2 fields keep their value, explicit null clears them', async () => {
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openrouter', apiKey: keyFor('or'), userId: 'u-admin' });
+    const full = {
+      effort: 'high',
+      heavyProvider: 'openrouter',
+      heavyModel: 'openai/gpt-5:free',
+      heavyEffort: 'medium',
+      heavyThresholdLines: 1200,
+      fallback: [{ provider: 'openrouter', model: 'z-ai/glm-5', effort: null }],
+      minSeverity: 'high',
+      monthlyBudgetUsd: 50,
+    };
+    expect((await put(full)).statusCode).toBe(200);
+    const read = async () =>
+      (await h.app.inject({ method: 'GET', url: '/api/workspaces/ws-1/settings', headers: { cookie: h.adminCookie() } })).json()
+        .settings;
+
+    // An old client that only changes the budget.
+    const budgetOnly = await put({ monthlyBudgetUsd: 75 });
+    expect(budgetOnly.statusCode).toBe(200);
+    expect(await read()).toMatchObject({ ...full, monthlyBudgetUsd: 75 });
+
+    const cleared = await put({
+      effort: null,
+      heavyProvider: null,
+      heavyModel: null,
+      heavyEffort: null,
+      heavyThresholdLines: null,
+      fallback: null,
+      minSeverity: null,
+      monthlyBudgetUsd: null,
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(await read()).toMatchObject({
+      effort: null,
+      heavyProvider: null,
+      heavyModel: null,
+      heavyEffort: null,
+      fallback: [],
+      minSeverity: 'medium',
+      monthlyBudgetUsd: null,
+    });
+  });
+
+  it('validates the merged result, so a patch cannot leave a heavy model without its provider', async () => {
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openrouter', apiKey: keyFor('or'), userId: 'u-admin' });
+    expect((await put({ heavyProvider: 'openrouter', heavyModel: 'm' })).statusCode).toBe(200);
+    expect(await errorCode({ heavyProvider: null })).toBe('validation_error');
+  });
 });
+

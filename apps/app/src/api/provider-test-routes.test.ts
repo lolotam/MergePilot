@@ -72,6 +72,32 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect([custom.statusCode, custom.json().error.code]).toEqual([400, 'model_required']);
   });
 
+  it('without a model, tests the custom key with the model the workspace uses it for (heavy, then fallback)', async () => {
+    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 2, model: 'x', reply: 'OK' });
+    await h.credentials.saveKey({
+      workspaceId: 'ws-1',
+      provider: 'custom',
+      apiKey: keyFor('c'),
+      userId: 'u-admin',
+      baseUrl: 'https://llm.example.com/v1',
+    });
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('o'), userId: 'u-admin' });
+    const putSettings = (payload: Record<string, unknown>) =>
+      h.app.inject({
+        method: 'PUT',
+        url: '/api/workspaces/ws-1/settings',
+        headers: { cookie: h.adminCookie() },
+        payload: { provider: 'openai', model: 'gpt-5', language: 'en', ...payload },
+      });
+    expect((await putSettings({ fallback: [{ provider: 'custom', model: 'llama-fb' }] })).statusCode).toBe(200);
+    expect((await test('custom', h.adminCookie())).json().ok).toBe(true);
+    expect(vi.mocked(testConnection).mock.calls[0]?.[2]).toBe('llama-fb');
+
+    expect((await putSettings({ heavyProvider: 'custom', heavyModel: 'llama-heavy' })).statusCode).toBe(200);
+    await test('custom', h.adminCookie());
+    expect(vi.mocked(testConnection).mock.calls[1]?.[2]).toBe('llama-heavy');
+  });
+
   it('custom: calls through the guarded fetch, and refuses a private address', async () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 3, model: 'llama', reply: 'OK' });
     const ok = await test('custom', h.adminCookie(), {

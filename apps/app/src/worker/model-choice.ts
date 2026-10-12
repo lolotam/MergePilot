@@ -1,7 +1,7 @@
-import { isApiProviderId } from '@mergepilot/engine';
+import { isApiProviderId, type ReviewModel } from '@mergepilot/engine';
 import { listPullRequestFiles, type GitHubClient } from '@mergepilot/github';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
-import type { ApiProvider, AppStore, WorkspaceSettings } from '../core/types.js';
+import type { ApiProvider, AppStore, FallbackSetting, WorkspaceSettings } from '../core/types.js';
 
 /** Default "large PR" size when the workspace set a heavy model but no threshold. */
 export const DEFAULT_HEAVY_THRESHOLD_LINES = 800;
@@ -43,6 +43,33 @@ export async function changedLinesOf(
   if (typeof pr.additions === 'number' && typeof pr.deletions === 'number') return pr.additions + pr.deletions;
   const { files } = await listPullRequestFiles(client, params);
   return files.reduce((sum, f) => sum + f.additions + f.deletions, 0);
+}
+
+/**
+ * The fallback chain for this review: the configured entries in order, without the model that is
+ * already primary (the heavy model may also be listed as a fallback) and without repeats, so a
+ * failing model is never retried as its own fallback.
+ */
+export function fallbackChain(
+  fallback: readonly FallbackSetting[],
+  choice: Pick<ModelChoice, 'provider' | 'model'>,
+): Array<{ provider: ApiProvider; model: string; effort?: string }> {
+  const seen = new Set([`${choice.provider}:${choice.model}`]);
+  const chain: Array<{ provider: ApiProvider; model: string; effort?: string }> = [];
+  for (const f of fallback) {
+    const id = `${f.provider}:${f.model}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    chain.push({ provider: f.provider, model: f.model, ...(f.effort ? { effort: f.effort } : {}) });
+  }
+  return chain;
+}
+
+/** One line naming every configured fallback the engine left out, or undefined. */
+export function skippedFallbacksNote(model: Pick<ReviewModel, 'skippedFallbacks'>): string | undefined {
+  const skipped = model.skippedFallbacks ?? [];
+  if (skipped.length === 0) return undefined;
+  return skipped.map((s) => `fallback ${s.label} skipped: ${s.reason}`).join('; ');
 }
 
 export interface UsedModel {

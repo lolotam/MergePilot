@@ -64,6 +64,17 @@ export const SettingsSchema = z.object({
   minSeverity: SeveritySchema.optional().default('medium'),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
+
+/**
+ * PUT body: provider, model and language are required; every other field is a patch. Left out
+ * (undefined) keeps the stored value, so an older client that only sends the budget does not
+ * wipe the J2 fields; an explicit `null` clears it (fallback → [], minSeverity → medium).
+ */
+export const SettingsUpdateSchema = SettingsSchema.extend({
+  fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).nullable().optional(),
+  minSeverity: SeveritySchema.nullable().optional(),
+});
+export type SettingsUpdate = z.infer<typeof SettingsUpdateSchema>;
 export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable() });
 
 /** GET (admin) /api/workspaces/:workspaceId/keys */

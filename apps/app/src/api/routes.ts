@@ -9,7 +9,7 @@ import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { ApiProvider, AppStore, ReviewQueue } from '../core/types.js';
 import type { CredentialService } from '../credentials/service.js';
 import type { GitHubAppClientFactory } from '../worker/types.js';
-import { ApiProviderSchema, SettingsSchema, SaveKeyRequestSchema } from './contract.js';
+import { ApiProviderSchema, SettingsUpdateSchema, SaveKeyRequestSchema } from './contract.js';
 import { validateKey as defaultValidateKey } from './validate-key.js';
 import {
   sendError,
@@ -20,7 +20,7 @@ import {
 import { registerInstallationRoutes } from './installation-routes.js';
 import { invalidateModelsCache, registerProviderRoutes } from './provider-routes.js';
 import { registerRunsRoutes } from './runs-routes.js';
-import { validateSettings } from './settings-validation.js';
+import { mergeSettings, validateSettings } from './settings-validation.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
 
 export interface DashboardApiDeps {
@@ -93,7 +93,7 @@ export function registerDashboardApi(
     { preHandler: [requireRole('admin', deps.auth)] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { workspaceId } = request.params as { workspaceId: string };
-      const parsed = SettingsSchema.safeParse(request.body);
+      const parsed = SettingsUpdateSchema.safeParse(request.body);
       if (!parsed.success) {
         return sendError(
           reply,
@@ -103,25 +103,14 @@ export function registerDashboardApi(
         );
       }
 
-      const problem = await validateSettings(deps.store, workspaceId, parsed.data);
+      // A patch over the stored settings: fields left out keep their value, null clears them.
+      const merged = mergeSettings(workspaceId, await deps.store.getSettings(workspaceId), parsed.data);
+      const problem = await validateSettings(deps.store, workspaceId, merged);
       if (problem) return sendError(reply, 400, problem.code, problem.message);
 
-      await deps.store.saveSettings({
-        workspaceId,
-        provider: parsed.data.provider,
-        model: parsed.data.model,
-        effort: parsed.data.effort ?? null,
-        heavyProvider: parsed.data.heavyProvider ?? null,
-        heavyModel: parsed.data.heavyModel ?? null,
-        heavyEffort: parsed.data.heavyEffort ?? null,
-        heavyThresholdLines: parsed.data.heavyThresholdLines ?? null,
-        fallback: parsed.data.fallback ?? [],
-        minSeverity: parsed.data.minSeverity ?? 'medium',
-        language: parsed.data.language,
-        monthlyBudgetUsd: parsed.data.monthlyBudgetUsd ?? null,
-      });
-
-      return reply.status(200).send({ settings: parsed.data });
+      await deps.store.saveSettings(merged);
+      const { workspaceId: _ws, ...settings } = merged;
+      return reply.status(200).send({ settings });
     },
   );
 
