@@ -46,6 +46,7 @@ export const privacyEn: LegalDocument = {
         'Executing automated code reviews and posting findings back to pull requests on GitHub.',
         'Enforcing customer-defined monthly spending limits and budgets.',
         'Protecting system integrity and preventing abuse.',
+        'The service operator can view account and workspace metadata (name, email, sign-in providers, workspaces, connected installations, review run metadata and costs) to operate, support and secure the service — never source code or API keys.',
       ],
     },
     {

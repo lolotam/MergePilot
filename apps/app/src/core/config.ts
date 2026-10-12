@@ -19,6 +19,8 @@ export interface AppConfig {
   };
   google: { clientId: string; clientSecret: string };
   authSecret: string;
+  /** MERGEPILOT_PLATFORM_ADMINS: lower-cased operator emails. Empty means nobody. */
+  platformAdmins?: string[];
 }
 
 const REQUIRED = [
@@ -35,6 +37,14 @@ const REQUIRED = [
   'GOOGLE_CLIENT_SECRET',
   'BETTER_AUTH_SECRET',
 ] as const;
+
+/** Parses MERGEPILOT_PLATFORM_ADMINS: comma-separated, trimmed, lower-cased, empties dropped. */
+export function parsePlatformAdmins(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => email.length > 0);
+}
 
 export function loadAppConfig(env: Record<string, string | undefined>): AppConfig {
   const missing = REQUIRED.filter((name) => !env[name]?.trim());
@@ -59,5 +69,6 @@ export function loadAppConfig(env: Record<string, string | undefined>): AppConfi
     },
     google: { clientId: get('GOOGLE_CLIENT_ID'), clientSecret: get('GOOGLE_CLIENT_SECRET') },
     authSecret: get('BETTER_AUTH_SECRET'),
+    platformAdmins: parsePlatformAdmins(env.MERGEPILOT_PLATFORM_ADMINS),
   };
 }

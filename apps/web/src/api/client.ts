@@ -2,6 +2,11 @@ import type { MeResponse, Settings, ErrorBody } from '@mergepilot/app/contract';
 
 export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
 
+/** GET /api/me plus the platform-operator flag (false for everyone not in MERGEPILOT_PLATFORM_ADMINS). */
+export interface MeResponseWithAdmin extends MeResponse {
+  isPlatformAdmin?: boolean;
+}
+
 export interface KeyItem {
   provider: ApiProvider;
   last4: string;
@@ -104,7 +109,7 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
 }
 
 export const api = {
-  getMe: () => fetchApi<MeResponse>('/api/me'),
+  getMe: () => fetchApi<MeResponseWithAdmin>('/api/me'),
   getSettings: (workspaceId: string) =>
     fetchApi<SettingsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
   updateSettings: (workspaceId: string, settings: Settings) =>
