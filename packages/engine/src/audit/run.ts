@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { TokenUsage } from '../llm/types.js';
 import { parseReviewAnswer, ReviewAnswerSchema } from '../review/answer.js';
+import { secretsToRedact } from '../review/model.js';
 import type { Finding } from '../review/types.js';
 import { redactSecrets } from '../security/redact.js';
 import { selectFindings } from '../validate/select.js';
@@ -20,9 +21,10 @@ export async function runAudit(input: RunAuditInput): Promise<AuditResult> {
     readFile,
     files,
     model,
-    knownSecrets = [],
     signal,
   } = input;
+  // Keys the model (and its fallbacks) send are redacted too, not only the caller's list.
+  const knownSecrets = secretsToRedact(input.knownSecrets ?? [], model);
 
   const plan = planAudit({
     files: files.map((f) => ({ path: f.path, size: f.size ?? 0 })),

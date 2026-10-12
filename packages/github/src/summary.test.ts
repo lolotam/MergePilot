@@ -336,4 +336,35 @@ describe('renderReviewSummary', () => {
     expect(text).toContain('a@b.c');
     expect(text.match(/<\/div>/g)).toHaveLength(1);
   });
+
+  describe('explicit fallback disclosure (ADR-0008)', () => {
+    it('renders Arabic fallback warning line when fallback is used', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        language: 'ar',
+        modelLabel: 'xai:grok-4',
+        fallback: { from: 'openai:gpt-5', code: 'quota' },
+      });
+      expect(rendered).toContain('> ⚠️ استُخدم النموذج الاحتياطي `xai:grok-4` لأن `openai:gpt-5` فشل (quota)');
+    });
+
+    it('renders English fallback warning line when fallback is used', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        language: 'en',
+        modelLabel: 'xai:grok-4',
+        fallback: { from: 'openai:gpt-5', code: 'rate-limit' },
+      });
+      expect(rendered).toContain('> ⚠️ Fallback model `xai:grok-4` was used because `openai:gpt-5` failed (rate-limit)');
+    });
+
+    it('omits fallback line when fallback is not configured or not used', () => {
+      const renderedAr = renderReviewSummary({ ...baseInput, language: 'ar', fallback: undefined });
+      expect(renderedAr).not.toContain('استُخدم النموذج الاحتياطي');
+
+      const renderedEn = renderReviewSummary({ ...baseInput, language: 'en', fallback: undefined });
+      expect(renderedEn).not.toContain('Fallback model');
+    });
+  });
 });
+

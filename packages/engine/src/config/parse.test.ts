@@ -17,6 +17,7 @@ describe('parseConfig', () => {
       config: {
         provider: 'anthropic',
         model: 'claude-sonnet',
+        fallback: [],
         language: 'ar',
         review: {
           maxFindings: 5,

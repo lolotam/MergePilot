@@ -21,7 +21,8 @@ import { parseReviewAnswer } from './answer.js';
 import { ReviewAnswerSchema } from './answer.js';
 import { checkBudget, estimateTokens } from './budget.js';
 import { costUsd, estimateCostUsd } from '../budget/cost.js';
-import type { ReviewModel } from './model.js';
+import { FallbackChain, type FallbackDisclosure } from './fallback.js';
+import { secretsToRedact, type ReviewModel } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 import {
@@ -31,9 +32,7 @@ import {
   VerifyAnswerSchema,
 } from './verify.js';
 
-// ---------------------------------------------------------------------------
-// Input types
-// ---------------------------------------------------------------------------
+// ── Input types ──
 
 export interface PrFile {
   path: string;
@@ -53,17 +52,17 @@ export interface RunReviewInput {
   files: PrFile[];
   rulesFiles: RulesFile[];
   model: ReviewModel;
+  /** Explicit fallback models (ADR-0008); defaults to `model.fallbacks`, else none. */
+  fallbackModels?: readonly ReviewModel[] | undefined;
   knownSecrets: Secret[];
   libraryDocs?: LibraryDoc[] | undefined;
   signal?: AbortSignal | undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Output types
-// ---------------------------------------------------------------------------
+// ── Output types ──
 
 export type ReviewRunResult =
-  | {
+  | ({
       status: 'completed';
       summary: string;
       inline: Finding[];
@@ -74,18 +73,16 @@ export type ReviewRunResult =
       droppedInvalid: number;
       complete: boolean;
       verification?: { checked: number; rejected: number } | undefined;
-    }
+    } & Partial<FallbackDisclosure>)
   | { status: 'skipped-budget'; reason: string }
-  | {
+  | ({
       status: 'failed';
       reason: string;
       /** Provider message, already secret-redacted by the adapter; for logs and the summary. */
       detail?: string | undefined;
-    };
+    } & Partial<FallbackDisclosure>);
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
+// ── Internal helpers ──
 
 /** Builds a security Finding for a redacted secret on an added line. */
 function makeRedactionFinding(
@@ -158,15 +155,18 @@ function combineUsage(u1?: TokenUsage, u2?: TokenUsage): TokenUsage | undefined 
   };
 }
 
-// ---------------------------------------------------------------------------
-// Pipeline
-// ---------------------------------------------------------------------------
+// ── Pipeline ──
 
 /**
  * Runs the full single-pass review pipeline described in PRD v0.2 §7 steps 2–8.
  */
 export async function runReview(input: RunReviewInput): Promise<ReviewRunResult> {
-  const { config, pr, files, rulesFiles, model, knownSecrets, signal } = input;
+  const { config, pr, files, rulesFiles, signal } = input;
+  // One chain per review, so a fallback lasts for the rest of this review only (ADR-0008).
+  const fallbackModels = input.fallbackModels ?? input.model.fallbacks ?? [];
+  const model = new FallbackChain(input.model, fallbackModels);
+  // Every key a model in the chain may send is redacted before ANY model call, fallbacks included.
+  const knownSecrets = secretsToRedact(input.knownSecrets, input.model, fallbackModels);
   const reviewCfg = config.review;
   const budgetCfg = config.budget;
 
@@ -247,16 +247,20 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
 
   const maxOutputTokens = 4096;
+  // Price the output limit each call really requests: answer budget + effort's thinking headroom
+  // (largest across the chain). Thinking is billed as output, so pricing less could overspend.
+  const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
+  const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
   let estimatedCostUsd: number | undefined;
   if (budgetCfg.pricing) {
     estimatedCostUsd = estimateCostUsd(
-      { inputTokens: promptTokens, maxOutputTokens },
+      { inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens },
       budgetCfg.pricing,
     );
     if (reviewCfg.verify) {
       // Worst case for the verification call: its hunks are a subset of the review prompt.
       estimatedCostUsd += estimateCostUsd(
-        { inputTokens: promptTokens, maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS },
+        { inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens },
         budgetCfg.pricing,
       );
     }
@@ -280,11 +284,12 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     });
   } catch (err) {
     const failure = err as LlmFailure;
+    const disclosure = model.disclosure();
     if (failure && typeof failure === 'object' && 'code' in failure) {
       const detail = redactSecrets(String(failure.message ?? ''), knownSecrets).text.slice(0, 500);
-      return { status: 'failed', reason: failure.code as string, ...(detail ? { detail } : {}) };
+      return { status: 'failed', reason: failure.code as string, ...(detail ? { detail } : {}), ...disclosure };
     }
-    return { status: 'failed', reason: String(err) };
+    return { status: 'failed', reason: String(err), ...disclosure };
   }
 
   // ── Step e: parse answer ───────────────────────────────────────────────
@@ -366,12 +371,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     incompleteReasons,
   };
 
+  // Pricing belongs to the configured model; after a fallback the cost is unknown (tokens still count).
+  const disclosure = model.disclosure();
   let reviewCostUsd: number | undefined;
-  if (budgetCfg.pricing) {
+  if (budgetCfg.pricing && !disclosure.fallbackFrom) {
     reviewCostUsd = totalUsage
       ? costUsd(totalUsage, budgetCfg.pricing)
       : (estimatedCostUsd ??
-        estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing));
+        estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing));
   }
 
   return {
@@ -385,5 +392,6 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     droppedInvalid: parseResult.droppedInvalid,
     complete,
     ...(verification !== undefined ? { verification } : {}),
+    ...disclosure,
   };
 }

@@ -1,3 +1,4 @@
+import type { Secret } from '../credentials/secret.js';
 import type { LlmAdapter } from '../llm/adapter.js';
 import { collectText } from '../llm/collect.js';
 import type { FinishReason, TokenUsage } from '../llm/types.js';
@@ -12,6 +13,38 @@ export interface ReviewModel {
   /** Stable label for logs and the review footer, e.g. `anthropic:claude-sonnet-5-5`. */
   readonly label: string;
   generate(request: ReviewModelRequest): Promise<ReviewModelResponse>;
+  /**
+   * Explicit fallback models from the config (ADR-0008), tried in order by the pipeline when
+   * this model fails after its retries with quota / rate-limit / server / network / auth.
+   */
+  readonly fallbacks?: readonly ReviewModel[];
+  /**
+   * Credentials this model and its fallbacks send. The pipeline adds them to the secrets it
+   * redacts from every prompt, so no configured key (a fallback's included) reaches any model.
+   */
+  readonly secrets?: readonly Secret[];
+  /** Configured fallbacks left out before the review, each with a reason to disclose. */
+  readonly skippedFallbacks?: readonly SkippedFallback[];
+  /**
+   * The output-token limit one call actually requests for an answer budget of `maxOutputTokens`
+   * (thinking headroom included). Absent means exactly `maxOutputTokens`.
+   */
+  outputTokensFor?(maxOutputTokens: number): number;
+}
+
+/** The caller's known secrets plus every key the model and its fallbacks send, for redaction. */
+export function secretsToRedact(
+  known: readonly Secret[],
+  model: ReviewModel,
+  fallbacks: readonly ReviewModel[] = model.fallbacks ?? [],
+): Secret[] {
+  return [...known, ...(model.secrets ?? []), ...fallbacks.flatMap((m) => m.secrets ?? [])];
+}
+
+export interface SkippedFallback {
+  /** `provider:model` of the configured entry. */
+  label: string;
+  reason: string;
 }
 
 export interface ReviewModelRequest {
@@ -30,10 +63,13 @@ export interface ReviewModelResponse {
   finishReason: FinishReason;
 }
 
-/** Adapts any API `LlmAdapter` to the orchestrator's `ReviewModel`. */
-export function modelFromAdapter(adapter: LlmAdapter, model: string): ReviewModel {
+/** Adapts any API `LlmAdapter` to the orchestrator's `ReviewModel`; `effort` is the configured thinking effort. */
+export function modelFromAdapter(adapter: LlmAdapter, model: string, effort?: string): ReviewModel {
   return {
     label: `${adapter.provider}:${model}`,
+    outputTokensFor(maxOutputTokens) {
+      return adapter.requestedOutputTokens({ model, maxOutputTokens, ...(effort ? { effort } : {}) });
+    },
     async generate(request) {
       const result = await collectText(
         adapter.stream({
@@ -43,6 +79,7 @@ export function modelFromAdapter(adapter: LlmAdapter, model: string): ReviewMode
             { role: 'user', content: request.user },
           ],
           maxOutputTokens: request.maxOutputTokens,
+          ...(effort ? { effort } : {}),
           ...(request.responseSchema ? { responseSchema: request.responseSchema } : {}),
           ...(request.signal ? { signal: request.signal } : {}),
         }),

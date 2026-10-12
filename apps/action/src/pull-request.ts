@@ -11,6 +11,7 @@ import {
   ClaudeCodeRunner,
   createReviewModel,
   EnvCredentialStore,
+  resolveReviewSecrets,
   Secret,
   type CredentialStore,
   type MergePilotConfig,
@@ -21,6 +22,7 @@ import {
   loadRepoConfig,
   reviewPullRequest,
 } from '@mergepilot/github';
+import { trustedCustomBaseUrl, warnIgnoredBaseUrls } from './custom-base-url.js';
 import type { ActionDeps } from './deps.js';
 import {
   createSanitizedWorkspace,
@@ -32,7 +34,7 @@ export interface PullRequestReviewDeps extends Omit<ActionDeps, 'createModel'> {
     | ((
         config: MergePilotConfig,
         store: CredentialStore,
-        opts: { cwd: string; configDir?: string },
+        opts: { cwd: string; configDir?: string; customBaseUrl?: string | undefined },
       ) => Promise<ReviewModel>)
     | undefined;
   createSanitizedWorkspace?: typeof createSanitizedWorkspace | undefined;
@@ -43,7 +45,7 @@ export interface PullRequestReviewDeps extends Omit<ActionDeps, 'createModel'> {
 const defaultCreateModel = async (
   config: MergePilotConfig,
   store: CredentialStore,
-  opts: { cwd: string; configDir?: string },
+  opts: { cwd: string; configDir?: string; customBaseUrl?: string | undefined },
 ): Promise<ReviewModel> => {
   if (config.provider === 'claude-code') {
     const token = await store.resolve({ provider: 'claude-code' }, 'review');
@@ -153,7 +155,9 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
   log(`Loaded configuration for provider: ${config.provider}`);
 
   const store = new EnvCredentialStore(env);
-  const providerSecret = await store.resolve({ provider: config.provider }, 'review');
+  // The primary key (none for a keyless custom server) plus every configured fallback key, so
+  // all of them are redacted from the prompt before any model is called.
+  const providerSecrets = await resolveReviewSecrets(config, store);
   const githubSecret = new Secret(githubToken);
 
   let sandbox: SanitizedWorkspace | undefined;
@@ -194,11 +198,17 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
       effectiveCwd = sandbox.dir;
     }
 
+    warnIgnoredBaseUrls(config, log);
+    const customBaseUrl = trustedCustomBaseUrl(env);
     const model = await createModel(config, store, {
       cwd: effectiveCwd,
       ...(tempConfigDir ? { configDir: tempConfigDir } : {}),
+      ...(customBaseUrl ? { customBaseUrl } : {}),
     });
     log(`Created review model: ${model.label}`);
+    for (const skipped of model.skippedFallbacks ?? []) {
+      log(`Fallback ${skipped.label} skipped: ${skipped.reason}`);
+    }
 
     const configHash = createHash('sha256')
       .update(configText)
@@ -223,7 +233,7 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
       configHash,
       rulesFiles,
       model,
-      knownSecrets: [providerSecret, githubSecret],
+      knownSecrets: [...providerSecrets, githubSecret],
       publisherLogin,
       log,
     });

@@ -137,3 +137,10 @@
 ### س15: بيانات صفحتي الخصوصية والشروط
 
 **الإجابة:** «email:admin@walidmohamed.com» · «اسم المشغّل Walidmohamed» · «القانون المطبّق kuwait»
+
+## الدفعة 4 — 2026-10-12
+
+### س16: إضافة المزودين وقائمة النماذج ومنطق النماذج الاحتياطية (Fallback)
+
+**الإجابة:** «Clone all model system and providers and fale back logic from this repo so add fall back models and add all these providers to the list»
+

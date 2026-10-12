@@ -17,6 +17,8 @@ export interface AnthropicStreamParams {
   messages: AnthropicMessageParam[];
   system?: AnthropicSystemBlock[];
   temperature?: number;
+  thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'adaptive' };
+  output_config?: { effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' };
 }
 
 export interface AnthropicLike {
