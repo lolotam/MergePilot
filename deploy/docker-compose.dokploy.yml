@@ -2,12 +2,14 @@
 # Postgres and Redis are reachable only on the private `backend` network. The web app and the
 # worker also join `egress` (a normal network with internet access) because they must call
 # GitHub and the AI providers; only `web` joins `dokploy-network` so Traefik can route to it.
+# Other stacks on `dokploy-network` may also have services called `postgres`/`redis`, so the app
+# reaches ours through the unique aliases `mergepilot-postgres` and `mergepilot-redis`.
 
 x-app-env: &app-env
   NODE_ENV: production
   MERGEPILOT_BASE_URL: ${MERGEPILOT_BASE_URL:-https://mergepilot.walidmohamed.com}
-  DATABASE_URL: postgres://${POSTGRES_USER:-mergepilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mergepilot}
-  REDIS_URL: redis://redis:6379
+  DATABASE_URL: postgres://${POSTGRES_USER:-mergepilot}:${POSTGRES_PASSWORD}@mergepilot-postgres:5432/${POSTGRES_DB:-mergepilot}
+  REDIS_URL: redis://mergepilot-redis:6379
   MERGEPILOT_MASTER_KEY: ${MERGEPILOT_MASTER_KEY}
   MERGEPILOT_MASTER_KEY_VERSION: ${MERGEPILOT_MASTER_KEY_VERSION:-1}
   MERGEPILOT_MASTER_KEY_PREVIOUS: ${MERGEPILOT_MASTER_KEY_PREVIOUS:-}
@@ -40,7 +42,9 @@ services:
       resources:
         limits:
           memory: 512M
-    networks: [backend]
+    networks:
+      backend:
+        aliases: [mergepilot-postgres]
 
   redis:
     image: redis:7-alpine
@@ -57,14 +61,16 @@ services:
       resources:
         limits:
           memory: 256M
-    networks: [backend]
+    networks:
+      backend:
+        aliases: [mergepilot-redis]
 
   migrate:
     image: ${MERGEPILOT_IMAGE}
     restart: "no"
     command: ["node", "dist/bootstrap/migrate-cli.js"]
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-mergepilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mergepilot}
+      DATABASE_URL: postgres://${POSTGRES_USER:-mergepilot}:${POSTGRES_PASSWORD}@mergepilot-postgres:5432/${POSTGRES_DB:-mergepilot}
     depends_on:
       postgres:
         condition: service_healthy
