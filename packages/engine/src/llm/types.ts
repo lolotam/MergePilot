@@ -20,6 +20,11 @@ export interface GenerateOptions {
    * reasoning parameter and ignores a value it does not know (providers/effort.ts).
    */
   effort?: string;
+  /**
+   * Per-call override: `off` asks for this one call without thinking (the retry after an empty,
+   * reasoning-only reply, ADR-0013). Adapters that cannot switch thinking off ignore it.
+   */
+  thinking?: 'off';
   signal?: AbortSignal;
   /** JSON schema the provider should constrain its output to, when it supports that. */
   responseSchema?: Record<string, unknown>;

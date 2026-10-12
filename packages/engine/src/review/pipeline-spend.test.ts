@@ -66,7 +66,7 @@ describe('runReview — spend across retries and batches (ADR-0011)', () => {
     if (result.status === 'completed') {
       expect(result.complete).toBe(false);
       expect(result.result.incompleteReasons).toContain('truncation retry skipped: budget limit reached');
-      expect(result.result.incompleteReasons).toContain('batch 2: budget limit reached');
+      expect(result.result.incompleteReasons).toContain('batch 2 (src/b.ts): budget limit reached');
       expect(result.costUsd).toBeLessThanOrEqual(0.1);
     }
   });

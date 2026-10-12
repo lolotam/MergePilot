@@ -1,25 +1,25 @@
 /**
  * The review pipeline: classify → redact → build prompt → budget check → model call →
- * parse answer → select + anchor findings → return result.
+ * parse answer → select + anchor findings → return result. A PR above
+ * `review.maxPromptTokens` skips the whole-PR call and is reviewed in capped batches;
+ * every call has its own timeout and the review an overall time limit (ADR-0013).
  *
  * Pure engine code: no GitHub calls, no filesystem access, no network.
  * Everything arrives through `RunReviewInput` (ADR-0001).
  */
 
-import { z } from 'zod';
-import type { MergePilotConfig } from '../config/schema.js';
+import { REVIEW_LIMIT_DEFAULTS, type MergePilotConfig, type ReviewLimits } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import { classifyFile } from '../diff/classify-file.js';
 import { parsePatch, type ParsedPatch } from '../diff/parse-patch.js';
-import type { LlmFailure } from '../llm/failure.js';
 import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
 import { isSensitivePath } from '../security/sensitive-path.js';
 import { anchorFindings } from '../validate/anchor.js';
 import { selectFindings } from '../validate/select.js';
-import { parseReviewAnswer } from './answer.js';
-import { ReviewAnswerSchema } from './answer.js';
+import { buildBatchPrompt } from './batch-run.js';
 import { checkBudget, estimateTokens } from './budget.js';
+import { ReviewDeadline, withCallTimeout } from './call.js';
 import { estimateCostUsd } from '../budget/cost.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
@@ -29,7 +29,8 @@ import {
   makeRedactionFinding,
   buildPatchLineToNewLineMap,
 } from './patch-helpers.js';
-import { recoverReviewTruncation } from './split.js';
+import { runBatchedPass, runSinglePass, type ReviewPassContext } from './review-pass.js';
+import { batchFilesByTokenCap, type CappedBatches } from './split.js';
 import { SpendTracker } from './spend.js';
 import { runVerifyPass, VERIFY_MAX_OUTPUT_TOKENS } from './verify-pass.js';
 
@@ -92,13 +93,19 @@ export type ReviewRunResult =
  */
 export async function runReview(input: RunReviewInput): Promise<ReviewRunResult> {
   const { config, pr, files, rulesFiles, signal } = input;
-  // One chain per review, so a fallback lasts for the rest of this review only (ADR-0008).
-  const fallbackModels = input.fallbackModels ?? input.model.fallbacks ?? [];
-  const model = new FallbackChain(input.model, fallbackModels);
-  // Every key a model in the chain may send is redacted before ANY model call, fallbacks included.
-  const knownSecrets = secretsToRedact(input.knownSecrets, input.model, fallbackModels);
   const reviewCfg = config.review;
   const budgetCfg = config.budget;
+  const limits = reviewLimits(reviewCfg);
+  const deadline = new ReviewDeadline(limits.totalTimeoutMs);
+  // One chain per review, so a fallback lasts for the rest of this review only (ADR-0008).
+  // Each model gets its own per-call timeout, so a timeout is a failure the chain decides on.
+  const fallbackModels = input.fallbackModels ?? input.model.fallbacks ?? [];
+  const model = new FallbackChain(
+    withCallTimeout(input.model, limits.callTimeoutMs),
+    fallbackModels.map((m) => withCallTimeout(m, limits.callTimeoutMs)),
+  );
+  // Every key a model in the chain may send is redacted before ANY model call, fallbacks included.
+  const knownSecrets = secretsToRedact(input.knownSecrets, input.model, fallbackModels);
 
   // ── Step a: classify files ─────────────────────────────────────────────
   const incompleteReasons: string[] = [];
@@ -176,6 +183,27 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     return { status: 'skipped-budget', reason: budgetResult.reason };
   }
 
+  // Size guard (ADR-0013): a prompt too big for one reliable call goes straight to capped batches.
+  let plan: CappedBatches | undefined;
+  if (promptTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0) {
+    plan = batchFilesByTokenCap(redactedReviewableFiles, limits.batchTokens);
+    for (const path of plan.truncatedPaths) {
+      incompleteReasons.push(`${path}: patch truncated to fit review.batchTokens`);
+    }
+  }
+  const promptArgs = {
+    config,
+    pr: { title: redactedPrTitle, body: redactedPrBody },
+    rulesFiles: redactedRulesFiles,
+    libraryDocs: input.libraryDocs,
+  };
+  const callPromptTokens = plan
+    ? plan.batches.map((batch) => {
+        const batchPrompt = buildBatchPrompt(promptArgs, batch);
+        return estimateTokens(batchPrompt.system + batchPrompt.user);
+      })
+    : [promptTokens];
+
   const maxOutputTokens = 4096;
   // Price the output limit each call really requests: answer budget + effort's thinking headroom
   // (largest across the chain). Thinking is billed as output, so pricing less could overspend.
@@ -183,9 +211,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
   let estimatedCostUsd: number | undefined;
   if (budgetCfg.pricing) {
-    estimatedCostUsd = estimateCostUsd(
-      { inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens },
-      budgetCfg.pricing,
+    const pricing = budgetCfg.pricing;
+    estimatedCostUsd = callPromptTokens.reduce(
+      (sum, tokens) => sum + estimateCostUsd({ inputTokens: tokens, maxOutputTokens: reviewOutputTokens }, pricing),
+      0,
     );
     if (reviewCfg.verify) {
       // Worst case for the verification call: its hunks are a subset of the review prompt.
@@ -205,66 +234,38 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // Real spend across every call of this review; usage-less calls count at their estimate.
   const spend = new SpendTracker(budgetCfg.pricing, budgetCfg.perReviewUsd);
 
-  // ── Step d: call the model ─────────────────────────────────────────────
-  let totalUsage: TokenUsage | undefined;
-  let modelResponse: Awaited<ReturnType<typeof model.generate>>;
-  try {
-    modelResponse = await model.generate({
-      system: prompt.system,
-      user: prompt.user,
-      maxOutputTokens,
-      responseSchema: z.toJSONSchema(ReviewAnswerSchema) as Record<string, unknown>,
-      ...(signal ? { signal } : {}),
-    });
-    totalUsage = modelResponse.usage;
-    spend.record(promptTokens, reviewOutputTokens, modelResponse.usage);
-  } catch (err) {
-    const failure = err as LlmFailure;
-    const disclosure = model.disclosure();
-    if (failure && typeof failure === 'object' && 'code' in failure) {
-      const detail = redactSecrets(String(failure.message ?? ''), knownSecrets).text.slice(0, 500);
-      return { status: 'failed', reason: failure.code as string, ...(detail ? { detail } : {}), ...disclosure };
-    }
-    return { status: 'failed', reason: String(err), ...disclosure };
-  }
-
-  // ── Step e: parse answer + truncation recovery ─────────────────────────
-  let parseResult = parseReviewAnswer(modelResponse.text, {
-    finishReason: modelResponse.finishReason,
-    outputTokens: modelResponse.usage?.outputTokens,
-  });
-
-  const recovery = await recoverReviewTruncation({
-    parseResult,
-    modelResponse,
+  // ── Steps d + e: model call(s), parse, recovery ────────────────────────
+  const passContext: ReviewPassContext = {
+    config,
+    model,
+    spend,
+    knownSecrets,
+    signal,
+    deadline,
     prompt,
     promptTokens,
     maxOutputTokens,
     reviewOutputTokens,
-    model,
-    config,
-    spend,
-    knownSecrets,
     redactedPrTitle,
     redactedPrBody,
     redactedRulesFiles,
     redactedReviewableFiles,
     libraryDocs: input.libraryDocs,
-    signal,
-    totalUsage,
-  });
-  parseResult = recovery.parseResult;
-  totalUsage = recovery.totalUsage;
-  incompleteReasons.push(...recovery.incompleteReasons);
-
-  if (!parseResult.ok) {
-    // Skipped or failed recovery steps are disclosed alongside the parse error.
-    const detail = recovery.incompleteReasons.join('; ');
-    return { status: 'failed', reason: parseResult.error, ...(detail ? { detail } : {}), ...model.disclosure() };
+  };
+  const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
+  if (!pass.ok) {
+    return {
+      status: 'failed',
+      reason: pass.reason,
+      ...(pass.detail ? { detail: pass.detail } : {}),
+      ...model.disclosure(),
+    };
   }
+  let totalUsage = pass.totalUsage;
+  incompleteReasons.push(...pass.incompleteReasons);
 
   // ── Step e2: verification pass ─────────────────────────────────────────
-  let modelFindings = parseResult.findings;
+  let modelFindings = pass.findings;
   let verification: { checked: number; rejected: number } | undefined;
 
   if (reviewCfg.verify && modelFindings.length > 0) {
@@ -277,6 +278,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       knownSecrets,
       totalUsage,
       signal,
+      deadline,
     });
     modelFindings = verified.findings;
     totalUsage = verified.totalUsage;
@@ -309,7 +311,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const complete = incompleteReasons.length === 0;
 
   const result: ReviewResult = {
-    summary: parseResult.summary,
+    summary: pass.summary,
     findings: selected,
     complete,
     incompleteReasons,
@@ -325,15 +327,25 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   return {
     status: 'completed',
-    summary: parseResult.summary,
+    summary: pass.summary,
     inline,
     summaryOnly,
     result,
     usage: totalUsage,
     ...(reviewCostUsd !== undefined ? { costUsd: reviewCostUsd } : {}),
-    droppedInvalid: parseResult.droppedInvalid,
+    droppedInvalid: pass.droppedInvalid,
     complete,
     ...(verification !== undefined ? { verification } : {}),
     ...disclosure,
+  };
+}
+
+/** The ADR-0013 limits, defaulted for a config built in code without the schema. */
+function reviewLimits(review: Partial<ReviewLimits>): ReviewLimits {
+  return {
+    maxPromptTokens: review.maxPromptTokens ?? REVIEW_LIMIT_DEFAULTS.maxPromptTokens,
+    batchTokens: review.batchTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens,
+    callTimeoutMs: review.callTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.callTimeoutMs,
+    totalTimeoutMs: review.totalTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.totalTimeoutMs,
   };
 }

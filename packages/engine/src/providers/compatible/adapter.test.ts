@@ -224,5 +224,35 @@ describe('parseSseChunk', () => {
     const body = zaiCoding.requestBody({ ...base, model: 'glm-5.3', effort: 'on', maxOutputTokens: 2048 });
     expect(body.max_tokens).toBe(on);
   });
-});
 
+  describe('per-call thinking off (ADR-0013 empty-reply retry)', () => {
+    it('sends GLM thinking disabled over the configured effort, without thinking headroom', async () => {
+      const { fetch, calls } = mockFetch(okStream());
+      const adapter = new OpenAICompatibleAdapter({ provider: 'zai-coding', apiKey: KEY, fetch });
+      await collectText(adapter.stream({ ...base, model: 'glm-5.3', effort: 'on', thinking: 'off' }));
+      expect(calls[0]?.body).toMatchObject({ thinking: { type: 'disabled' }, max_tokens: 100 });
+      // Without the override the configured effort still applies.
+      expect(adapter.requestBody({ ...base, model: 'glm-5.3', effort: 'on' })).toMatchObject({ thinking: { type: 'enabled' } });
+      expect(adapter.requestBody({ ...base, model: 'glm-5.3', thinking: 'off' })).toMatchObject({ thinking: { type: 'disabled' } });
+    });
+
+    it('sends the lowest reasoning_effort to an OpenAI-style reasoning model', () => {
+      const xai = new OpenAICompatibleAdapter({ provider: 'xai', apiKey: KEY });
+      expect(xai.requestBody({ ...base, effort: 'high', thinking: 'off' })).toMatchObject({ reasoning_effort: 'low' });
+      const openrouter = new OpenAICompatibleAdapter({ provider: 'openrouter', apiKey: KEY });
+      expect(openrouter.requestBody({ ...base, model: 'deepseek/deepseek-r1', thinking: 'off' })).toMatchObject({
+        reasoning_effort: 'low',
+      });
+    });
+
+    it('sends nothing extra where the call would not think, and ignores it on styles without a switch', () => {
+      const xai = new OpenAICompatibleAdapter({ provider: 'xai', apiKey: KEY });
+      expect(xai.requestBody({ ...base, thinking: 'off' })).not.toHaveProperty('reasoning_effort');
+      expect(xai.requestBody({ ...base, effort: 'off', thinking: 'off' })).not.toHaveProperty('reasoning_effort');
+      const deepseek = new OpenAICompatibleAdapter({ provider: 'deepseek', apiKey: KEY });
+      const body = deepseek.requestBody({ ...base, effort: 'high', thinking: 'off' });
+      expect(body).not.toHaveProperty('reasoning_effort');
+      expect(body).not.toHaveProperty('thinking');
+    });
+  });
+});

@@ -34,4 +34,15 @@ describe('modelFromAdapter', () => {
       finishReason: 'stop',
     });
   });
+
+  it('passes a per-call thinking override to the adapter next to the configured effort', async () => {
+    const adapter = new FakeAdapter();
+    const model = modelFromAdapter(adapter, 'glm-5.3', 'on');
+
+    await model.generate({ system: 'S', user: 'U', maxOutputTokens: 100, thinking: 'off' });
+    expect(adapter.seen).toMatchObject({ effort: 'on', thinking: 'off' });
+
+    await model.generate({ system: 'S', user: 'U', maxOutputTokens: 100 });
+    expect(adapter.seen).not.toHaveProperty('thinking');
+  });
 });

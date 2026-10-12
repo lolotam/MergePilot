@@ -53,6 +53,11 @@ export interface ReviewModelRequest {
   maxOutputTokens: number;
   /** JSON schema for the answer; backends that cannot enforce it still receive it in the prompt. */
   responseSchema?: Record<string, unknown>;
+  /**
+   * `off` asks for this call without thinking: the one retry after an empty, reasoning-only
+   * reply (ADR-0013). Backends that cannot switch thinking off ignore it.
+   */
+  thinking?: 'off';
   signal?: AbortSignal;
 }
 
@@ -81,6 +86,7 @@ export function modelFromAdapter(adapter: LlmAdapter, model: string, effort?: st
           maxOutputTokens: request.maxOutputTokens,
           ...(effort ? { effort } : {}),
           ...(request.responseSchema ? { responseSchema: request.responseSchema } : {}),
+          ...(request.thinking ? { thinking: request.thinking } : {}),
           ...(request.signal ? { signal: request.signal } : {}),
         }),
       );
