@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { PrivacyPage } from './PrivacyPage.js';
 import { TermsPage } from './TermsPage.js';
 import { I18nProvider } from '../i18n/context.js';
-import { SUPPORT_EMAIL, GOVERNING_LAW } from '../config/site.js';
+import { SUPPORT_EMAIL, GOVERNING_LAW, GOVERNING_LAW_AR } from '../config/site.js';
 
 describe('Legal Pages - Privacy and Terms', () => {
   const renderWithLang = (component: React.ReactElement, lang: 'ar' | 'en' = 'ar') =>
@@ -58,7 +58,7 @@ describe('Legal Pages - Privacy and Terms', () => {
       renderWithLang(React.createElement(TermsPage, null), 'ar');
       expect(screen.getByRole('heading', { level: 1 })).toBeDefined();
       expect(screen.getByText(/2026-10-12/)).toBeDefined();
-      expect(screen.getByText(new RegExp(GOVERNING_LAW))).toBeDefined();
+      expect(screen.getByText(new RegExp(GOVERNING_LAW_AR))).toBeDefined();
     });
 
     it('renders in English and includes governing law', () => {

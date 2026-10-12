@@ -1,5 +1,5 @@
 import type { LegalDocument } from './types.js';
-import { SITE_NAME, SUPPORT_EMAIL, OPERATOR_NAME, GOVERNING_LAW, LAST_UPDATED } from '../config/site.js';
+import { SITE_NAME, SUPPORT_EMAIL, OPERATOR_NAME, GOVERNING_LAW_AR, LAST_UPDATED } from '../config/site.js';
 
 export const termsAr: LegalDocument = {
   title: 'شروط وأحكام الخدمة',
@@ -97,7 +97,7 @@ export const termsAr: LegalDocument = {
       id: 'governing-law',
       title: '١١. القانون الحاكم وتسوية النزاعات',
       paragraphs: [
-        `تخضع هذه الشروط وتفسر وفقًا لقوانين ${GOVERNING_LAW}، ويتم الفصل في أي نزاع ينشأ عنها حصريًا أمام المحاكم المختصة هناك.`,
+        `تخضع هذه الشروط وتفسر وفقًا لقوانين ${GOVERNING_LAW_AR}، ويتم الفصل في أي نزاع ينشأ عنها حصريًا أمام المحاكم المختصة هناك.`,
       ],
     },
     {

@@ -131,3 +131,9 @@
 
 **الإجابة:** «سيرفر Dokploy بتاعك» — والدومين: «http://mergepilot.walidmohamed.com»
 
+
+## الدفعة 3 — 2026-10-12
+
+### س15: بيانات صفحتي الخصوصية والشروط
+
+**الإجابة:** «email:admin@walidmohamed.com» · «اسم المشغّل Walidmohamed» · «القانون المطبّق kuwait»
