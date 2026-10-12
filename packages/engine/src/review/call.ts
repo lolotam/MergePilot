@@ -24,7 +24,7 @@ function timeoutFailure(label: string, timeoutMs: number): LlmFailure {
  * One call with its own timeout. The model gets a signal that aborts on the caller's signal OR
  * the timeout; the call also stops waiting when the timeout fires, even for a backend that
  * ignores the signal. A timeout surfaces as `LlmFailure` code `TIMEOUT`; an abort by the
- * caller keeps the model's own error.
+ * caller keeps the model's own error, and an already-aborted caller gets `ABORTED` at once.
  */
 export async function generateWithTimeout(
   model: ReviewModel,
@@ -32,7 +32,10 @@ export async function generateWithTimeout(
   timeoutMs: number,
 ): Promise<ReviewModelResponse> {
   const outer = request.signal;
-  if (outer?.aborted) return model.generate(request);
+  // A cancelled review never starts a call: a backend that ignores an aborted signal could hang.
+  if (outer?.aborted) {
+    throw new LlmFailure({ code: 'ABORTED', provider: model.label.split(':')[0] ?? model.label, message: 'review cancelled' });
+  }
 
   const timer = new AbortController();
   const signal = outer ? AbortSignal.any([outer, timer.signal]) : timer.signal;

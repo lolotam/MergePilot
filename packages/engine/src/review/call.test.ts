@@ -71,6 +71,16 @@ describe('generateWithTimeout (ADR-0013)', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('rejects at once with ABORTED for an already-cancelled review, without calling the model', async () => {
+    const outer = new AbortController();
+    outer.abort();
+    const generate = vi.fn(() => new Promise<ReviewModelResponse>(() => {}));
+    const model: ReviewModel = { label: 'fake:hang', generate };
+    const failure = (await rejection(generateWithTimeout(model, { ...REQUEST, signal: outer.signal }, 5_000))) as LlmFailure;
+    expect(failure.code).toBe('ABORTED');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it('withCallTimeout keeps the label, headroom and disclosure fields of the wrapped model', () => {
     const base: ReviewModel = {
       label: 'fake:base',

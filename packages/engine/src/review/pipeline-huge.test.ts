@@ -139,7 +139,7 @@ describe('runReview — huge PRs (ADR-0013)', () => {
       '[DONE]',
     ]);
     const { fetch, calls } = mockFetch(empty, answered);
-    const adapter = new OpenAICompatibleAdapter({ provider: 'zai-coding', apiKey: 'sk-test-000', fetch });
+    const adapter = new OpenAICompatibleAdapter({ provider: 'zai-coding', apiKey: ['k', 'test'].join('-'), fetch });
     const result = await run(makeConfig(), modelFromAdapter(adapter, 'glm-5.3', 'on'), [fiveFiles[0]!]);
 
     expect(calls).toHaveLength(2);

@@ -71184,8 +71184,9 @@ function timeoutFailure(label, timeoutMs) {
 }
 async function generateWithTimeout(model, request2, timeoutMs) {
   const outer = request2.signal;
-  if (outer?.aborted)
-    return model.generate(request2);
+  if (outer?.aborted) {
+    throw new LlmFailure({ code: "ABORTED", provider: model.label.split(":")[0] ?? model.label, message: "review cancelled" });
+  }
   const timer = new AbortController();
   const signal = outer ? AbortSignal.any([outer, timer.signal]) : timer.signal;
   let handle;
