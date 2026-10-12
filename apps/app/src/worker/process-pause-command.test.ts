@@ -104,6 +104,7 @@ describe('processPauseCommandJob', () => {
       expect(env.githubAppFactory).not.toHaveBeenCalled();
     }
   });
+});
 
 describe('processPauseCommandJob — real installation client (wrapOctokit + workspace guard)', () => {
   it('sends addLabels / removeLabel to the Octokit issues API', async () => {
@@ -147,5 +148,4 @@ describe('processPauseCommandJob — real installation client (wrapOctokit + wor
     // GitHub's add-labels endpoint creates a missing label, so no separate create call is needed.
     expect(calls).toEqual(['add:mergepilot:paused', 'remove:mergepilot:paused']);
   });
-});
 });
