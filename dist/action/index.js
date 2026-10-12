@@ -50385,7 +50385,7 @@ var ENTRIES = {
     kind: "openai-compatible",
     baseUrl: "https://api.deepseek.com",
     keyHint: "sk-",
-    thinkingStyle: "none",
+    thinkingStyle: "deepseek",
     defaultModel: "deepseek-chat",
     envName: "DEEPSEEK_API_KEY",
     streamUsage: true
@@ -70486,6 +70486,26 @@ function classifyFile(file2, opts) {
   return "review";
 }
 
+var ESCAPE = /\\(u[0-9a-fA-F]{4}|[\s\S])/g;
+var VALID_SIMPLE_ESCAPES = /* @__PURE__ */ new Set(['"', "\\", "/", "b", "f", "n", "r", "t"]);
+function repairInvalidEscapes(json3) {
+  return json3.replace(ESCAPE, (match2, escaped) => escaped.length === 5 || VALID_SIMPLE_ESCAPES.has(escaped) ? match2 : `\\\\${escaped}`);
+}
+function parseJsonLenient(json3) {
+  try {
+    return JSON.parse(json3);
+  } catch (error62) {
+    const repaired = repairInvalidEscapes(json3);
+    if (repaired === json3)
+      throw error62;
+    try {
+      return JSON.parse(repaired);
+    } catch {
+      throw error62;
+    }
+  }
+}
+
 var ReviewAnswerSchema = external_exports.object({
   summary: external_exports.string().min(1),
   findings: external_exports.array(external_exports.object({
@@ -70592,7 +70612,7 @@ function parseReviewAnswer(text, options) {
   for (const candidate of candidates) {
     let parsed;
     try {
-      parsed = JSON.parse(candidate);
+      parsed = parseJsonLenient(candidate);
     } catch (err) {
       if (!firstParseError) {
         firstParseError = err instanceof Error ? err.message : String(err);
@@ -72005,7 +72025,7 @@ function parseVerifyAnswer(text, options) {
   for (const candidate of candidates) {
     let parsed;
     try {
-      parsed = JSON.parse(candidate);
+      parsed = parseJsonLenient(candidate);
     } catch (err) {
       if (!firstParseError) {
         firstParseError = err instanceof Error ? err.message : String(err);
@@ -95076,6 +95096,7 @@ _a6 = brand_privateBedrockClient;
 var FALLBACK_EFFORTS = Object.freeze({
   reasoning_effort: ["off", "low", "medium", "high"],
   glm: ["on", "off"],
+  deepseek: ["off", "low", "high", "max"],
   gemini: ["minimal", "low", "medium", "high"],
   anthropic: ["off", "low", "medium", "high"],
   none: []
@@ -95116,7 +95137,27 @@ function compatibleEffortFields(style, effort) {
       return { thinking: { type: "enabled" } };
     return {};
   }
+  if (style === "deepseek") {
+    if (value === "off" || value === "none")
+      return { thinking: { type: "disabled" } };
+    const graded = deepseekEffort(value);
+    return graded ? { thinking: { type: "enabled" }, reasoning_effort: graded } : {};
+  }
   return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
+}
+var DEEPSEEK_EFFORTS = Object.freeze({
+  minimal: "low",
+  low: "low",
+  medium: "high",
+  high: "high",
+  xhigh: "high",
+  max: "max"
+});
+function deepseekEffort(effort) {
+  return DEEPSEEK_EFFORTS[normalize(effort)];
+}
+function defaultThinkingHeadroom(style) {
+  return style === "deepseek" ? THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM : DEFAULT_THINKING_HEADROOM;
 }
 var ADAPTIVE_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]|4-[6-9])(?:\b|-)/;
 var ANTHROPIC_EFFORTS = /* @__PURE__ */ new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -95155,6 +95196,9 @@ function isCompatibleReasoningModel(provider, model, style) {
     return true;
   }
   if (style === "glm" || provider === "zai" || provider === "zai-coding") {
+    return true;
+  }
+  if ((style === "deepseek" || provider === "deepseek") && /deepseek-(?:v(?:[4-9]|\d{2})|flash|pro)\b/.test(lowerModel)) {
     return true;
   }
   if (provider === "nvidia" && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
@@ -119211,7 +119255,7 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
   #effortFor(options) {
     if (options.thinking !== "off")
       return options.effort;
-    if (this.#style === "glm")
+    if (this.#style === "glm" || this.#style === "deepseek")
       return "off";
     if (this.#style === "reasoning_effort" && this.#thinks(options.model, options.effort)) {
       return LOWEST_REASONING_EFFORT;
@@ -119223,11 +119267,12 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
       const isOff = options.effort === "off" || options.effort === "none";
       const effortFields = compatibleEffortFields(this.#style, options.effort);
       const thinks = Object.keys(effortFields).length > 0 && !isOff;
-      const headroom = thinks ? thinkingHeadroom(options.effort) || DEFAULT_THINKING_HEADROOM : 0;
+      const sized = this.#style === "deepseek" ? deepseekEffort(options.effort) : options.effort;
+      const headroom = thinks ? thinkingHeadroom(sized) || DEFAULT_THINKING_HEADROOM : 0;
       return options.maxOutputTokens + headroom;
     }
     const thinksByDefault = isCompatibleReasoningModel(this.provider, options.model, this.#style);
-    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
+    return options.maxOutputTokens + (thinksByDefault ? defaultThinkingHeadroom(this.#style) : 0);
   }
   /** The JSON request body; exposed for tests of the effort mapping. */
   requestBody(options) {

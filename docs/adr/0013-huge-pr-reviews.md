@@ -77,3 +77,16 @@ Root causes:
   `totalTimeoutMs`) with the defaults above; existing configs keep working unchanged.
 - `executeBatchedReview` moved to `review/batch-run.ts` and `recoverReviewTruncation` to
   `review/truncation.ts`; both stay exported from the engine package.
+
+## Amendment (2026-10-13): DeepSeek thinking
+
+DeepSeek's API thinks by default (effort `high`) and is switched with `thinking: {type:
+enabled|disabled}` plus `reasoning_effort: low|high|max`. The preset now uses the `deepseek` thinking
+style:
+- The empty-reply retry sends `thinking: {type: disabled}`.
+- V4 and the canonical ids (`deepseek-flash`, `deepseek-pro`) reserve the `high` budget when no
+  effort is set.
+- Headroom follows the effort DeepSeek really runs (`medium` maps to `high`).
+
+The empty batches on #84 came from the heavy model `deepseek-v4-pro`, whose default reasoning used
+up the generic 8192-token headroom.

@@ -13,14 +13,17 @@
  * - `glm`: Z.ai GLM `thinking: { type: 'enabled' | 'disabled' }`.
  * - `gemini`: Gemini levels; thinking cannot be turned off on Gemini 3, so no `off`.
  * - `anthropic`: Claude extended / adaptive thinking.
+ * - `deepseek`: DeepSeek V4 thinks by default (effort high); `thinking: {type: enabled|disabled}`
+ *   switches it and `reasoning_effort` (low / high / max) grades it.
  * - `none`: the API rejects reasoning parameters, so nothing is ever sent.
  */
-export type ThinkingStyle = 'reasoning_effort' | 'glm' | 'gemini' | 'anthropic' | 'none';
+export type ThinkingStyle = 'reasoning_effort' | 'glm' | 'deepseek' | 'gemini' | 'anthropic' | 'none';
 
 /** Efforts offered when a model list does not say which efforts a model takes. */
 export const FALLBACK_EFFORTS: Readonly<Record<ThinkingStyle, readonly string[]>> = Object.freeze({
   reasoning_effort: ['off', 'low', 'medium', 'high'],
   glm: ['on', 'off'],
+  deepseek: ['off', 'low', 'high', 'max'],
   gemini: ['minimal', 'low', 'medium', 'high'],
   anthropic: ['off', 'low', 'medium', 'high'],
   none: [],
@@ -89,7 +92,35 @@ export function compatibleEffortFields(
     if (value === 'on') return { thinking: { type: 'enabled' } };
     return {};
   }
+  if (style === 'deepseek') {
+    if (value === 'off' || value === 'none') return { thinking: { type: 'disabled' } };
+    const graded = deepseekEffort(value);
+    return graded ? { thinking: { type: 'enabled' }, reasoning_effort: graded } : {};
+  }
   return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
+}
+
+/** DeepSeek grades thinking as low / high / max; other names map to the nearest one it documents. */
+const DEEPSEEK_EFFORTS: Readonly<Record<string, string>> = Object.freeze({
+  minimal: 'low',
+  low: 'low',
+  medium: 'high',
+  high: 'high',
+  xhigh: 'high',
+  max: 'max',
+});
+
+/** The effort DeepSeek really runs at for this configured value (undefined when it sends none). */
+export function deepseekEffort(effort: string | undefined): string | undefined {
+  return DEEPSEEK_EFFORTS[normalize(effort)];
+}
+
+/**
+ * Output tokens reserved when a model thinks by default and no effort is configured. DeepSeek V4
+ * defaults to effort `high`, whose reasoning outgrows the generic headroom on large diffs.
+ */
+export function defaultThinkingHeadroom(style: ThinkingStyle | undefined): number {
+  return style === 'deepseek' ? (THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM) : DEFAULT_THINKING_HEADROOM;
 }
 
 export type AnthropicThinking =
@@ -161,6 +192,11 @@ export function isCompatibleReasoningModel(
     return true;
   }
   if (style === 'glm' || provider === 'zai' || provider === 'zai-coding') {
+    return true;
+  }
+  // DeepSeek V4 and later think by default on the official API.
+  // Versioned ids (deepseek-v4-pro) and the current canonical ids (deepseek-flash, deepseek-pro).
+  if ((style === 'deepseek' || provider === 'deepseek') && /deepseek-(?:v(?:[4-9]|\d{2})|flash|pro)\b/.test(lowerModel)) {
     return true;
   }
   // NVIDIA NIM reasoning models (Nemotron, R1 / QwQ distills, `-reasoning` / `thinking` ids).
