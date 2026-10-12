@@ -21,7 +21,7 @@ export function WorkspaceDangerZone({ workspaceId, workspaceName, role }: Worksp
 
   if (role !== 'owner') return null;
 
-  const nameMatches = confirmName === workspaceName;
+  const nameMatches = confirmName.trim() === workspaceName;
 
   const closeDialog = () => {
     setDialogOpen(false);
@@ -32,7 +32,7 @@ export function WorkspaceDangerZone({ workspaceId, workspaceName, role }: Worksp
     e.preventDefault();
     if (!nameMatches) return;
     try {
-      await deleteMutation.mutateAsync(confirmName);
+      await deleteMutation.mutateAsync(confirmName.trim());
       closeDialog();
       navigate('/');
     } catch {

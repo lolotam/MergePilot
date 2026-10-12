@@ -112,8 +112,8 @@ export const RenameWorkspaceResponseSchema = z.object({
 });
 export type RenameWorkspaceResponse = z.infer<typeof RenameWorkspaceResponseSchema>;
 
-/** DELETE (owner) /api/workspaces/:workspaceId — confirmName must match workspace name exactly */
+/** DELETE (owner) /api/workspaces/:workspaceId — confirmName, trimmed like rename, must equal the name */
 export const DeleteWorkspaceRequestSchema = z.object({
-  confirmName: z.string(),
+  confirmName: z.string().trim(),
 });
 export type DeleteWorkspaceRequest = z.infer<typeof DeleteWorkspaceRequestSchema>;

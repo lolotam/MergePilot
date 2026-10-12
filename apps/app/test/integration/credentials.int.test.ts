@@ -11,7 +11,7 @@ import {
 
 describe.skipIf(!hasIntegrationEnv)('vault + credentials integration on real Postgres', () => {
   it('saves key through CredentialService, verifies ciphertext in raw row, resolves key, and isolates workspaces', async () => {
-    const ctx = await createMigratedTestDb(INTEGRATION_DATABASE_URL);
+    const ctx = await createMigratedTestDb(INTEGRATION_DATABASE_URL, { workspaces: ['ws-cred-alpha'] });
     try {
       const masterKey = randomBytes(32).toString('base64');
       const vault = new EnvelopeVault(masterKey);

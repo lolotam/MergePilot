@@ -19,6 +19,11 @@ export class MemoryStore implements AppStore {
   readonly runs = new Map<string, ReviewRun>();
   readonly deletedWorkspaces = new Set<string>();
 
+  /** Mirrors the Postgres organization check: no writes for a workspace deleted in this store. */
+  private assertLive(workspaceId: string): void {
+    if (this.deletedWorkspaces.has(workspaceId)) throw new WorkspaceDeletedError(workspaceId);
+  }
+
   async recordDelivery(deliveryId: string): Promise<boolean> {
     if (this.deliveries.has(deliveryId)) return false;
     this.deliveries.add(deliveryId);
@@ -35,6 +40,7 @@ export class MemoryStore implements AppStore {
   }
 
   async linkInstallation(installationId: number, workspaceId: string): Promise<void> {
+    this.assertLive(workspaceId);
     const existing = this.installations.get(installationId);
     if (!existing) throw new Error(`installation ${installationId} not found`);
     const current = 'workspaceId' in existing ? existing.workspaceId : undefined;
@@ -67,10 +73,12 @@ export class MemoryStore implements AppStore {
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
+    this.assertLive(settings.workspaceId);
     this.settings.set(settings.workspaceId, { ...settings });
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
+    this.assertLive(credential.workspaceId);
     this.credentials.set(`${credential.workspaceId}:${credential.provider}`, { ...credential });
   }
 
@@ -89,7 +97,7 @@ export class MemoryStore implements AppStore {
   }
 
   async createReviewRun(run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>): Promise<ReviewRun> {
-    if (this.deletedWorkspaces.has(run.workspaceId)) throw new WorkspaceDeletedError(run.workspaceId);
+    this.assertLive(run.workspaceId);
     const created: ReviewRun = { ...run, id: randomUUID(), createdAt: new Date(), finishedAt: null };
     this.runs.set(created.id, created);
     return created;

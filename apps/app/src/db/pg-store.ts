@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
-import { InstallationAlreadyLinkedError, WorkspaceDeletedError } from '../core/types.js';
+import { InstallationAlreadyLinkedError } from '../core/types.js';
 import { organization } from '../auth/schema.js';
+import { withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
@@ -84,16 +85,18 @@ export class PgStore implements AppStore {
   async linkInstallation(installationId: number, workspaceId: string): Promise<void> {
     // Atomic: only claim an installation that is unlinked or already ours, so two workspaces
     // linking the same pending installation at once cannot both succeed.
-    const result = await this.db
-      .update(installations)
-      .set({ workspaceId, updatedAt: new Date() })
-      .where(
-        and(
-          eq(installations.id, installationId),
-          sql`(${installations.workspaceId} IS NULL OR ${installations.workspaceId} = ${workspaceId})`,
-        ),
-      )
-      .returning();
+    const result = await withLiveWorkspace(this.db, workspaceId, async (tx) =>
+      await tx
+        .update(installations)
+        .set({ workspaceId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(installations.id, installationId),
+            sql`(${installations.workspaceId} IS NULL OR ${installations.workspaceId} = ${workspaceId})`,
+          ),
+        )
+        .returning(),
+    );
     if (result.length > 0) return;
     const exists = await this.db.select({ id: installations.id }).from(installations).where(eq(installations.id, installationId));
     throw exists.length > 0
@@ -173,52 +176,39 @@ export class PgStore implements AppStore {
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
     const budgetStr =
       settings.monthlyBudgetUsd !== null ? String(settings.monthlyBudgetUsd) : null;
-    await this.db
-      .insert(workspaceSettings)
-      .values({
-        workspaceId: settings.workspaceId,
-        provider: settings.provider,
-        model: settings.model,
-        language: settings.language,
-        monthlyBudgetUsd: budgetStr,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: workspaceSettings.workspaceId,
-        set: {
-          provider: settings.provider,
-          model: settings.model,
-          language: settings.language,
-          monthlyBudgetUsd: budgetStr,
-          updatedAt: new Date(),
-        },
-      });
+    const values = {
+      provider: settings.provider,
+      model: settings.model,
+      language: settings.language,
+      monthlyBudgetUsd: budgetStr,
+      updatedAt: new Date(),
+    };
+    await withLiveWorkspace(this.db, settings.workspaceId, async (tx) => {
+      await tx
+        .insert(workspaceSettings)
+        .values({ workspaceId: settings.workspaceId, ...values })
+        .onConflictDoUpdate({ target: workspaceSettings.workspaceId, set: values });
+    });
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
-    await this.db
-      .insert(providerCredentials)
-      .values({
-        id: credential.id,
-        workspaceId: credential.workspaceId,
-        provider: credential.provider,
-        ciphertext: credential.ciphertext,
-        keyVersion: credential.keyVersion,
-        last4: credential.last4,
-        createdBy: credential.createdBy,
-        createdAt: credential.createdAt,
-      })
-      .onConflictDoUpdate({
-        target: [providerCredentials.workspaceId, providerCredentials.provider],
-        set: {
-          id: credential.id,
-          ciphertext: credential.ciphertext,
-          keyVersion: credential.keyVersion,
-          last4: credential.last4,
-          createdBy: credential.createdBy,
-          createdAt: credential.createdAt,
-        },
-      });
+    const values = {
+      id: credential.id,
+      ciphertext: credential.ciphertext,
+      keyVersion: credential.keyVersion,
+      last4: credential.last4,
+      createdBy: credential.createdBy,
+      createdAt: credential.createdAt,
+    };
+    await withLiveWorkspace(this.db, credential.workspaceId, async (tx) => {
+      await tx
+        .insert(providerCredentials)
+        .values({ workspaceId: credential.workspaceId, provider: credential.provider, ...values })
+        .onConflictDoUpdate({
+          target: [providerCredentials.workspaceId, providerCredentials.provider],
+          set: values,
+        });
+    });
   }
 
   async getCredential(
@@ -292,11 +282,7 @@ export class PgStore implements AppStore {
   ): Promise<ReviewRun> {
     const id = randomUUID();
     const createdAt = new Date();
-    await this.db.transaction(async (tx) => {
-      // FOR SHARE: a concurrent deleteWorkspace waits for this insert, or this insert sees the org gone.
-      const org = await tx.select({ id: organization.id }).from(organization)
-        .where(eq(organization.id, run.workspaceId)).for('share');
-      if (org.length === 0) throw new WorkspaceDeletedError(run.workspaceId);
+    await withLiveWorkspace(this.db, run.workspaceId, async (tx) => {
       await tx.insert(reviewRuns).values({
         id,
         workspaceId: run.workspaceId,
@@ -381,7 +367,8 @@ export class PgStore implements AppStore {
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
     await this.db.transaction(async (tx) => {
-      // Organization first (members/invitations cascade); its row lock serialises createReviewRun.
+      // Organization first (members/invitations cascade): writes holding its share lock
+      // (withLiveWorkspace) finish before this proceeds; later ones see it gone and throw.
       await tx.delete(organization).where(eq(organization.id, workspaceId));
       await tx.delete(providerCredentials).where(eq(providerCredentials.workspaceId, workspaceId));
       await tx.delete(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));

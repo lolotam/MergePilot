@@ -54,9 +54,24 @@ export interface TestPostgresContext {
   close: () => Promise<void>;
 }
 
-export async function createMigratedTestDb(databaseUrl: string): Promise<TestPostgresContext> {
+export interface CreateMigratedTestDbOptions {
+  /** Organization (workspace) ids to seed so review runs can be recorded for them. */
+  workspaces?: readonly string[];
+}
+
+export async function createMigratedTestDb(
+  databaseUrl: string,
+  options?: CreateMigratedTestDbOptions,
+): Promise<TestPostgresContext> {
   const schemaCtx = await createTestSchema(databaseUrl);
   await runMigrations(schemaCtx.pool, { migrationsDir: getMigrationsDir() });
+  for (const id of options?.workspaces ?? []) {
+    await schemaCtx.pool.query('INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3);', [
+      id,
+      `Workspace ${id}`,
+      id,
+    ]);
+  }
 
   const db = drizzleNodePg(schemaCtx.pool, { schema });
   const store = new PgStore(db);

@@ -94,6 +94,16 @@ describe('WorkspaceDangerZone - delete workspace dialog', () => {
     await user.clear(input);
     await user.type(input, 'My Team');
     expect(confirmBtn.disabled).toBe(false);
+
+    // Surrounding spaces are ignored, like on the server
+    await user.clear(input);
+    await user.type(input, '  My Team  ');
+    expect(confirmBtn.disabled).toBe(false);
+
+    // Case still matters
+    await user.clear(input);
+    await user.type(input, 'my team');
+    expect(confirmBtn.disabled).toBe(true);
   });
 
   it('submits delete mutation when confirmed and navigates to /', async () => {

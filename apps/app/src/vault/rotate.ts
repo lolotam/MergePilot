@@ -1,4 +1,4 @@
-import type { AppStore, Vault } from '../core/types.js';
+import { WorkspaceDeletedError, type AppStore, type Vault } from '../core/types.js';
 
 export interface RotateResult {
   reencrypted: number;
@@ -45,11 +45,17 @@ export async function reencryptAll(
         provider: full.provider,
       });
 
-      await store.saveCredential({
-        ...full,
-        ciphertext: newCiphertext,
-        keyVersion: vault.keyVersion,
-      });
+      try {
+        await store.saveCredential({
+          ...full,
+          ciphertext: newCiphertext,
+          keyVersion: vault.keyVersion,
+        });
+      } catch (error) {
+        // The workspace was deleted mid-rotation: its credentials are gone, nothing to rewrite.
+        if (error instanceof WorkspaceDeletedError) break;
+        throw error;
+      }
 
       reencrypted++;
     }
