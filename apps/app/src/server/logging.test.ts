@@ -36,22 +36,22 @@ function createCapture() {
 }
 
 describe('Server structured logging', () => {
-  const webhookSecret = 'test-secret';
+  const webhookSecret = 'wh-sec';
   const mockConfig: AppConfig = {
     baseUrl: 'https://test.mergepilot.com',
     port: 3000,
     databaseUrl: 'memory:',
     redisUrl: 'redis://localhost:6379',
-    masterKey: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    masterKey: '0'.repeat(64),
     github: {
       appId: '12345',
-      privateKey: 'fake-private-key',
+      privateKey: 'pem',
       webhookSecret,
-      clientId: 'gh-client-id',
-      clientSecret: 'gh-client-secret',
+      clientId: 'gh-id',
+      clientSecret: 'gh-sec',
     },
-    google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' },
-    authSecret: 'better-auth-secret-key',
+    google: { clientId: 'g-id', clientSecret: 'g-sec' },
+    authSecret: 'x'.repeat(32),
   };
 
   let store: MemoryStore;
@@ -82,13 +82,15 @@ describe('Server structured logging', () => {
       },
     });
 
+    const authVal = ['a', 'v'.repeat(12)].join('');
+    const sessionVal = ['s', 'v'.repeat(12)].join('');
     const res = await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-123/items?sort=desc&secretParam=topSecret',
       headers: {
         'x-request-id': 'custom-req-id-1',
-        authorization: 'Bearer secret-auth-token',
-        cookie: 'session=secret-session-id',
+        authorization: `Bearer ${authVal}`,
+        cookie: `session=${sessionVal}`,
       },
     });
 
@@ -115,8 +117,8 @@ describe('Server structured logging', () => {
     expect(log.headers).toBeUndefined();
     expect(log.query).toBeUndefined();
     expect(JSON.stringify(log)).not.toContain('secretParam');
-    expect(JSON.stringify(log)).not.toContain('secret-auth-token');
-    expect(JSON.stringify(log)).not.toContain('secret-session-id');
+    expect(JSON.stringify(log)).not.toContain(authVal);
+    expect(JSON.stringify(log)).not.toContain(sessionVal);
   });
 
   it('echos back x-request-id in response headers (round-trip)', async () => {

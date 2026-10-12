@@ -279,8 +279,45 @@ describe('Domain events logging - Core API', () => {
     });
     expect(resWebhook.statusCode).toBe(202);
 
-    const unlinkLog = lines.find((l) => l.event === 'installation.unlinked');
-    expect(unlinkLog).toBeDefined();
+    // One line per delivery: the outcome line carries the domain detail.
+    const webhookLines = lines.filter((l) => l.deliveryId === 'del-del-inst');
+    expect(webhookLines).toHaveLength(1);
+    const unlinkLog = webhookLines[0];
+    expect(unlinkLog?.msg).toBe('webhook received');
+    expect(unlinkLog?.event).toBe('installation');
+    expect(unlinkLog?.outcome).toBe('processed');
+    expect(unlinkLog?.domainEvent).toBe('installation.unlinked');
     expect(unlinkLog?.installationId).toBe(999);
+    expect(lines.filter((l) => l.event === 'installation.unlinked')).toHaveLength(0);
+  });
+
+  it('puts the signed-in userId and workspaceId on the request completion line', async () => {
+    const { stream, lines } = createCapture();
+    const logger = createLogger({ service: 'web', stream });
+    const app = setupApp(logger);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/workspaces/${workspaceId}/settings`,
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const completion = lines.filter((l) => l.msg === 'request completed');
+    expect(completion).toHaveLength(1);
+    expect(completion[0]?.userId).toBe(userId);
+    expect(completion[0]?.workspaceId).toBe(workspaceId);
+  });
+
+  it('puts the userId on the completion line of a signed-in non-workspace route', async () => {
+    const { stream, lines } = createCapture();
+    const logger = createLogger({ service: 'web', stream });
+    const app = setupApp(logger);
+
+    const res = await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } });
+    expect(res.statusCode).toBe(200);
+
+    const completion = lines.find((l) => l.msg === 'request completed' && l.path === '/api/me');
+    expect(completion?.userId).toBe(userId);
   });
 });

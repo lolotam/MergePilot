@@ -1,15 +1,30 @@
 import { createHash } from 'node:crypto';
 import {
-  createReviewModel, MergePilotConfigSchema, redactSecrets, Secret,
-  type CredentialInfo, type CredentialRef, type CredentialStore,
-  type MergePilotConfig, type RequestPurpose, type ReviewModel,
+  createReviewModel,
+  MergePilotConfigSchema,
+  redactSecrets,
+  Secret,
+  type CredentialInfo,
+  type CredentialRef,
+  type CredentialStore,
+  type MergePilotConfig,
+  type RequestPurpose,
+  type ReviewModel,
 } from '@mergepilot/engine';
 import {
-  loadRepoConfig, publishReview, renderReviewSummary, type FileContent,
+  loadRepoConfig,
+  publishReview,
+  renderReviewSummary,
+  type FileContent,
 } from '@mergepilot/github';
 import {
-  ActiveRunExistsError, WorkspaceDeletedError, type ApiProvider,
-  type ReviewJob, type ReviewRun, type ReviewRunResultPayload, type ReviewRunStatus,
+  ActiveRunExistsError,
+  WorkspaceDeletedError,
+  type ApiProvider,
+  type ReviewJob,
+  type ReviewRun,
+  type ReviewRunResultPayload,
+  type ReviewRunStatus,
 } from '../core/types.js';
 import { workerLogger } from '../core/logger.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
@@ -35,10 +50,14 @@ class WorkspaceCredentialStore implements CredentialStore {
     this.secrets.set(primaryProvider, primarySecret);
   }
 
-  getKnownSecrets(): Secret[] { return Array.from(this.secrets.values()); }
+  getKnownSecrets(): Secret[] {
+    return Array.from(this.secrets.values());
+  }
+
   async info(ref: CredentialRef): Promise<CredentialInfo> {
     return { provider: ref.provider, configured: true, source: 'env', envName: 'DATABASE' };
   }
+
   async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
     const existing = this.secrets.get(ref.provider);
     if (existing) return existing;
@@ -54,12 +73,15 @@ export async function processReviewJob(
 ): Promise<ProcessReviewResult> {
   const logger = deps.logger ?? workerLogger;
   const startTime = performance.now();
+  const logSkip = (reason: string, message: string, fields: Record<string, unknown> = {}): void => {
+    deps.log?.(message);
+    logger.info({ event: 'job.skipped', jobId: job.deliveryId, reason, ...fields }, message);
+  };
 
   const installation = await deps.store.getInstallation(job.installationId);
   if (!installation || installation.suspended) {
     const detail = !installation ? 'unknown installation' : 'suspended installation';
-    deps.log?.(`Skipping job ${job.deliveryId}: installation ${job.installationId} is ${detail}`);
-    logger.info({ event: 'job.skipped', jobId: job.deliveryId, installationId: job.installationId, reason: detail }, `Skipping job ${job.deliveryId}: installation ${job.installationId} is ${detail}`);
+    logSkip(detail, `Skipping job ${job.deliveryId}: installation ${job.installationId} is ${detail}`, { installationId: job.installationId });
     return { status: 'skipped', detail };
   }
 
@@ -69,26 +91,31 @@ export async function processReviewJob(
     let run: ReviewRun;
     try {
       run = await deps.store.createReviewRun({
-        workspaceId, jobId: job.deliveryId, installationId: job.installationId,
-        repoFullName: job.repoFullName, pullNumber: job.pullNumber, headSha: job.headSha,
-        status: 'running', costUsd: null, detail: null,
+        workspaceId,
+        jobId: job.deliveryId,
+        installationId: job.installationId,
+        repoFullName: job.repoFullName,
+        pullNumber: job.pullNumber,
+        headSha: job.headSha,
+        status: 'running',
+        costUsd: null,
+        detail: null,
       });
     } catch (error) {
       if (error instanceof ActiveRunExistsError) {
-        deps.log?.(`Skipping job ${job.deliveryId}: a run for this head is already active`);
-        logger.info({ event: 'job.skipped', jobId: job.deliveryId, reason: DUPLICATE }, `Skipping job ${job.deliveryId}: duplicate run`);
+        logSkip(DUPLICATE, `Skipping job ${job.deliveryId}: a run for this head is already active`);
         return { status: 'skipped', detail: DUPLICATE };
       }
       if (!(error instanceof WorkspaceDeletedError)) throw error;
-      deps.log?.(`Skipping job ${job.deliveryId}: workspace ${workspaceId} was deleted`);
-      logger.info({ event: 'job.skipped', jobId: job.deliveryId, workspaceId, reason: WORKSPACE_DELETED }, `Skipping job ${job.deliveryId}: workspace deleted`);
+      logSkip(WORKSPACE_DELETED, `Skipping job ${job.deliveryId}: workspace ${workspaceId} was deleted`, { workspaceId });
       return { status: 'skipped', detail: WORKSPACE_DELETED };
     }
     await deps.store.finishReviewRun(workspaceId, run.id, {
-      status: 'skipped', costUsd: null, detail: 'workspace not configured',
+      status: 'skipped',
+      costUsd: null,
+      detail: 'workspace not configured',
     });
-    deps.log?.(`Skipping job ${job.deliveryId}: workspace ${workspaceId} not configured`);
-    logger.info({ event: 'job.skipped', jobId: job.deliveryId, runId: run.id, workspaceId, reason: 'workspace not configured' }, `Skipping job ${job.deliveryId}: workspace not configured`);
+    logSkip('workspace not configured', `Skipping job ${job.deliveryId}: workspace ${workspaceId} not configured`, { runId: run.id, workspaceId });
     return { status: 'skipped', detail: 'workspace not configured' };
   }
 
@@ -100,10 +127,18 @@ export async function processReviewJob(
 
   try {
     run = await deps.store.createReviewRun({
-      workspaceId, jobId: job.deliveryId, installationId: job.installationId,
-      repoFullName: job.repoFullName, pullNumber: job.pullNumber, headSha: job.headSha,
-      status: 'running', costUsd: null, detail: null,
-      provider: choice.provider, model: choice.model, effort: choice.effort,
+      workspaceId,
+      jobId: job.deliveryId,
+      installationId: job.installationId,
+      repoFullName: job.repoFullName,
+      pullNumber: job.pullNumber,
+      headSha: job.headSha,
+      status: 'running',
+      costUsd: null,
+      detail: null,
+      provider: choice.provider,
+      model: choice.model,
+      effort: choice.effort,
     });
     stopHeartbeat = startRunHeartbeat(deps.store, workspaceId, run.id, {
       intervalMs: deps.heartbeatIntervalMs,
@@ -241,11 +276,7 @@ export async function processReviewJob(
           result: null,
           reviewUrl: budgetReviewUrl,
         });
-        deps.log?.(`Monthly budget reached for workspace ${workspaceId}; skipping`);
-        logger.info(
-          { event: 'job.skipped', jobId: job.deliveryId, runId: run.id, workspaceId, reason: 'monthly budget reached' },
-          `Monthly budget reached for workspace ${workspaceId}; skipping`,
-        );
+        logSkip('monthly budget reached', `Monthly budget reached for workspace ${workspaceId}; skipping`, { runId: run.id, workspaceId });
         return { status: 'skipped', detail: 'monthly budget reached' };
       }
     }
@@ -317,33 +348,38 @@ export async function processReviewJob(
 
     const used = usedModel(choice, settings, reviewResult.modelUsed, reviewResult.fallbackFrom);
     await deps.store.finishReviewRun(workspaceId, run.id, {
-      status, costUsd, detail, provider: used.provider, model: used.model,
-      effort: used.effort, fallbackFrom: used.fallbackFrom, findingsCount,
-      result: payload, reviewUrl: reviewResult.reviewUrl ?? null,
+      status,
+      costUsd,
+      detail,
+      provider: used.provider,
+      model: used.model,
+      effort: used.effort,
+      fallbackFrom: used.fallbackFrom,
+      findingsCount,
+      result: payload,
+      reviewUrl: reviewResult.reviewUrl ?? null,
     });
 
-    const durationMs = Math.round(performance.now() - startTime);
     const usage = reviewResult.runResult?.status === 'completed' ? reviewResult.runResult.usage : undefined;
     logger.info({
       event: 'job.end', jobId: job.deliveryId, runId: run.id, status,
       provider: used.provider, model: used.model, fallbackFrom: used.fallbackFrom ?? null,
       findingsCount: findingsCount ?? 0, inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0,
-      cost: costUsd, durationMs, reviewUrl: reviewResult.reviewUrl ?? null,
+      cost: costUsd, durationMs: Math.round(performance.now() - startTime), reviewUrl: reviewResult.reviewUrl ?? null,
     }, `Review job ${job.deliveryId} finished with status ${status}`);
-
     return { status, costUsd, detail };
   } catch (error) {
     if (error instanceof ActiveRunExistsError && !run) {
-      deps.log?.(`Skipping job ${job.deliveryId}: a run for this head is already active`);
-      logger.info({ event: 'job.skipped', jobId: job.deliveryId, reason: DUPLICATE }, `Skipping job ${job.deliveryId}: duplicate run`);
+      logSkip(DUPLICATE, `Skipping job ${job.deliveryId}: a run for this head is already active`);
       return { status: 'skipped', detail: DUPLICATE };
     }
     if (error instanceof WorkspaceDeletedError) {
-      deps.log?.(`Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`);
-      logger.info({ event: 'job.skipped', jobId: job.deliveryId, workspaceId, reason: WORKSPACE_DELETED }, `Review job ${job.deliveryId} skipped: workspace deleted`);
+      logSkip(WORKSPACE_DELETED, `Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`, { workspaceId });
       if (run) {
         await deps.store.finishReviewRun(workspaceId, run.id, {
-          status: 'skipped', costUsd: null, detail: WORKSPACE_DELETED,
+          status: 'skipped',
+          costUsd: null,
+          detail: WORKSPACE_DELETED,
         });
       }
       return { status: 'skipped', detail: WORKSPACE_DELETED };
@@ -351,10 +387,9 @@ export async function processReviewJob(
     const rawMessage = error instanceof Error ? error.message : String(error);
     const known = credStore?.getKnownSecrets() ?? [];
     const redactedDetail = redactSecrets(rawMessage, known).text.slice(0, 500);
-    const failureCode =
-      error instanceof Error && 'code' in error && typeof (error as { code: unknown }).code === 'string'
-        ? (error as { code: string }).code
-        : error instanceof Error ? error.name : 'UNKNOWN_ERROR';
+
+    const code: unknown = error instanceof Error ? (error as { code?: unknown }).code : undefined;
+    const failureCode = typeof code === 'string' ? code : error instanceof Error ? error.name : 'UNKNOWN_ERROR';
 
     deps.log?.(`Review job ${job.deliveryId} failed: ${redactedDetail}`);
     logger.error({
@@ -364,8 +399,12 @@ export async function processReviewJob(
 
     if (run) {
       await deps.store.finishReviewRun(workspaceId, run.id, {
-        status: 'failed', costUsd: null, detail: redactedDetail,
-        provider: choice.provider, model: choice.model, effort: choice.effort,
+        status: 'failed',
+        costUsd: null,
+        detail: redactedDetail,
+        provider: choice.provider,
+        model: choice.model,
+        effort: choice.effort,
       });
     }
 

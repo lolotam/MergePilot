@@ -66,6 +66,8 @@ describe('core/logger', () => {
     const logger = createLogger({ service: 'web', stream });
 
     const fakeToken = ['sec', 'ret', '123'].join('');
+    const authVal = ['a', 'w'.repeat(10)].join('');
+    const cookieVal = ['c', 'w'.repeat(10)].join('');
     logger.info({
       apiKey: fakeToken,
       token: fakeToken,
@@ -77,8 +79,8 @@ describe('core/logger', () => {
       },
       req: {
         headers: {
-          authorization: 'Bearer secret-auth',
-          cookie: 'session=secret-cookie',
+          authorization: `Bearer ${authVal}`,
+          cookie: `session=${cookieVal}`,
         },
       },
     }, 'event with secrets');
@@ -133,5 +135,53 @@ describe('core/logger', () => {
     expect(lines).toHaveLength(1);
     const line = lines[0] as Record<string, unknown>;
     expect(JSON.stringify(line)).not.toContain(fakeKey);
+  });
+});
+
+describe('core/logger sanitizing never mutates caller values', () => {
+  it('leaves the original Error untouched and logs a redacted copy', () => {
+    const { stream, lines } = createCapture();
+    const fakeKey = ['sk', 'proj', 'c'.repeat(25)].join('-');
+    const logger = createLogger({ service: 'web', stream });
+    const err = Object.assign(new Error(`call failed with ${fakeKey}`), { code: 'E_X' });
+    const originalMessage = err.message;
+    const originalStack = err.stack;
+
+    logger.error({ err }, 'Request failed');
+    logger.error(err);
+
+    expect(err.message).toBe(originalMessage);
+    expect(err.stack).toBe(originalStack);
+    expect(err).toBeInstanceOf(Error);
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(JSON.stringify(line)).not.toContain(fakeKey);
+      const logged = line.err as Record<string, unknown>;
+      expect(logged.type).toBe('Error');
+      expect(logged.code).toBe('E_X');
+      expect(logged.message).toContain('[REDACTED:');
+    }
+    expect(lines[1]?.msg).toContain('[REDACTED:');
+  });
+
+  it('redacts nested string fields of plain objects without mutating them', () => {
+    const { stream, lines } = createCapture();
+    const fakeKey = ['sk', 'ant', 'api03', 'd'.repeat(25)].join('-');
+    const logger = createLogger({ service: 'web', stream });
+    const payload = {
+      detail: `bad key ${fakeKey}`,
+      context: { inner: { note: `retry with ${fakeKey}` }, list: [`item ${fakeKey}`] },
+    };
+    const snapshot = JSON.parse(JSON.stringify(payload)) as unknown;
+
+    logger.warn(payload, 'nested');
+
+    expect(payload).toEqual(snapshot);
+    expect(lines).toHaveLength(1);
+    const text = JSON.stringify(lines[0]);
+    expect(text).not.toContain(fakeKey);
+    const context = lines[0]?.context as { inner: { note: string }; list: string[] };
+    expect(context.inner.note).toContain('[REDACTED:anthropic]');
+    expect(context.list[0]).toContain('[REDACTED:anthropic]');
   });
 });

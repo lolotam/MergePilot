@@ -9,13 +9,21 @@ import fastify, {
 import { redactSecrets } from '@mergepilot/engine';
 import type { AppConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
+import type {} from './log-context.js';
+import type {} from '../auth/fastify.js';
+import type {} from '../admin/guard.js';
 import type { AppStore, ReviewQueue } from '../core/types.js';
 import { handleWebhook } from '../webhooks/handle.js';
+import { firstHeader, webhookOutcomeFields, webhookPayloadFields } from './webhook-log.js';
 import { verifyGitHubSignature } from '../webhooks/verify.js';
 
 const WEBHOOK_BODY_LIMIT = 25 * 1024 * 1024; // 25 MB (GitHub maximum webhook size)
 /** Everything except the webhook (sign-in, dashboard) stays small. */
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
+
+function isStaticPath(path: string): boolean {
+  return path.startsWith('/assets/') || /\.(js|css|png|svg|ico|woff2|woff|ttf|json|map)$/.test(path);
+}
 
 export interface ServerProbes {
   store?: () => Promise<boolean>;
@@ -88,104 +96,44 @@ export function createServer({
     });
 
     app.addHook('onResponse', async (request, reply) => {
-      const url = request.url ?? '';
-      const path = url.split('?')[0] ?? '';
-      const route = request.routeOptions?.url ?? path;
-      const reqId = request.id;
-      const method = request.method;
+      const path = (request.url ?? '').split('?')[0] ?? '';
       const statusCode = reply.statusCode;
-      const durationMs = Math.round(reply.elapsedTime * 100) / 100;
-      const clientIp = request.ip ?? '';
-
       const params = request.params as { workspaceId?: string } | undefined;
-      const workspaceId = params?.workspaceId;
+      const userId = request.logContext?.userId ?? request.auth?.userId ?? request.adminUser?.id;
+      const workspaceId =
+        request.logContext?.workspaceId ?? request.auth?.workspaceId ?? params?.workspaceId;
 
-      const authReq = request as unknown as {
-        auth?: { userId?: string };
-        session?: { user?: { id?: string } };
-        user?: { id?: string };
+      const fields = {
+        reqId: request.id,
+        method: request.method,
+        route: request.routeOptions?.url ?? path,
+        path,
+        statusCode,
+        durationMs: Math.round(reply.elapsedTime * 100) / 100,
+        ...(userId ? { userId } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
+        clientIp: request.ip ?? '',
       };
-      const userId = authReq.auth?.userId ?? authReq.session?.user?.id ?? authReq.user?.id;
 
-      const isStatic =
-        path.startsWith('/assets/') ||
-        /\.(js|css|png|svg|ico|woff2|woff|ttf|json|map)$/.test(path);
-      const isHealth = path === '/health';
-
+      const routeError = (request as unknown as { _routeError?: Error & { code?: string } })
+        ._routeError;
       if (statusCode >= 500) {
-        const err = (request as unknown as { _routeError?: Error })._routeError;
-        request.log.error(
-          {
-            reqId,
-            method,
-            route,
-            path,
-            statusCode,
-            durationMs,
-            ...(userId ? { userId } : {}),
-            ...(workspaceId ? { workspaceId } : {}),
-            clientIp,
-            ...(err
-              ? {
-                  err: {
-                    type: err.name,
-                    message: redactSecrets(err.message).text,
-                    stack: redactSecrets(err.stack ?? '').text,
-                  },
-                }
-              : {}),
-          },
-          'request completed',
-        );
+        const err = routeError
+          ? {
+              type: routeError.name,
+              message: redactSecrets(routeError.message).text,
+              stack: redactSecrets(routeError.stack ?? '').text,
+            }
+          : undefined;
+        request.log.error({ ...fields, ...(err ? { err } : {}) }, 'request completed');
       } else if (statusCode >= 400) {
         const code =
-          (request as unknown as { _errorCode?: string })._errorCode ??
-          (request as unknown as { _routeError?: { code?: string } })._routeError?.code;
-        request.log.warn(
-          {
-            reqId,
-            method,
-            route,
-            path,
-            statusCode,
-            durationMs,
-            ...(userId ? { userId } : {}),
-            ...(workspaceId ? { workspaceId } : {}),
-            clientIp,
-            ...(code ? { code } : {}),
-          },
-          'request completed',
-        );
-      } else if (isHealth || isStatic) {
-        request.log.debug(
-          {
-            reqId,
-            method,
-            route,
-            path,
-            statusCode,
-            durationMs,
-            ...(userId ? { userId } : {}),
-            ...(workspaceId ? { workspaceId } : {}),
-            clientIp,
-          },
-          'request completed',
-        );
+          (request as unknown as { _errorCode?: string })._errorCode ?? routeError?.code;
+        request.log.warn({ ...fields, ...(code ? { code } : {}) }, 'request completed');
+      } else if (path === '/health' || isStaticPath(path)) {
+        request.log.debug(fields, 'request completed');
       } else {
-        request.log.info(
-          {
-            reqId,
-            method,
-            route,
-            path,
-            statusCode,
-            durationMs,
-            ...(userId ? { userId } : {}),
-            ...(workspaceId ? { workspaceId } : {}),
-            clientIp,
-          },
-          'request completed',
-        );
+        request.log.info(fields, 'request completed');
       }
     });
   }
@@ -210,10 +158,12 @@ export function createServer({
     },
   );
 
-  // POST /webhooks/github
+  // POST /webhooks/github — exactly one 'webhook received' line per delivery, carrying the outcome.
   app.post('/webhooks/github', { bodyLimit: WEBHOOK_BODY_LIMIT }, async (request, reply) => {
-    const rawSignature = request.headers['x-hub-signature-256'];
-    const signature = Array.isArray(rawSignature) ? rawSignature[0] : rawSignature;
+    const event = firstHeader(request.headers['x-github-event']);
+    const deliveryId = firstHeader(request.headers['x-github-delivery']);
+    const signature = firstHeader(request.headers['x-hub-signature-256']) || undefined;
+    const base = { event, deliveryId };
 
     const rawBody = Buffer.isBuffer(request.body)
       ? request.body
@@ -221,21 +171,7 @@ export function createServer({
 
     // Verify signature first before parsing JSON
     if (!verifyGitHubSignature(rawBody, signature, config.github.webhookSecret)) {
-      const rawEvent = request.headers['x-github-event'];
-      const event = (Array.isArray(rawEvent) ? rawEvent[0] : rawEvent) ?? '';
-      const rawDelivery = request.headers['x-github-delivery'];
-      const deliveryId = (Array.isArray(rawDelivery) ? rawDelivery[0] : rawDelivery) ?? '';
-      request.log.warn(
-        {
-          event,
-          action: null,
-          deliveryId,
-          repo: null,
-          pr: null,
-          outcome: 'invalid-signature',
-        },
-        'webhook received',
-      );
+      request.log.warn({ ...base, outcome: 'invalid-signature' }, 'webhook received');
       return reply.status(401).send({ error: 'Invalid signature' });
     }
 
@@ -243,58 +179,23 @@ export function createServer({
     try {
       payload = JSON.parse(rawBody.toString('utf8'));
     } catch {
+      request.log.warn({ ...base, outcome: 'invalid-json' }, 'webhook received');
       return reply.status(400).send({ error: 'Invalid JSON' });
     }
 
-    const rawEvent = request.headers['x-github-event'];
-    const event = (Array.isArray(rawEvent) ? rawEvent[0] : rawEvent) ?? '';
-
-    const rawDelivery = request.headers['x-github-delivery'];
-    const deliveryId = (Array.isArray(rawDelivery) ? rawDelivery[0] : rawDelivery) ?? '';
     // An empty id would be recorded once and then make every later webhook look like a duplicate.
     if (!deliveryId.trim()) {
+      request.log.warn({ ...base, outcome: 'missing-delivery-id' }, 'webhook received');
       return reply.status(400).send({ error: 'Missing X-GitHub-Delivery' });
     }
-
-    const payloadObj = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {};
-    const action = typeof payloadObj.action === 'string' ? payloadObj.action : null;
-    const repo = typeof (payloadObj.repository as { full_name?: string } | undefined)?.full_name === 'string'
-      ? (payloadObj.repository as { full_name: string }).full_name
-      : null;
-    const pr = typeof (payloadObj.pull_request as { number?: number } | undefined)?.number === 'number'
-      ? (payloadObj.pull_request as { number: number }).number
-      : null;
 
     const result = await handleWebhook(
       { event, deliveryId, payload },
       { store, queue, log: request.log },
     );
 
-    const outcome = result.status === 'enqueued'
-      ? 'queued'
-      : result.status === 'duplicate'
-        ? 'duplicate'
-        : 'ignored';
-
-    if (result.status === 'installation_deleted') {
-      request.log.info(
-        {
-          event: 'installation.unlinked',
-          installationId: result.installationId,
-        },
-        'Installation unlinked',
-      );
-    }
-
     request.log.info(
-      {
-        event,
-        action,
-        deliveryId,
-        repo,
-        pr,
-        outcome,
-      },
+      { ...base, ...webhookPayloadFields(payload), ...webhookOutcomeFields(result) },
       'webhook received',
     );
 

@@ -33,36 +33,65 @@ const REDACT_PATHS: readonly string[] = [
   'privateKey',
 ];
 
-function sanitizeArg(val: unknown, secrets: Secret[]): unknown {
-  if (typeof val === 'string') {
-    return redactSecrets(val, secrets).text;
-  }
-  if (val instanceof Error) {
-    val.message = redactSecrets(val.message, secrets).text;
-    if (val.stack) {
-      val.stack = redactSecrets(val.stack, secrets).text;
+const MAX_SANITIZE_DEPTH = 4;
+
+export interface SanitizedError {
+  type: string;
+  message: string;
+  stack?: string;
+  code?: string | number;
+}
+
+function redactText(text: string, secrets: Secret[]): string {
+  return redactSecrets(text, secrets).text;
+}
+
+/** Plain, redacted copy of an Error. The original Error is never touched. */
+export function sanitizeError(err: Error, secrets: Secret[]): SanitizedError {
+  const out: SanitizedError = { type: err.name, message: redactText(err.message, secrets) };
+  if (err.stack) out.stack = redactText(err.stack, secrets);
+  const code: unknown = (err as { code?: unknown }).code;
+  if (typeof code === 'string') out.code = redactText(code, secrets);
+  else if (typeof code === 'number') out.code = code;
+  return out;
+}
+
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  if (val === null || typeof val !== 'object') return false;
+  const proto: unknown = Object.getPrototypeOf(val);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Returns a redacted copy of a log argument. Strings are redacted, Errors become
+ * plain objects, plain objects and arrays are copied recursively (up to a small
+ * depth). Anything else (request objects, Dates, class instances) is passed
+ * through unchanged. The caller's values are never mutated.
+ */
+function sanitizeValue(val: unknown, secrets: Secret[], depth: number): unknown {
+  if (typeof val === 'string') return redactText(val, secrets);
+  if (val instanceof Error) return sanitizeError(val, secrets);
+  if (depth >= MAX_SANITIZE_DEPTH) return val;
+  if (Array.isArray(val)) return val.map((item) => sanitizeValue(item, secrets, depth + 1));
+  if (isPlainObject(val)) {
+    const copy: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(val)) {
+      copy[key] = sanitizeValue(item, secrets, depth + 1);
     }
-    return val;
-  }
-  if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    if (obj.err instanceof Error) {
-      obj.err.message = redactSecrets(obj.err.message, secrets).text;
-      if (obj.err.stack) {
-        obj.err.stack = redactSecrets(obj.err.stack, secrets).text;
-      }
-    }
-    if (typeof obj.message === 'string') {
-      obj.message = redactSecrets(obj.message, secrets).text;
-    }
-    if (typeof obj.msg === 'string') {
-      obj.msg = redactSecrets(obj.msg, secrets).text;
-    }
-    if (typeof obj.detail === 'string') {
-      obj.detail = redactSecrets(obj.detail, secrets).text;
-    }
+    return copy;
   }
   return val;
+}
+
+function sanitizeArgs(args: unknown[], secrets: Secret[]): unknown[] {
+  return args.map((arg, index) => {
+    if (index === 0 && arg instanceof Error) {
+      // pino turns a leading Error into `{ err, msg }`; keep that shape with a copy.
+      const err = sanitizeError(arg, secrets);
+      return args.length === 1 ? { err, msg: err.message } : { err };
+    }
+    return sanitizeValue(arg, secrets, 0);
+  });
 }
 
 export function createLogger(options?: LoggerOptions): Logger {
@@ -80,19 +109,13 @@ export function createLogger(options?: LoggerOptions): Logger {
     },
     serializers: {
       err: (err: unknown) => {
-        if (err instanceof Error) {
-          return {
-            type: err.name,
-            message: redactSecrets(err.message, knownSecrets).text,
-            stack: redactSecrets(err.stack ?? '', knownSecrets).text,
-          };
-        }
+        if (err instanceof Error) return sanitizeError(err, knownSecrets);
         return err;
       },
     },
     hooks: {
       logMethod(inputArgs, method) {
-        const sanitized = inputArgs.map((arg) => sanitizeArg(arg, knownSecrets));
+        const sanitized = sanitizeArgs(inputArgs, knownSecrets);
         return method.apply(this, sanitized as Parameters<typeof method>);
       },
     },
