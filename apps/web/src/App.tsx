@@ -36,7 +36,7 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <I18nProvider initialLanguage="ar">
+      <I18nProvider>
         <ToastProvider>
           <BrowserRouter>
             <Routes>
