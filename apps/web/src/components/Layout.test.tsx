@@ -90,6 +90,22 @@ describe('Layout component - Leap inspired app shell', () => {
     expect(mobileMenuButton.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('menus inside the open mobile drawer keep working (single sidebar instance)', () => {
+    renderLayout('/w/ws-1');
+    fireEvent.click(screen.getByRole('button', { name: /menu|open menu|toggle menu|قائمة/i }));
+
+    const drawer = screen.getByTestId('mobile-drawer');
+    const avatarButtons = document.querySelectorAll('button[aria-haspopup="menu"]');
+    expect(avatarButtons).toHaveLength(1);
+    expect(drawer.contains(avatarButtons[0] as Node)).toBe(true);
+
+    fireEvent.click(avatarButtons[0] as HTMLElement);
+    const menu = screen.getByRole('menu');
+    const firstItem = menu.querySelector('[role="menuitem"]') as HTMLElement;
+    fireEvent.mouseDown(firstItem);
+    expect(screen.getByRole('menu')).toBeDefined();
+  });
+
   it('breadcrumb renders the current page', () => {
     renderLayout('/w/ws-1/settings');
 

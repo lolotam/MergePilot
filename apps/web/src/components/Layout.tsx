@@ -334,13 +334,14 @@ export function Layout() {
 
       {/* Desktop Fixed Start Sidebar (~240px) */}
       <aside className="hidden md:flex md:w-60 md:flex-col md:fixed md:inset-y-0 md:start-0 bg-[#FBFBFA] dark:bg-ink-950 border-e border-ink-200 dark:border-ink-800 z-30 p-4">
-        {sidebarContent}
+        {/* One sidebar instance at a time: the menus' outside-click refs must point at the visible copy. */}
+        {!mobileMenuOpen && sidebarContent}
       </aside>
 
       {/* Main Column */}
       <div className="md:ps-60 flex-1 flex flex-col min-h-screen">
         {/* Desktop Top Bar */}
-        <header className="sticky top-0 z-20 bg-[#FBFBFA]/80 dark:bg-ink-950/80 backdrop-blur-md border-b border-ink-200 dark:border-ink-800 h-14 sm:h-16 px-4 sm:px-6 flex items-center justify-between">
+        <header className="hidden md:flex sticky top-0 z-20 bg-[#FBFBFA]/80 dark:bg-ink-950/80 backdrop-blur-md border-b border-ink-200 dark:border-ink-800 h-14 sm:h-16 px-4 sm:px-6 items-center justify-between">
           {/* Breadcrumb: Section / Page */}
           <nav aria-label={t('breadcrumb')} className="flex items-center gap-1.5 text-xs">
             <span className="text-ink-500 dark:text-ink-400 font-medium truncate max-w-[150px] sm:max-w-[200px]">
