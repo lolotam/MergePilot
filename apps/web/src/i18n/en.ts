@@ -178,6 +178,30 @@ export const en: I18nDictionary = {
   settingsSavedSuccess: 'Settings saved successfully',
   memberReadOnlyBanner: 'You are viewing settings as a member. Modifying settings and keys requires admin or owner role.',
 
+  // Workspace General Card (Rename)
+  workspaceGeneralTitle: 'General Settings',
+  workspaceGeneralDesc: 'Manage workspace name and basic details.',
+  renameWorkspaceLabel: 'Workspace name',
+  renameWorkspacePlaceholder: 'e.g. My Engineering Team',
+  renameWorkspaceButton: 'Rename workspace',
+  renamingWorkspace: 'Saving...',
+  workspaceRenamedSuccess: 'Workspace renamed successfully',
+  workspaceNameRequired: 'Workspace name is required (between 1 and 60 characters)',
+
+  // Workspace Danger Zone (Delete)
+  dangerZoneTitle: 'Danger zone',
+  dangerZoneDesc: 'Irreversible actions that permanently delete this workspace and its data.',
+  deleteWorkspaceButton: 'Delete workspace',
+  deleteWorkspaceModalTitle: 'Delete workspace permanently',
+  deleteWorkspaceModalDesc: 'This action is permanent and cannot be undone. Please read what happens carefully:',
+  deleteWorkspaceWhatIsDeleted: 'Will be deleted: Provider API keys, workspace settings, review run history, and all team memberships.',
+  deleteWorkspaceWhatIsKept: 'What remains: The GitHub App remains installed on your GitHub account. You can uninstall it directly on GitHub if desired, or link it to another workspace later.',
+  deleteWorkspaceConfirmPrompt: 'To confirm deletion, please type the workspace name exactly:',
+  deleteWorkspaceConfirmPlaceholder: 'Type workspace name to confirm',
+  deleteWorkspaceConfirmButton: 'I understand the consequences, delete this workspace',
+  deletingWorkspace: 'Deleting...',
+  workspaceDeletedSuccess: 'Workspace deleted successfully',
+
   // Keys Section
   apiKeysTitle: 'Provider API Keys',
   apiKeysDesc: 'Keys are encrypted and securely stored; values are never echoed back after saving.',

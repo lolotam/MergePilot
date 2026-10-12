@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest';
-import { describeStoreContract } from '../../src/db/store-contract.js';
+import { describeStoreContract, STORE_CONTRACT_WORKSPACES } from '../../src/db/store-contract.js';
 import {
   createMigratedTestDb,
   hasIntegrationEnv,
@@ -17,7 +17,9 @@ if (!hasIntegrationEnv) {
   describeStoreContract(
     'PgStore on real Postgres',
     async () => {
-      currentContext = await createMigratedTestDb(INTEGRATION_DATABASE_URL);
+      currentContext = await createMigratedTestDb(INTEGRATION_DATABASE_URL, {
+        workspaces: STORE_CONTRACT_WORKSPACES,
+      });
       return currentContext.store;
     },
     async () => {

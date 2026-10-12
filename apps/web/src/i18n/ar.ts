@@ -176,6 +176,30 @@ export const ar = {
   settingsSavedSuccess: 'تم حفظ الإعدادات بنجاح',
   memberReadOnlyBanner: 'أنت تتصفح الإعدادات كعضو فقط. تعديل الإعدادات والمفاتيح يتطلب صلاحية مدير أو مالك.',
 
+  // Workspace General Card (Rename)
+  workspaceGeneralTitle: 'الإعدادات العامة',
+  workspaceGeneralDesc: 'إدارة اسم مساحة العمل وتفاصيلها الأساسية.',
+  renameWorkspaceLabel: 'اسم مساحة العمل',
+  renameWorkspacePlaceholder: 'مثال: فريقي الهندسي',
+  renameWorkspaceButton: 'تغيير الاسم',
+  renamingWorkspace: 'جاري الحفظ...',
+  workspaceRenamedSuccess: 'تم تغيير اسم مساحة العمل بنجاح',
+  workspaceNameRequired: 'اسم مساحة العمل مطلوب (بين 1 و60 حرفًا)',
+
+  // Workspace Danger Zone (Delete)
+  dangerZoneTitle: 'منطقة الخطر',
+  dangerZoneDesc: 'إجراءات لا رجعة فيها تؤدي لحذف مساحة العمل وبياناتها نهائيًا.',
+  deleteWorkspaceButton: 'حذف مساحة العمل',
+  deleteWorkspaceModalTitle: 'حذف مساحة العمل نهائيًا',
+  deleteWorkspaceModalDesc: 'هذا الإجراء نهائي ولا يمكن التراجع عنه. يرجى قراءة ما سيحدث بعناية:',
+  deleteWorkspaceWhatIsDeleted: 'سيتم حذف: مفاتيح API الخاصة بالمزودين، إعدادات مساحة العمل، وسجل جميع المراجعات المنفذة، بالإضافة إلى إلغاء عضوية جميع الفريق.',
+  deleteWorkspaceWhatIsKept: 'ما سيبقى: يظل تطبيق GitHub App مثبتًا على حسابك في GitHub، ويمكنك إلغاء تثبيته من GitHub مباشرة أو ربطه بمساحة عمل أخرى لاحقًا.',
+  deleteWorkspaceConfirmPrompt: 'لتأكيد الحذف، يرجى كتابة اسم مساحة العمل بالضبط:',
+  deleteWorkspaceConfirmPlaceholder: 'اكتب اسم مساحة العمل للتأكيد',
+  deleteWorkspaceConfirmButton: 'أنا أدرك العواقب، احذف هذه المساحة',
+  deletingWorkspace: 'جاري الحذف...',
+  workspaceDeletedSuccess: 'تم حذف مساحة العمل بنجاح',
+
   // Keys Section
   apiKeysTitle: 'مفاتيح API للمزودين',
   apiKeysDesc: 'المفاتيح مشفرة ومحفوظة بأمان، ولا تظهر قيمتها أبدًا بعد الحفظ.',

@@ -99,3 +99,21 @@ export const UsageResponseSchema = z.object({
  * GET /app/installed?installation_id=&setup_action= — GitHub's post-install redirect.
  * Redirects to the web UI at `/install?installation_id=…` where the user picks a workspace.
  */
+
+/** PATCH (admin/owner) /api/workspaces/:workspaceId — 1–60 chars after trim */
+export const RenameWorkspaceRequestSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+});
+export type RenameWorkspaceRequest = z.infer<typeof RenameWorkspaceRequestSchema>;
+
+export const RenameWorkspaceResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+export type RenameWorkspaceResponse = z.infer<typeof RenameWorkspaceResponseSchema>;
+
+/** DELETE (owner) /api/workspaces/:workspaceId — confirmName, trimmed like rename, must equal the name */
+export const DeleteWorkspaceRequestSchema = z.object({
+  confirmName: z.string().trim(),
+});
+export type DeleteWorkspaceRequest = z.infer<typeof DeleteWorkspaceRequestSchema>;

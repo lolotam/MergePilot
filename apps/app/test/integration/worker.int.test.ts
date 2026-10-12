@@ -14,9 +14,9 @@ import {
 
 describe.skipIf(!hasIntegrationEnv)('worker end to end on real Postgres', () => {
   it('processes review job with PgStore, real vault/credentials, publishing review once and completing review run with cost', async () => {
-    const ctx = await createMigratedTestDb(INTEGRATION_DATABASE_URL);
+    const workspaceId = 'ws-worker-e2e';
+    const ctx = await createMigratedTestDb(INTEGRATION_DATABASE_URL, { workspaces: [workspaceId] });
     try {
-      const workspaceId = 'ws-worker-e2e';
       const installationId = 8888;
       const masterKey = randomBytes(32).toString('base64');
       const vault = new EnvelopeVault(masterKey);

@@ -4,7 +4,7 @@
   "description": "AI-Powered Pull Request Review Engine",
   "start_url": "/",
   "display": "standalone",
-  "theme_color": "#0B9B63",
+  "theme_color": "#0A9463",
   "background_color": "#0F141B",
   "icons": [
     {

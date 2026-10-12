@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Settings } from '@mergepilot/app/contract';
+import type { MeResponse, Settings } from '@mergepilot/app/contract';
 import { api, type ApiProvider } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
@@ -127,5 +127,45 @@ export function useUsageQuery(workspaceId: string) {
     queryKey: ['workspaces', workspaceId, 'usage'],
     queryFn: () => api.getUsage(workspaceId),
     enabled: Boolean(workspaceId),
+  });
+}
+
+export function useRenameWorkspaceMutation(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+
+  return useMutation({
+    mutationFn: (name: string) => api.renameWorkspace(workspaceId, name),
+    onSuccess: () => {
+      showToast(t('workspaceRenamedSuccess'), 'success');
+      queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+    onError: (err: Error) => {
+      showToast(err.message || t('error'), 'error');
+    },
+  });
+}
+
+export function useDeleteWorkspaceMutation(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+
+  return useMutation({
+    mutationFn: (confirmName: string) => api.deleteWorkspace(workspaceId, confirmName),
+    onSuccess: async () => {
+      // Drop the deleted workspace from the cache before the caller navigates to `/`, so the root
+      // redirect cannot send the user back to it while /api/me is refetched.
+      queryClient.setQueryData<MeResponse>(['me'], (prev) =>
+        prev ? { ...prev, workspaces: prev.workspaces.filter((w) => w.id !== workspaceId) } : prev,
+      );
+      queryClient.removeQueries({ queryKey: ['workspaces', workspaceId] });
+      showToast(t('workspaceDeletedSuccess'), 'success');
+      await queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+    onError: (err: Error) => {
+      showToast(err.message || t('error'), 'error');
+    },
   });
 }

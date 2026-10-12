@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Auth } from '../auth/auth.js';
 import { isUserPlatformAdmin } from '../admin/guard.js';
 import { requireRole } from '../auth/guard.js';
-import { listUserInstallationIds } from '../auth/github-installations.js';
+import { listUserInstallations, type UserInstallation } from '../auth/github-installations.js';
 import type { AppConfig } from '../core/config.js';
 import { InstallationAlreadyLinkedError, type ApiProvider, type AppStore } from '../core/types.js';
 import type { CredentialService } from '../credentials/service.js';
@@ -15,6 +15,7 @@ import {
   getUserWorkspaces,
   fetchUserGitHubInstallations,
 } from './helpers.js';
+import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
 
 export interface DashboardApiDeps {
   auth: Auth;
@@ -228,9 +229,9 @@ export function registerDashboardApi(
         return sendError(reply, 403, 'forbidden', 'GitHub account is not linked');
       }
 
-      let userInstIds: number[];
+      let userInstallations: UserInstallation[];
       try {
-        userInstIds = await listUserInstallationIds(
+        userInstallations = await listUserInstallations(
           githubAccount.accessToken,
           deps.githubFetch ?? globalThis.fetch,
         );
@@ -238,11 +239,17 @@ export function registerDashboardApi(
         return sendError(reply, 403, 'forbidden', 'Could not verify user installations on GitHub');
       }
 
-      if (!userInstIds.includes(installationId)) {
+      const fromGitHub = userInstallations.find((i) => i.id === installationId);
+      if (!fromGitHub) {
         return sendError(reply, 403, 'forbidden', 'User cannot access this installation');
       }
 
       const existing = await deps.store.getInstallation(installationId);
+      if (!existing) {
+        // The `installation` webhook may never have reached us (e.g. the App was installed
+        // before its webhook was configured); GitHub just confirmed it to this user, so record it.
+        await deps.store.upsertPendingInstallation(fromGitHub);
+      }
       if (existing && existing.workspaceId !== workspaceId) {
         return sendError(
           reply,
@@ -362,4 +369,6 @@ export function registerDashboardApi(
 
     return reply.redirect(`/install?installation_id=${installationId}`, 302);
   });
+
+  registerWorkspaceLifecycleRoutes(app, deps);
 }

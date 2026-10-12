@@ -329,4 +329,50 @@ review:
     expect(runsWs1).toHaveLength(1);
     expect(runsWs2).toHaveLength(0);
   });
+
+  it('does not publish when the workspace is deleted while the model is running', async () => {
+    const { deps, job, store, createdReviews, fakeModel } = createTestSetup();
+    const generate = fakeModel.generate;
+    fakeModel.generate = vi.fn(async (...args: Parameters<typeof generate>) => {
+      await store.deleteWorkspace(workspaceId);
+      return generate(...args);
+    });
+
+    const result = await processReviewJob(job, deps);
+
+    expect(result).toEqual({ status: 'skipped', detail: 'workspace_deleted' });
+    expect(createdReviews).toHaveLength(0);
+    expect(await store.listReviewRuns(workspaceId, 10)).toEqual([]);
+  });
+
+  it('does not publish when the installation is relinked to another workspace mid-review', async () => {
+    const { deps, job, store, createdReviews, fakeModel } = createTestSetup();
+    const generate = fakeModel.generate;
+    fakeModel.generate = vi.fn(async (...args: Parameters<typeof generate>) => {
+      await store.deleteWorkspace(workspaceId);
+      await store.linkInstallation(installationId, 'ws-new-owner');
+      return generate(...args);
+    });
+
+    const result = await processReviewJob(job, deps);
+
+    expect(result.detail).toBe('workspace_deleted');
+    expect(createdReviews).toHaveLength(0);
+  });
+
+  it('skips without recording a run when the workspace is deleted after settings were read', async () => {
+    const { deps, job, store, createdReviews } = createTestSetup();
+    const getSettings = store.getSettings.bind(store);
+    vi.spyOn(store, 'getSettings').mockImplementation(async (wsId: string) => {
+      const settings = await getSettings(wsId);
+      await store.deleteWorkspace(wsId);
+      return settings;
+    });
+
+    const result = await processReviewJob(job, deps);
+
+    expect(result).toEqual({ status: 'skipped', detail: 'workspace_deleted' });
+    expect(createdReviews).toHaveLength(0);
+    expect(await store.listReviewRuns(workspaceId, 10)).toEqual([]);
+  });
 });
