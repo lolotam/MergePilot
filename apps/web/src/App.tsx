@@ -17,6 +17,7 @@ import { TermsPage } from './pages/TermsPage.js';
 
 // Operator-only area: loaded on demand so regular users never download it.
 const AdminPage = lazy(() => import('./admin/AdminPage.js'));
+const RunDetailPage = lazy(() => import('./runs/RunDetailPage.js'));
 
 function PageFallback() {
   const { t } = useI18n();
@@ -50,6 +51,14 @@ export function App() {
                 <Route path="/w/:workspaceId/settings" element={<SettingsPage />} />
                 <Route path="/w/:workspaceId/team" element={<TeamPage />} />
                 <Route path="/w/:workspaceId/runs" element={<RunsPage />} />
+                <Route
+                  path="/w/:workspaceId/runs/:runId"
+                  element={
+                    <Suspense fallback={<PageFallback />}>
+                      <RunDetailPage />
+                    </Suspense>
+                  }
+                />
                 <Route
                   path="/admin"
                   element={

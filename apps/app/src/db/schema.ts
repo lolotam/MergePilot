@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -76,6 +77,7 @@ export const reviewRuns = pgTable(
   {
     id: uuid('id').primaryKey(),
     workspaceId: text('workspace_id').notNull(),
+    jobId: text('job_id'),
     installationId: bigint('installation_id', { mode: 'number' }).notNull(),
     repoFullName: text('repo_full_name').notNull(),
     pullNumber: integer('pull_number').notNull(),
@@ -87,6 +89,13 @@ export const reviewRuns = pgTable(
       .notNull()
       .defaultNow(),
     finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+    provider: text('provider'),
+    model: text('model'),
+    effort: text('effort'),
+    fallbackFrom: text('fallback_from'),
+    findingsCount: integer('findings_count'),
+    result: jsonb('result'),
+    reviewUrl: text('review_url'),
   },
   (table) => [
     index('idx_review_runs_workspace_id').on(table.workspaceId),
@@ -94,6 +103,8 @@ export const reviewRuns = pgTable(
       table.workspaceId,
       table.createdAt.desc(),
     ),
+    uniqueIndex('idx_review_runs_workspace_job_id').on(table.workspaceId, table.jobId),
+    index('idx_review_runs_workspace_repo').on(table.workspaceId, table.repoFullName),
   ],
 );
 

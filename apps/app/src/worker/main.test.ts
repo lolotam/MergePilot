@@ -235,5 +235,49 @@ describe('worker/main', { timeout: 20000 }, () => {
       await signalHandlers['SIGTERM']?.();
       expect(mockWorkerClose).toHaveBeenCalled();
     });
+
+    it('sweeps stale runs on worker startup', async () => {
+      const store = new MemoryStore();
+      const failStaleSpy = vi.spyOn(store, 'failStaleRuns');
+
+      const workerInstance = await createWorker({
+        env: {
+          MERGEPILOT_BASE_URL: 'https://test.mergepilot.com',
+          PORT: '3000',
+          DATABASE_URL: 'memory:',
+          REDIS_URL: 'memory:',
+          MERGEPILOT_MASTER_KEY: masterKey,
+          GITHUB_APP_ID: '12345',
+          GITHUB_APP_PRIVATE_KEY: 'fake-private-key',
+          GITHUB_WEBHOOK_SECRET: 'fake-webhook-secret',
+          GITHUB_CLIENT_ID: 'gh-id',
+          GITHUB_CLIENT_SECRET: 'gh-sec',
+          GOOGLE_CLIENT_ID: 'goog-id',
+          GOOGLE_CLIENT_SECRET: 'goog-sec',
+          BETTER_AUTH_SECRET: 'better-auth-secret-1234567890',
+          WORKER_CONCURRENCY: '1',
+          WORKER_HEALTH_PORT: '0',
+        },
+        services: {
+          store,
+          vault: {} as unknown as import('../core/types.js').Vault,
+          credentials: {} as unknown as import('../credentials/service.js').CredentialService,
+          queue: {} as unknown as import('../core/types.js').ReviewQueue,
+          close: vi.fn(),
+        },
+      });
+
+      try {
+        expect(failStaleSpy).toHaveBeenCalled();
+        const calledArg = failStaleSpy.mock.calls[0]?.[0];
+        expect(calledArg).toBeInstanceOf(Date);
+        // Should be approximately 30 minutes in the past
+        const diffMs = Date.now() - (calledArg as Date).getTime();
+        expect(diffMs).toBeGreaterThanOrEqual(29 * 60 * 1000);
+        expect(diffMs).toBeLessThanOrEqual(31 * 60 * 1000);
+      } finally {
+        await workerInstance.stop();
+      }
+    });
   });
 });

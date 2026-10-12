@@ -59,6 +59,34 @@ export interface StoredCredential {
 
 export type ReviewRunStatus = 'queued' | 'running' | 'completed' | 'skipped' | 'failed';
 
+export interface ReviewRunFinding {
+  path: string;
+  line?: number;
+  endLine?: number;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  category?: string;
+  title: string;
+  body: string;
+  suggestion?: string;
+  truncated?: boolean;
+}
+
+export interface ReviewRunResultPayload {
+  v: 1;
+  summary: string;
+  highlights: string[];
+  findings: ReviewRunFinding[];
+  outOfDiff?: ReviewRunFinding[];
+  language: 'ar' | 'en';
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+  verify?: {
+    dropped: number;
+  };
+}
+
 export interface ReviewRun {
   id: string;
   workspaceId: string;
@@ -71,6 +99,55 @@ export interface ReviewRun {
   detail: string | null;
   createdAt: Date;
   finishedAt: Date | null;
+  jobId?: string | null | undefined;
+  provider?: string | null | undefined;
+  model?: string | null | undefined;
+  effort?: string | null | undefined;
+  fallbackFrom?: string | null | undefined;
+  findingsCount?: number | null | undefined;
+  result?: ReviewRunResultPayload | null | undefined;
+  reviewUrl?: string | null | undefined;
+}
+
+export interface FinishReviewRunOptions {
+  status: ReviewRunStatus;
+  costUsd: number | null;
+  detail: string | null;
+  provider?: string | null | undefined;
+  model?: string | null | undefined;
+  effort?: string | null | undefined;
+  fallbackFrom?: string | null | undefined;
+  findingsCount?: number | null | undefined;
+  result?: ReviewRunResultPayload | null | undefined;
+  reviewUrl?: string | null | undefined;
+}
+
+export interface ListReviewRunsOptions {
+  limit?: number | undefined;
+  offset?: number | undefined;
+  repo?: string[] | undefined;
+  status?: ReviewRunStatus[] | undefined;
+  from?: Date | undefined;
+  to?: Date | undefined;
+  provider?: string | undefined;
+  q?: string | undefined;
+  sort?:
+    | 'createdAt'
+    | 'repo'
+    | 'pullNumber'
+    | 'status'
+    | 'provider'
+    | 'model'
+    | 'findingsCount'
+    | 'costUsd'
+    | 'duration'
+    | undefined;
+  dir?: 'asc' | 'desc' | undefined;
+}
+
+export interface ListReviewRunsResult {
+  runs: ReviewRun[];
+  total: number;
 }
 
 /** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
@@ -100,9 +177,17 @@ export interface AppStore {
   finishReviewRun(
     workspaceId: string,
     id: string,
-    result: { status: ReviewRunStatus; costUsd: number | null; detail: string | null },
+    result: FinishReviewRunOptions,
   ): Promise<void>;
+  getReviewRun(workspaceId: string, id: string): Promise<ReviewRun | null>;
   listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
+  listReviewRuns(workspaceId: string, options: ListReviewRunsOptions): Promise<ListReviewRunsResult>;
+  listReviewRuns(
+    workspaceId: string,
+    limitOrOptions?: number | ListReviewRunsOptions,
+  ): Promise<ReviewRun[] | ListReviewRunsResult>;
+  listReviewRunRepos(workspaceId: string): Promise<string[]>;
+  failStaleRuns(olderThan: Date): Promise<number>;
   monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;
   /**
    * Deletes the workspace's credentials, settings and review runs and unlinks its installations.

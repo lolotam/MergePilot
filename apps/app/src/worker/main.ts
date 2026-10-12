@@ -164,7 +164,29 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   const healthPort = healthPortStr ? parseInt(healthPortStr, 10) : 3001;
   const healthServer = await startHealthServer(healthPort);
 
+  const STALE_RUN_THRESHOLD_MS = 30 * 60 * 1000;
+  const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+
+  const sweepStale = async () => {
+    try {
+      const olderThan = new Date(Date.now() - STALE_RUN_THRESHOLD_MS);
+      const failedCount = await services.store.failStaleRuns(olderThan);
+      if (failedCount > 0) {
+        deps.log?.(`Marked ${failedCount} stale running/queued run(s) as failed (interrupted)`);
+      }
+    } catch (err) {
+      deps.log?.(`Failed to sweep stale runs: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  await sweepStale();
+  const sweepTimer = setInterval(() => {
+    void sweepStale();
+  }, SWEEP_INTERVAL_MS);
+  sweepTimer.unref?.();
+
   const stop = async () => {
+    clearInterval(sweepTimer);
     await Promise.allSettled([
       new Promise<void>((resolve) => healthServer.close(() => resolve())),
       worker.close(),

@@ -48,8 +48,10 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     pglite = new PGlite();
     const appSql = readFileSync(join(__dirname, '../../migrations/0001_app.sql'), 'utf-8');
     const authSql = readFileSync(join(__dirname, '../../migrations/0002_auth.sql'), 'utf-8');
+    const detailsSql = readFileSync(join(__dirname, '../../migrations/0003_review_run_details.sql'), 'utf-8');
     await pglite.exec(appSql);
     await pglite.exec(authSql);
+    await pglite.exec(detailsSql);
 
     const schema = { ...authSchema, ...dbSchema };
     db = drizzle(pglite, { schema });
@@ -273,7 +275,7 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     await passValidateApp.close();
   });
 
-  it('GET /api/workspaces/:workspaceId/runs clamps limit to max 200, defaults to 50', async () => {
+  it('GET /api/workspaces/:workspaceId/runs clamps limit to max 100, defaults to 50, returns total', async () => {
     // Seed 3 review runs
     for (let i = 1; i <= 3; i++) {
       await store.createReviewRun({
@@ -296,15 +298,16 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     });
     expect(resDefault.statusCode).toBe(200);
     expect(resDefault.json().runs).toHaveLength(3);
+    expect(resDefault.json().total).toBe(3);
 
-    // Limit clamp
+    // Limit clamp to 100
     const spy = vi.spyOn(store, 'listReviewRuns');
     await app.inject({
       method: 'GET',
       url: '/api/workspaces/ws-A/runs?limit=300',
       headers: { cookie: signedSessionCookie('token-member', config.authSecret) },
     });
-    expect(spy).toHaveBeenCalledWith('ws-A', 200);
+    expect(spy).toHaveBeenCalledWith('ws-A', expect.objectContaining({ limit: 100 }));
     spy.mockRestore();
   });
 

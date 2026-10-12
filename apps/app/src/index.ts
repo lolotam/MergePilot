@@ -6,4 +6,5 @@ export * from './server/index.js';
 export * from './worker/index.js';
 export * from './auth/index.js';
 export * from './bootstrap/index.js';
+export type { ReviewRun, ReviewRunFinding } from './core/index.js';
 export * from './api/contract.js';

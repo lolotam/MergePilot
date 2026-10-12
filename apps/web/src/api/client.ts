@@ -1,10 +1,31 @@
-import type { MeResponse, Settings, ErrorBody } from '@mergepilot/app/contract';
+import type {
+  MeResponse,
+  Settings,
+  ErrorBody,
+  ReviewRun,
+  RunsResponse,
+  RunDetailResponse,
+  RunReposResponse,
+  ReviewRunResult,
+  ReviewRunFinding,
+  SeverityCounts,
+} from '@mergepilot/app/contract';
+
+export type {
+  ReviewRun,
+  RunsResponse,
+  RunDetailResponse,
+  RunReposResponse,
+  ReviewRunResult,
+  ReviewRunFinding,
+  SeverityCounts,
+};
 
 export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
 
 /** GET /api/me plus the platform-operator flag (false for everyone not in MERGEPILOT_PLATFORM_ADMINS). */
 export interface MeResponseWithAdmin extends MeResponse {
-  isPlatformAdmin?: boolean;
+  isPlatformAdmin?: boolean | undefined;
 }
 
 export interface KeyItem {
@@ -39,20 +60,17 @@ export interface GitHubInstallationsResponse {
   installUrl: string;
 }
 
-export interface ReviewRun {
-  id: string;
-  repoFullName: string;
-  pullNumber: number;
-  headSha: string;
-  status: 'queued' | 'running' | 'completed' | 'skipped' | 'failed';
-  costUsd: number | null;
-  detail: string | null;
-  createdAt: string;
-  finishedAt: string | null;
-}
-
-export interface RunsResponse {
-  runs: ReviewRun[];
+export interface GetRunsParams {
+  limit?: number | undefined;
+  offset?: number | undefined;
+  repo?: string[] | undefined;
+  status?: string[] | undefined;
+  provider?: string | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  q?: string | undefined;
+  sort?: string | undefined;
+  dir?: 'asc' | 'desc' | undefined;
 }
 
 export interface UsageResponse {
@@ -142,8 +160,40 @@ export const api = {
     }),
   getGitHubInstallations: () =>
     fetchApi<GitHubInstallationsResponse>('/api/github/installations'),
-  getRuns: (workspaceId: string, limit = 50) =>
-    fetchApi<RunsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/runs?limit=${limit}`),
+  getRuns: (workspaceId: string, params?: GetRunsParams | number) => {
+    let qs = '';
+    if (typeof params === 'number') {
+      qs = `limit=${params}`;
+    } else if (params) {
+      const search = new URLSearchParams();
+      if (params.limit !== undefined) search.set('limit', String(params.limit));
+      if (params.offset !== undefined) search.set('offset', String(params.offset));
+      if (params.provider) search.set('provider', params.provider);
+      if (params.from) search.set('from', params.from);
+      if (params.to) search.set('to', params.to);
+      if (params.q) search.set('q', params.q);
+      if (params.sort) search.set('sort', params.sort);
+      if (params.dir) search.set('dir', params.dir);
+      if (params.repo) {
+        for (const r of params.repo) search.append('repo', r);
+      }
+      if (params.status) {
+        for (const s of params.status) search.append('status', s);
+      }
+      qs = search.toString();
+    }
+    return fetchApi<RunsResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/runs${qs ? `?${qs}` : ''}`,
+    );
+  },
+  getRun: (workspaceId: string, runId: string) =>
+    fetchApi<RunDetailResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/runs/${encodeURIComponent(runId)}`,
+    ),
+  getRunRepos: (workspaceId: string) =>
+    fetchApi<RunReposResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/runs/repos`,
+    ),
   getUsage: (workspaceId: string) =>
     fetchApi<UsageResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/usage`),
   renameWorkspace: (workspaceId: string, name: string) =>

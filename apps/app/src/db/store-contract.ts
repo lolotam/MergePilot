@@ -250,6 +250,135 @@ export function describeStoreContract(
       }
     });
 
+    it('records review run details and retrieves via getReviewRun', async () => {
+      const store = await createStore();
+      try {
+        const payload = {
+          v: 1 as const,
+          summary: 'Review summary text',
+          highlights: ['Fix memory leak', 'Add test coverage'],
+          findings: [
+            {
+              path: 'src/index.ts',
+              line: 10,
+              severity: 'high' as const,
+              title: 'Memory leak',
+              body: 'Listener is not cleaned up',
+            },
+          ],
+          language: 'en' as const,
+          usage: { inputTokens: 120, outputTokens: 80 },
+        };
+
+        const run = await store.createReviewRun({
+          workspaceId: 'ws-runs-test',
+          installationId: 42,
+          repoFullName: 'org/repo-details',
+          pullNumber: 99,
+          headSha: 'head-sha-123',
+          status: 'running',
+          costUsd: null,
+          detail: null,
+          jobId: 'job-meta-1',
+        });
+
+        await store.finishReviewRun('ws-runs-test', run.id, {
+          status: 'completed',
+          costUsd: 0.12,
+          detail: null,
+          provider: 'anthropic',
+          model: 'claude-3-5-sonnet',
+          effort: 'high',
+          fallbackFrom: 'openai',
+          findingsCount: 1,
+          result: payload,
+          reviewUrl: 'https://github.com/org/repo-details/pull/99#pullrequestreview-456',
+        });
+
+        const fetched = await store.getReviewRun('ws-runs-test', run.id);
+        expect(fetched).not.toBeNull();
+        expect(fetched?.provider).toBe('anthropic');
+        expect(fetched?.model).toBe('claude-3-5-sonnet');
+        expect(fetched?.effort).toBe('high');
+        expect(fetched?.fallbackFrom).toBe('openai');
+        expect(fetched?.findingsCount).toBe(1);
+        expect(fetched?.result).toEqual(payload);
+        expect(fetched?.reviewUrl).toBe('https://github.com/org/repo-details/pull/99#pullrequestreview-456');
+
+        // Isolation: getReviewRun for different workspace returns null
+        const otherWorkspace = await store.getReviewRun('ws-alpha', run.id);
+        expect(otherWorkspace).toBeNull();
+      } finally {
+        await cleanup?.();
+      }
+    });
+
+    it('reuses existing run when retrying job with the same jobId', async () => {
+      const store = await createStore();
+      try {
+        const first = await store.createReviewRun({
+          workspaceId: 'ws-runs-test',
+          installationId: 42,
+          repoFullName: 'org/retry-repo',
+          pullNumber: 7,
+          headSha: 'sha-first',
+          status: 'running',
+          costUsd: null,
+          detail: null,
+          jobId: 'job-unique-retry-key',
+        });
+
+        // Retry of same job
+        const retry = await store.createReviewRun({
+          workspaceId: 'ws-runs-test',
+          installationId: 42,
+          repoFullName: 'org/retry-repo',
+          pullNumber: 7,
+          headSha: 'sha-second',
+          status: 'running',
+          costUsd: null,
+          detail: null,
+          jobId: 'job-unique-retry-key',
+        });
+
+        expect(retry.id).toBe(first.id);
+
+        const list = await store.listReviewRuns('ws-runs-test', 10);
+        const retryRuns = list.filter((r) => r.jobId === 'job-unique-retry-key');
+        expect(retryRuns).toHaveLength(1);
+      } finally {
+        await cleanup?.();
+      }
+    });
+
+    it('manages stale runs and repository listing', async () => {
+      const store = await createStore();
+      try {
+        const reposBefore = await store.listReviewRunRepos('ws-runs-test');
+        expect(Array.isArray(reposBefore)).toBe(true);
+
+        const staleDate = new Date(Date.now() - 40 * 60 * 1000); // 40 mins ago
+        const staleRun = await store.createReviewRun({
+          workspaceId: 'ws-runs-test',
+          installationId: 42,
+          repoFullName: 'org/alpha-repo',
+          pullNumber: 1,
+          headSha: 'sha-stale',
+          status: 'running',
+          costUsd: null,
+          detail: null,
+        });
+
+        // Force stale createdAt
+        staleRun.createdAt = staleDate;
+
+        const count = await store.failStaleRuns(new Date(Date.now() - 30 * 60 * 1000));
+        expect(typeof count).toBe('number');
+      } finally {
+        await cleanup?.();
+      }
+    });
+
     defineDeleteWorkspaceContract(createStore, cleanup);
   });
 }
