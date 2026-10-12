@@ -73,10 +73,13 @@ describe('OpenAICompatibleAdapter', () => {
     expect(zai.requestBody({ ...base, effort: 'off' })).toMatchObject({ thinking: { type: 'disabled' } });
     expect(zai.requestBody(base)).not.toHaveProperty('stream_options');
     const deepseek = new OpenAICompatibleAdapter({ provider: 'deepseek', apiKey: KEY });
-    const body = deepseek.requestBody({ ...base, effort: 'high' });
-    expect(body).not.toHaveProperty('reasoning_effort');
-    expect(body).not.toHaveProperty('thinking');
-    expect(body.max_tokens).toBe(100);
+    expect(deepseek.requestBody({ ...base, effort: 'high' })).toMatchObject({
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+    });
+    expect(deepseek.requestBody({ ...base, effort: 'medium' })).toMatchObject({ reasoning_effort: 'high' });
+    expect(deepseek.requestBody({ ...base, effort: 'off' })).toMatchObject({ thinking: { type: 'disabled' } });
+    expect(deepseek.requestBody({ ...base, effort: 'off' })).not.toHaveProperty('reasoning_effort');
   });
 
   it('adds response_format: { type: "json_object" } for supported presets and keeps prompt instruction', () => {
@@ -249,10 +252,18 @@ describe('parseSseChunk', () => {
       const xai = new OpenAICompatibleAdapter({ provider: 'xai', apiKey: KEY });
       expect(xai.requestBody({ ...base, thinking: 'off' })).not.toHaveProperty('reasoning_effort');
       expect(xai.requestBody({ ...base, effort: 'off', thinking: 'off' })).not.toHaveProperty('reasoning_effort');
-      const deepseek = new OpenAICompatibleAdapter({ provider: 'deepseek', apiKey: KEY });
-      const body = deepseek.requestBody({ ...base, effort: 'high', thinking: 'off' });
+      const xiaomi = new OpenAICompatibleAdapter({ provider: 'xiaomi', apiKey: KEY });
+      const body = xiaomi.requestBody({ ...base, effort: 'high', thinking: 'off' });
       expect(body).not.toHaveProperty('reasoning_effort');
       expect(body).not.toHaveProperty('thinking');
+    });
+
+    it('turns DeepSeek thinking off for the retry, whatever effort is configured', () => {
+      const deepseek = new OpenAICompatibleAdapter({ provider: 'deepseek', apiKey: KEY });
+      const body = deepseek.requestBody({ ...base, model: 'deepseek-v4-pro', effort: 'high', thinking: 'off' });
+      expect(body).toMatchObject({ thinking: { type: 'disabled' } });
+      expect(body).not.toHaveProperty('reasoning_effort');
+      expect(body.max_tokens).toBe(100);
     });
   });
 });

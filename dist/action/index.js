@@ -50385,7 +50385,7 @@ var ENTRIES = {
     kind: "openai-compatible",
     baseUrl: "https://api.deepseek.com",
     keyHint: "sk-",
-    thinkingStyle: "none",
+    thinkingStyle: "deepseek",
     defaultModel: "deepseek-chat",
     envName: "DEEPSEEK_API_KEY",
     streamUsage: true
@@ -95072,6 +95072,7 @@ _a6 = brand_privateBedrockClient;
 var FALLBACK_EFFORTS = Object.freeze({
   reasoning_effort: ["off", "low", "medium", "high"],
   glm: ["on", "off"],
+  deepseek: ["off", "low", "high", "max"],
   gemini: ["minimal", "low", "medium", "high"],
   anthropic: ["off", "low", "medium", "high"],
   none: []
@@ -95112,7 +95113,24 @@ function compatibleEffortFields(style, effort) {
       return { thinking: { type: "enabled" } };
     return {};
   }
+  if (style === "deepseek") {
+    if (value === "off" || value === "none")
+      return { thinking: { type: "disabled" } };
+    const graded = DEEPSEEK_EFFORTS[value];
+    return graded ? { thinking: { type: "enabled" }, reasoning_effort: graded } : {};
+  }
   return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
+}
+var DEEPSEEK_EFFORTS = Object.freeze({
+  minimal: "low",
+  low: "low",
+  medium: "high",
+  high: "high",
+  xhigh: "high",
+  max: "max"
+});
+function defaultThinkingHeadroom(style) {
+  return style === "deepseek" ? THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM : DEFAULT_THINKING_HEADROOM;
 }
 var ADAPTIVE_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]|4-[6-9])(?:\b|-)/;
 var ANTHROPIC_EFFORTS = /* @__PURE__ */ new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -95151,6 +95169,9 @@ function isCompatibleReasoningModel(provider, model, style) {
     return true;
   }
   if (style === "glm" || provider === "zai" || provider === "zai-coding") {
+    return true;
+  }
+  if ((style === "deepseek" || provider === "deepseek") && /deepseek-v(?:[4-9]|\d{2})/.test(lowerModel)) {
     return true;
   }
   if (provider === "nvidia" && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
@@ -119207,7 +119228,7 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
   #effortFor(options) {
     if (options.thinking !== "off")
       return options.effort;
-    if (this.#style === "glm")
+    if (this.#style === "glm" || this.#style === "deepseek")
       return "off";
     if (this.#style === "reasoning_effort" && this.#thinks(options.model, options.effort)) {
       return LOWEST_REASONING_EFFORT;
@@ -119223,7 +119244,7 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
       return options.maxOutputTokens + headroom;
     }
     const thinksByDefault = isCompatibleReasoningModel(this.provider, options.model, this.#style);
-    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
+    return options.maxOutputTokens + (thinksByDefault ? defaultThinkingHeadroom(this.#style) : 0);
   }
   /** The JSON request body; exposed for tests of the effort mapping. */
   requestBody(options) {

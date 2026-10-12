@@ -214,7 +214,7 @@ describe('listModels', () => {
       expect(calls).toHaveLength(2);
       expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
       expect(calls[1]?.headers.authorization).toBeUndefined();
-      expect(models).toEqual([{ id: 'deepseek-chat', name: 'DeepSeek Chat', efforts: [] }]);
+      expect(models).toEqual([{ id: 'deepseek-chat', name: 'DeepSeek Chat', efforts: ['off', 'low', 'high', 'max'] }]);
     });
 
     it('lists models for Xiaomi MiMo endpoint with bearer auth', async () => {

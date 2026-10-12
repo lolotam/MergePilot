@@ -51,7 +51,7 @@ describe('provider registry', () => {
     const natives = listProviders().filter((p) => p.kind === 'native').map((p) => p.id);
     expect(natives).toEqual(['anthropic', 'openai', 'gemini']);
     expect(providerEntry('zai').thinkingStyle).toBe('glm');
-    expect(providerEntry('deepseek').thinkingStyle).toBe('none');
+    expect(providerEntry('deepseek').thinkingStyle).toBe('deepseek');
     expect(providerEntry('anthropic').keyHint).toBe('sk-ant-');
     expect(providerEntry('openrouter').keyHint).toBe('sk-or-');
     expect(providerEntry('xiaomi').keyHint).toBe('sk-');

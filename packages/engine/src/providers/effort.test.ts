@@ -13,6 +13,7 @@ describe('FALLBACK_EFFORTS', () => {
     expect(FALLBACK_EFFORTS).toEqual({
       reasoning_effort: ['off', 'low', 'medium', 'high'],
       glm: ['on', 'off'],
+      deepseek: ['off', 'low', 'high', 'max'],
       gemini: ['minimal', 'low', 'medium', 'high'],
       anthropic: ['off', 'low', 'medium', 'high'],
       none: [],
@@ -170,8 +171,9 @@ describe('default thinking headroom (P0.1)', () => {
     expect(openai.requestedOutputTokens({ model: 'gpt-4o', maxOutputTokens: 4096 })).toBe(4096);
 
     const deepseek = new OpenAICompatibleAdapter({ provider: 'deepseek', apiKey: fakeKey });
-    // DeepSeek reasoner adds 8192
-    expect(deepseek.requestedOutputTokens({ model: 'deepseek-reasoner', maxOutputTokens: 4096 })).toBe(4096 + 8192);
+    // DeepSeek reasoner and V4 think at effort high by default: they reserve the `high` budget
+    expect(deepseek.requestedOutputTokens({ model: 'deepseek-reasoner', maxOutputTokens: 4096 })).toBe(4096 + 16384);
+    expect(deepseek.requestedOutputTokens({ model: 'deepseek-v4-pro', maxOutputTokens: 4096 })).toBe(4096 + 16384);
     // DeepSeek chat does not add headroom
     expect(deepseek.requestedOutputTokens({ model: 'deepseek-chat', maxOutputTokens: 4096 })).toBe(4096);
 

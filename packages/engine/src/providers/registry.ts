@@ -75,7 +75,7 @@ const ENTRIES: Record<ApiProviderId, EntryInit> = {
     kind: 'openai-compatible',
     baseUrl: 'https://api.deepseek.com',
     keyHint: 'sk-',
-    thinkingStyle: 'none',
+    thinkingStyle: 'deepseek',
     defaultModel: 'deepseek-chat',
     envName: 'DEEPSEEK_API_KEY',
     streamUsage: true,
