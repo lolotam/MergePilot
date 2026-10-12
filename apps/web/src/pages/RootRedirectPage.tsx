@@ -5,6 +5,7 @@ import { useMeQuery } from '../api/hooks.js';
 import { useI18n } from '../i18n/context.js';
 import { authClient } from '../auth/client.js';
 import { useToast } from '../components/Toast.js';
+import { LandingPage } from './LandingPage.js';
 
 export function RootRedirectPage() {
   const { data: meData, isLoading, isError, refetch } = useMeQuery();
@@ -24,8 +25,9 @@ export function RootRedirectPage() {
     );
   }
 
+  // Signed-out visitors see the Landing Page
   if (isError || !meData?.user) {
-    return <Navigate to="/login" replace />;
+    return <LandingPage />;
   }
 
   const workspaces = meData.workspaces;
@@ -60,9 +62,9 @@ export function RootRedirectPage() {
   };
 
   return (
-    <div className="max-w-md mx-auto my-12 p-6 bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700">
+    <div className="max-w-md mx-auto my-12 p-6 bg-white dark:bg-ink-900 rounded-xl shadow-md border border-gray-200 dark:border-ink-800">
       <div className="flex items-center gap-3 mb-4">
-        <PlusCircle className="w-8 h-8 text-blue-600 dark:text-blue-400 shrink-0" />
+        <PlusCircle className="w-8 h-8 text-brand-600 dark:text-brand-400 shrink-0" />
         <div>
           <h1 className="text-xl font-bold">{t('createWorkspaceTitle')}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">{t('createWorkspaceDesc')}</p>
@@ -86,7 +88,7 @@ export function RootRedirectPage() {
               }
             }}
             placeholder={t('workspaceNamePlaceholder')}
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
           />
         </div>
 
@@ -100,14 +102,14 @@ export function RootRedirectPage() {
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder={t('workspaceSlugPlaceholder')}
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
           />
         </div>
 
         <button
           type="submit"
           disabled={isSubmitting || !name.trim()}
-          className="mt-2 w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+          className="mt-2 w-full py-2.5 px-4 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
         >
           {isSubmitting ? t('creatingWorkspace') : t('createWorkspaceButton')}
         </button>

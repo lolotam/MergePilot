@@ -34,6 +34,8 @@ export const en: I18nDictionary = {
   createWorkspace: 'Create workspace',
   newWorkspace: 'New workspace',
   languageToggle: 'العربية',
+  signInCTA: 'Sign In',
+  backToHome: 'Back to Home',
 
   // Navigation
   navOverview: 'Overview',
@@ -41,6 +43,68 @@ export const en: I18nDictionary = {
   navRuns: 'Review Runs',
   navTeam: 'Team',
   navSettings: 'Settings',
+
+  // Footer & Legal
+  footerPrivacy: 'Privacy Policy',
+  footerTerms: 'Terms of Service',
+  footerContact: 'Contact Us',
+  footerCopyright: 'All rights reserved.',
+  lastUpdatedLabel: 'Last updated',
+  tableOfContents: 'Table of Contents',
+
+  // Landing Page
+  landingHeroTitle: 'Intelligent Pull Request Reviews on Your Terms',
+  landingHeroSubtitle: 'Fast, automated GitHub PR reviews that understand Arabic, enforce your custom repository rules, and run using your own AI provider keys without storing your code.',
+  landingGetStarted: 'Get started',
+  landingInstallGitHub: 'Install on GitHub',
+
+  // How it works
+  howItWorksTitle: 'How It Works',
+  howItWorksSubtitle: 'Three simple steps to automate high-quality pull request reviews.',
+  landingStep1Title: '1. Connect GitHub Repositories',
+  landingStep1Desc: 'Install the MergePilot GitHub App on your personal account or organization in seconds, and select repositories to review.',
+  landingStep2Title: '2. Add Your AI Provider Key',
+  landingStep2Desc: 'Bring your own API key for Anthropic, OpenAI, or Google Gemini. Your keys are AES-256-GCM encrypted and never visible.',
+  landingStep3Title: '3. Get Reviews on Every PR',
+  landingStep3Desc: 'On every new pull request, MergePilot analyzes diffs, performs a verification pass, and posts actionable comments with code suggestions.',
+
+  // Features
+  featuresTitle: 'Built for Modern Engineering Teams',
+  featuresSubtitle: 'Everything you need for fast, accurate, and secure PR reviews without compromising privacy.',
+  featArabicTitle: 'Arabic-First Technical Comments',
+  featArabicDesc: 'Native, high-quality Arabic technical review comments, with flexible English switching whenever your team prefers.',
+  featRulesTitle: 'Enforce Your Project Rules',
+  featRulesDesc: 'Validates repository guidelines and design conventions (such as CLAUDE.md) on every contribution.',
+  featByokTitle: 'Bring Your Own Key (BYOK)',
+  featByokDesc: 'Connect directly with Anthropic, OpenAI, or Google Gemini under your own enterprise or developer account.',
+  featVerificationTitle: 'Rigorous Verification Pass',
+  featVerificationDesc: 'Automated verification suppresses false positives, noise, and hallucinations before comments reach your PR.',
+  featBudgetTitle: 'Strict Monthly Budget Limits',
+  featBudgetDesc: 'Set hard monthly spending caps in USD to prevent unexpected spikes in AI usage costs.',
+  featSecurityTitle: 'Zero Code Retention & Safe Permissions',
+  featSecurityDesc: 'Keys encrypted with AES-256-GCM. The App only posts comments — never pushes, approves, or merges pull requests.',
+
+  // Providers
+  providersTitle: 'Works with Industry-Leading AI Providers',
+  providersSubtitle: 'Choose the best model and provider for your workflow, speed, and budget.',
+
+  // FAQ
+  faqTitle: 'Frequently Asked Questions',
+  faqSubtitle: 'Answers to common questions about MergePilot, code privacy, and billing.',
+  faqQ1: 'What data leaves my repository during a review?',
+  faqA1: 'Only the PR diffs and modified files are read ephemerally at review time and dispatched to your chosen AI provider. We never store repository source code on MergePilot servers.',
+  faqQ2: 'Who pays for AI provider usage?',
+  faqA2: 'You pay your AI provider directly using your own API key. MergePilot does not mark up token costs, and you can enforce monthly budgets to control spending.',
+  faqQ3: 'Can MergePilot approve or merge pull requests?',
+  faqA3: 'No, never. MergePilot’s permissions are strictly restricted to posting review comments. It will never push commits, approve, or merge pull requests.',
+  faqQ4: 'Which programming languages are supported?',
+  faqA4: 'MergePilot supports all major languages and frameworks (TypeScript, Python, Go, Rust, Java, C#, PHP, and more) powered by modern foundation models.',
+  faqQ5: 'How do I remove or uninstall MergePilot?',
+  faqA5: 'You can uninstall the GitHub App with one click from your GitHub settings, or delete your workspace and keys at any time from the dashboard.',
+
+  // CTA Banner
+  ctaBannerTitle: 'Ready to elevate your team’s code quality?',
+  ctaBannerSubtitle: 'Get started in minutes with automated, intelligent pull request reviews on every PR.',
 
   // Workspace Creation (Root page)
   createWorkspaceTitle: 'Create a new workspace',

@@ -15,14 +15,40 @@ export interface I18nContextValue {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 const dictionaries = { ar, en };
+const STORAGE_KEY = 'mergepilot_lang';
+
+function getStoredLanguage(fallback: Language): Language {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === 'ar' || stored === 'en') {
+      return stored;
+    }
+  } catch {
+    // Ignore storage access errors (sandboxed iframe, disabled cookies)
+  }
+  return fallback;
+}
+
+function persistLanguage(lang: Language): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, lang);
+  } catch {
+    // Ignore storage access errors
+  }
+}
 
 export interface I18nProviderProps {
   children?: ReactNode;
   initialLanguage?: Language;
 }
 
-export function I18nProvider({ children, initialLanguage = 'ar' }: I18nProviderProps) {
-  const [language, setLanguage] = useState<Language>(initialLanguage);
+export function I18nProvider({ children, initialLanguage }: I18nProviderProps) {
+  const [language, setLanguageState] = useState<Language>(() => {
+    if (initialLanguage) return initialLanguage;
+    return getStoredLanguage('ar');
+  });
 
   const dir: 'rtl' | 'ltr' = language === 'ar' ? 'rtl' : 'ltr';
 
@@ -33,8 +59,14 @@ export function I18nProvider({ children, initialLanguage = 'ar' }: I18nProviderP
     }
   }, [language, dir]);
 
+  const setLanguage = (lang: Language) => {
+    setLanguageState(lang);
+    persistLanguage(lang);
+  };
+
   const toggleLanguage = () => {
-    setLanguage((prev) => (prev === 'ar' ? 'en' : 'ar'));
+    const next: Language = language === 'ar' ? 'en' : 'ar';
+    setLanguage(next);
   };
 
   const t = (key: I18nKey, params?: Record<string, string | number>): string => {

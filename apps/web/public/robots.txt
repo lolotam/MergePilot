@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /w/
+
+Sitemap: https://mergepilot.walidmohamed.com/sitemap.xml

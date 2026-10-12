@@ -32,6 +32,8 @@ export const ar = {
   createWorkspace: 'إنشاء مساحة عمل',
   newWorkspace: 'مساحة عمل جديدة',
   languageToggle: 'English',
+  signInCTA: 'تسجيل الدخول',
+  backToHome: 'العودة للرئيسية',
 
   // Navigation
   navOverview: 'نظرة عامة',
@@ -39,6 +41,68 @@ export const ar = {
   navRuns: 'سجل المراجعات',
   navTeam: 'الفريق',
   navSettings: 'الإعدادات',
+
+  // Footer & Legal
+  footerPrivacy: 'الخصوصية',
+  footerTerms: 'الشروط والأحكام',
+  footerContact: 'تواصل معنا',
+  footerCopyright: 'جميع الحقوق محفوظة.',
+  lastUpdatedLabel: 'آخر تحديث',
+  tableOfContents: 'جدول المحتويات',
+
+  // Landing Page
+  landingHeroTitle: 'مراجعة ذكية لطلبات السحب بلغتك وقواعدك الخاصة',
+  landingHeroSubtitle: 'محرك مراجعة فوري لـ GitHub PRs يدعم العربية، يطبق قواعد مشروعك الصارمة، ويعتمد على مفاتيحك الخاصة دون تخزين كودك.',
+  landingGetStarted: 'ابدأ مجانًا',
+  landingInstallGitHub: 'ثبّت على GitHub',
+
+  // How it works
+  howItWorksTitle: 'كيف يعمل MergePilot؟',
+  howItWorksSubtitle: '٣ خطوات بسيطة لبدء مراجعة كود فريقك تلقائيًا وبأمان تام.',
+  landingStep1Title: '١. ربط مستودعات GitHub',
+  landingStep1Desc: 'ثبّت تطبيق MergePilot على حسابك أو منظمتك في ثوانٍ، واختر المستودعات التي تريد مراجعتها.',
+  landingStep2Title: '٢. إضافة مفتاح الذكاء الاصطناعي',
+  landingStep2Desc: 'استخدم مفتاحك الخاص من Anthropic أو OpenAI أو Gemini. مفاتيحك تُشفر بـ AES-256 ولا نراها أبدًا.',
+  landingStep3Title: '٣. مراجعات فورية لكل PR',
+  landingStep3Desc: 'مع كل طلب سحب جديد، يفحص MergePilot التغييرات ويقدم تعليقات دقيقة، ملخصًا وافيًا، واقتراحات كود قابلة للتطبيق.',
+
+  // Features
+  featuresTitle: 'مصمم للمطورين والفرق الاحترافية',
+  featuresSubtitle: 'كل ما تحتاجه لمراجعات كود سريعة ودقيقة وموثوقة دون التنازل عن الخصوصية.',
+  featArabicTitle: 'تعليقات عربية احترافية',
+  featArabicDesc: 'دعم كامل للغة العربية البرمجية السليمة، مع إمكانية التبديل إلى الإنجليزية حسب تفضيل فريقك.',
+  featRulesTitle: 'قواعد مشروعك الصارمة',
+  featRulesDesc: 'يفحص ملفات التوجيهات مثل CLAUDE.md وإرشادات التصميم للتأكد من التزام كل مساهمة بقواعدكم.',
+  featByokTitle: 'استخدم مفتاحك الخاص (BYOK)',
+  featByokDesc: 'اربط حسابك في Anthropic، OpenAI، أو Google Gemini مباشرة وتحكم في فواتيرك واستهلاكك.',
+  featVerificationTitle: 'مرحلة تحقق ذكية',
+  featVerificationDesc: 'فلترة ذكية ومرحلة تدقيق تمنع التعليقات المزعجة والتخمينات غير الدقيقة قبل نشرها في الـ PR.',
+  featBudgetTitle: 'سقف ميزانية شهري',
+  featBudgetDesc: 'حدد سقفًا أقصى للإنفاق الشهري بالدولار لمساحة العمل، ويتوقف الفحص تلقائيًا عند تجاوزه.',
+  featSecurityTitle: 'أمان تام وملاحظات فقط',
+  featSecurityDesc: 'مفاتيحك مشفرة بـ AES-256-GCM. التطبيق يكتب تعليقات فقط ولا يقوم أبدًا باعتماد أو دمج أو دفع أي كود.',
+
+  // Providers
+  providersTitle: 'يعمل مع أقوى نماذج الذكاء الاصطناعي',
+  providersSubtitle: 'اختر النموذج والمزود الأنسب لاحتياجات فريقك وميزانيتك.',
+
+  // FAQ
+  faqTitle: 'الأسئلة الشائعة',
+  faqSubtitle: 'إجابات على الأسئلة الأكثر شيوعًا حول MergePilot وكيفية عمله.',
+  faqQ1: 'ما هي البيانات التي تغادر مستودعي أثناء المراجعة؟',
+  faqA1: 'نحن نقرأ فقط الفروقات (diffs) والملفات المعدلة وقت الفحص ونرسلها لمزود الذكاء الاصطناعي الذي اخترته. لا نقوم أبدًا بتخزين الشيفرة البرمجية المصدرية على خوادمنا.',
+  faqQ2: 'من يدفع تكاليف استهلاك الذكاء الاصطناعي؟',
+  faqA2: 'أنت تدفع للمزود مباشرة (Anthropic، OpenAI، أو Gemini) باستخدام مفتاح API الخاص بك. MergePilot لا يفرض رسومًا على استهلاك التوكنات، ويمكنك ضبط ميزانية شهرية لإيقاف المراجعات عند حد معين.',
+  faqQ3: 'هل يمكن لـ MergePilot اعتماد أو دمج طلبات السحب؟',
+  faqA3: 'كلا، إطلاقًا. صلاحيات MergePilot تقتصر على كتابة التعليقات والملاحظات. لا نقوم أبدًا باعتماد الـ PR أو دمجه أو دفع أي كود.',
+  faqQ4: 'ما هي لغات البرمجة والتقنيات المدعومة؟',
+  faqA4: 'يدعم MergePilot جميع لغات البرمجة والبيئات الشائعة (TypeScript، Python، Go، Rust، Java، PHP، C#، وغيرها) بفضل قوة النماذج الحديثة.',
+  faqQ5: 'كيف يمكنني إزالة أو إلغاء تثبيت MergePilot؟',
+  faqA5: 'يمكنك إلغاء تثبيت التطبيق بنقرة واحدة من إعدادات GitHub، أو حذف مساحة العمل وإزالة مفاتيح API في أي وقت من لوحة التحكم.',
+
+  // CTA Banner
+  ctaBannerTitle: 'جاهز لرفع جودة كود فريقك اليوم؟',
+  ctaBannerSubtitle: 'ابدأ الآن في دقائق معدودة، واستمتع بمراجعات كود دقيقة وذكية لكل طلب سحب.',
 
   // Workspace Creation (Root page)
   createWorkspaceTitle: 'إنشاء مساحة عمل جديدة',

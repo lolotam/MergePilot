@@ -11,6 +11,8 @@ import { SettingsPage } from './pages/SettingsPage.js';
 import { TeamPage } from './pages/TeamPage.js';
 import { RunsPage } from './pages/RunsPage.js';
 import { InstallPage } from './pages/InstallPage.js';
+import { PrivacyPage } from './pages/PrivacyPage.js';
+import { TermsPage } from './pages/TermsPage.js';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,10 +30,12 @@ export function App() {
         <ToastProvider>
           <BrowserRouter>
             <Routes>
+              <Route path="/" element={<RootRedirectPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/install" element={<InstallPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
+              <Route path="/terms" element={<TermsPage />} />
               <Route element={<Layout />}>
-                <Route path="/" element={<RootRedirectPage />} />
                 <Route path="/w/:workspaceId" element={<OverviewPage />} />
                 <Route path="/w/:workspaceId/repos" element={<ReposPage />} />
                 <Route path="/w/:workspaceId/settings" element={<SettingsPage />} />

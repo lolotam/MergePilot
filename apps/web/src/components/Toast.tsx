@@ -47,14 +47,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               toast.type === 'error'
                 ? 'bg-red-50 text-red-900 border-red-200 dark:bg-red-950 dark:text-red-200 dark:border-red-900'
                 : toast.type === 'success'
-                  ? 'bg-green-50 text-green-900 border-green-200 dark:bg-green-950 dark:text-green-200 dark:border-green-900'
-                  : 'bg-blue-50 text-blue-900 border-blue-200 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-900'
+                  ? 'bg-brand-50 text-brand-900 border-brand-200 dark:bg-brand-950 dark:text-brand-200 dark:border-brand-900'
+                  : 'bg-brand-50 text-brand-900 border-brand-200 dark:bg-brand-950 dark:text-brand-200 dark:border-brand-900'
             }`}
           >
             <div className="flex items-center gap-2">
               {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />}
-              {toast.type === 'success' && <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />}
-              {toast.type === 'info' && <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />}
+              {toast.type === 'success' && <CheckCircle className="w-5 h-5 text-brand-600 dark:text-brand-400 shrink-0" />}
+              {toast.type === 'info' && <Info className="w-5 h-5 text-brand-600 dark:text-brand-400 shrink-0" />}
               <span>{toast.message}</span>
             </div>
             <button
