@@ -58,6 +58,13 @@ export const workspaceSettings = pgTable('workspace_settings', {
   runRetentionDays: integer('run_retention_days').default(30),
   /** Migration 0006: `owner/repo` -> palette key. */
   repoColors: jsonb('repo_colors').notNull().default(sql`'{}'::jsonb`),
+  /** Migration 0007: the Jev judge (ADR-0015). */
+  judgeEnabled: boolean('judge_enabled').notNull().default(false),
+  judgeProvider: text('judge_provider'),
+  judgeModel: text('judge_model'),
+  judgeMode: text('judge_mode').notNull().default('off'),
+  judgeThreshold: numeric('judge_threshold', { precision: 4, scale: 3 }).notNull().default('0.35'),
+  judgeFallback: jsonb('judge_fallback').notNull().default(sql`'[]'::jsonb`),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),

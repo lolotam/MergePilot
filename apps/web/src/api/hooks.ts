@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse, Settings } from '@mergepilot/app/contract';
-import { api, type ApiProvider, type GetRunsParams } from './client.js';
+import { api, type GetRunsParams, type KeyProvider } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -51,7 +51,7 @@ export function useSaveKeyMutation(workspaceId: string) {
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: ({ provider, apiKey, baseUrl }: { provider: ApiProvider; apiKey: string; baseUrl?: string | undefined }) =>
+    mutationFn: ({ provider, apiKey, baseUrl }: { provider: KeyProvider; apiKey: string; baseUrl?: string | undefined }) =>
       api.saveKey(workspaceId, provider, apiKey, baseUrl),
     onSuccess: () => {
       showToast(t('keySavedSuccess'), 'success');
@@ -69,7 +69,7 @@ export function useDeleteKeyMutation(workspaceId: string) {
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: (provider: ApiProvider) => api.deleteKey(workspaceId, provider),
+    mutationFn: (provider: KeyProvider) => api.deleteKey(workspaceId, provider),
     onSuccess: () => {
       showToast(t('keyDeletedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });

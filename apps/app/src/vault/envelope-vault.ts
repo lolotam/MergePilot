@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import type { ApiProvider, Vault } from '../core/types.js';
+import type { KeyProvider, Vault } from '../core/types.js';
 
 export class VaultError extends Error {
   constructor(message = 'decryption failed') {
@@ -59,7 +59,7 @@ function parseMasterKey(raw: unknown): Buffer {
 }
 
 /** Unambiguous AAD: a JSON array cannot be confused the way `a:b` joins can. */
-function aadFor(context: { workspaceId: string; provider: ApiProvider }): Buffer {
+function aadFor(context: { workspaceId: string; provider: KeyProvider }): Buffer {
   return Buffer.from(JSON.stringify([context.workspaceId, context.provider]), 'utf8');
 }
 
@@ -123,7 +123,7 @@ export class EnvelopeVault implements Vault {
 
   async encrypt(
     plaintext: string,
-    context: { workspaceId: string; provider: ApiProvider },
+    context: { workspaceId: string; provider: KeyProvider },
   ): Promise<string> {
     const masterKey = this.#keys.get(this.#currentVersion);
     if (!masterKey) {
@@ -164,7 +164,7 @@ export class EnvelopeVault implements Vault {
 
   async decrypt(
     ciphertext: string,
-    context: { workspaceId: string; provider: ApiProvider },
+    context: { workspaceId: string; provider: KeyProvider },
   ): Promise<string> {
     try {
       const parts = ciphertext.split('.');

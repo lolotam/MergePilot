@@ -4,7 +4,7 @@ import {
   type Secret,
   type TokenUsage,
 } from '@mergepilot/engine';
-import type { ReviewRunFinding, ReviewRunResultPayload } from '../core/types.js';
+import type { ReviewRunFinding, ReviewRunJudge, ReviewRunResultPayload } from '../core/types.js';
 
 export interface PrepareRunResultInput {
   summary: string;
@@ -13,6 +13,8 @@ export interface PrepareRunResultInput {
   language: 'ar' | 'en';
   usage?: TokenUsage | undefined;
   verification?: { checked: number; rejected: number } | undefined;
+  /** The Jev judge record; its finding titles and paths are redacted like the findings. */
+  judge?: ReviewRunJudge | undefined;
   knownSecrets?: Secret[] | undefined;
 }
 
@@ -90,6 +92,18 @@ export function prepareRunResult(input: PrepareRunResultInput): ReviewRunResultP
       ? {
           verify: {
             dropped: input.verification.rejected,
+          },
+        }
+      : {}),
+    ...(input.judge
+      ? {
+          judge: {
+            ...input.judge,
+            filtered: input.judge.filtered.slice(0, MAX_FINDINGS).map((f) => ({
+              ...f,
+              title: redactSecrets(f.title, secrets).text,
+              path: redactSecrets(f.path, secrets).text,
+            })),
           },
         }
       : {}),

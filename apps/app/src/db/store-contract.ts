@@ -171,6 +171,23 @@ export function describeStoreContract(
         expect(reloaded?.heavyModel).toBeNull();
         expect(reloaded?.fallback).toEqual([]);
         expect(reloaded?.minSeverity).toBe('medium');
+        expect(reloaded?.judge).toBeNull();
+
+        // The Jev judge (ADR-0015): saved with its fallbacks, kept when left out, cleared by null.
+        const judge = {
+          enabled: true,
+          provider: 'typesafe' as const,
+          model: 'jev-latest',
+          mode: 'filter' as const,
+          threshold: 0.4,
+          fallback: [{ provider: 'opencode-zen' as const, model: 'jev-1.13-free' }],
+        };
+        await store.saveSettings({ ...updated, judge });
+        expect((await store.getSettings('ws-settings-test'))?.judge).toEqual(judge);
+        await store.saveSettings(updated);
+        expect((await store.getSettings('ws-settings-test'))?.judge).toEqual(judge);
+        await store.saveSettings({ ...updated, judge: null });
+        expect((await store.getSettings('ws-settings-test'))?.judge).toBeNull();
       } finally {
         await cleanup?.();
       }

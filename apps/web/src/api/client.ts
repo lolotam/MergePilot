@@ -12,9 +12,13 @@ import type {
   ReviewRunFinding,
   SeverityCounts,
   ApiProvider,
+  KeyProvider,
+  JudgeProvidersResponse,
 } from '@mergepilot/app/contract';
 
 export type {
+  KeyProvider,
+  JudgeProvidersResponse,
   ReviewRun,
   RunGroup,
   RunGroupsResponse,
@@ -33,7 +37,7 @@ export interface MeResponseWithAdmin extends MeResponse {
 }
 
 export interface KeyItem {
-  provider: ApiProvider;
+  provider: KeyProvider;
   last4: string;
   createdAt: string;
   createdBy: string;
@@ -183,7 +187,7 @@ export const api = {
     }),
   getKeys: (workspaceId: string) =>
     fetchApi<KeysResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys`),
-  saveKey: (workspaceId: string, provider: ApiProvider, apiKey: string, baseUrl?: string | undefined) =>
+  saveKey: (workspaceId: string, provider: KeyProvider, apiKey: string, baseUrl?: string | undefined) =>
     fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys/${encodeURIComponent(provider)}`, {
       method: 'PUT',
       body: JSON.stringify({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
@@ -212,9 +216,18 @@ export const api = {
         body: JSON.stringify(options ?? {}),
       },
     ),
-  deleteKey: (workspaceId: string, provider: ApiProvider) =>
+  deleteKey: (workspaceId: string, provider: KeyProvider) =>
     fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys/${encodeURIComponent(provider)}`, {
       method: 'DELETE',
+    }),
+  /** The fixed Jev-only model table (ADR-0015). */
+  getJudgeProviders: (workspaceId: string) =>
+    fetchApi<JudgeProvidersResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/judge/providers`),
+  /** One tiny Jev question with the stored key, or an unsaved `apiKey` (never stored). */
+  testJudge: (workspaceId: string, body: { provider: string; model?: string | undefined; apiKey?: string | undefined }) =>
+    fetchApi<TestConnectionResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/judge/test`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
   getInstallations: (workspaceId: string) =>
     fetchApi<InstallationsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/installations`),

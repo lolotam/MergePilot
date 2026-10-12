@@ -2364,9 +2364,9 @@ var require_stringifyNumber = __commonJS({
     function stringifyNumber({ format, minFractionDigits, tag, value }) {
       if (typeof value === "bigint")
         return String(value);
-      const num = typeof value === "number" ? value : Number(value);
-      if (!isFinite(num))
-        return isNaN(num) ? ".nan" : num < 0 ? "-.inf" : ".inf";
+      const num2 = typeof value === "number" ? value : Number(value);
+      if (!isFinite(num2))
+        return isNaN(num2) ? ".nan" : num2 < 0 ? "-.inf" : ".inf";
       let n = Object.is(value, -0) ? "-0" : JSON.stringify(value);
       if (!format && minFractionDigits && (!tag || tag === "tag:yaml.org,2002:float") && /^-?\d/.test(n) && !n.includes("e")) {
         let i2 = n.indexOf(".");
@@ -2405,8 +2405,8 @@ var require_float = __commonJS({
       test: /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+$/,
       resolve: (str) => parseFloat(str),
       stringify(node2) {
-        const num = Number(node2.value);
-        return isFinite(num) ? num.toExponential() : stringifyNumber.stringifyNumber(node2);
+        const num2 = Number(node2.value);
+        return isFinite(num2) ? num2.toExponential() : stringifyNumber.stringifyNumber(node2);
       }
     };
     var float = {
@@ -2837,8 +2837,8 @@ var require_float2 = __commonJS({
       test: /^[-+]?(?:[0-9][0-9_]*)?(?:\.[0-9_]*)?[eE][-+]?[0-9]+$/,
       resolve: (str) => parseFloat(str.replace(/_/g, "")),
       stringify(node2) {
-        const num = Number(node2.value);
-        return isFinite(num) ? num.toExponential() : stringifyNumber.stringifyNumber(node2);
+        const num2 = Number(node2.value);
+        return isFinite(num2) ? num2.toExponential() : stringifyNumber.stringifyNumber(node2);
       }
     };
     var float = {
@@ -3037,23 +3037,23 @@ var require_timestamp = __commonJS({
     function parseSexagesimal(str, asBigInt) {
       const sign = str[0];
       const parts = sign === "-" || sign === "+" ? str.substring(1) : str;
-      const num = (n) => asBigInt ? BigInt(n) : Number(n);
-      const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num(60) + num(p), num(0));
-      return sign === "-" ? num(-1) * res : res;
+      const num2 = (n) => asBigInt ? BigInt(n) : Number(n);
+      const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num2(60) + num2(p), num2(0));
+      return sign === "-" ? num2(-1) * res : res;
     }
     function stringifySexagesimal(node2) {
       let { value } = node2;
-      let num = (n) => n;
+      let num2 = (n) => n;
       if (typeof value === "bigint")
-        num = (n) => BigInt(n);
+        num2 = (n) => BigInt(n);
       else if (isNaN(value) || !isFinite(value))
         return stringifyNumber.stringifyNumber(node2);
       let sign = "";
       if (value < 0) {
         sign = "-";
-        value *= num(-1);
+        value *= num2(-1);
       }
-      const _60 = num(60);
+      const _60 = num2(60);
       const parts = [value % _60];
       if (value < 60) {
         parts.unshift(0);
@@ -12983,12 +12983,12 @@ var require_sha256 = __commonJS({
       }
       exports2.hmac = hmac;
       function fillBuffer(buffer, hmac2, info, counter) {
-        var num = counter[0];
-        if (num === 0) {
+        var num2 = counter[0];
+        if (num2 === 0) {
           throw new Error("hkdf: cannot expand more");
         }
         hmac2.reset();
-        if (num > 1) {
+        if (num2 > 1) {
           hmac2.update(buffer);
         }
         if (info) {
@@ -39503,8 +39503,8 @@ var require_base64_js = __commonJS({
       }
       return arr;
     }
-    function tripletToBase64(num) {
-      return lookup[num >> 18 & 63] + lookup[num >> 12 & 63] + lookup[num >> 6 & 63] + lookup[num & 63];
+    function tripletToBase64(num2) {
+      return lookup[num2 >> 18 & 63] + lookup[num2 >> 12 & 63] + lookup[num2 >> 6 & 63] + lookup[num2 & 63];
     }
     function encodeChunk(uint8, start, end) {
       var tmp;
@@ -46955,26 +46955,26 @@ var require_permessage_deflate = __commonJS({
             value = value[0];
             if (key === "client_max_window_bits") {
               if (value !== true) {
-                const num = +value;
-                if (!Number.isInteger(num) || num < 8 || num > 15) {
+                const num2 = +value;
+                if (!Number.isInteger(num2) || num2 < 8 || num2 > 15) {
                   throw new TypeError(
                     `Invalid value for parameter "${key}": ${value}`
                   );
                 }
-                value = num;
+                value = num2;
               } else if (!this._isServer) {
                 throw new TypeError(
                   `Invalid value for parameter "${key}": ${value}`
                 );
               }
             } else if (key === "server_max_window_bits") {
-              const num = +value;
-              if (!Number.isInteger(num) || num < 8 || num > 15) {
+              const num2 = +value;
+              if (!Number.isInteger(num2) || num2 < 8 || num2 > 15) {
                 throw new TypeError(
                   `Invalid value for parameter "${key}": ${value}`
                 );
               }
-              value = num;
+              value = num2;
             } else if (key === "client_no_context_takeover" || key === "server_no_context_takeover") {
               if (value !== true) {
                 throw new TypeError(
@@ -47686,8 +47686,8 @@ var require_receiver = __commonJS({
           return;
         }
         const buf = this.consume(8);
-        const num = buf.readUInt32BE(0);
-        if (num > Math.pow(2, 53 - 32) - 1) {
+        const num2 = buf.readUInt32BE(0);
+        if (num2 > Math.pow(2, 53 - 32) - 1) {
           const error62 = this.createError(
             RangeError,
             "Unsupported WebSocket frame: payload length > 2^53 - 1",
@@ -47698,7 +47698,7 @@ var require_receiver = __commonJS({
           cb(error62);
           return;
         }
-        this._payloadLength = num * Math.pow(2, 32) + buf.readUInt32BE(4);
+        this._payloadLength = num2 * Math.pow(2, 32) + buf.readUInt32BE(4);
         this.haveLength(cb);
       }
       /**
@@ -67062,8 +67062,8 @@ function rewriteKeyNames(ctx) {
       bySchema.set(entry.schema, entry);
   }
   const rewrites = /* @__PURE__ */ new Map();
-  for (const record2 of pendingRecords.get(ctx) ?? []) {
-    const seen = ctx.seen.get(record2);
+  for (const record3 of pendingRecords.get(ctx) ?? []) {
+    const seen = ctx.seen.get(record3);
     const names = (seen?.def ?? seen?.schema)?.propertyNames;
     if (!names || names === true || rewrites.has(names))
       continue;
@@ -70112,6 +70112,869 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+var LlmFailure = class extends Error {
+  code;
+  provider;
+  status;
+  retryAfterMs;
+  requestId;
+  constructor(init) {
+    super(init.message);
+    this.name = "LlmFailure";
+    this.code = init.code;
+    this.provider = init.provider;
+    this.status = init.status;
+    this.retryAfterMs = init.retryAfterMs;
+    this.requestId = init.requestId;
+  }
+};
+var QUOTA_WORDING = /quota|billing|insufficient|credit balance|exceeded your|per ?day|daily|payment required|credits? (?:exhausted|remaining: 0)/i;
+var NO_CREDIT_400_WORDING = /credit balance (?:is )?too low|insufficient[_ ]quota/i;
+var CONTEXT_WORDING = /context (length|window)|too many tokens|prompt is too long|maximum context/i;
+var MAX_BODY_IN_MESSAGE = 300;
+function header(headers, name) {
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted)
+      return value;
+  }
+  return void 0;
+}
+function parseRetryAfter(value, now) {
+  if (!value)
+    return void 0;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0)
+    return Math.round(seconds * 1e3);
+  const date5 = Date.parse(value);
+  return Number.isNaN(date5) ? void 0 : Math.max(0, date5 - now());
+}
+function code429(bodyText) {
+  const quotaId = /"quotaId"\s*:\s*"([^"]+)"/.exec(bodyText)?.[1] ?? "";
+  if (/PerDay/i.test(quotaId))
+    return "QUOTA";
+  if (/PerMinute|PerSecond/i.test(quotaId))
+    return "RATE_LIMIT";
+  return QUOTA_WORDING.test(bodyText) ? "QUOTA" : "RATE_LIMIT";
+}
+function codeFor(status, bodyText) {
+  if (status === 401 || status === 403)
+    return "INVALID_CREDENTIAL";
+  if (status === 402)
+    return "QUOTA";
+  if (status === 429)
+    return code429(bodyText);
+  if (status === 400 && NO_CREDIT_400_WORDING.test(bodyText))
+    return "QUOTA";
+  if (status === 413 || CONTEXT_WORDING.test(bodyText))
+    return "CONTEXT_WINDOW_EXCEEDED";
+  if (status === 408 || status === 504)
+    return "TIMEOUT";
+  if (status >= 500)
+    return "SERVER";
+  if (status >= 400)
+    return "BAD_REQUEST";
+  return "UNKNOWN";
+}
+function failureFromHttp(input2, now = Date.now) {
+  const code = codeFor(input2.status, input2.bodyText);
+  const body = (input2.detail ?? input2.bodyText).trim().slice(0, MAX_BODY_IN_MESSAGE);
+  const retryAfterMs = parseRetryAfter(header(input2.headers, "retry-after"), now);
+  const requestId = header(input2.headers, "request-id") ?? header(input2.headers, "x-request-id");
+  return new LlmFailure({
+    code,
+    provider: input2.provider,
+    status: input2.status,
+    message: `${input2.provider} returned HTTP ${input2.status} (${code})${body ? `: ${body}` : ""}`,
+    ...retryAfterMs !== void 0 ? { retryAfterMs } : {},
+    ...requestId !== void 0 ? { requestId } : {}
+  });
+}
+var KIND_BY_CODE = {
+  QUOTA: "quota",
+  INVALID_CREDENTIAL: "auth",
+  RATE_LIMIT: "rate-limit",
+  SERVER: "server",
+  TIMEOUT: "network",
+  NETWORK: "network",
+  CONTEXT_WINDOW_EXCEEDED: "other",
+  BAD_REQUEST: "other",
+  ABORTED: "other",
+  UNKNOWN: "other"
+};
+function failureKind(code) {
+  return KIND_BY_CODE[code];
+}
+function providerMessage(text, max = 300) {
+  let message = text;
+  try {
+    const body = JSON.parse(text);
+    if (body && typeof body === "object") {
+      const record3 = body;
+      const inner = record3.error ?? record3.detail ?? record3;
+      if (typeof inner === "string")
+        message = inner;
+      else if (inner && typeof inner === "object") {
+        const fields = inner;
+        const found = fields.message ?? fields.msg;
+        if (typeof found === "string")
+          message = found;
+      }
+    }
+  } catch {
+  }
+  return message.trim().slice(0, max);
+}
+
+function estimateTokens(text) {
+  return Math.ceil(text.length / 3.5);
+}
+function checkBudget(input2) {
+  if (input2.promptTokens <= input2.maxInputTokens) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    reason: `Estimated prompt tokens (${input2.promptTokens}) exceed maxInputTokens limit (${input2.maxInputTokens}).`
+  };
+}
+
+function computeLineOffsets(text) {
+  const offsets = [0];
+  for (let i2 = 0; i2 < text.length; i2++) {
+    if (text[i2] === "\n") {
+      offsets.push(i2 + 1);
+    }
+  }
+  return offsets;
+}
+function getLineFromOffsets(offsets, index) {
+  let low = 0;
+  let high = offsets.length - 1;
+  while (low <= high) {
+    const mid = low + high >> 1;
+    const offset = offsets[mid] ?? 0;
+    if (offset <= index) {
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return high + 1;
+}
+var TOKEN_PATTERNS = [
+  {
+    regex: /-----BEGIN (?:[A-Z0-9_-]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9_-]+ )*PRIVATE KEY-----/g,
+    kind: "pem",
+    priority: 60
+  },
+  // Real keys carry a long random body; a bare prefix such as `sk-ant-oat01-` in docs is not a secret.
+  { regex: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "anthropic", priority: 50 },
+  { regex: /(?<![A-Za-z0-9_-])sk-proj-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "openai", priority: 50 },
+  { regex: /(?<![A-Za-z0-9_-])sk-(?!ant-|proj-)[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "openai", priority: 50 },
+  { regex: /(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])/g, kind: "google", priority: 50 },
+  { regex: /(?<![A-Za-z0-9_])(?:gh[posu]|github_pat)_[A-Za-z0-9_]{8,}(?![A-Za-z0-9_])/g, kind: "github", priority: 50 },
+  { regex: /(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])/g, kind: "aws", priority: 50 }
+];
+function redactSecrets(text, knownSecrets = []) {
+  const lineOffsets = computeLineOffsets(text);
+  const candidates = [];
+  for (const secret of knownSecrets) {
+    const value = secret.reveal();
+    if (!value || value.trim().length === 0) {
+      continue;
+    }
+    let searchIdx = 0;
+    while (searchIdx < text.length) {
+      const foundIdx = text.indexOf(value, searchIdx);
+      if (foundIdx === -1) {
+        break;
+      }
+      candidates.push({
+        start: foundIdx,
+        end: foundIdx + value.length,
+        kind: "known",
+        line: getLineFromOffsets(lineOffsets, foundIdx),
+        replacement: "[REDACTED:known]",
+        priority: 100
+      });
+      searchIdx = foundIdx + value.length;
+    }
+  }
+  for (const { regex, kind, priority } of TOKEN_PATTERNS) {
+    for (const match2 of text.matchAll(regex)) {
+      candidates.push({
+        start: match2.index,
+        end: match2.index + match2[0].length,
+        kind,
+        line: getLineFromOffsets(lineOffsets, match2.index),
+        replacement: `[REDACTED:${kind}]`,
+        priority
+      });
+    }
+  }
+  const genericRegex = /(?:(?:\b|['"])[a-zA-Z0-9_]*(?:password|passwd|secret|token|api_key|apikey)['"]?\s*[=:]\s*)(["'`])((?:\\.|(?!\1)[^\r\n\\]){8,})\1/gi;
+  let genMatch;
+  while ((genMatch = genericRegex.exec(text)) !== null) {
+    const fullMatch = genMatch[0];
+    const quote = genMatch[1] ?? "";
+    const val = genMatch[2] ?? "";
+    const target = `${quote}${val}${quote}`;
+    const quoteStartInMatch = fullMatch.lastIndexOf(target);
+    const valStart = quoteStartInMatch !== -1 ? genMatch.index + quoteStartInMatch + quote.length : genMatch.index + fullMatch.indexOf(val);
+    const valEnd = valStart + val.length;
+    candidates.push({
+      start: valStart,
+      end: valEnd,
+      kind: "generic",
+      line: getLineFromOffsets(lineOffsets, genMatch.index),
+      replacement: "[REDACTED:generic]",
+      priority: 10
+    });
+  }
+  candidates.sort((a, b) => {
+    if (b.priority !== a.priority) {
+      return b.priority - a.priority;
+    }
+    const lenA = a.end - a.start;
+    const lenB = b.end - b.start;
+    if (lenB !== lenA) {
+      return lenB - lenA;
+    }
+    return a.start - b.start;
+  });
+  const accepted = [];
+  for (const candidate of candidates) {
+    const overlaps = accepted.some((existing) => !(candidate.end <= existing.start || candidate.start >= existing.end));
+    if (!overlaps) {
+      accepted.push(candidate);
+    }
+  }
+  accepted.sort((a, b) => a.start - b.start);
+  let redactedText = "";
+  let lastIndex = 0;
+  const found = [];
+  for (const match2 of accepted) {
+    redactedText += text.slice(lastIndex, match2.start);
+    redactedText += match2.replacement;
+    lastIndex = match2.end;
+    found.push({ kind: match2.kind, line: match2.line });
+  }
+  redactedText += text.slice(lastIndex);
+  return {
+    text: redactedText,
+    found
+  };
+}
+
+var ERROR_BODY_BYTES = 4096;
+function keyValue(key) {
+  if (key === void 0)
+    return void 0;
+  const value = typeof key === "string" ? key : key.reveal();
+  return value.trim() ? value.trim() : void 0;
+}
+function redactKey(text, key) {
+  const value = keyValue(key);
+  return redactSecrets(text, value ? [new Secret(value)] : []).text;
+}
+async function readPrefix(res) {
+  const reader = res.body?.getReader();
+  if (!reader)
+    return "";
+  const chunks = [];
+  let size = 0;
+  try {
+    while (size < ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done || !value)
+        break;
+      chunks.push(value);
+      size += value.length;
+    }
+  } catch {
+  } finally {
+    reader.cancel().catch(() => void 0);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+  return new TextDecoder().decode(bytes.subarray(0, ERROR_BODY_BYTES));
+}
+function headerRecord(headers) {
+  const out = {};
+  for (const name of ["retry-after", "request-id", "x-request-id"]) {
+    const value = headers.get(name);
+    if (value !== null)
+      out[name] = value;
+  }
+  return out;
+}
+async function failureFromResponse(res, provider, key) {
+  const raw = await readPrefix(res);
+  return failureFromHttp({
+    status: res.status,
+    provider,
+    headers: headerRecord(res.headers),
+    bodyText: redactKey(raw, key),
+    detail: redactKey(providerMessage(raw), key)
+  });
+}
+function failureFromThrown(error62, provider, key, signal) {
+  if (error62 instanceof LlmFailure)
+    return error62;
+  const name = error62 instanceof Error ? error62.name : "";
+  const message = redactKey(error62 instanceof Error ? error62.message : String(error62), key);
+  if (name === "TimeoutError") {
+    return new LlmFailure({ code: "TIMEOUT", provider, message: `${provider} did not answer in time` });
+  }
+  if (signal?.aborted || name === "AbortError") {
+    return new LlmFailure({ code: "ABORTED", provider, message: "request aborted" });
+  }
+  if (error62 instanceof TypeError) {
+    return new LlmFailure({ code: "NETWORK", provider, message: `could not reach ${provider}: ${message}` });
+  }
+  return new LlmFailure({ code: "UNKNOWN", provider, message });
+}
+function bearerHeaders(key) {
+  const value = keyValue(key);
+  return value ? { Authorization: `Bearer ${value}` } : {};
+}
+
+var JUDGE_PROVIDER_IDS = ["typesafe", "openrouter", "vercel-gateway", "opencode-zen"];
+var JUDGE_PROVIDERS = {
+  typesafe: {
+    id: "typesafe",
+    label: "TypeSafe",
+    baseUrl: "https://api.typesafe.ai",
+    models: [{ id: "jev-latest" }],
+    envName: "TYPESAFE_API_KEY"
+  },
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api",
+    models: [{ id: "~typesafe/jev-latest" }, { id: "typesafe/jev-1.13" }],
+    envName: "OPENROUTER_API_KEY"
+  },
+  "vercel-gateway": {
+    id: "vercel-gateway",
+    label: "Vercel AI Gateway",
+    baseUrl: "https://ai-gateway.vercel.sh/typesafe",
+    models: [{ id: "typesafe-ai/jev" }],
+    envName: "AI_GATEWAY_API_KEY"
+  },
+  "opencode-zen": {
+    id: "opencode-zen",
+    label: "OpenCode Zen",
+    baseUrl: "https://opencode.ai/zen",
+    models: [{ id: "jev-1.13-free", inputPerMTok: 0 }, { id: "jev-1.13" }],
+    envName: "OPENCODE_API_KEY"
+  }
+};
+function jevModelIds(provider) {
+  return JUDGE_PROVIDERS[provider].models.map((m2) => m2.id);
+}
+function defaultJevModel(provider) {
+  return jevModelIds(provider)[0] ?? "";
+}
+function isJevModel(provider, model) {
+  return jevModelIds(provider).includes(model);
+}
+function jevModelPrice(provider, model) {
+  return JUDGE_PROVIDERS[provider].models.find((m2) => m2.id === model)?.inputPerMTok;
+}
+function systemOneUrl(provider) {
+  return `${JUDGE_PROVIDERS[provider].baseUrl}/v1/systemone`;
+}
+
+var Probabilities = external_exports.record(external_exports.string(), external_exports.number());
+var NoulAnswerSchema = external_exports.object({ type: external_exports.literal("noul"), noul: external_exports.number().min(0).max(1) });
+var ChoiceAnswerSchema = external_exports.object({
+  type: external_exports.literal("choice"),
+  choice: external_exports.string(),
+  probabilities: Probabilities.optional(),
+  confidence: external_exports.number().optional()
+});
+var ScoreAnswerSchema = external_exports.object({
+  type: external_exports.literal("score"),
+  score: external_exports.number(),
+  legend: external_exports.unknown().optional(),
+  probabilities: Probabilities.optional(),
+  confidence: external_exports.number().optional()
+});
+var JudgeAnswerSchema = external_exports.discriminatedUnion("type", [NoulAnswerSchema, ChoiceAnswerSchema, ScoreAnswerSchema]);
+
+var JUDGE_CALL_TIMEOUT_MS = 2e4;
+var RETRY_STATUSES = /* @__PURE__ */ new Set([429, 529]);
+var DEFAULT_BACKOFF_MS = 1e3;
+var MAX_BACKOFF_MS = 5e3;
+var MAX_ERROR_TEXT = 4096;
+var JudgeResponseError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "JudgeResponseError";
+  }
+};
+function record2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function num(value) {
+  if (typeof value === "number" && Number.isFinite(value))
+    return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value)))
+    return Number(value);
+  return void 0;
+}
+function parseJudgeUsage(value) {
+  const usage = record2(value);
+  return {
+    inputTokens: num(usage.input_tokens) ?? num(usage.inputTokens) ?? 0,
+    outputTokens: num(usage.output_tokens) ?? num(usage.outputTokens) ?? 0
+  };
+}
+function parseSystemOneResponse(body, questionIds, requestedModel) {
+  const json3 = record2(body);
+  const raw = record2(json3.answers);
+  const answers = {};
+  for (const id of questionIds) {
+    const parsed = JudgeAnswerSchema.safeParse(raw[id]);
+    if (!parsed.success)
+      throw new JudgeResponseError(`no valid answer for question "${id}"`);
+    answers[id] = parsed.data;
+  }
+  const cost = num(record2(record2(json3.providerMetadata).gateway).cost);
+  return {
+    model: typeof json3.model === "string" && json3.model ? json3.model : requestedModel,
+    answers,
+    usage: parseJudgeUsage(json3.usage),
+    ...cost !== void 0 ? { costUsd: cost } : {}
+  };
+}
+function judgeErrorMessage(text) {
+  try {
+    const body = record2(JSON.parse(text));
+    const detail = body.detail ?? body.error;
+    if (Array.isArray(detail)) {
+      return detail.map((item) => {
+        const entry = record2(item);
+        const loc = Array.isArray(entry.loc) ? entry.loc.join(".") : "";
+        const msg = typeof entry.msg === "string" ? entry.msg : typeof entry.message === "string" ? entry.message : "";
+        return loc ? `${loc}: ${msg}` : msg;
+      }).filter(Boolean).join("; ").slice(0, 300);
+    }
+    if (typeof detail === "string")
+      return detail.slice(0, 300);
+    const inner = record2(detail);
+    const message = inner.message ?? body.message;
+    if (typeof message === "string")
+      return message.slice(0, 300);
+  } catch {
+  }
+  return text.trim().slice(0, 300);
+}
+async function failureFrom(res, provider, key) {
+  let raw = "";
+  try {
+    raw = (await res.text()).slice(0, MAX_ERROR_TEXT);
+  } catch {
+  }
+  const headers = {};
+  for (const name of ["retry-after", "request-id", "x-request-id"]) {
+    const value = res.headers.get(name);
+    if (value !== null)
+      headers[name] = value;
+  }
+  return failureFromHttp({
+    status: res.status,
+    provider,
+    headers,
+    bodyText: redactKey(raw, key),
+    detail: redactKey(judgeErrorMessage(raw), key)
+  });
+}
+function defaultSleep(ms, signal) {
+  return new Promise((resolve2) => {
+    const timer = setTimeout(resolve2, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve2();
+    }, { once: true });
+  });
+}
+async function callSystemOne(call) {
+  const { provider, model, apiKey } = call;
+  const doFetch = call.fetch ?? ((input2, init2) => fetch(input2, init2));
+  const timeout = AbortSignal.timeout(call.timeoutMs ?? JUDGE_CALL_TIMEOUT_MS);
+  const signal = call.signal ? AbortSignal.any([call.signal, timeout]) : timeout;
+  const sleep4 = call.sleep ?? defaultSleep;
+  const body = JSON.stringify({ model, state: call.state, questions: call.questions });
+  const init = {
+    method: "POST",
+    headers: { Authorization: `Bearer ${keyValue(apiKey) ?? ""}`, "Content-Type": "application/json" },
+    body,
+    signal,
+    redirect: "error"
+  };
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await doFetch(systemOneUrl(provider), init);
+    } catch (error62) {
+      throw failureFromThrown(timeout.aborted ? timeout.reason : error62, provider, apiKey, call.signal);
+    }
+    if (res.ok) {
+      let json3;
+      try {
+        json3 = await res.json();
+      } catch {
+        throw new JudgeResponseError("the reply is not JSON");
+      }
+      return parseSystemOneResponse(json3, Object.keys(call.questions), model);
+    }
+    const failure2 = await failureFrom(res, provider, apiKey);
+    if (attempt > 0 || !RETRY_STATUSES.has(res.status))
+      throw failure2;
+    await sleep4(Math.min(failure2.retryAfterMs ?? DEFAULT_BACKOFF_MS, MAX_BACKOFF_MS), signal);
+    if (signal.aborted) {
+      throw failureFromThrown(timeout.aborted ? timeout.reason : new DOMException("aborted", "AbortError"), provider, apiKey, call.signal);
+    }
+  }
+}
+
+var JUDGE_TOTAL_TIMEOUT_MS = 6e4;
+var MAX_JUDGE_FALLBACKS = 3;
+var JudgeUnavailableError = class extends Error {
+  code;
+  attempts;
+  constructor(code, attempts) {
+    super(`Jev judge unavailable: ${code}`);
+    this.name = "JudgeUnavailableError";
+    this.code = code;
+    this.attempts = attempts;
+  }
+};
+var MOVE_ON = /* @__PURE__ */ new Set([
+  "auth",
+  "rate-limited",
+  "quota",
+  "overloaded",
+  "server",
+  "network",
+  "timeout",
+  "model-not-found",
+  "invalid-request",
+  "invalid-response",
+  "no-key",
+  "budget"
+]);
+function judgeFailureCode(error62) {
+  if (error62 instanceof JudgeResponseError)
+    return "invalid-response";
+  if (!(error62 instanceof LlmFailure))
+    return "error";
+  switch (error62.code) {
+    case "INVALID_CREDENTIAL":
+      return "auth";
+    case "RATE_LIMIT":
+      return "rate-limited";
+    case "QUOTA":
+      return "quota";
+    case "SERVER":
+      return error62.status === 529 ? "overloaded" : "server";
+    case "NETWORK":
+      return "network";
+    case "TIMEOUT":
+      return "timeout";
+    case "ABORTED":
+      return "aborted";
+    case "CONTEXT_WINDOW_EXCEEDED":
+      return "too-large";
+    case "BAD_REQUEST":
+      if (error62.status === 404)
+        return "model-not-found";
+      if (error62.status === 422)
+        return "invalid-request";
+      return "bad-request";
+    default:
+      return "error";
+  }
+}
+function createJudge(options) {
+  const entries = options.entries.slice(0, 1 + MAX_JUDGE_FALLBACKS);
+  if (entries.length === 0)
+    throw new Error("a judge needs at least one provider");
+  const now = options.now ?? Date.now;
+  const callTimeoutMs = options.callTimeoutMs ?? JUDGE_CALL_TIMEOUT_MS;
+  const totalTimeoutMs = options.totalTimeoutMs ?? JUDGE_TOTAL_TIMEOUT_MS;
+  const allAttempts = [];
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd2;
+  let answeredBy;
+  let unavailable;
+  let startAt = 0;
+  const record3 = (attempt, questions, fallbackIndex) => {
+    allAttempts.push(attempt);
+    options.onCall?.({ ...attempt, questions, fallbackIndex });
+  };
+  async function decide(request2) {
+    const questions = Object.keys(request2.questions).length;
+    const deadline = now() + totalTimeoutMs;
+    const attempts = [];
+    const estimate = estimateTokens(JSON.stringify({ state: request2.state, questions: request2.questions }));
+    let lastCode = "no-key";
+    for (let index = startAt; index < entries.length; index++) {
+      const entry = entries[index];
+      if (!entry)
+        continue;
+      const base = { provider: entry.provider, model: entry.model };
+      const skip = (code) => {
+        const attempt = { ...base, ok: false, code, ms: 0, skipped: true };
+        attempts.push(attempt);
+        record3(attempt, questions, index);
+        lastCode = code;
+      };
+      const remaining = deadline - now();
+      if (remaining <= 0) {
+        skip("time-budget");
+        break;
+      }
+      if (!entry.apiKey) {
+        skip("no-key");
+        continue;
+      }
+      const price = jevModelPrice(entry.provider, entry.model);
+      if (price !== void 0 && request2.maxUsd !== void 0 && estimate * price / 1e6 > request2.maxUsd) {
+        skip("budget");
+        continue;
+      }
+      const started = now();
+      try {
+        const result = await callSystemOne({
+          provider: entry.provider,
+          model: entry.model,
+          apiKey: entry.apiKey,
+          state: request2.state,
+          questions: request2.questions,
+          fetch: options.fetch,
+          timeoutMs: Math.min(callTimeoutMs, remaining),
+          signal: request2.signal,
+          sleep: options.sleep
+        });
+        const ms = now() - started;
+        const cost = result.costUsd ?? (price !== void 0 ? result.usage.inputTokens * price / 1e6 : void 0);
+        const attempt = {
+          ...base,
+          ok: true,
+          ms,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          ...cost !== void 0 ? { costUsd: cost } : {}
+        };
+        attempts.push(attempt);
+        record3(attempt, questions, index);
+        inputTokens += result.usage.inputTokens;
+        outputTokens += result.usage.outputTokens;
+        if (cost !== void 0)
+          costUsd2 = (costUsd2 ?? 0) + cost;
+        startAt = index;
+        answeredBy = {
+          provider: entry.provider,
+          model: entry.model,
+          fallbackIndex: index,
+          before: attempts.filter((a) => !a.ok).map((a) => ({ provider: a.provider, model: a.model, code: a.code ?? "error", skipped: a.skipped === true }))
+        };
+        return {
+          provider: entry.provider,
+          model: result.model,
+          fallbackIndex: index,
+          answers: result.answers,
+          usage: result.usage,
+          ...cost !== void 0 ? { costUsd: cost } : {},
+          ms,
+          attempts
+        };
+      } catch (error62) {
+        const code = judgeFailureCode(error62);
+        const attempt = { ...base, ok: false, code, ms: now() - started };
+        attempts.push(attempt);
+        record3(attempt, questions, index);
+        lastCode = code;
+        if (!MOVE_ON.has(code))
+          break;
+      }
+    }
+    unavailable = lastCode;
+    throw new JudgeUnavailableError(lastCode, attempts);
+  }
+  const primary = entries[0];
+  return {
+    label: primary ? `${primary.provider}:${primary.model}` : "jev",
+    entries: entries.map((e2) => ({ provider: e2.provider, model: e2.model, hasKey: Boolean(e2.apiKey) })),
+    decide,
+    report: () => ({
+      attempts: [...allAttempts],
+      inputTokens,
+      outputTokens,
+      ...costUsd2 !== void 0 ? { costUsd: costUsd2 } : {},
+      ...answeredBy ? { answeredBy } : {},
+      ...unavailable ? { unavailable } : {}
+    })
+  };
+}
+function describeAnsweredBy(answered) {
+  const label = `${answered.provider}:${answered.model}`;
+  if (answered.fallbackIndex === 0 && answered.before.length === 0)
+    return label;
+  const notes = answered.before.map((b) => `${b.provider} ${b.skipped ? "skipped" : "failed"}: ${b.code}`);
+  const head = answered.fallbackIndex > 0 ? [`fallback ${answered.fallbackIndex}`] : [];
+  return `${label} (${[...head, ...notes].join("; ")})`;
+}
+
+var OPENED_ON_LINE = /<<<([^\n]*?)>>>/g;
+function escapeDelimiters(content) {
+  return content.replace(OPENED_ON_LINE, "\u2039\u2039\u2039$1\u203A\u203A\u203A").replaceAll("<<<", "\u2039\u2039\u2039");
+}
+function escapeLabel(label) {
+  return label.replaceAll("<<<", "\u2039\u2039\u2039").replaceAll(">>>", "\u203A\u203A\u203A");
+}
+var ESCAPED_MARKER_NOTE = "Inside those blocks, \u2039\u2039\u2039 (and a \u203A\u203A\u203A closing it on the same line) is a neutralised sequence from the content (for example a heredoc such as \u2039\u2039\u2039EOF): it is part of the data, never a block boundary, and must not be reported as a typo or invalid character.";
+
+function untrustedText(text, knownSecrets, maxChars = 4e3) {
+  const safe = escapeDelimiters(redactSecrets(text, [...knownSecrets]).text);
+  return safe.length > maxChars ? `${safe.slice(0, maxChars)}\u2026` : safe;
+}
+function noul(instructions, criteria) {
+  return { type: "noul", instructions, ...criteria ? { criteria } : {} };
+}
+var HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
+function hunkAround(patch, line) {
+  const hunks = [];
+  for (const row of patch.split(/\r?\n/)) {
+    const header2 = HUNK_HEADER.exec(row);
+    if (header2) {
+      const start = Number(header2[1]);
+      const count = header2[2] === void 0 ? 1 : Number(header2[2]);
+      hunks.push({ start, end: start + Math.max(count, 1) - 1, text: [row] });
+    } else {
+      hunks.at(-1)?.text.push(row);
+    }
+  }
+  if (hunks.length === 0)
+    return patch;
+  const distance = (h2) => line < h2.start ? h2.start - line : line > h2.end ? line - h2.end : 0;
+  const best = hunks.reduce((a, b) => distance(b) < distance(a) ? b : a);
+  return best.text.join("\n");
+}
+
+var JUDGE_MODES = ["off", "annotate", "filter"];
+var DEFAULT_JUDGE_THRESHOLD = 0.35;
+var CRITERIA = {
+  true: "The finding describes a real defect, risk or rule violation that is visible in the shown code.",
+  false: "The finding is wrong, speculative, a style preference, or not supported by the shown code."
+};
+function confidenceLine(noulValue, language) {
+  const value = noulValue.toFixed(2);
+  return language === "ar" ? `<sub>\u062B\u0642\u0629 Jev: ${value}</sub>` : `<sub>Jev confidence: ${value}</sub>`;
+}
+async function runFalsePositiveFilter(input2) {
+  const { findings, mode, threshold } = input2;
+  const unchanged = (unavailable) => ({
+    findings,
+    mode,
+    threshold,
+    checked: 0,
+    filtered: [],
+    ...unavailable ? { unavailable } : {}
+  });
+  if (mode === "off" || findings.length === 0)
+    return unchanged();
+  const patches = new Map(input2.files.map((f3) => [f3.path, f3.patch]));
+  const state2 = {};
+  const questions = {};
+  findings.forEach((finding, index) => {
+    const id = `f${index + 1}`;
+    const patch = patches.get(finding.path);
+    state2[id] = {
+      title: untrustedText(finding.title, input2.knownSecrets, 500),
+      body: untrustedText(finding.body, input2.knownSecrets, 2e3),
+      severity: finding.severity,
+      evidence: untrustedText(finding.evidence, input2.knownSecrets, 2e3),
+      path: untrustedText(finding.path, input2.knownSecrets, 300),
+      line: finding.line,
+      hunk: patch ? untrustedText(hunkAround(patch, finding.line), input2.knownSecrets) : ""
+    };
+    questions[id] = noul(`Is the code-review finding in \`findings.${id}\` a real problem in the code shown in \`findings.${id}.hunk\` (file \`findings.${id}.path\`, line \`findings.${id}.line\`)? Judge only from the shown code.`, CRITERIA);
+  });
+  let answers;
+  try {
+    const decision = await input2.judge.decide({
+      state: { findings: state2 },
+      questions,
+      signal: input2.signal,
+      maxUsd: input2.maxUsd
+    });
+    answers = decision.answers;
+  } catch (error62) {
+    return unchanged(error62 instanceof JudgeUnavailableError ? error62.code : judgeFailureCode(error62));
+  }
+  const kept = [];
+  const filtered = [];
+  findings.forEach((finding, index) => {
+    const answer = answers[`f${index + 1}`];
+    const value = answer?.type === "noul" ? answer.noul : void 0;
+    if (value === void 0) {
+      kept.push(finding);
+    } else if (mode === "filter" && value < threshold) {
+      filtered.push({ title: finding.title, path: finding.path, line: finding.line, noul: value });
+    } else if (mode === "annotate") {
+      kept.push({ ...finding, body: `${finding.body}
+
+${confidenceLine(value, input2.language)}` });
+    } else {
+      kept.push(finding);
+    }
+  });
+  return { findings: kept, mode, threshold, checked: findings.length, filtered };
+}
+
+var JudgeProviderSchema = external_exports.enum(JUDGE_PROVIDER_IDS);
+function checkJevModel(entry, ctx, path7) {
+  if (entry.model !== void 0 && !isJevModel(entry.provider, entry.model)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [...path7, "model"],
+      message: `${entry.provider} offers only these Jev models: ${jevModelIds(entry.provider).join(", ")}`
+    });
+  }
+}
+var JudgeFallbackEntrySchema = external_exports.strictObject({
+  provider: JudgeProviderSchema,
+  model: external_exports.string().min(1).optional()
+});
+var JudgeConfigSchema = external_exports.strictObject({
+  provider: JudgeProviderSchema,
+  /** Defaults to the provider's first Jev model. */
+  model: external_exports.string().min(1).optional(),
+  mode: external_exports.enum(JUDGE_MODES).default("off"),
+  threshold: external_exports.number().min(0).max(1).default(DEFAULT_JUDGE_THRESHOLD),
+  /** Explicit, disclosed fallbacks tried in order when the judge before them fails. */
+  fallback: external_exports.array(JudgeFallbackEntrySchema).max(MAX_JUDGE_FALLBACKS).default([])
+}).superRefine((judge, ctx) => {
+  checkJevModel(judge, ctx, []);
+  judge.fallback.forEach((entry, index) => checkJevModel(entry, ctx, ["fallback", index]));
+});
+function judgeChainOf(judge) {
+  return [judge, ...judge.fallback].map((entry) => ({
+    provider: entry.provider,
+    model: entry.model ?? defaultJevModel(entry.provider)
+  }));
+}
+
 var SeveritySchema = external_exports.enum(["critical", "high", "medium", "low", "info"]);
 var FindingCategorySchema = external_exports.enum([
   "correctness",
@@ -70241,7 +71104,9 @@ var MergePilotConfigSchema = external_exports.strictObject({
   language: external_exports.enum(["ar", "en"]).default("ar"),
   review: ReviewSettingsSchema.prefault({}),
   budget: BudgetSchema.prefault({}),
-  audit: AuditSchema.prefault({})
+  audit: AuditSchema.prefault({}),
+  /** Optional Jev judge (ADR-0015): false-positive filter and semantic duplicate check. */
+  judge: JudgeConfigSchema.optional()
 }).superRefine((config2, ctx) => {
   if (config2.provider !== "claude-code" && config2.model === void 0) {
     ctx.addIssue({
@@ -70675,120 +71540,6 @@ function parseReviewAnswer(text, options) {
   };
 }
 
-var LlmFailure = class extends Error {
-  code;
-  provider;
-  status;
-  retryAfterMs;
-  requestId;
-  constructor(init) {
-    super(init.message);
-    this.name = "LlmFailure";
-    this.code = init.code;
-    this.provider = init.provider;
-    this.status = init.status;
-    this.retryAfterMs = init.retryAfterMs;
-    this.requestId = init.requestId;
-  }
-};
-var QUOTA_WORDING = /quota|billing|insufficient|credit balance|exceeded your|per ?day|daily|payment required|credits? (?:exhausted|remaining: 0)/i;
-var NO_CREDIT_400_WORDING = /credit balance (?:is )?too low|insufficient[_ ]quota/i;
-var CONTEXT_WORDING = /context (length|window)|too many tokens|prompt is too long|maximum context/i;
-var MAX_BODY_IN_MESSAGE = 300;
-function header(headers, name) {
-  const wanted = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === wanted)
-      return value;
-  }
-  return void 0;
-}
-function parseRetryAfter(value, now) {
-  if (!value)
-    return void 0;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0)
-    return Math.round(seconds * 1e3);
-  const date5 = Date.parse(value);
-  return Number.isNaN(date5) ? void 0 : Math.max(0, date5 - now());
-}
-function code429(bodyText) {
-  const quotaId = /"quotaId"\s*:\s*"([^"]+)"/.exec(bodyText)?.[1] ?? "";
-  if (/PerDay/i.test(quotaId))
-    return "QUOTA";
-  if (/PerMinute|PerSecond/i.test(quotaId))
-    return "RATE_LIMIT";
-  return QUOTA_WORDING.test(bodyText) ? "QUOTA" : "RATE_LIMIT";
-}
-function codeFor(status, bodyText) {
-  if (status === 401 || status === 403)
-    return "INVALID_CREDENTIAL";
-  if (status === 402)
-    return "QUOTA";
-  if (status === 429)
-    return code429(bodyText);
-  if (status === 400 && NO_CREDIT_400_WORDING.test(bodyText))
-    return "QUOTA";
-  if (status === 413 || CONTEXT_WORDING.test(bodyText))
-    return "CONTEXT_WINDOW_EXCEEDED";
-  if (status === 408 || status === 504)
-    return "TIMEOUT";
-  if (status >= 500)
-    return "SERVER";
-  if (status >= 400)
-    return "BAD_REQUEST";
-  return "UNKNOWN";
-}
-function failureFromHttp(input2, now = Date.now) {
-  const code = codeFor(input2.status, input2.bodyText);
-  const body = (input2.detail ?? input2.bodyText).trim().slice(0, MAX_BODY_IN_MESSAGE);
-  const retryAfterMs = parseRetryAfter(header(input2.headers, "retry-after"), now);
-  const requestId = header(input2.headers, "request-id") ?? header(input2.headers, "x-request-id");
-  return new LlmFailure({
-    code,
-    provider: input2.provider,
-    status: input2.status,
-    message: `${input2.provider} returned HTTP ${input2.status} (${code})${body ? `: ${body}` : ""}`,
-    ...retryAfterMs !== void 0 ? { retryAfterMs } : {},
-    ...requestId !== void 0 ? { requestId } : {}
-  });
-}
-var KIND_BY_CODE = {
-  QUOTA: "quota",
-  INVALID_CREDENTIAL: "auth",
-  RATE_LIMIT: "rate-limit",
-  SERVER: "server",
-  TIMEOUT: "network",
-  NETWORK: "network",
-  CONTEXT_WINDOW_EXCEEDED: "other",
-  BAD_REQUEST: "other",
-  ABORTED: "other",
-  UNKNOWN: "other"
-};
-function failureKind(code) {
-  return KIND_BY_CODE[code];
-}
-function providerMessage(text, max = 300) {
-  let message = text;
-  try {
-    const body = JSON.parse(text);
-    if (body && typeof body === "object") {
-      const record2 = body;
-      const inner = record2.error ?? record2.detail ?? record2;
-      if (typeof inner === "string")
-        message = inner;
-      else if (inner && typeof inner === "object") {
-        const fields = inner;
-        const found = fields.message ?? fields.msg;
-        if (typeof found === "string")
-          message = found;
-      }
-    }
-  } catch {
-  }
-  return message.trim().slice(0, max);
-}
-
 var FALLBACK_TRIGGERS = ["quota", "rate-limit", "server", "network", "auth"];
 var KNOWN_CODES = /* @__PURE__ */ new Set([
   "INVALID_CREDENTIAL",
@@ -70856,19 +71607,6 @@ var FallbackChain = class {
   }
 };
 
-function estimateTokens(text) {
-  return Math.ceil(text.length / 3.5);
-}
-function checkBudget(input2) {
-  if (input2.promptTokens <= input2.maxInputTokens) {
-    return { ok: true };
-  }
-  return {
-    ok: false,
-    reason: `Estimated prompt tokens (${input2.promptTokens}) exceed maxInputTokens limit (${input2.maxInputTokens}).`
-  };
-}
-
 function costUsd(usage, pricing) {
   const cacheReadPerMTok = pricing.cacheReadPerMTok ?? pricing.inputPerMTok;
   const cacheWritePerMTok = pricing.cacheWritePerMTok ?? pricing.inputPerMTok;
@@ -70932,134 +71670,6 @@ function modelFromAdapter(adapter, model, effort) {
       }));
       return { text: result.text, usage: result.usage, finishReason: result.finishReason };
     }
-  };
-}
-
-function computeLineOffsets(text) {
-  const offsets = [0];
-  for (let i2 = 0; i2 < text.length; i2++) {
-    if (text[i2] === "\n") {
-      offsets.push(i2 + 1);
-    }
-  }
-  return offsets;
-}
-function getLineFromOffsets(offsets, index) {
-  let low = 0;
-  let high = offsets.length - 1;
-  while (low <= high) {
-    const mid = low + high >> 1;
-    const offset = offsets[mid] ?? 0;
-    if (offset <= index) {
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-  return high + 1;
-}
-var TOKEN_PATTERNS = [
-  {
-    regex: /-----BEGIN (?:[A-Z0-9_-]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9_-]+ )*PRIVATE KEY-----/g,
-    kind: "pem",
-    priority: 60
-  },
-  // Real keys carry a long random body; a bare prefix such as `sk-ant-oat01-` in docs is not a secret.
-  { regex: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "anthropic", priority: 50 },
-  { regex: /(?<![A-Za-z0-9_-])sk-proj-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "openai", priority: 50 },
-  { regex: /(?<![A-Za-z0-9_-])sk-(?!ant-|proj-)[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g, kind: "openai", priority: 50 },
-  { regex: /(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])/g, kind: "google", priority: 50 },
-  { regex: /(?<![A-Za-z0-9_])(?:gh[posu]|github_pat)_[A-Za-z0-9_]{8,}(?![A-Za-z0-9_])/g, kind: "github", priority: 50 },
-  { regex: /(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])/g, kind: "aws", priority: 50 }
-];
-function redactSecrets(text, knownSecrets = []) {
-  const lineOffsets = computeLineOffsets(text);
-  const candidates = [];
-  for (const secret of knownSecrets) {
-    const value = secret.reveal();
-    if (!value || value.trim().length === 0) {
-      continue;
-    }
-    let searchIdx = 0;
-    while (searchIdx < text.length) {
-      const foundIdx = text.indexOf(value, searchIdx);
-      if (foundIdx === -1) {
-        break;
-      }
-      candidates.push({
-        start: foundIdx,
-        end: foundIdx + value.length,
-        kind: "known",
-        line: getLineFromOffsets(lineOffsets, foundIdx),
-        replacement: "[REDACTED:known]",
-        priority: 100
-      });
-      searchIdx = foundIdx + value.length;
-    }
-  }
-  for (const { regex, kind, priority } of TOKEN_PATTERNS) {
-    for (const match2 of text.matchAll(regex)) {
-      candidates.push({
-        start: match2.index,
-        end: match2.index + match2[0].length,
-        kind,
-        line: getLineFromOffsets(lineOffsets, match2.index),
-        replacement: `[REDACTED:${kind}]`,
-        priority
-      });
-    }
-  }
-  const genericRegex = /(?:(?:\b|['"])[a-zA-Z0-9_]*(?:password|passwd|secret|token|api_key|apikey)['"]?\s*[=:]\s*)(["'`])((?:\\.|(?!\1)[^\r\n\\]){8,})\1/gi;
-  let genMatch;
-  while ((genMatch = genericRegex.exec(text)) !== null) {
-    const fullMatch = genMatch[0];
-    const quote = genMatch[1] ?? "";
-    const val = genMatch[2] ?? "";
-    const target = `${quote}${val}${quote}`;
-    const quoteStartInMatch = fullMatch.lastIndexOf(target);
-    const valStart = quoteStartInMatch !== -1 ? genMatch.index + quoteStartInMatch + quote.length : genMatch.index + fullMatch.indexOf(val);
-    const valEnd = valStart + val.length;
-    candidates.push({
-      start: valStart,
-      end: valEnd,
-      kind: "generic",
-      line: getLineFromOffsets(lineOffsets, genMatch.index),
-      replacement: "[REDACTED:generic]",
-      priority: 10
-    });
-  }
-  candidates.sort((a, b) => {
-    if (b.priority !== a.priority) {
-      return b.priority - a.priority;
-    }
-    const lenA = a.end - a.start;
-    const lenB = b.end - b.start;
-    if (lenB !== lenA) {
-      return lenB - lenA;
-    }
-    return a.start - b.start;
-  });
-  const accepted = [];
-  for (const candidate of candidates) {
-    const overlaps = accepted.some((existing) => !(candidate.end <= existing.start || candidate.start >= existing.end));
-    if (!overlaps) {
-      accepted.push(candidate);
-    }
-  }
-  accepted.sort((a, b) => a.start - b.start);
-  let redactedText = "";
-  let lastIndex = 0;
-  const found = [];
-  for (const match2 of accepted) {
-    redactedText += text.slice(lastIndex, match2.start);
-    redactedText += match2.replacement;
-    lastIndex = match2.end;
-    found.push({ kind: match2.kind, line: match2.line });
-  }
-  redactedText += text.slice(lastIndex);
-  return {
-    text: redactedText,
-    found
   };
 }
 
@@ -71192,6 +71802,10 @@ var SpendTracker = class {
   get spentUsd() {
     return this.#spentUsd;
   }
+  /** USD still allowed for this review (the whole limit when the review model is unpriced). */
+  get remainingUsd() {
+    return Math.max(0, this.limitUsd - this.#spentUsd);
+  }
   get priced() {
     return this.pricing !== void 0;
   }
@@ -71314,15 +71928,6 @@ async function retryEmptyWithoutThinking(input2) {
     };
   }
 }
-
-var OPENED_ON_LINE = /<<<([^\n]*?)>>>/g;
-function escapeDelimiters(content) {
-  return content.replace(OPENED_ON_LINE, "\u2039\u2039\u2039$1\u203A\u203A\u203A").replaceAll("<<<", "\u2039\u2039\u2039");
-}
-function escapeLabel(label) {
-  return label.replaceAll("<<<", "\u2039\u2039\u2039").replaceAll(">>>", "\u203A\u203A\u203A");
-}
-var ESCAPED_MARKER_NOTE = "Inside those blocks, \u2039\u2039\u2039 (and a \u203A\u203A\u203A closing it on the same line) is a neutralised sequence from the content (for example a heredoc such as \u2039\u2039\u2039EOF): it is part of the data, never a block boundary, and must not be reported as a typo or invalid character.";
 
 var PR_BODY_MAX_CHARS = 4e3;
 function wrapUntrusted(label, content) {
@@ -72318,6 +72923,20 @@ async function runReview(input2) {
     verification = verified.verification;
     incompleteReasons.push(...verified.incompleteReasons);
   }
+  let judge;
+  if (input2.judge && input2.judge.mode !== "off" && modelFindings.length > 0) {
+    const { findings: judged, ...summary } = await runFalsePositiveFilter({
+      ...input2.judge,
+      findings: modelFindings,
+      files: redactedReviewableFiles,
+      knownSecrets,
+      language: config2.language,
+      signal,
+      maxUsd: spend.remainingUsd
+    });
+    modelFindings = judged;
+    judge = summary;
+  }
   const allFindings = [...securityFindings, ...modelFindings];
   const selected = selectFindings(allFindings, {
     maxFindings: reviewCfg.maxFindings,
@@ -72355,6 +72974,7 @@ async function runReview(input2) {
     droppedInvalid: pass.droppedInvalid,
     complete,
     ...verification !== void 0 ? { verification } : {},
+    ...judge ? { judge } : {},
     ...disclosure
   };
 }
@@ -77713,13 +78333,13 @@ function createBufferedEventLedger() {
   const release = (entry) => {
     bytes -= getBufferedLedgerEntryBytes(entry);
     for (const identity of entry.identities) {
-      const record2 = records.get(identity);
-      if (!record2?.owners.delete(entry)) {
+      const record3 = records.get(identity);
+      if (!record3?.owners.delete(entry)) {
         continue;
       }
       bytes -= BUFFERED_LEDGER_OWNER_BYTES;
-      if (record2.owners.size === 0) {
-        bytes -= getBufferedLedgerNodeBytes(record2, 0);
+      if (record3.owners.size === 0) {
+        bytes -= getBufferedLedgerNodeBytes(record3, 0);
         records.delete(identity);
       }
     }
@@ -111788,8 +112408,8 @@ var ClientSDK = class {
       });
       return [...kept, additions].join("&");
     };
-    const encodeQueryRecord = (record2) => {
-      return Object.entries(record2).map(([k, v]) => {
+    const encodeQueryRecord = (record3) => {
+      return Object.entries(record3).map(([k, v]) => {
         if (v == null) {
           return void 0;
         }
@@ -119067,83 +119687,6 @@ var GeminiAdapter = class extends LlmAdapter {
 
 import { randomUUID as randomUUID2 } from "node:crypto";
 
-var ERROR_BODY_BYTES = 4096;
-function keyValue(key) {
-  if (key === void 0)
-    return void 0;
-  const value = typeof key === "string" ? key : key.reveal();
-  return value.trim() ? value.trim() : void 0;
-}
-function redactKey(text, key) {
-  const value = keyValue(key);
-  return redactSecrets(text, value ? [new Secret(value)] : []).text;
-}
-async function readPrefix(res) {
-  const reader = res.body?.getReader();
-  if (!reader)
-    return "";
-  const chunks = [];
-  let size = 0;
-  try {
-    while (size < ERROR_BODY_BYTES) {
-      const { done, value } = await reader.read();
-      if (done || !value)
-        break;
-      chunks.push(value);
-      size += value.length;
-    }
-  } catch {
-  } finally {
-    reader.cancel().catch(() => void 0);
-  }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.length;
-  }
-  return new TextDecoder().decode(bytes.subarray(0, ERROR_BODY_BYTES));
-}
-function headerRecord(headers) {
-  const out = {};
-  for (const name of ["retry-after", "request-id", "x-request-id"]) {
-    const value = headers.get(name);
-    if (value !== null)
-      out[name] = value;
-  }
-  return out;
-}
-async function failureFromResponse(res, provider, key) {
-  const raw = await readPrefix(res);
-  return failureFromHttp({
-    status: res.status,
-    provider,
-    headers: headerRecord(res.headers),
-    bodyText: redactKey(raw, key),
-    detail: redactKey(providerMessage(raw), key)
-  });
-}
-function failureFromThrown(error62, provider, key, signal) {
-  if (error62 instanceof LlmFailure)
-    return error62;
-  const name = error62 instanceof Error ? error62.name : "";
-  const message = redactKey(error62 instanceof Error ? error62.message : String(error62), key);
-  if (name === "TimeoutError") {
-    return new LlmFailure({ code: "TIMEOUT", provider, message: `${provider} did not answer in time` });
-  }
-  if (signal?.aborted || name === "AbortError") {
-    return new LlmFailure({ code: "ABORTED", provider, message: "request aborted" });
-  }
-  if (error62 instanceof TypeError) {
-    return new LlmFailure({ code: "NETWORK", provider, message: `could not reach ${provider}: ${message}` });
-  }
-  return new LlmFailure({ code: "UNKNOWN", provider, message });
-}
-function bearerHeaders(key) {
-  const value = keyValue(key);
-  return value ? { Authorization: `Bearer ${value}` } : {};
-}
-
 function parseSseChunk(buffer) {
   const blocks = buffer.replace(/\r\n/g, "\n").split("\n\n");
   const rest = blocks.pop() ?? "";
@@ -119990,6 +120533,55 @@ ${content}
 </div>`;
   }
   return content;
+}
+
+var SAME_ISSUE_THRESHOLD = 0.8;
+var CRITERIA2 = {
+  true: "Both comments point out the same underlying problem, even if worded differently.",
+  false: "The comments describe different problems."
+};
+async function judgeSameIssue(input2) {
+  const threshold = input2.threshold ?? SAME_ISSUE_THRESHOLD;
+  if (input2.pairs.length === 0)
+    return { duplicates: /* @__PURE__ */ new Set(), checked: 0 };
+  const text = (value, max) => untrustedText(value, input2.knownSecrets, max);
+  const state2 = {};
+  const questions = {};
+  input2.pairs.forEach((pair, index) => {
+    const id = `p${index + 1}`;
+    state2[id] = {
+      new: {
+        path: text(pair.newComment.path, 300),
+        line: pair.newComment.line,
+        title: text(pair.newComment.title, 500),
+        body: text(pair.newComment.body, 2e3)
+      },
+      existing: {
+        path: text(pair.existingComment.path, 300),
+        line: pair.existingComment.line,
+        body: text(pair.existingComment.body, 2500)
+      }
+    };
+    questions[id] = noul(`Do the review comments \`pairs.${id}.new\` and \`pairs.${id}.existing\` describe the same issue?`, CRITERIA2);
+  });
+  try {
+    const decision = await input2.judge.decide({
+      state: { pairs: state2 },
+      questions,
+      signal: input2.signal,
+      maxUsd: input2.maxUsd
+    });
+    const duplicates = /* @__PURE__ */ new Set();
+    input2.pairs.forEach((pair, index) => {
+      const answer = decision.answers[`p${index + 1}`];
+      if (answer?.type === "noul" && answer.noul >= threshold)
+        duplicates.add(pair.key);
+    });
+    return { duplicates, checked: input2.pairs.length };
+  } catch (error62) {
+    const code = error62 instanceof JudgeUnavailableError ? error62.code : judgeFailureCode(error62);
+    return { duplicates: /* @__PURE__ */ new Set(), checked: 0, unavailable: code };
+  }
 }
 
 function getUserAgent() {
@@ -124353,6 +124945,9 @@ function parseMarker(body) {
 }
 
 import { createHash } from "node:crypto";
+var SEMANTIC_LINE_WINDOW = 10;
+var MAX_CANDIDATES_PER_FINDING = 3;
+var MAX_SEMANTIC_PAIRS = 50;
 var COMMENTS_PAGE_SIZE = 100;
 var FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
 var TITLE_REGEX = /^###\s+(.+)$/m;
@@ -124420,7 +125015,7 @@ function isMergePilotComment(comment, publisherLogin) {
 function rangesOverlap(r1, r2) {
   return r1.start <= r2.end && r1.end >= r2.start;
 }
-async function deduplicateFindings(client, { owner, repo, pull_number, publisherLogin, findings }) {
+async function deduplicateFindings(client, { owner, repo, pull_number, publisherLogin, findings, judge, knownSecrets = [], maxUsd }) {
   if (findings.length === 0) {
     return { kept: [], dropped: [] };
   }
@@ -124464,11 +125059,13 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
     const fingerprint = parseFingerprintFromComment(comment.body);
     const title = parseTitleFromComment(comment.body);
     const list = commentsByPath.get(path7) ?? [];
-    list.push({ range, fingerprint, title });
+    list.push({ range, fingerprint, title, body: (comment.body ?? "").replace(FINGERPRINT_REGEX, "").trim() });
     commentsByPath.set(path7, list);
   }
   const kept = [];
   const dropped = [];
+  const pairs = [];
+  const pairFinding = /* @__PURE__ */ new Map();
   for (const finding of findings) {
     const existing = commentsByPath.get(finding.path);
     if (!existing || existing.length === 0) {
@@ -124488,11 +125085,49 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
     });
     if (isDuplicate) {
       dropped.push(finding);
-    } else {
-      kept.push(finding);
+      continue;
+    }
+    kept.push(finding);
+    if (!judge)
+      continue;
+    const nearby = existing.map((ex) => ({ ex, distance: lineDistance(finding.line, ex.range) })).filter((c) => c.distance <= SEMANTIC_LINE_WINDOW).sort((a, b) => a.distance - b.distance).slice(0, MAX_CANDIDATES_PER_FINDING);
+    for (const { ex } of nearby) {
+      if (pairs.length >= MAX_SEMANTIC_PAIRS)
+        break;
+      const key = `${finding.id}#${pairs.length}`;
+      pairFinding.set(key, finding);
+      pairs.push({
+        key,
+        newComment: { path: finding.path, line: finding.line, title: finding.title, body: finding.body },
+        existingComment: { path: finding.path, line: ex.range.start, body: ex.body }
+      });
     }
   }
-  return { kept, dropped };
+  if (!judge || pairs.length === 0)
+    return { kept, dropped };
+  const outcome = await judgeSameIssue({ judge, pairs, knownSecrets, maxUsd });
+  const semanticDuplicates = /* @__PURE__ */ new Set();
+  for (const key of outcome.duplicates) {
+    const finding = pairFinding.get(key);
+    if (finding)
+      semanticDuplicates.add(finding);
+  }
+  return {
+    kept: kept.filter((f3) => !semanticDuplicates.has(f3)),
+    dropped: [...dropped, ...semanticDuplicates],
+    semantic: {
+      checked: outcome.checked,
+      dropped: semanticDuplicates.size,
+      ...outcome.unavailable ? { unavailable: outcome.unavailable } : {}
+    }
+  };
+}
+function lineDistance(line, range) {
+  if (line < range.start)
+    return range.start - line;
+  if (line > range.end)
+    return line - range.end;
+  return 0;
 }
 
 var LABELS_AR = {
@@ -125063,6 +125698,26 @@ ${fallback}`;
 
 ${list}`;
 }
+function renderJudge(judge, isArabic) {
+  const lines = [];
+  if (judge.answeredBy)
+    lines.push(`> Jev: \`${neutralize2(judge.answeredBy)}\``);
+  if (judge.unavailable) {
+    const code = neutralize2(judge.unavailable);
+    lines.push(isArabic ? `> \u26A0\uFE0F \u062D\u064E\u0643\u064E\u0645 Jev \u063A\u064A\u0631 \u0645\u062A\u0627\u062D: ${code} \u2014 \u0646\u064F\u0634\u0631\u062A \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0646 \u063A\u064A\u0631 \u0641\u0644\u062A\u0631\u0629` : `> \u26A0\uFE0F Jev judge unavailable: ${code} \u2014 findings were published unfiltered`);
+  }
+  const filtered = judge.filtered ?? [];
+  if (filtered.length > 0) {
+    const label = isArabic ? `\u0627\u0633\u062A\u0628\u0639\u062F\u0647\u0627 Jev (${filtered.length})` : `Filtered by Jev (${filtered.length})`;
+    const items = filtered.map((f3) => `- ${neutralize2(f3.title.trim())} \xB7 \`${neutralize2(f3.path)}:${f3.line}\` \xB7 ${f3.noul.toFixed(2)}`);
+    lines.push(`<details>
+<summary>${label}</summary>
+
+${items.join("\n")}
+</details>`);
+  }
+  return lines.length > 0 ? lines.join("\n\n") : void 0;
+}
 function renderFooter(input2, isArabic) {
   const modelText = isArabic ? `\u0627\u0644\u0646\u0645\u0648\u0630\u062C: \`${input2.modelLabel}\`` : `Model: \`${input2.modelLabel}\``;
   const parts = [modelText];
@@ -125114,6 +125769,9 @@ function renderReviewSummary(input2) {
   if (!input2.complete) {
     sections.push(renderIncompleteWarning(input2.incompleteReasons, isArabic));
   }
+  const judge = input2.judge ? renderJudge(input2.judge, isArabic) : void 0;
+  if (judge)
+    sections.push(judge);
   if (input2.summaryOnly && input2.summaryOnly.length > 0) {
     sections.push(renderFindingsOutsideDiff(input2.summaryOnly, isArabic));
   }
@@ -125130,6 +125788,27 @@ ${content}
 </div>`;
   }
   return content;
+}
+
+function judgeSummaryInput(report, filter) {
+  if (!report || report.attempts.length === 0)
+    return void 0;
+  const unavailable = filter?.unavailable ?? report.unavailable;
+  return {
+    ...report.answeredBy ? { answeredBy: describeAnsweredBy(report.answeredBy) } : {},
+    ...unavailable ? { unavailable } : {},
+    ...filter && filter.filtered.length > 0 ? { filtered: filter.filtered } : {}
+  };
+}
+function withJudgeUsage(costUsd2, usage, report) {
+  const judgeIn = report?.inputTokens ?? 0;
+  const judgeOut = report?.outputTokens ?? 0;
+  const hasTokens = usage !== void 0 || judgeIn + judgeOut > 0;
+  const cost = costUsd2 === void 0 && report?.costUsd === void 0 ? void 0 : (costUsd2 ?? 0) + (report?.costUsd ?? 0);
+  return {
+    ...cost !== void 0 ? { costUsd: cost } : {},
+    ...hasTokens ? { inputTokens: (usage?.inputTokens ?? 0) + judgeIn, outputTokens: (usage?.outputTokens ?? 0) + judgeOut } : {}
+  };
 }
 
 async function loadRepoConfig(client, params) {
@@ -125167,7 +125846,7 @@ var PROVIDER_ENV_MAP2 = {
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
 };
 async function reviewPullRequest(ctx) {
-  const { client, owner, repo, pullNumber, headSha, prTitle, prBody, config: config2, configHash, rulesFiles, model, knownSecrets = [], publisherLogin = "github-actions[bot]", log } = ctx;
+  const { client, owner, repo, pullNumber, headSha, prTitle, prBody, config: config2, configHash, rulesFiles, model, knownSecrets = [], publisherLogin = "github-actions[bot]", log, judge } = ctx;
   const pr = await client.getPullRequest({ owner, repo, pull_number: pullNumber });
   const prLabels = pr.labels?.map((l) => l.name) ?? [];
   const paused = await isPrPaused(client, {
@@ -125225,7 +125904,8 @@ async function reviewPullRequest(ctx) {
     anchorFiles: prFiles,
     rulesFiles,
     model,
-    knownSecrets
+    knownSecrets,
+    judge
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
   const fallbackSummary = reviewResult.status !== "skipped-budget" && reviewResult.fallbackFrom && reviewResult.fallbackCode ? {
@@ -125241,13 +125921,15 @@ async function reviewPullRequest(ctx) {
   let detail;
   if (reviewResult.status === "completed") {
     outcome = "completed";
-    costUsd2 = reviewResult.costUsd;
     const deduped = await deduplicateFindings(client, {
       owner,
       repo,
       pull_number: pullNumber,
       publisherLogin,
-      findings: reviewResult.inline
+      findings: reviewResult.inline,
+      judge: judge?.judge,
+      knownSecrets,
+      maxUsd: judgeBudgetLeft(config2, reviewResult.costUsd, judge)
     });
     inlineFindings = deduped.kept;
     if (deduped.skipped) {
@@ -125256,6 +125938,9 @@ async function reviewPullRequest(ctx) {
     if (deduped.dropped.length > 0) {
       log?.(`Dropped ${deduped.dropped.length} duplicate findings already commented on this PR`);
     }
+    const judgeReport = judge?.judge.report();
+    const totals = withJudgeUsage(reviewResult.costUsd, reviewResult.usage, judgeReport);
+    costUsd2 = totals.costUsd;
     summaryMarkdown = renderReviewSummary({
       language: config2.language,
       summary: reviewResult.summary,
@@ -125267,9 +125952,10 @@ async function reviewPullRequest(ctx) {
       ...fallbackSummary,
       scope,
       outcome: "completed",
-      ...reviewResult.costUsd !== void 0 ? { costUsd: reviewResult.costUsd } : {},
-      ...reviewResult.usage?.inputTokens !== void 0 ? { inputTokens: reviewResult.usage.inputTokens } : {},
-      ...reviewResult.usage?.outputTokens !== void 0 ? { outputTokens: reviewResult.usage.outputTokens } : {}
+      judge: judgeSummaryInput(judgeReport, reviewResult.judge),
+      ...totals.costUsd !== void 0 ? { costUsd: totals.costUsd } : {},
+      ...totals.inputTokens !== void 0 ? { inputTokens: totals.inputTokens } : {},
+      ...totals.outputTokens !== void 0 ? { outputTokens: totals.outputTokens } : {}
     });
   } else if (reviewResult.status === "skipped-budget") {
     outcome = "skipped-budget";
@@ -125341,6 +126027,10 @@ async function reviewPullRequest(ctx) {
     detail,
     publish
   };
+}
+function judgeBudgetLeft(config2, reviewCostUsd, judge) {
+  const spent = (reviewCostUsd ?? 0) + (judge?.judge.report().costUsd ?? 0);
+  return Math.max(0, config2.budget.perReviewUsd - spent);
 }
 
 // src/custom-base-url.ts
@@ -125567,6 +126257,38 @@ import {
 import { tmpdir as tmpdir3 } from "node:os";
 import { join as join4 } from "node:path";
 
+// src/judge.ts
+function judgeCallLine(event) {
+  const parts = [
+    `provider=${event.provider}`,
+    `model=${event.model}`,
+    `fallback=${event.fallbackIndex}`,
+    `questions=${event.questions}`,
+    `ms=${event.ms}`,
+    event.ok ? "ok=true" : `ok=false code=${event.code ?? "error"}`,
+    `inputTokens=${event.inputTokens ?? 0}`,
+    `outputTokens=${event.outputTokens ?? 0}`
+  ];
+  return `judge.call ${parts.join(" ")}`;
+}
+function actionJudge(config2, env2, log) {
+  if (!config2.judge) return { secrets: [] };
+  const secrets = [];
+  const entries = judgeChainOf(config2.judge).map((entry) => {
+    const raw = env2[JUDGE_PROVIDERS[entry.provider].envName]?.trim();
+    if (!raw) {
+      log(`Jev judge ${entry.provider}:${entry.model} has no key (${JUDGE_PROVIDERS[entry.provider].envName}); it will be skipped`);
+      return entry;
+    }
+    const apiKey = new Secret(raw);
+    secrets.push(apiKey);
+    return { ...entry, apiKey };
+  });
+  const judge = createJudge({ entries, onCall: (event) => log(judgeCallLine(event)) });
+  log(`Jev judge: ${judge.label} (mode ${config2.judge.mode}, threshold ${config2.judge.threshold}, ${entries.length - 1} fallbacks)`);
+  return { judge: { judge, mode: config2.judge.mode, threshold: config2.judge.threshold }, secrets };
+}
+
 // src/sandbox.ts
 import {
   copyFile as fsCopyFile,
@@ -125766,6 +126488,7 @@ ${configResult.errors.join("\n")}`);
   const store = new EnvCredentialStore(env2);
   const providerSecrets = await resolveReviewSecrets(config2, store);
   const githubSecret = new Secret(githubToken);
+  const { judge, secrets: judgeSecrets } = actionJudge(config2, env2, log);
   let sandbox;
   let tempConfigDir;
   try {
@@ -125822,9 +126545,10 @@ ${configResult.errors.join("\n")}`);
       configHash,
       rulesFiles,
       model,
-      knownSecrets: [...providerSecrets, githubSecret],
+      knownSecrets: [...providerSecrets, ...judgeSecrets, githubSecret],
       publisherLogin,
-      log
+      log,
+      ...judge ? { judge } : {}
     });
   } finally {
     if (sandbox) {

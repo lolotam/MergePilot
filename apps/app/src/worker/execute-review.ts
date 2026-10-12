@@ -10,6 +10,9 @@ import {
 import {
   deduplicateFindings,
   hasNothingNewToReview,
+  judgeBudgetLeft,
+  judgeSummaryInput,
+  withJudgeUsage,
   listPullRequestFiles,
   NOTHING_NEW_DETAIL,
   publishReview,
@@ -19,6 +22,8 @@ import {
   type FileContent,
   type GitHubClient,
   type PublishReviewResult,
+  type ReviewJudge,
+  type SemanticDedupeResult,
 } from '@mergepilot/github';
 
 export interface ExecuteReviewParams {
@@ -37,6 +42,8 @@ export interface ExecuteReviewParams {
   knownSecrets?: Secret[] | undefined;
   publisherLogin?: string | undefined;
   log?: ((message: string) => void) | undefined;
+  /** Optional Jev judge (ADR-0015): false-positive filter and semantic duplicate check. */
+  judge?: ReviewJudge | undefined;
 }
 
 export interface ExecuteReviewOutcome {
@@ -50,6 +57,8 @@ export interface ExecuteReviewOutcome {
   modelUsed?: string | undefined;
   /** Label of the configured model, set only when an explicit fallback took over (ADR-0008). */
   fallbackFrom?: string | undefined;
+  /** What the Jev semantic duplicate check did, when it ran. */
+  judgeSemantic?: SemanticDedupeResult | undefined;
 }
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
@@ -77,6 +86,7 @@ export async function executeReview(
     knownSecrets = [],
     publisherLogin = 'github-actions[bot]',
     log,
+    judge,
   } = params;
 
   log?.(`Listing files for pull request #${pullNumber}...`);
@@ -118,6 +128,7 @@ export async function executeReview(
     rulesFiles,
     model,
     knownSecrets,
+    judge,
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
 
@@ -137,10 +148,10 @@ export async function executeReview(
   let outcome: 'completed' | 'skipped' | 'skipped-budget' | 'failed';
   let costUsd: number | undefined;
   let detail: string | undefined;
+  let judgeSemantic: SemanticDedupeResult | undefined;
 
   if (reviewResult.status === 'completed') {
     outcome = 'completed';
-    costUsd = reviewResult.costUsd;
 
     let deduplicated = reviewResult.inline;
     if (deduplicated.length > 0) {
@@ -151,8 +162,12 @@ export async function executeReview(
         pull_number: pullNumber,
         findings: deduplicated,
         publisherLogin,
+        judge: judge?.judge,
+        knownSecrets,
+        maxUsd: judgeBudgetLeft(config, reviewResult.costUsd, judge),
       });
       deduplicated = dedupeResult.kept;
+      judgeSemantic = dedupeResult.semantic;
       if (dedupeResult.skipped) {
         log?.('Could not read existing review comments; publishing without duplicate filtering');
       }
@@ -163,6 +178,9 @@ export async function executeReview(
       }
     }
     inlineFindings = deduplicated;
+    const judgeReport = judge?.judge.report();
+    const totals = withJudgeUsage(reviewResult.costUsd, reviewResult.usage, judgeReport);
+    costUsd = totals.costUsd;
 
     summaryMarkdown = renderReviewSummary({
       language: config.language,
@@ -175,13 +193,10 @@ export async function executeReview(
       scope,
       ...fallbackSummary,
       outcome: 'completed',
-      ...(reviewResult.costUsd !== undefined ? { costUsd: reviewResult.costUsd } : {}),
-      ...(reviewResult.usage?.inputTokens !== undefined
-        ? { inputTokens: reviewResult.usage.inputTokens }
-        : {}),
-      ...(reviewResult.usage?.outputTokens !== undefined
-        ? { outputTokens: reviewResult.usage.outputTokens }
-        : {}),
+      judge: judgeSummaryInput(judgeReport, reviewResult.judge),
+      ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
+      ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
+      ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),
     });
   } else if (reviewResult.status === 'skipped-budget') {
     outcome = 'skipped-budget';
@@ -277,5 +292,6 @@ export async function executeReview(
     runResult: reviewResult,
     ...(disclosure?.modelUsed ? { modelUsed: disclosure.modelUsed } : {}),
     ...(disclosure?.fallbackFrom ? { fallbackFrom: disclosure.fallbackFrom } : {}),
+    ...(judgeSemantic ? { judgeSemantic } : {}),
   };
 }

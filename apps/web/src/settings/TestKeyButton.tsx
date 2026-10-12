@@ -15,6 +15,10 @@ const REASONS: Record<string, I18nKey> = {
   timeout: 'testReasonTimeout',
   'bad-request': 'testReasonBadRequest',
   'invalid-response': 'testReasonInvalidResponse',
+  // Jev judge codes (ADR-0015).
+  overloaded: 'testReasonServer',
+  'model-not-found': 'testReasonBadRequest',
+  'invalid-request': 'testReasonBadRequest',
 };
 
 /** The translated reason for a failed connection test code (`auth`, `quota`, ...). */

@@ -26,6 +26,7 @@ import {
 } from '@mergepilot/github';
 import { trustedCustomBaseUrl, warnIgnoredBaseUrls } from './custom-base-url.js';
 import type { ActionDeps } from './deps.js';
+import { actionJudge } from './judge.js';
 import {
   createSanitizedWorkspace,
   type SanitizedWorkspace,
@@ -188,6 +189,7 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
   // all of them are redacted from the prompt before any model is called.
   const providerSecrets = await resolveReviewSecrets(config, store);
   const githubSecret = new Secret(githubToken);
+  const { judge, secrets: judgeSecrets } = actionJudge(config, env, log);
 
   let sandbox: SanitizedWorkspace | undefined;
   let tempConfigDir: string | undefined;
@@ -257,9 +259,10 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
       configHash,
       rulesFiles,
       model,
-      knownSecrets: [...providerSecrets, githubSecret],
+      knownSecrets: [...providerSecrets, ...judgeSecrets, githubSecret],
       publisherLogin,
       log,
+      ...(judge ? { judge } : {}),
     });
   } finally {
     if (sandbox) {

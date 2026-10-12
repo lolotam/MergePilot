@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
-import { api, type ApiProvider, type TestConnectionResponse } from '../api/client.js';
+import { api, type KeyProvider, type TestConnectionResponse } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
-import { ProviderSelect } from '../settings/providers.js';
+import { isJudgeKeyOnly, KEY_PROVIDERS, ProviderSelect } from '../settings/providers.js';
 import { runConnectionTest, useTestReason } from '../settings/TestKeyButton.js';
 import { Modal } from './Modal.js';
 
 export interface AddKeyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (provider: ApiProvider, apiKey: string, baseUrl?: string | undefined) => Promise<void>;
+  onSubmit: (provider: KeyProvider, apiKey: string, baseUrl?: string | undefined) => Promise<void>;
   isPending: boolean;
   workspaceId?: string | undefined;
 }
@@ -17,7 +17,7 @@ export interface AddKeyModalProps {
 export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId }: AddKeyModalProps) {
   const { t } = useI18n();
   const testReason = useTestReason();
-  const [keyProvider, setKeyProvider] = useState<ApiProvider>('anthropic');
+  const [keyProvider, setKeyProvider] = useState<KeyProvider>('anthropic');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [baseUrlInput, setBaseUrlInput] = useState('');
   const [keyError, setKeyError] = useState('');
@@ -49,6 +49,8 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     const baseUrl = keyProvider === 'custom' ? baseUrlInput.trim() : undefined;
     // The typed key goes only to this one test call: it is never stored, logged or shown.
     const result = await runConnectionTest(async () => {
+      // A Jev-only key (ADR-0015) is tested with one tiny judge question instead.
+      if (isJudgeKeyOnly(keyProvider)) return api.testJudge(workspaceId, { provider: keyProvider, apiKey });
       let model: string | undefined;
       if (keyProvider === 'custom') {
         // A custom server has no default model: test the first one it lists.
@@ -95,10 +97,11 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
       description={t('addKeyModalDesc')}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
-        <ProviderSelect
+        <ProviderSelect<KeyProvider>
           id="key-provider-select"
           label={t('keyProviderCol')}
           value={keyProvider}
+          options={KEY_PROVIDERS}
           onChange={(next) => {
             setKeyProvider(next);
             setTestResult(null);

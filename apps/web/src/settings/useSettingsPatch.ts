@@ -21,6 +21,8 @@ export function useWorkspaceSettings(workspaceId: string) {
 export interface SettingsPatch {
   runRetentionDays?: Settings['runRetentionDays'];
   repoColors?: Record<string, RepoColorKey>;
+  /** The Jev judge (ADR-0015); null turns it off and clears it. */
+  judge?: Settings['judge'];
 }
 
 /**

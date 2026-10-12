@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Finding } from '@mergepilot/engine';
+import { judgeSameIssue, type Finding, type Judge, type SameIssuePair, type Secret } from '@mergepilot/engine';
 import type { GitHubClient, GitHubReviewComment } from './client.js';
 
 export interface DeduplicateFindingsParams {
@@ -8,6 +8,20 @@ export interface DeduplicateFindingsParams {
   pull_number: number;
   publisherLogin: string;
   findings: Finding[];
+  /**
+   * Optional Jev judge (ADR-0015): when fingerprint and title do not match, asks whether a new
+   * finding and a nearby existing MergePilot comment describe the same issue.
+   */
+  judge?: Judge | undefined;
+  knownSecrets?: readonly Secret[] | undefined;
+  /** Spend still allowed for the judge call. */
+  maxUsd?: number | undefined;
+}
+
+export interface SemanticDedupeResult {
+  checked: number;
+  dropped: number;
+  unavailable?: string | undefined;
 }
 
 export interface DeduplicateFindingsResult {
@@ -15,7 +29,14 @@ export interface DeduplicateFindingsResult {
   dropped: Finding[];
   /** True when existing comments could not be read, so nothing was filtered. */
   skipped?: boolean;
+  /** Set when the Jev semantic check ran (or failed). */
+  semantic?: SemanticDedupeResult | undefined;
 }
+
+/** Existing comments within this many lines of a new finding are semantic-check candidates. */
+export const SEMANTIC_LINE_WINDOW = 10;
+const MAX_CANDIDATES_PER_FINDING = 3;
+const MAX_SEMANTIC_PAIRS = 50;
 
 const COMMENTS_PAGE_SIZE = 100;
 const FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
@@ -124,7 +145,7 @@ function rangesOverlap(r1: LineRange, r2: LineRange): boolean {
  */
 export async function deduplicateFindings(
   client: GitHubClient,
-  { owner, repo, pull_number, publisherLogin, findings }: DeduplicateFindingsParams,
+  { owner, repo, pull_number, publisherLogin, findings, judge, knownSecrets = [], maxUsd }: DeduplicateFindingsParams,
 ): Promise<DeduplicateFindingsResult> {
   if (findings.length === 0) {
     return { kept: [], dropped: [] };
@@ -176,6 +197,7 @@ export async function deduplicateFindings(
       range: LineRange;
       fingerprint: string | null;
       title: string | null;
+      body: string;
     }>
   >();
 
@@ -187,12 +209,14 @@ export async function deduplicateFindings(
     const title = parseTitleFromComment(comment.body);
 
     const list = commentsByPath.get(path) ?? [];
-    list.push({ range, fingerprint, title });
+    list.push({ range, fingerprint, title, body: (comment.body ?? '').replace(FINGERPRINT_REGEX, '').trim() });
     commentsByPath.set(path, list);
   }
 
   const kept: Finding[] = [];
   const dropped: Finding[] = [];
+  const pairs: SameIssuePair[] = [];
+  const pairFinding = new Map<string, Finding>();
 
   for (const finding of findings) {
     const existing = commentsByPath.get(finding.path);
@@ -221,10 +245,49 @@ export async function deduplicateFindings(
 
     if (isDuplicate) {
       dropped.push(finding);
-    } else {
-      kept.push(finding);
+      continue;
+    }
+    kept.push(finding);
+    if (!judge) continue;
+    // 3. Semantic check (Jev): only nearby comments the cheap checks did not match.
+    const nearby = existing
+      .map((ex) => ({ ex, distance: lineDistance(finding.line, ex.range) }))
+      .filter((c) => c.distance <= SEMANTIC_LINE_WINDOW)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, MAX_CANDIDATES_PER_FINDING);
+    for (const { ex } of nearby) {
+      if (pairs.length >= MAX_SEMANTIC_PAIRS) break;
+      const key = `${finding.id}#${pairs.length}`;
+      pairFinding.set(key, finding);
+      pairs.push({
+        key,
+        newComment: { path: finding.path, line: finding.line, title: finding.title, body: finding.body },
+        existingComment: { path: finding.path, line: ex.range.start, body: ex.body },
+      });
     }
   }
 
-  return { kept, dropped };
+  if (!judge || pairs.length === 0) return { kept, dropped };
+
+  const outcome = await judgeSameIssue({ judge, pairs, knownSecrets, maxUsd });
+  const semanticDuplicates = new Set<Finding>();
+  for (const key of outcome.duplicates) {
+    const finding = pairFinding.get(key);
+    if (finding) semanticDuplicates.add(finding);
+  }
+  return {
+    kept: kept.filter((f) => !semanticDuplicates.has(f)),
+    dropped: [...dropped, ...semanticDuplicates],
+    semantic: {
+      checked: outcome.checked,
+      dropped: semanticDuplicates.size,
+      ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}),
+    },
+  };
+}
+
+function lineDistance(line: number, range: LineRange): number {
+  if (line < range.start) return range.start - line;
+  if (line > range.end) return line - range.end;
+  return 0;
 }

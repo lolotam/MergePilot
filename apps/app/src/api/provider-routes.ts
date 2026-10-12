@@ -27,7 +27,7 @@ const CACHE_MAX_ENTRIES = 1000;
 const modelsCache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
 
 const RATE_WINDOW_MS = 60 * 1000;
-const TEST_LIMIT = 10;
+export const TEST_LIMIT = 10;
 const UNSAVED_MODELS_LIMIT = 20;
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -51,7 +51,7 @@ function cacheModels(key: string, models: CatalogModel[]): void {
   modelsCache.set(key, { expiresAt: now + CACHE_TTL_MS, models });
 }
 
-function allow(bucket: string, limit: number): boolean {
+export function allow(bucket: string, limit: number): boolean {
   const now = Date.now();
   const entry = rateBuckets.get(bucket);
   if (!entry || now >= entry.resetAt) {
@@ -69,7 +69,7 @@ function statusFor(kind: string): number {
   return 422;
 }
 
-function redact(text: string, key: string): string {
+export function redact(text: string, key: string): string {
   return key ? text.replaceAll(key, '[REDACTED]') : text;
 }
 
@@ -87,7 +87,7 @@ function parseProvider(request: FastifyRequest, reply: FastifyReply): ApiProvide
  * Aborts the provider call when the dashboard request goes away or after the dashboard limit;
  * the guarded custom fetch adds its own timeout, idle timeout and size cap on top.
  */
-function routeSignal(reply: FastifyReply): AbortSignal {
+export function routeSignal(reply: FastifyReply): AbortSignal {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DASHBOARD_FETCH_LIMITS.timeoutMs);
   reply.raw.once('close', () => {

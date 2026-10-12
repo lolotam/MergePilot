@@ -16,6 +16,7 @@ import {
   reviewScopeOf,
   selectIncrementalFiles,
 } from './incremental.js';
+import { judgeSummaryInput, withJudgeUsage, type ReviewJudge } from './judge-summary.js';
 import { isPrPaused, postPauseNoticeOnce } from './pause.js';
 import { listPullRequestFiles } from './pr-files.js';
 import { publishReview, type PublishReviewResult } from './publish.js';
@@ -81,6 +82,8 @@ export interface ReviewPullRequestContext {
   knownSecrets?: Secret[] | undefined;
   publisherLogin?: string | undefined;
   log?: ((message: string) => void) | undefined;
+  /** Optional Jev judge (ADR-0015): false-positive filter and semantic duplicate check. */
+  judge?: ReviewJudge | undefined;
 }
 
 export interface ReviewPullRequestResult {
@@ -119,6 +122,7 @@ export async function reviewPullRequest(
     knownSecrets = [],
     publisherLogin = 'github-actions[bot]',
     log,
+    judge,
   } = ctx;
 
   // 1. Check pause state before running review or calling model
@@ -189,6 +193,7 @@ export async function reviewPullRequest(
     rulesFiles,
     model,
     knownSecrets,
+    judge,
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
 
@@ -212,7 +217,6 @@ export async function reviewPullRequest(
 
   if (reviewResult.status === 'completed') {
     outcome = 'completed';
-    costUsd = reviewResult.costUsd;
 
     const deduped = await deduplicateFindings(client, {
       owner,
@@ -220,6 +224,9 @@ export async function reviewPullRequest(
       pull_number: pullNumber,
       publisherLogin,
       findings: reviewResult.inline,
+      judge: judge?.judge,
+      knownSecrets,
+      maxUsd: judgeBudgetLeft(config, reviewResult.costUsd, judge),
     });
     inlineFindings = deduped.kept;
     if (deduped.skipped) {
@@ -228,6 +235,9 @@ export async function reviewPullRequest(
     if (deduped.dropped.length > 0) {
       log?.(`Dropped ${deduped.dropped.length} duplicate findings already commented on this PR`);
     }
+    const judgeReport = judge?.judge.report();
+    const totals = withJudgeUsage(reviewResult.costUsd, reviewResult.usage, judgeReport);
+    costUsd = totals.costUsd;
 
     summaryMarkdown = renderReviewSummary({
       language: config.language,
@@ -240,13 +250,10 @@ export async function reviewPullRequest(
       ...fallbackSummary,
       scope,
       outcome: 'completed',
-      ...(reviewResult.costUsd !== undefined ? { costUsd: reviewResult.costUsd } : {}),
-      ...(reviewResult.usage?.inputTokens !== undefined
-        ? { inputTokens: reviewResult.usage.inputTokens }
-        : {}),
-      ...(reviewResult.usage?.outputTokens !== undefined
-        ? { outputTokens: reviewResult.usage.outputTokens }
-        : {}),
+      judge: judgeSummaryInput(judgeReport, reviewResult.judge),
+      ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
+      ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
+      ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),
     });
   } else if (reviewResult.status === 'skipped-budget') {
     outcome = 'skipped-budget';
@@ -320,4 +327,10 @@ export async function reviewPullRequest(
     detail,
     publish,
   };
+}
+
+/** The per-review budget left for a judge call after the review (and earlier judge calls). */
+export function judgeBudgetLeft(config: MergePilotConfig, reviewCostUsd: number | undefined, judge: ReviewJudge | undefined): number {
+  const spent = (reviewCostUsd ?? 0) + (judge?.judge.report().costUsd ?? 0);
+  return Math.max(0, config.budget.perReviewUsd - spent);
 }

@@ -39,6 +39,11 @@ export class SpendTracker {
     return this.#spentUsd;
   }
 
+  /** USD still allowed for this review (the whole limit when the review model is unpriced). */
+  get remainingUsd(): number {
+    return Math.max(0, this.limitUsd - this.#spentUsd);
+  }
+
   get priced(): boolean {
     return this.pricing !== undefined;
   }

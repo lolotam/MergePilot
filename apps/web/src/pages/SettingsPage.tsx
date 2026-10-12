@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router';
 import { KeyRound, ShieldAlert, Trash2, Plus } from 'lucide-react';
 import type { Settings } from '@mergepilot/app/contract';
-import type { ApiProvider } from '../api/client.js';
+import type { ApiProvider, KeyProvider } from '../api/client.js';
 import {
   useMeQuery,
   useSettingsQuery,
@@ -19,8 +19,10 @@ import { WorkspaceDangerZone } from '../components/WorkspaceDangerZone.js';
 import { ReviewSettingsCard } from '../settings/ReviewSettingsCard.js';
 import { RepoColorsCard } from '../settings/RepoColorsCard.js';
 import { RetentionCard } from '../settings/RetentionCard.js';
+import { JudgeCard } from '../settings/JudgeCard.js';
+import { JudgeTestButton } from '../settings/JudgeTestButton.js';
 import { TestKeyButton } from '../settings/TestKeyButton.js';
-import { useProviderLabel } from '../settings/providers.js';
+import { isJudgeKeyOnly, useProviderLabel } from '../settings/providers.js';
 
 export function SettingsPage() {
   const { workspaceId = '' } = useParams();
@@ -40,14 +42,16 @@ export function SettingsPage() {
 
   const [addKeyModalOpen, setAddKeyModalOpen] = useState(false);
   // Heavy-duty and fallback models may only use providers with a saved key (members cannot list keys).
-  const keyedProviders = isMember || !keysData ? undefined : keysData.keys.map((k) => k.provider);
+  const savedKeys = isMember || !keysData ? undefined : keysData.keys.map((k) => k.provider);
+  // Jev-only key types (ADR-0015) never serve as review providers.
+  const keyedProviders = savedKeys?.filter((p): p is ApiProvider => !isJudgeKeyOnly(p));
 
   const handleSettingsSave = async (updatedSettings: Settings) => {
     if (isMember) return;
     await updateSettingsMutation.mutateAsync(updatedSettings);
   };
 
-  const handleAddKeySubmit = async (prov: ApiProvider, apiKey: string, baseUrl?: string) => {
+  const handleAddKeySubmit = async (prov: KeyProvider, apiKey: string, baseUrl?: string) => {
     try {
       await saveKeyMutation.mutateAsync({
         provider: prov,
@@ -60,7 +64,7 @@ export function SettingsPage() {
     }
   };
 
-  const handleDeleteKey = async (prov: ApiProvider) => {
+  const handleDeleteKey = async (prov: KeyProvider) => {
     if (isMember) return;
     if (window.confirm(t('deleteKeyConfirm', { provider: prov }))) {
       await deleteKeyMutation.mutateAsync(prov);
@@ -92,6 +96,8 @@ export function SettingsPage() {
         isSaving={updateSettingsMutation.isPending}
         keyedProviders={keyedProviders}
       />
+
+      <JudgeCard workspaceId={workspaceId} isMember={isMember} keyedProviders={savedKeys} />
 
       <RetentionCard workspaceId={workspaceId} isMember={isMember} />
       <RepoColorsCard workspaceId={workspaceId} isMember={isMember} />
@@ -161,11 +167,11 @@ export function SettingsPage() {
                     {!isMember && (
                       <td className="py-2.5 px-3 text-end">
                         <div className="inline-flex items-center gap-2 justify-end">
-                          <TestKeyButton
-                            workspaceId={workspaceId}
-                            provider={k.provider}
-                            disabled={isMember}
-                          />
+                          {isJudgeKeyOnly(k.provider) ? (
+                            <JudgeTestButton workspaceId={workspaceId} provider={k.provider} disabled={isMember} />
+                          ) : (
+                            <TestKeyButton workspaceId={workspaceId} provider={k.provider} disabled={isMember} />
+                          )}
                           <button
                             type="button"
                             onClick={() => handleDeleteKey(k.provider)}

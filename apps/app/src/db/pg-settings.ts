@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { ApiProvider, WorkspaceSettings } from '../core/types.js';
+import type { ApiProvider, JudgeSettings, WorkspaceSettings } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
 import { workspaceSettings } from './schema.js';
@@ -24,11 +24,33 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
     minSeverity: (row.minSeverity as WorkspaceSettings['minSeverity']) ?? 'medium',
     runRetentionDays: row.runRetentionDays !== null ? Number(row.runRetentionDays) : null,
     repoColors: (row.repoColors ?? {}) as WorkspaceSettings['repoColors'],
+    judge: row.judgeProvider
+      ? {
+          enabled: row.judgeEnabled,
+          provider: row.judgeProvider as JudgeSettings['provider'],
+          model: row.judgeModel ?? '',
+          mode: row.judgeMode as JudgeSettings['mode'],
+          threshold: Number(row.judgeThreshold),
+          fallback: Array.isArray(row.judgeFallback) ? (row.judgeFallback as JudgeSettings['fallback']) : [],
+        }
+      : null,
+  };
+}
+
+/** The judge columns for a save: null clears them back to the defaults (off). */
+function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSettings.$inferInsert> {
+  return {
+    judgeEnabled: judge?.enabled ?? false,
+    judgeProvider: judge?.provider ?? null,
+    judgeModel: judge?.model ?? null,
+    judgeMode: judge?.mode ?? 'off',
+    judgeThreshold: String(judge?.threshold ?? 0.35),
+    judgeFallback: judge?.fallback ?? [],
   };
 }
 
 /**
- * Upserts the settings. `runRetentionDays` and `repoColors` left undefined keep the stored value
+ * Upserts the settings. `runRetentionDays`, `repoColors` and `judge` left undefined keep the stored value
  * (a new row gets the column defaults: 30 days, no colors).
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
@@ -50,6 +72,7 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
   };
   if (settings.runRetentionDays !== undefined) values.runRetentionDays = settings.runRetentionDays;
   if (settings.repoColors !== undefined) values.repoColors = settings.repoColors;
+  if (settings.judge !== undefined) Object.assign(values, judgeColumns(settings.judge));
   await withLiveWorkspace(db, settings.workspaceId, async (tx) => {
     await tx
       .insert(workspaceSettings)
