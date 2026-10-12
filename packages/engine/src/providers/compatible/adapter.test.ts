@@ -112,6 +112,26 @@ describe('OpenAICompatibleAdapter', () => {
     expect(result.text).toBe('Hello');
   });
 
+  it('does not retry an unrelated 400 and keeps its message', async () => {
+    let attempts = 0;
+    const fetch = vi.fn(async () => {
+      attempts++;
+      return jsonResponse({ error: { message: 'context length exceeded' } }, 400);
+    });
+    const adapter = new OpenAICompatibleAdapter({ provider: 'openrouter', apiKey: KEY, fetch });
+    const failure = await failureOf(collectText(adapter.stream({ ...base, responseSchema: { type: 'object' } })));
+    expect(attempts).toBe(1);
+    expect(failure.message).toContain('context length exceeded');
+  });
+
+  it('treats r1 as a reasoning marker only as its own token', async () => {
+    const { isCompatibleReasoningModel } = await import('../effort.js');
+    expect(isCompatibleReasoningModel('openrouter', 'deepseek/deepseek-r1')).toBe(true);
+    expect(isCompatibleReasoningModel('nvidia', 'deepseek-ai/deepseek-r1-distill-qwen-32b')).toBe(true);
+    expect(isCompatibleReasoningModel('xai', 'grok-4-fast-r1x')).toBe(false);
+    expect(isCompatibleReasoningModel('custom', 'mistral-large-2411')).toBe(false);
+  });
+
   it('sends a stable x-opencode-session header to OpenCode only', async () => {
     const { fetch, calls } = mockFetch(okStream());
     const adapter = new OpenAICompatibleAdapter({ provider: 'opencode-go', apiKey: KEY, fetch });

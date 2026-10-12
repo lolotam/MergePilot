@@ -59,8 +59,9 @@ describe('spend helpers', () => {
 
   it('describeCallError returns the failure code, else a redacted message', () => {
     expect(describeCallError({ code: 'rate-limit', message: 'slow down' })).toBe('rate-limit');
-    const key = new Secret('sk-test-1234567890abcdef');
-    const text = describeCallError(new Error('bad key sk-test-1234567890abcdef'), [key]);
-    expect(text).not.toContain('sk-test-1234567890abcdef');
+    const raw = ['s', 'k-', 'q'.repeat(20)].join('');
+    const key = new Secret(raw);
+    const text = describeCallError(new Error(`bad key ${raw}`), [key]);
+    expect(text).not.toContain(raw);
   });
 });

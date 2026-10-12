@@ -148,23 +148,23 @@ export function geminiThinksByDefault(model: string): boolean {
 /**
  * Compatible presets / models that think by default without explicit effort parameter.
  */
+const R1_TOKEN = /(?:^|[/:._-])r1(?:$|[/:._-])/;
+
 export function isCompatibleReasoningModel(
   provider: string,
   model: string,
   style?: ThinkingStyle,
 ): boolean {
   const lowerModel = model.toLowerCase();
-  if (provider === 'deepseek' && (lowerModel.includes('reasoner') || lowerModel.includes('r1'))) {
-    return true;
-  }
-  if (lowerModel.includes('reasoner') || lowerModel.includes('r1')) {
+  // `r1` only as its own token (deepseek-r1, r1-distill), never inside another word.
+  if (lowerModel.includes('reasoner') || R1_TOKEN.test(lowerModel)) {
     return true;
   }
   if (style === 'glm' || provider === 'zai' || provider === 'zai-coding') {
     return true;
   }
   // NVIDIA NIM reasoning models (Nemotron, R1 / QwQ distills, `-reasoning` / `thinking` ids).
-  if (provider === 'nvidia' && /nemotron|-reasoning|thinking|r1|qwq|deepseek-r1/.test(lowerModel)) {
+  if (provider === 'nvidia' && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
     return true;
   }
   if (provider === 'openrouter') {

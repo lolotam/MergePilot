@@ -94811,18 +94811,16 @@ function geminiThinksByDefault(model) {
   const id = model.replace(/^models\//, "").toLowerCase();
   return /^gemini-(?:[3-9]|\d{2,}|2\.[5-9])/.test(id) || id.includes("-thinking");
 }
+var R1_TOKEN = /(?:^|[/:._-])r1(?:$|[/:._-])/;
 function isCompatibleReasoningModel(provider, model, style) {
   const lowerModel = model.toLowerCase();
-  if (provider === "deepseek" && (lowerModel.includes("reasoner") || lowerModel.includes("r1"))) {
-    return true;
-  }
-  if (lowerModel.includes("reasoner") || lowerModel.includes("r1")) {
+  if (lowerModel.includes("reasoner") || R1_TOKEN.test(lowerModel)) {
     return true;
   }
   if (style === "glm" || provider === "zai" || provider === "zai-coding") {
     return true;
   }
-  if (provider === "nvidia" && /nemotron|-reasoning|thinking|r1|qwq|deepseek-r1/.test(lowerModel)) {
+  if (provider === "nvidia" && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
     return true;
   }
   if (provider === "openrouter") {
@@ -118959,7 +118957,8 @@ ${instruction}`;
     } catch (error62) {
       throw failureFromThrown(error62, this.provider, this.#key, options.signal);
     }
-    if (!response.ok && response.status === 400 && sendsJsonObject) {
+    const firstErrorBody = !response.ok && response.status === 400 && sendsJsonObject ? await response.text() : "";
+    if (firstErrorBody && /response_format|json_object|json mode/i.test(firstErrorBody)) {
       try {
         const retryResponse = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
           method: "POST",
@@ -118980,8 +118979,10 @@ ${instruction}`;
         throw failureFromThrown(retryError, this.provider, this.#key, options.signal);
       }
     }
-    if (!response.ok)
-      throw await failureFromResponse(response, this.provider, this.#key);
+    if (!response.ok) {
+      const failed = firstErrorBody && response.bodyUsed ? new Response(firstErrorBody, { status: response.status, headers: response.headers }) : response;
+      throw await failureFromResponse(failed, this.provider, this.#key);
+    }
     return response;
   }
   #streamError(error62) {

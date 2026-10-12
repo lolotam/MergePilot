@@ -198,8 +198,10 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
       throw failureFromThrown(error, this.provider, this.#key, options.signal);
     }
 
-    // If server rejected response_format with 400, retry once without response_format (prompt-only fallback)
-    if (!response.ok && response.status === 400 && sendsJsonObject) {
+    // Retry without JSON mode only when the 400 is about JSON mode itself; read the first body so
+    // its connection is released, and keep that body for the error when it is not.
+    const firstErrorBody = !response.ok && response.status === 400 && sendsJsonObject ? await response.text() : '';
+    if (firstErrorBody && /response_format|json_object|json mode/i.test(firstErrorBody)) {
       try {
         const retryResponse = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
           method: 'POST',
@@ -221,7 +223,14 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
       }
     }
 
-    if (!response.ok) throw await failureFromResponse(response, this.provider, this.#key);
+    if (!response.ok) {
+      // The first body was already read above; rebuild it so the failure keeps its message.
+      const failed =
+        firstErrorBody && response.bodyUsed
+          ? new Response(firstErrorBody, { status: response.status, headers: response.headers })
+          : response;
+      throw await failureFromResponse(failed, this.provider, this.#key);
+    }
     return response;
   }
 
