@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
-import { InstallationAlreadyLinkedError } from '../core/types.js';
+import { InstallationAlreadyLinkedError, WorkspaceDeletedError } from '../core/types.js';
+import { organization } from '../auth/schema.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
@@ -12,13 +13,7 @@ import type {
   StoredCredential,
   WorkspaceSettings,
 } from '../core/types.js';
-import {
-  installations,
-  providerCredentials,
-  reviewRuns,
-  webhookDeliveries,
-  workspaceSettings,
-} from './schema.js';
+import { installations, providerCredentials, reviewRuns, webhookDeliveries, workspaceSettings } from './schema.js';
 import type * as schema from './schema.js';
 
 export type AppDb = NodePgDatabase<typeof schema> | PgliteDatabase<typeof schema>;
@@ -297,18 +292,24 @@ export class PgStore implements AppStore {
   ): Promise<ReviewRun> {
     const id = randomUUID();
     const createdAt = new Date();
-    await this.db.insert(reviewRuns).values({
-      id,
-      workspaceId: run.workspaceId,
-      installationId: run.installationId,
-      repoFullName: run.repoFullName,
-      pullNumber: run.pullNumber,
-      headSha: run.headSha,
-      status: run.status,
-      costUsd: run.costUsd !== null ? String(run.costUsd) : null,
-      detail: run.detail,
-      createdAt,
-      finishedAt: null,
+    await this.db.transaction(async (tx) => {
+      // FOR SHARE: a concurrent deleteWorkspace waits for this insert, or this insert sees the org gone.
+      const org = await tx.select({ id: organization.id }).from(organization)
+        .where(eq(organization.id, run.workspaceId)).for('share');
+      if (org.length === 0) throw new WorkspaceDeletedError(run.workspaceId);
+      await tx.insert(reviewRuns).values({
+        id,
+        workspaceId: run.workspaceId,
+        installationId: run.installationId,
+        repoFullName: run.repoFullName,
+        pullNumber: run.pullNumber,
+        headSha: run.headSha,
+        status: run.status,
+        costUsd: run.costUsd !== null ? String(run.costUsd) : null,
+        detail: run.detail,
+        createdAt,
+        finishedAt: null,
+      });
     });
     return {
       ...run,
@@ -378,15 +379,16 @@ export class PgStore implements AppStore {
     return Number(total);
   }
 
-  async deleteWorkspaceData(workspaceId: string): Promise<void> {
+  async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
     await this.db.transaction(async (tx) => {
+      // Organization first (members/invitations cascade); its row lock serialises createReviewRun.
+      await tx.delete(organization).where(eq(organization.id, workspaceId));
       await tx.delete(providerCredentials).where(eq(providerCredentials.workspaceId, workspaceId));
       await tx.delete(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
       await tx.delete(reviewRuns).where(eq(reviewRuns.workspaceId, workspaceId));
-      await tx
-        .update(installations)
-        .set({ workspaceId: null, updatedAt: new Date() })
+      await tx.update(installations).set({ workspaceId: null, updatedAt: new Date() })
         .where(eq(installations.workspaceId, workspaceId));
     });
+    return { organizationDeleted: true };
   }
 }

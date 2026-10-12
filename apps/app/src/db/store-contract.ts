@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type {
-  AppStore,
-  Installation,
-  StoredCredential,
-  WorkspaceSettings,
+import {
+  WorkspaceDeletedError,
+  type AppStore,
+  type Installation,
+  type StoredCredential,
+  type WorkspaceSettings,
 } from '../core/types.js';
+
+/** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
+export const STORE_CONTRACT_WORKSPACES = ['ws-runs-test', 'ws-del-target', 'ws-del-other'] as const;
 
 export function describeStoreContract(
   suiteName: string,
@@ -323,8 +327,7 @@ export function describeStoreContract(
           suspended: false,
         });
 
-        // Perform deleteWorkspaceData on wsTarget
-        await store.deleteWorkspaceData(wsTarget);
+        await store.deleteWorkspace(wsTarget);
 
         // Verify wsTarget data is gone
         expect(await store.getSettings(wsTarget)).toBeNull();
@@ -348,6 +351,21 @@ export function describeStoreContract(
         expect(await store.listCredentials(wsOther)).toHaveLength(1);
         expect(await store.listReviewRuns(wsOther, 10)).toHaveLength(1);
         expect(await store.getInstallation(502)).not.toBeNull();
+
+        // A worker that read the workspace before deletion cannot record a run afterwards
+        await expect(
+          store.createReviewRun({
+            workspaceId: wsTarget,
+            installationId: 501,
+            repoFullName: 'target/repo',
+            pullNumber: 3,
+            headSha: 'sha-late',
+            status: 'running',
+            costUsd: null,
+            detail: null,
+          }),
+        ).rejects.toBeInstanceOf(WorkspaceDeletedError);
+        expect(await store.listReviewRuns(wsTarget, 10)).toEqual([]);
       } finally {
         await cleanup?.();
       }

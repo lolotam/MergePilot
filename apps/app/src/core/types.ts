@@ -16,6 +16,14 @@ export class InstallationAlreadyLinkedError extends Error {
   }
 }
 
+/** Thrown when a write targets a workspace that was deleted (or never existed in Postgres). */
+export class WorkspaceDeletedError extends Error {
+  constructor(workspaceId: string) {
+    super(`workspace ${workspaceId} no longer exists`);
+    this.name = 'WorkspaceDeletedError';
+  }
+}
+
 export type ApiProvider = 'anthropic' | 'openai' | 'gemini';
 
 export interface Installation {
@@ -87,6 +95,7 @@ export interface AppStore {
   listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>>;
   deleteCredential(workspaceId: string, provider: ApiProvider): Promise<void>;
 
+  /** Throws WorkspaceDeletedError when the workspace is gone, so a late worker cannot write orphan rows. */
   createReviewRun(run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>): Promise<ReviewRun>;
   finishReviewRun(
     workspaceId: string,
@@ -95,7 +104,13 @@ export interface AppStore {
   ): Promise<void>;
   listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
   monthCostUsd(workspaceId: string, monthStart: Date): Promise<number>;
-  deleteWorkspaceData(workspaceId: string): Promise<void>;
+  /**
+   * Deletes the workspace's credentials, settings and review runs and unlinks its installations.
+   * Postgres also deletes the Better Auth organization row (members and invitations cascade) in the
+   * same transaction and reports `organizationDeleted: true`; a store without the auth tables
+   * reports false and the caller deletes the organization itself.
+   */
+  deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }>;
 }
 
 /** Envelope encryption of customer secrets (ADR-0007). */

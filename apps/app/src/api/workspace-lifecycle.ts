@@ -67,11 +67,13 @@ export function registerWorkspaceLifecycleRoutes(
         );
       }
 
-      // Delete workspace-scoped store data in a single transaction (Postgres)
-      await deps.store.deleteWorkspaceData(workspaceId);
-
-      // Delete organization in Better Auth (cascades members and invitations)
-      await orgAdapter.deleteOrganization(workspaceId);
+      // Postgres: data and the organization row (members and invitations cascade) go in one
+      // transaction, so a failure leaves the workspace fully intact.
+      const { organizationDeleted } = await deps.store.deleteWorkspace(workspaceId);
+      if (!organizationDeleted) {
+        // Local-dev MemoryStore keeps no auth tables; remove the organization through Better Auth.
+        await orgAdapter.deleteOrganization(workspaceId);
+      }
 
       return reply.status(204).send();
     },

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { InstallationAlreadyLinkedError } from './types.js';
+import { InstallationAlreadyLinkedError, WorkspaceDeletedError } from './types.js';
 import type {
   ApiProvider,
   AppStore,
@@ -17,6 +17,7 @@ export class MemoryStore implements AppStore {
   readonly settings = new Map<string, WorkspaceSettings>();
   readonly credentials = new Map<string, StoredCredential>();
   readonly runs = new Map<string, ReviewRun>();
+  readonly deletedWorkspaces = new Set<string>();
 
   async recordDelivery(deliveryId: string): Promise<boolean> {
     if (this.deliveries.has(deliveryId)) return false;
@@ -88,6 +89,7 @@ export class MemoryStore implements AppStore {
   }
 
   async createReviewRun(run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>): Promise<ReviewRun> {
+    if (this.deletedWorkspaces.has(run.workspaceId)) throw new WorkspaceDeletedError(run.workspaceId);
     const created: ReviewRun = { ...run, id: randomUUID(), createdAt: new Date(), finishedAt: null };
     this.runs.set(created.id, created);
     return created;
@@ -116,7 +118,8 @@ export class MemoryStore implements AppStore {
       .reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
   }
 
-  async deleteWorkspaceData(workspaceId: string): Promise<void> {
+  async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
+    this.deletedWorkspaces.add(workspaceId);
     for (const [key, cred] of this.credentials.entries()) {
       if (cred.workspaceId === workspaceId) {
         this.credentials.delete(key);
@@ -134,5 +137,6 @@ export class MemoryStore implements AppStore {
         this.installations.set(id, unlinked);
       }
     }
+    return { organizationDeleted: false };
   }
 }

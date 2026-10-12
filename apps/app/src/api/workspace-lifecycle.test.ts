@@ -30,17 +30,17 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
     port: 3000,
     databaseUrl: 'postgres://localhost:5432/test',
     redisUrl: 'redis://localhost:6379',
-    masterKey: '01234567890123456789012345678901',
+    masterKey: 'test-placeholder-master-key-0000',
     github: {
       appId: '12345',
-      privateKey: 'key',
-      webhookSecret: 'secret',
+      privateKey: 'test-placeholder-pem',
+      webhookSecret: 'test-placeholder-webhook',
       clientId: 'gh-id',
-      clientSecret: 'gh-secret',
+      clientSecret: 'test-placeholder-gh-client',
       appSlug: 'mergepilot-test',
     },
-    google: { clientId: 'g-id', clientSecret: 'g-secret' },
-    authSecret: 'sk-test-secret-32-chars-long-0000000',
+    google: { clientId: 'g-id', clientSecret: 'test-placeholder-google' },
+    authSecret: 'test-placeholder-auth-value-000000000000',
   };
 
   beforeEach(async () => {
@@ -72,14 +72,16 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       { id: 'u-admin', name: 'Admin User', email: 'admin@test.com', emailVerified: true },
       { id: 'u-member', name: 'Member User', email: 'member@test.com', emailVerified: true },
       { id: 'u-outsider', name: 'Outsider User', email: 'outsider@test.com', emailVerified: true },
+      { id: 'u-owner-b', name: 'Owner B', email: 'owner-b@test.com', emailVerified: true },
     ]);
 
     // Seed sessions
     await db.insert(authSchema.session).values([
-      { id: 's-owner', token: 'token-owner', userId: 'u-owner', expiresAt: new Date(Date.now() + 86400000) },
-      { id: 's-admin', token: 'token-admin', userId: 'u-admin', expiresAt: new Date(Date.now() + 86400000) },
-      { id: 's-member', token: 'token-member', userId: 'u-member', expiresAt: new Date(Date.now() + 86400000) },
-      { id: 's-outsider', token: 'token-outsider', userId: 'u-outsider', expiresAt: new Date(Date.now() + 86400000) },
+      { id: 's-owner', token: 'test-session-owner', userId: 'u-owner', expiresAt: new Date(Date.now() + 86400000) },
+      { id: 's-admin', token: 'test-session-admin', userId: 'u-admin', expiresAt: new Date(Date.now() + 86400000) },
+      { id: 's-member', token: 'test-session-member', userId: 'u-member', expiresAt: new Date(Date.now() + 86400000) },
+      { id: 's-outsider', token: 'test-session-outsider', userId: 'u-outsider', expiresAt: new Date(Date.now() + 86400000) },
+      { id: 's-owner-b', token: 'test-session-owner-b', userId: 'u-owner-b', expiresAt: new Date(Date.now() + 86400000) },
     ]);
 
     // Workspaces
@@ -94,6 +96,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       { id: 'm-admin', organizationId: 'ws-A', userId: 'u-admin', role: 'admin' },
       { id: 'm-member', organizationId: 'ws-A', userId: 'u-member', role: 'member' },
       { id: 'm-outsider', organizationId: 'ws-B', userId: 'u-outsider', role: 'member' },
+      { id: 'm-owner-b', organizationId: 'ws-B', userId: 'u-owner-b', role: 'owner' },
     ]);
 
     await app.ready();
@@ -109,7 +112,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-admin', config.authSecret) },
         payload: { name: '  Renamed by Admin  ' },
       });
 
@@ -127,7 +130,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-owner', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-owner', config.authSecret) },
         payload: { name: 'Renamed by Owner' },
       });
 
@@ -140,7 +143,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resEmpty = await app.inject({
         method: 'PATCH',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-admin', config.authSecret) },
         payload: { name: '' },
       });
       expect(resEmpty.statusCode).toBe(400);
@@ -149,7 +152,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resSpaces = await app.inject({
         method: 'PATCH',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-admin', config.authSecret) },
         payload: { name: '     ' },
       });
       expect(resSpaces.statusCode).toBe(400);
@@ -158,7 +161,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resTooLong = await app.inject({
         method: 'PATCH',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-admin', config.authSecret) },
         payload: { name: 'a'.repeat(61) },
       });
       expect(resTooLong.statusCode).toBe(400);
@@ -167,7 +170,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resNoBody = await app.inject({
         method: 'PATCH',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-admin', config.authSecret) },
         payload: {},
       });
       expect(resNoBody.statusCode).toBe(400);
@@ -177,7 +180,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-member', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-member', config.authSecret) },
         payload: { name: 'Member Try' },
       });
       expect(res.statusCode).toBe(403);
@@ -187,7 +190,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resOutsider = await app.inject({
         method: 'PATCH',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-outsider', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-outsider', config.authSecret) },
         payload: { name: 'Outsider Try' },
       });
       expect(resOutsider.statusCode).toBe(403);
@@ -201,12 +204,35 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
     });
   });
 
+  it('checks the role in the SAME workspace: owner of ws-B gets 403 on PATCH and DELETE of ws-A', async () => {
+    const cookie = signedSessionCookie('test-session-owner-b', config.authSecret);
+    const rename = await app.inject({
+      method: 'PATCH',
+      url: '/api/workspaces/ws-A',
+      headers: { cookie },
+      payload: { name: 'Hijacked' },
+    });
+    expect(rename.statusCode).toBe(403);
+
+    const del = await app.inject({
+      method: 'DELETE',
+      url: '/api/workspaces/ws-A',
+      headers: { cookie },
+      payload: { confirmName: 'Workspace A' },
+    });
+    expect(del.statusCode).toBe(403);
+
+    const authCtx = (await auth.$context) as unknown as Parameters<typeof getOrgAdapter>[0];
+    const org = await getOrgAdapter(authCtx).findOrganizationById('ws-A');
+    expect(org?.name).toBe('Workspace A');
+  });
+
   describe('DELETE /api/workspaces/:workspaceId (delete)', () => {
     it('returns 400 confirm_mismatch if confirmName does not match exactly', async () => {
       const resMismatch = await app.inject({
         method: 'DELETE',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-owner', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-owner', config.authSecret) },
         payload: { confirmName: 'Wrong Name' },
       });
 
@@ -217,7 +243,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resEmpty = await app.inject({
         method: 'DELETE',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-owner', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-owner', config.authSecret) },
         payload: { confirmName: '' },
       });
       expect(resEmpty.statusCode).toBe(400);
@@ -229,7 +255,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resAdmin = await app.inject({
         method: 'DELETE',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-admin', config.authSecret) },
         payload: { confirmName: 'Workspace A' },
       });
       expect(resAdmin.statusCode).toBe(403);
@@ -238,7 +264,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resMember = await app.inject({
         method: 'DELETE',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-member', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-member', config.authSecret) },
         payload: { confirmName: 'Workspace A' },
       });
       expect(resMember.statusCode).toBe(403);
@@ -247,7 +273,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const resOutsider = await app.inject({
         method: 'DELETE',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-outsider', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-outsider', config.authSecret) },
         payload: { confirmName: 'Workspace A' },
       });
       expect(resOutsider.statusCode).toBe(403);
@@ -275,7 +301,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
         id: '11111111-1111-4111-8111-111111111111',
         workspaceId: 'ws-A',
         provider: 'anthropic',
-        ciphertext: 'enc:secret',
+        ciphertext: 'enc:test-placeholder',
         keyVersion: 1,
         last4: '1234',
         createdBy: 'u-owner',
@@ -306,7 +332,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
       const res = await app.inject({
         method: 'DELETE',
         url: '/api/workspaces/ws-A',
-        headers: { cookie: signedSessionCookie('token-owner', config.authSecret) },
+        headers: { cookie: signedSessionCookie('test-session-owner', config.authSecret) },
         payload: { confirmName: 'Workspace A' },
       });
 
