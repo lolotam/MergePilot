@@ -50335,7 +50335,6 @@ var API_PROVIDER_IDS = [
   "custom",
   "xiaomi",
   "xiaomi-token-plan",
-  "xiaomi-token-plan-sgp",
   "xiaomi-token-plan-cn"
 ];
 var PROVIDER_IDS = [...API_PROVIDER_IDS, "claude-code"];
@@ -50462,15 +50461,6 @@ var ENTRIES = {
     envName: "XIAOMI_API_KEY"
   },
   "xiaomi-token-plan": {
-    label: "Xiaomi MiMo Token Plan",
-    kind: "openai-compatible",
-    baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
-    keyHint: "tp-",
-    thinkingStyle: "none",
-    defaultModel: "mimo-v2-flash",
-    envName: "XIAOMI_TOKEN_PLAN_API_KEY"
-  },
-  "xiaomi-token-plan-sgp": {
     label: "Xiaomi MiMo Token Plan (Singapore)",
     kind: "openai-compatible",
     baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
