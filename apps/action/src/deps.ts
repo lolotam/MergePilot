@@ -9,7 +9,7 @@ export interface ActionDeps {
   createModel?: (
     config: MergePilotConfig,
     store: CredentialStore,
-    opts: { cwd: string },
+    opts: { cwd: string; configDir?: string; customBaseUrl?: string | undefined },
   ) => Promise<ReviewModel>;
   log?: (message: string) => void;
   cwd?: () => string;

@@ -50458,7 +50458,7 @@ function providerEntry(id) {
 }
 function resolveBaseUrl(id, override) {
   const entry = PROVIDER_REGISTRY[id];
-  const chosen = override?.trim() || (entry.requiresBaseUrl ? "" : entry.baseUrl);
+  const chosen = entry.requiresBaseUrl ? override?.trim() ?? "" : entry.baseUrl;
   if (!chosen)
     throw new Error(`Provider ${id} requires a base URL`);
   return chosen.replace(/\/+$/, "");
@@ -70128,16 +70128,19 @@ var SEVERITY_RANK = {
 var ProviderSchema = external_exports.enum(PROVIDER_IDS);
 var ApiProviderSchema = external_exports.enum(API_PROVIDER_IDS);
 var BaseUrlSchema = external_exports.url({ protocol: /^https?$/ });
+var BASE_URL_NOT_ALLOWED = 'baseUrl is not allowed here: preset providers always use their fixed API URL, and only provider "custom" may name one (set its URL through the trusted CUSTOM_LLM_BASE_URL / custom-base-url input, not this file)';
+function rejectPresetBaseUrl(entry, ctx) {
+  if (entry.provider !== "custom" && entry.baseUrl !== void 0) {
+    ctx.addIssue({ code: "custom", path: ["baseUrl"], message: BASE_URL_NOT_ALLOWED });
+  }
+}
 var FallbackEntrySchema = external_exports.strictObject({
   provider: ApiProviderSchema,
   model: external_exports.string().min(1),
   effort: external_exports.string().min(1).optional(),
+  /** Untrusted and ignored; rejected for presets (see BASE_URL_NOT_ALLOWED). */
   baseUrl: BaseUrlSchema.optional()
-}).superRefine((entry, ctx) => {
-  if (entry.provider === "custom" && entry.baseUrl === void 0) {
-    ctx.addIssue({ code: "custom", path: ["baseUrl"], message: "required when provider is custom" });
-  }
-});
+}).superRefine(rejectPresetBaseUrl);
 var MAX_FALLBACK_MODELS = 3;
 var PathInstructionSchema = external_exports.strictObject({
   path: external_exports.string().min(1),
@@ -70187,7 +70190,7 @@ var MergePilotConfigSchema = external_exports.strictObject({
   model: external_exports.string().min(1).optional(),
   /** Thinking effort for `model` (e.g. low / medium / high / off); ignored where unknown. */
   effort: external_exports.string().min(1).optional(),
-  /** API root; required for `custom`, an override for the other compatible presets. */
+  /** Untrusted and ignored; rejected for presets (see BASE_URL_NOT_ALLOWED). */
   baseUrl: BaseUrlSchema.optional(),
   /** Explicit, disclosed fallback models (ADR-0008); empty means no fallback at all. */
   fallback: external_exports.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).default([]),
@@ -70203,9 +70206,7 @@ var MergePilotConfigSchema = external_exports.strictObject({
       message: `required when provider is ${config2.provider}`
     });
   }
-  if (config2.provider === "custom" && config2.baseUrl === void 0) {
-    ctx.addIssue({ code: "custom", path: ["baseUrl"], message: "required when provider is custom" });
-  }
+  rejectPresetBaseUrl(config2, ctx);
 });
 
 function valueAt(data, path7) {
@@ -94375,9 +94376,11 @@ function normalize(effort) {
 function thinkingHeadroom(effort) {
   return THINKING_BUDGET_TOKENS[normalize(effort)] ?? 0;
 }
-function openAIReasoningEffort(effort) {
+var OPENAI_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
+var OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
+function openAIReasoningEffort(model, effort) {
   const value = normalize(effort);
-  return REASONING_EFFORT_VALUES.has(value) ? value : void 0;
+  return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : void 0;
 }
 function compatibleEffortFields(style, effort) {
   const value = normalize(effort);
@@ -94451,7 +94454,7 @@ var OpenAIAdapter = class extends LlmAdapter {
     this.#client = options.client ?? new OpenAI({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
   requestedOutputTokens(options) {
-    const reasoningEffort = openAIReasoningEffort(options.effort);
+    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
     return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
   }
   async *stream(options) {
@@ -94466,7 +94469,7 @@ var OpenAIAdapter = class extends LlmAdapter {
       role: m2.role,
       content: m2.content
     }));
-    const reasoningEffort = openAIReasoningEffort(options.effort);
+    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
     const params = {
       model: options.model,
       messages,
@@ -118537,10 +118540,13 @@ ${instruction}`;
   }
 };
 
-function createAdapter(provider, apiKey, baseUrl) {
+var CUSTOM_BASE_URL_MISSING = 'provider "custom" needs a trusted base URL (CUSTOM_LLM_BASE_URL / the custom-base-url input); .mergepilot.yml baseUrl is ignored';
+function createAdapter(provider, apiKey, customBaseUrl) {
   const entry = providerEntry(provider);
   if (entry.kind === "openai-compatible") {
-    return new OpenAICompatibleAdapter({ provider, apiKey, ...baseUrl ? { baseUrl } : {} });
+    if (provider === "custom" && !customBaseUrl?.trim())
+      throw new Error(CUSTOM_BASE_URL_MISSING);
+    return new OpenAICompatibleAdapter({ provider, apiKey, ...provider === "custom" && customBaseUrl ? { baseUrl: customBaseUrl } : {} });
   }
   if (!apiKey)
     throw new Error(`An API key is required for provider: ${provider}`);
@@ -118571,7 +118577,7 @@ async function resolveKey(store, provider) {
   }
   return store.resolve({ provider }, "review");
 }
-async function resolveFallbacks(config2, store) {
+async function resolveFallbacks(config2, store, customBaseUrl) {
   const resolved = { models: [], secrets: [], skipped: [] };
   for (const entry of config2.fallback ?? []) {
     const label = `${entry.provider}:${entry.model}`;
@@ -118584,8 +118590,12 @@ async function resolveFallbacks(config2, store) {
     }
     if (key)
       resolved.secrets.push(key);
+    if (entry.provider === "custom" && !customBaseUrl?.trim()) {
+      resolved.skipped.push({ label, reason: "no trusted base URL is configured (CUSTOM_LLM_BASE_URL)" });
+      continue;
+    }
     try {
-      resolved.models.push(withRetries(createAdapter(entry.provider, key, entry.baseUrl), entry.model, entry.effort));
+      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl), entry.model, entry.effort));
     } catch {
       resolved.skipped.push({ label, reason: "the provider could not be set up" });
     }
@@ -118613,19 +118623,19 @@ async function createReviewModel(config2, store, opts) {
       ...config2.model ? { model: config2.model } : {},
       ...opts.configDir ? { configDir: opts.configDir } : {}
     });
-    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store)));
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store, opts.customBaseUrl)));
   }
   if (!isApiProviderId(config2.provider)) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
   }
   const provider = config2.provider;
   const apiKey = provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
-  const adapter = createAdapter(provider, apiKey, config2.baseUrl);
+  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl);
   if (!config2.model) {
     throw new Error(`Model is required for provider: ${config2.provider}`);
   }
   const model = withRetries(adapter, config2.model, config2.effort);
-  return { ...model, ...attachments(apiKey, await resolveFallbacks(config2, store)) };
+  return { ...model, ...attachments(apiKey, await resolveFallbacks(config2, store, opts.customBaseUrl)) };
 }
 
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
@@ -123743,6 +123753,20 @@ async function reviewPullRequest(ctx) {
   };
 }
 
+// src/custom-base-url.ts
+function trustedCustomBaseUrl(env2) {
+  const value = env2["INPUT_CUSTOM-BASE-URL"] || env2.INPUT_CUSTOM_BASE_URL || env2.CUSTOM_LLM_BASE_URL;
+  return value?.trim() || void 0;
+}
+function warnIgnoredBaseUrls(config2, log) {
+  const named = config2.baseUrl !== void 0 || (config2.fallback ?? []).some((entry) => entry.baseUrl !== void 0);
+  if (named) {
+    log(
+      "Warning: baseUrl in .mergepilot.yml is ignored; set the custom server URL with the custom-base-url input or CUSTOM_LLM_BASE_URL."
+    );
+  }
+}
+
 // src/audit.ts
 async function defaultWalk(dir, baseDir = dir) {
   const entries = await readdir2(dir, { withFileTypes: true });
@@ -123826,9 +123850,12 @@ ${parseResult.errors.join("\n")}`);
     isolated.push(await mkdtemp(join2(tmpdir(), "mergepilot-audit-config-")));
   }
   const [isolatedCwd, configDir] = isolated;
+  warnIgnoredBaseUrls(config2, log);
+  const customBaseUrl = trustedCustomBaseUrl(env2);
   const model = await createModel(config2, store, {
     cwd: isolatedCwd ?? cwd,
-    ...configDir ? { configDir } : {}
+    ...configDir ? { configDir } : {},
+    ...customBaseUrl ? { customBaseUrl } : {}
   });
   log(`Created audit model: ${model.label}`);
   for (const skipped of model.skippedFallbacks ?? []) {
@@ -124094,9 +124121,12 @@ ${configResult.errors.join("\n")}`);
       tempConfigDir = await mkdtempFn(join4(tmpdir3(), "mergepilot-claude-config-"));
       effectiveCwd = sandbox.dir;
     }
+    warnIgnoredBaseUrls(config2, log);
+    const customBaseUrl = trustedCustomBaseUrl(env2);
     const model = await createModel(config2, store, {
       cwd: effectiveCwd,
-      ...tempConfigDir ? { configDir: tempConfigDir } : {}
+      ...tempConfigDir ? { configDir: tempConfigDir } : {},
+      ...customBaseUrl ? { customBaseUrl } : {}
     });
     log(`Created review model: ${model.label}`);
     for (const skipped of model.skippedFallbacks ?? []) {

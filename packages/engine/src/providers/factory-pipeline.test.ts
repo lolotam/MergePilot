@@ -6,7 +6,7 @@ import { FallbackChain } from '../review/fallback.js';
 import { modelFromAdapter, type ReviewModel } from '../review/model.js';
 import { runReview } from '../review/pipeline.js';
 import { OpenAICompatibleAdapter } from './compatible/adapter.js';
-import { createReviewModel, resolveReviewSecrets } from './factory.js';
+import { createReviewModel, CUSTOM_BASE_URL_MISSING, resolveReviewSecrets } from './factory.js';
 import { OpenAIAdapter } from './openai/adapter.js';
 
 const CWD = '/test/workspace';
@@ -171,5 +171,55 @@ describe('budget preflight prices the effort headroom', () => {
   it('uses the largest output limit across the fallback chain', () => {
     const chain = new FallbackChain(xaiModel(), [xaiModel('high'), xaiModel('low')]);
     expect(chain.outputTokensFor(2048)).toBe(2048 + 16384);
+  });
+});
+
+describe('a key is never sent to a URL from repository content (ADR-0008 amendment)', () => {
+  const okStream = () =>
+    new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] })}
+
+data: [DONE]
+
+`, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+
+  it('custom: ignores the config file baseUrl and calls only the trusted customBaseUrl', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (urls.push(url), okStream())));
+    try {
+      const store = new EnvCredentialStore({ CUSTOM_LLM_API_KEY: FALLBACK_KEY });
+      const cfg = config({ provider: 'custom', model: 'local', baseUrl: 'https://evil.example/v1' });
+      const model = await createReviewModel(cfg, store, { cwd: CWD, customBaseUrl: 'http://localhost:8080/v1' });
+      await model.generate({ system: 's', user: 'u', maxOutputTokens: 10 });
+      expect(urls).toEqual(['http://localhost:8080/v1/chat/completions']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('custom without a trusted URL fails clearly instead of using the file baseUrl', async () => {
+    const cfg = config({ provider: 'custom', model: 'local', baseUrl: 'https://evil.example/v1' });
+    await expect(createReviewModel(cfg, new EnvCredentialStore({}), { cwd: CWD })).rejects.toThrow(CUSTOM_BASE_URL_MISSING);
+  });
+
+  it('a custom fallback without a trusted URL is skipped and disclosed', async () => {
+    const store = new EnvCredentialStore({ OPENAI_API_KEY: 'k1' });
+    const cfg = config({ provider: 'openai', model: 'gpt-5', fallback: [{ provider: 'custom', model: 'local' }] });
+    const model = await createReviewModel(cfg, store, { cwd: CWD });
+    expect(model.skippedFallbacks).toEqual([{ label: 'custom:local', reason: expect.stringContaining('CUSTOM_LLM_BASE_URL') }]);
+  });
+
+  it('a preset adapter always calls its fixed registry URL, whatever baseUrl is passed', async () => {
+    const urls: string[] = [];
+    const adapter = new OpenAICompatibleAdapter({
+      provider: 'openrouter',
+      apiKey: 'k1',
+      baseUrl: 'https://evil.example/v1',
+      fetch: async (url) => (urls.push(String(url)), okStream()),
+    });
+    await modelFromAdapter(adapter, 'openai/gpt-5').generate({ system: 's', user: 'u', maxOutputTokens: 10 });
+    expect(urls).toEqual(['https://openrouter.ai/api/v1/chat/completions']);
   });
 });

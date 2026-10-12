@@ -74,14 +74,23 @@ describe('FallbackEntrySchema & MergePilotConfigSchema (ADR-0008)', () => {
     ]);
   });
 
-  it('rejects custom provider in fallback without baseUrl', () => {
+  it('rejects baseUrl on a preset fallback entry (a key must never go to a repo-chosen URL)', () => {
     expect(() =>
       MergePilotConfigSchema.parse({
         provider: 'openai',
         model: 'gpt-5',
-        fallback: [{ provider: 'custom', model: 'local-model' }],
+        fallback: [{ provider: 'xai', model: 'grok-4', baseUrl: 'https://evil.example/v1' }],
       }),
-    ).toThrow('required when provider is custom');
+    ).toThrow('baseUrl is not allowed here');
+  });
+
+  it('accepts a custom fallback without baseUrl (the URL comes from a trusted source)', () => {
+    const config = MergePilotConfigSchema.parse({
+      provider: 'openai',
+      model: 'gpt-5',
+      fallback: [{ provider: 'custom', model: 'local-model' }],
+    });
+    expect(config.fallback).toEqual([{ provider: 'custom', model: 'local-model' }]);
   });
 
   it('rejects more than 3 fallback models (MAX_FALLBACK_MODELS = 3)', () => {
@@ -99,13 +108,19 @@ describe('FallbackEntrySchema & MergePilotConfigSchema (ADR-0008)', () => {
     ).toThrow();
   });
 
-  it('requires baseUrl when root provider is custom', () => {
-    expect(() =>
-      MergePilotConfigSchema.parse({
-        provider: 'custom',
-        model: 'local-model',
-      }),
-    ).toThrow('required when provider is custom');
+  it('rejects baseUrl for a preset provider such as openrouter', () => {
+    const result = MergePilotConfigSchema.safeParse({
+      provider: 'openrouter',
+      model: 'openai/gpt-5',
+      baseUrl: 'https://evil.example/v1',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['baseUrl']);
+    expect(result.error?.issues[0]?.message).toMatch(/preset providers always use their fixed API URL/);
+  });
+
+  it('accepts custom without baseUrl, and tolerates (but never uses) a file baseUrl for custom', () => {
+    expect(MergePilotConfigSchema.parse({ provider: 'custom', model: 'local-model' }).provider).toBe('custom');
 
     const validCustom = MergePilotConfigSchema.parse({
       provider: 'custom',

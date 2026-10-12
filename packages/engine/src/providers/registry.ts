@@ -177,10 +177,14 @@ export function chatModelsFor<T extends { id: string }>(provider: ApiProviderId,
   return excluded ? models.filter((m) => !excluded.test(m.id)) : [...models];
 }
 
-/** The base URL to call: the config's own for `custom` (required) or an override, else the preset's. */
+/**
+ * The base URL to call. A preset ALWAYS uses its fixed registry URL, whatever is passed, so a
+ * customer key can never be sent elsewhere; only `custom` takes `override` (required), and the
+ * caller must take that from a trusted source, never from repository content (ADR-0008).
+ */
 export function resolveBaseUrl(id: ApiProviderId, override?: string): string {
   const entry = PROVIDER_REGISTRY[id];
-  const chosen = override?.trim() || (entry.requiresBaseUrl ? '' : entry.baseUrl);
+  const chosen = entry.requiresBaseUrl ? (override?.trim() ?? '') : entry.baseUrl;
   if (!chosen) throw new Error(`Provider ${id} requires a base URL`);
   return chosen.replace(/\/+$/, '');
 }

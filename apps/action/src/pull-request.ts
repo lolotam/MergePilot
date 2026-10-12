@@ -22,6 +22,7 @@ import {
   loadRepoConfig,
   reviewPullRequest,
 } from '@mergepilot/github';
+import { trustedCustomBaseUrl, warnIgnoredBaseUrls } from './custom-base-url.js';
 import type { ActionDeps } from './deps.js';
 import {
   createSanitizedWorkspace,
@@ -33,7 +34,7 @@ export interface PullRequestReviewDeps extends Omit<ActionDeps, 'createModel'> {
     | ((
         config: MergePilotConfig,
         store: CredentialStore,
-        opts: { cwd: string; configDir?: string },
+        opts: { cwd: string; configDir?: string; customBaseUrl?: string | undefined },
       ) => Promise<ReviewModel>)
     | undefined;
   createSanitizedWorkspace?: typeof createSanitizedWorkspace | undefined;
@@ -44,7 +45,7 @@ export interface PullRequestReviewDeps extends Omit<ActionDeps, 'createModel'> {
 const defaultCreateModel = async (
   config: MergePilotConfig,
   store: CredentialStore,
-  opts: { cwd: string; configDir?: string },
+  opts: { cwd: string; configDir?: string; customBaseUrl?: string | undefined },
 ): Promise<ReviewModel> => {
   if (config.provider === 'claude-code') {
     const token = await store.resolve({ provider: 'claude-code' }, 'review');
@@ -197,9 +198,12 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
       effectiveCwd = sandbox.dir;
     }
 
+    warnIgnoredBaseUrls(config, log);
+    const customBaseUrl = trustedCustomBaseUrl(env);
     const model = await createModel(config, store, {
       cwd: effectiveCwd,
       ...(tempConfigDir ? { configDir: tempConfigDir } : {}),
+      ...(customBaseUrl ? { customBaseUrl } : {}),
     });
     log(`Created review model: ${model.label}`);
     for (const skipped of model.skippedFallbacks ?? []) {

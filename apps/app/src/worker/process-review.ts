@@ -169,11 +169,15 @@ export async function processReviewJob(
       // In the SaaS the workspace's dashboard settings choose the provider, model and review
       // language (the repo file may target the GitHub Action, e.g. `provider: claude-code`); the
       // repo still supplies its review rules and other settings.
-      const repoConfig = repoConfigResult.config;
+      // A repo-provided baseUrl never reaches the effective config: a key must not be sent to a
+      // URL from repository content (ADR-0008 amendment). The engine ignores it too.
+      const { baseUrl: _repoBaseUrl, ...repoConfig } = repoConfigResult.config;
+      const fallback = repoConfig.fallback.map(({ baseUrl: _fallbackBaseUrl, ...entry }) => entry);
       const sameModel =
         repoConfig.provider === settings.provider && repoConfig.model === settings.model;
       effectiveConfig = {
         ...repoConfig,
+        fallback,
         provider: settings.provider,
         model: settings.model,
         language: settings.language,

@@ -19,7 +19,7 @@ export interface OpenAICompatibleAdapterOptions {
   provider: ApiProviderId;
   /** Customer-owned key; may be absent only for a keyless custom server. */
   apiKey?: KeyInput;
-  /** Required for `custom`; overrides the preset's URL otherwise. */
+  /** Required for `custom` (from a trusted source); ignored for presets, which keep their fixed URL. */
   baseUrl?: string;
   fetch?: FetchLike;
 }

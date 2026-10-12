@@ -45,7 +45,7 @@ export class OpenAIAdapter extends LlmAdapter {
   }
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
-    const reasoningEffort = openAIReasoningEffort(options.effort);
+    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
     return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
   }
 
@@ -63,7 +63,7 @@ export class OpenAIAdapter extends LlmAdapter {
       content: m.content,
     }));
 
-    const reasoningEffort = openAIReasoningEffort(options.effort);
+    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
     const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming = {
       model: options.model,
       messages,

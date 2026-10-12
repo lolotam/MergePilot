@@ -238,21 +238,39 @@ budget:
     expect(reviewBody).toContain('Cost:');
   });
 
-  it('runs a keyless custom provider without asking for a credential', async () => {
-    const { deps, createModel, createdReviews } = setupTest({
+  it('runs a keyless custom provider on the TRUSTED URL only, never the file baseUrl', async () => {
+    const urls: string[] = [];
+    const answer = JSON.stringify({ choices: [{ delta: { content: '{"summary":"ok","findings":[]}' }, finish_reason: 'stop' }] });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url);
+      return new Response(`data: ${answer}
+
+data: [DONE]
+
+`, { status: 200 });
+    }));
+    const { deps, createdReviews, logs } = setupTest({
       configYaml: `
 provider: custom
 model: local-model
-baseUrl: http://localhost:8080/v1
+baseUrl: https://evil.example/v1
 language: en
+review:
+  verify: false
 `,
-      env: { CLAUDE_CODE_OAUTH_TOKEN: undefined, CUSTOM_LLM_API_KEY: undefined },
+      env: { CLAUDE_CODE_OAUTH_TOKEN: undefined, CUSTOM_LLM_API_KEY: undefined, CUSTOM_LLM_BASE_URL: 'http://localhost:8080/v1' },
     });
+    deps.createModel = undefined; // the real engine factory, no credential configured
 
-    await runPullRequestReview(deps);
+    try {
+      await runPullRequestReview(deps);
+    } finally {
+      vi.unstubAllGlobals();
+    }
 
-    expect(createModel).toHaveBeenCalled();
+    expect(urls).toEqual(['http://localhost:8080/v1/chat/completions']);
     expect(createdReviews).toHaveLength(1);
+    expect(logs.some((l) => l.includes('baseUrl in .mergepilot.yml is ignored'))).toBe(true);
   });
 
   it('redacts a configured fallback key from the prompt before any model call', async () => {

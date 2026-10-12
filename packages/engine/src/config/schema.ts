@@ -11,6 +11,22 @@ export const ApiProviderSchema = z.enum(API_PROVIDER_IDS);
 const BaseUrlSchema = z.url({ protocol: /^https?$/ });
 
 /**
+ * `baseUrl` in a repository file is untrusted (anyone who can change the file could point a
+ * customer key at their own server), so it is never used to send a request (ADR-0008
+ * amendment). Presets reject it outright; `custom` tolerates it only so an existing file still
+ * parses, and the engine ignores it: the custom server URL comes from a trusted source only
+ * (the Action's `custom-base-url` input / `CUSTOM_LLM_BASE_URL`, or workspace settings).
+ */
+const BASE_URL_NOT_ALLOWED =
+  'baseUrl is not allowed here: preset providers always use their fixed API URL, and only provider "custom" may name one (set its URL through the trusted CUSTOM_LLM_BASE_URL / custom-base-url input, not this file)';
+
+function rejectPresetBaseUrl(entry: { provider: string; baseUrl?: string | undefined }, ctx: z.RefinementCtx): void {
+  if (entry.provider !== 'custom' && entry.baseUrl !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['baseUrl'], message: BASE_URL_NOT_ALLOWED });
+  }
+}
+
+/**
  * One explicit fallback model (ADR-0008). Tried in order, only when the model before it failed
  * after its retries with quota / rate-limit / server / network / auth, and always disclosed.
  */
@@ -19,13 +35,10 @@ export const FallbackEntrySchema = z
     provider: ApiProviderSchema,
     model: z.string().min(1),
     effort: z.string().min(1).optional(),
+    /** Untrusted and ignored; rejected for presets (see BASE_URL_NOT_ALLOWED). */
     baseUrl: BaseUrlSchema.optional(),
   })
-  .superRefine((entry, ctx) => {
-    if (entry.provider === 'custom' && entry.baseUrl === undefined) {
-      ctx.addIssue({ code: 'custom', path: ['baseUrl'], message: 'required when provider is custom' });
-    }
-  });
+  .superRefine(rejectPresetBaseUrl);
 export type FallbackEntry = z.infer<typeof FallbackEntrySchema>;
 
 export const MAX_FALLBACK_MODELS = 3;
@@ -99,7 +112,7 @@ export const MergePilotConfigSchema = z
     model: z.string().min(1).optional(),
     /** Thinking effort for `model` (e.g. low / medium / high / off); ignored where unknown. */
     effort: z.string().min(1).optional(),
-    /** API root; required for `custom`, an override for the other compatible presets. */
+    /** Untrusted and ignored; rejected for presets (see BASE_URL_NOT_ALLOWED). */
     baseUrl: BaseUrlSchema.optional(),
     /** Explicit, disclosed fallback models (ADR-0008); empty means no fallback at all. */
     fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).default([]),
@@ -116,9 +129,7 @@ export const MergePilotConfigSchema = z
         message: `required when provider is ${config.provider}`,
       });
     }
-    if (config.provider === 'custom' && config.baseUrl === undefined) {
-      ctx.addIssue({ code: 'custom', path: ['baseUrl'], message: 'required when provider is custom' });
-    }
+    rejectPresetBaseUrl(config, ctx);
   });
 
 export type MergePilotConfig = z.infer<typeof MergePilotConfigSchema>;

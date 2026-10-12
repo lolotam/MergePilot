@@ -104,7 +104,7 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
     };
   }
   if (provider === 'openai') {
-    const effort = openAIReasoningEffort(options.effort);
+    const effort = openAIReasoningEffort(model, options.effort);
     return {
       url: `${base}/chat/completions`,
       headers: { ...json, ...bearerHeaders(key) },

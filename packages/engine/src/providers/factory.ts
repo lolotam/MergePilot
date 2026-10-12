@@ -17,13 +17,27 @@ export interface CreateReviewModelOptions {
   cwd: string;
   /** claude-code only: isolated CLAUDE_CONFIG_DIR so no runner-level settings or hooks apply. */
   configDir?: string;
+  /**
+   * The `custom` server URL, from a TRUSTED source only: the Action's `custom-base-url` input /
+   * `CUSTOM_LLM_BASE_URL`, or workspace settings. Never `.mergepilot.yml`: the config's own
+   * `baseUrl` is ignored, so a key is never sent to a URL that came from repository content.
+   */
+  customBaseUrl?: string | undefined;
 }
 
-/** One API adapter for a provider id; `custom` may run without a key (a local server). */
-export function createAdapter(provider: ApiProviderId, apiKey: Secret | undefined, baseUrl?: string): LlmAdapter {
+export const CUSTOM_BASE_URL_MISSING =
+  'provider "custom" needs a trusted base URL (CUSTOM_LLM_BASE_URL / the custom-base-url input); .mergepilot.yml baseUrl is ignored';
+
+/**
+ * One API adapter for a provider id; `custom` may run without a key (a local server). Presets
+ * always call their fixed registry URL; `customBaseUrl` is used for `custom` only and must be
+ * trusted (see CreateReviewModelOptions).
+ */
+export function createAdapter(provider: ApiProviderId, apiKey: Secret | undefined, customBaseUrl?: string): LlmAdapter {
   const entry = providerEntry(provider);
   if (entry.kind === 'openai-compatible') {
-    return new OpenAICompatibleAdapter({ provider, apiKey, ...(baseUrl ? { baseUrl } : {}) });
+    if (provider === 'custom' && !customBaseUrl?.trim()) throw new Error(CUSTOM_BASE_URL_MISSING);
+    return new OpenAICompatibleAdapter({ provider, apiKey, ...(provider === 'custom' && customBaseUrl ? { baseUrl: customBaseUrl } : {}) });
   }
   if (!apiKey) throw new Error(`An API key is required for provider: ${provider}`);
   if (provider === 'anthropic') return new AnthropicAdapter({ apiKey });
@@ -78,7 +92,11 @@ export interface ResolvedFallbacks {
  * The configured fallback chain (ADR-0008), resolved up front. A missing fallback key never
  * stops a review the primary model can finish: that entry is skipped with a disclosed reason.
  */
-export async function resolveFallbacks(config: MergePilotConfig, store: AnyCredentialStore): Promise<ResolvedFallbacks> {
+export async function resolveFallbacks(
+  config: MergePilotConfig,
+  store: AnyCredentialStore,
+  customBaseUrl?: string,
+): Promise<ResolvedFallbacks> {
   const resolved: ResolvedFallbacks = { models: [], secrets: [], skipped: [] };
   for (const entry of config.fallback ?? []) {
     const label = `${entry.provider}:${entry.model}`;
@@ -90,8 +108,12 @@ export async function resolveFallbacks(config: MergePilotConfig, store: AnyCrede
       continue;
     }
     if (key) resolved.secrets.push(key);
+    if (entry.provider === 'custom' && !customBaseUrl?.trim()) {
+      resolved.skipped.push({ label, reason: 'no trusted base URL is configured (CUSTOM_LLM_BASE_URL)' });
+      continue;
+    }
     try {
-      resolved.models.push(withRetries(createAdapter(entry.provider, key, entry.baseUrl), entry.model, entry.effort));
+      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl), entry.model, entry.effort));
     } catch {
       resolved.skipped.push({ label, reason: 'the provider could not be set up' });
     }
@@ -140,7 +162,7 @@ export async function createReviewModel(
       ...(config.model ? { model: config.model } : {}),
       ...(opts.configDir ? { configDir: opts.configDir } : {}),
     });
-    return Object.assign(runner, attachments(token, await resolveFallbacks(config, store)));
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config, store, opts.customBaseUrl)));
   }
 
   if (!isApiProviderId(config.provider)) {
@@ -149,11 +171,12 @@ export async function createReviewModel(
   const provider = config.provider;
   const apiKey =
     provider === 'custom' ? await resolveKey(store, provider) : await store.resolve({ provider }, 'review');
-  const adapter = createAdapter(provider, apiKey, config.baseUrl);
+  // `config.baseUrl` is deliberately NOT read: it comes from the repository (ADR-0008 amendment).
+  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl);
 
   if (!config.model) {
     throw new Error(`Model is required for provider: ${config.provider}`);
   }
   const model = withRetries(adapter, config.model, config.effort);
-  return { ...model, ...attachments(apiKey, await resolveFallbacks(config, store)) };
+  return { ...model, ...attachments(apiKey, await resolveFallbacks(config, store, opts.customBaseUrl)) };
 }

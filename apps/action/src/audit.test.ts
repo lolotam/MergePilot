@@ -216,22 +216,22 @@ audit:
     expect(opts?.configDir).toBeDefined();
   });
 
-  it('runs a keyless custom provider without asking for a credential', async () => {
+  it('runs a keyless custom provider with the trusted custom-base-url input', async () => {
     const { deps, createModel, summariesWritten } = setupTest({
       configYaml: `
 provider: custom
 model: local-model
-baseUrl: http://localhost:8080/v1
 language: en
 audit:
   enabled: true
 `,
-      env: { ANTHROPIC_API_KEY: undefined, CUSTOM_LLM_API_KEY: undefined },
+      env: { ANTHROPIC_API_KEY: undefined, CUSTOM_LLM_API_KEY: undefined, 'INPUT_CUSTOM-BASE-URL': 'http://localhost:8080/v1' },
     });
 
     await runAudit(deps);
 
-    expect(createModel).toHaveBeenCalled();
+    const opts = (createModel.mock.calls[0] as unknown[] | undefined)?.[2] as { customBaseUrl?: string } | undefined;
+    expect(opts?.customBaseUrl).toBe('http://localhost:8080/v1');
     expect(summariesWritten).toHaveLength(1);
   });
 

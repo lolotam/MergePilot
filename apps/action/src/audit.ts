@@ -21,6 +21,7 @@ import {
   createOctokitClient,
   readFilesAtRef,
 } from '@mergepilot/github';
+import { trustedCustomBaseUrl, warnIgnoredBaseUrls } from './custom-base-url.js';
 import type { ActionDeps } from './deps.js';
 
 export interface AuditActionDeps extends ActionDeps {
@@ -136,9 +137,12 @@ export async function runAudit(deps?: AuditActionDeps): Promise<void> {
     isolated.push(await mkdtemp(join(tmpdir(), 'mergepilot-audit-config-')));
   }
   const [isolatedCwd, configDir] = isolated;
+  warnIgnoredBaseUrls(config, log);
+  const customBaseUrl = trustedCustomBaseUrl(env);
   const model = await createModel(config, store, {
     cwd: isolatedCwd ?? cwd,
     ...(configDir ? { configDir } : {}),
+    ...(customBaseUrl ? { customBaseUrl } : {}),
   });
   log(`Created audit model: ${model.label}`);
   for (const skipped of model.skippedFallbacks ?? []) {

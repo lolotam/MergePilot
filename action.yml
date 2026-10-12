@@ -8,6 +8,9 @@ inputs:
     description: 'GitHub token for reading pull request changes and posting reviews'
     required: false
     default: '${{ github.token }}'
+  custom-base-url:
+    description: 'Server URL for provider "custom" (OpenAI-compatible). Trusted source only: a baseUrl in .mergepilot.yml is ignored. CUSTOM_LLM_BASE_URL also works.'
+    required: false
   publisher-login:
     description: 'Login handle of the review publisher used for idempotency checks'
     required: false
