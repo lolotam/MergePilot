@@ -5,7 +5,8 @@ import { adminApi } from '../api/admin.js';
 import { WorkspacesTab } from './WorkspacesTab.js';
 import { renderWithProviders, workspacesFixture } from './admin-test-utils.js';
 
-vi.mock('../api/admin.js', () => ({
+vi.mock('../api/admin.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/admin.js')>()),
   adminApi: {
     getWorkspaces: vi.fn(),
     deleteWorkspace: vi.fn(),

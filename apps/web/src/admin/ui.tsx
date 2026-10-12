@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { useI18n } from '../i18n/context.js';
 import type { AdminPageInfo } from '../api/admin.js';
 
@@ -132,5 +132,30 @@ export function Pager({
         </button>
       </div>
     </div>
+  );
+}
+
+/** Search box for the admin tables; the caller debounces and sends the term to the server. */
+export function SearchInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <label className="relative flex-1 min-w-[200px] max-w-md">
+      <span className="sr-only">{placeholder}</span>
+      <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 start-3 text-gray-400 pointer-events-none" />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full ps-9 pe-3 py-2 text-sm rounded-md border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-950 focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
+      />
+    </label>
   );
 }

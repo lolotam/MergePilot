@@ -1,44 +1,83 @@
-import { useMemo, useState } from 'react';
-import { Search, Trash2 } from 'lucide-react';
-import type { AdminUser } from '../api/admin.js';
+import { useState } from 'react';
+import { AlertTriangle, Trash2, X } from 'lucide-react';
+import { soleOwnedWorkspaces, type AdminUser, type AdminWorkspaceRef } from '../api/admin.js';
 import { useMeQuery } from '../api/hooks.js';
 import { useI18n } from '../i18n/context.js';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog.js';
 import { formatDateTime } from './format.js';
-import { useAdminDeleteUserMutation, useAdminUsersQuery } from './hooks.js';
-import { Badge, Pager, StateMessage, TableCard, tbodyClass, tdClass, thClass, theadClass } from './ui.js';
+import { useAdminDeleteUserMutation, useAdminUsersQuery, useDebouncedValue } from './hooks.js';
+import {
+  Badge,
+  Pager,
+  SearchInput,
+  StateMessage,
+  TableCard,
+  tbodyClass,
+  tdClass,
+  thClass,
+  theadClass,
+} from './ui.js';
 
-function matches(user: AdminUser, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return user.name.toLowerCase().includes(q) || user.email.toLowerCase().includes(q);
+interface BlockedDelete {
+  user: AdminUser;
+  workspaces: AdminWorkspaceRef[];
+}
+
+function SoleOwnerAlert({ blocked, onDismiss }: { blocked: BlockedDelete; onDismiss: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-3 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-4 text-sm text-amber-900 dark:text-amber-100"
+    >
+      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold">{t('deleteUserSoleOwnerTitle', { name: blocked.user.name })}</p>
+        <p className="mt-1">{t('deleteUserSoleOwnerDesc')}</p>
+        <ul className="mt-2 list-disc ps-5">
+          {blocked.workspaces.map((ws) => (
+            <li key={ws.id} className="font-medium">
+              {ws.name}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label={t('close')}
+        className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/40"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
 }
 
 export function UsersTab() {
   const { t, language } = useI18n();
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState('');
+  const q = useDebouncedValue(search.trim());
   const [pending, setPending] = useState<AdminUser | null>(null);
-  const { data, isLoading, isError } = useAdminUsersQuery(offset);
+  const [blocked, setBlocked] = useState<BlockedDelete | null>(null);
+  const { data, isLoading, isError } = useAdminUsersQuery(offset, q);
   const { data: me } = useMeQuery();
   const remove = useAdminDeleteUserMutation();
 
-  const users = useMemo(() => (data?.users ?? []).filter((u) => matches(u, search)), [data, search]);
+  const users = data?.users ?? [];
   const roleLabel = (role: string) =>
     role === 'owner' ? t('roleOwner') : role === 'admin' ? t('roleAdmin') : t('roleMember');
 
   const toolbar = (
-    <label className="relative flex-1 min-w-[200px] max-w-md">
-      <span className="sr-only">{t('searchUsersPlaceholder')}</span>
-      <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 start-3 text-gray-400 pointer-events-none" />
-      <input
-        type="search"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder={t('searchUsersPlaceholder')}
-        className="w-full ps-9 pe-3 py-2 text-sm rounded-md border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-950 focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
-      />
-    </label>
+    <SearchInput
+      value={search}
+      onChange={(value) => {
+        setSearch(value);
+        setOffset(0);
+      }}
+      placeholder={t('searchUsersPlaceholder')}
+    />
   );
 
   let body;
@@ -135,7 +174,8 @@ export function UsersTab() {
   }
 
   return (
-    <>
+    <div className="flex flex-col gap-4">
+      {blocked && <SoleOwnerAlert blocked={blocked} onDismiss={() => setBlocked(null)} />}
       <TableCard toolbar={toolbar} footer={<Pager page={data} onChange={setOffset} />}>
         {body}
       </TableCard>
@@ -148,9 +188,17 @@ export function UsersTab() {
         onClose={() => setPending(null)}
         onConfirm={() => {
           if (!pending) return;
-          remove.mutate(pending.id, { onSettled: () => setPending(null) });
+          const target = pending;
+          setBlocked(null);
+          remove.mutate(target.id, {
+            onError: (err) => {
+              const workspaces = soleOwnedWorkspaces(err);
+              if (workspaces !== null) setBlocked({ user: target, workspaces });
+            },
+            onSettled: () => setPending(null),
+          });
         }}
       />
-    </>
+    </div>
   );
 }

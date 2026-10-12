@@ -7,7 +7,12 @@ import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import { CredentialService } from '../credentials/service.js';
 import { registerDashboardApi } from '../api/routes.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
-import { adminTestConfig, createAdminTestDb, type AdminTestDb } from './admin.fixtures.js';
+import {
+  adminTestConfig,
+  createAdminTestDb,
+  fixtureToken,
+  type AdminTestDb,
+} from './admin.fixtures.js';
 
 describe('GET /api/me isPlatformAdmin', () => {
   let app: FastifyInstance;
@@ -34,8 +39,8 @@ describe('GET /api/me isPlatformAdmin', () => {
     ]);
     const expiresAt = new Date(Date.now() + 86_400_000);
     await db.insert(authSchema.session).values([
-      { id: 's-ops', token: 'tok-ops', userId: 'u-ops', expiresAt },
-      { id: 's-user', token: 'tok-user', userId: 'u-user', expiresAt },
+      { id: 's-ops', token: fixtureToken('ops'), userId: 'u-ops', expiresAt },
+      { id: 's-user', token: fixtureToken('user'), userId: 'u-user', expiresAt },
     ]);
     await app.ready();
   });
@@ -49,7 +54,7 @@ describe('GET /api/me isPlatformAdmin', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/me',
-      headers: { cookie: signedSessionCookie('tok-ops', config.authSecret) },
+      headers: { cookie: signedSessionCookie(fixtureToken('ops'), config.authSecret) },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().isPlatformAdmin).toBe(true);
@@ -59,7 +64,7 @@ describe('GET /api/me isPlatformAdmin', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/me',
-      headers: { cookie: signedSessionCookie('tok-user', config.authSecret) },
+      headers: { cookie: signedSessionCookie(fixtureToken('user'), config.authSecret) },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().isPlatformAdmin).toBe(false);

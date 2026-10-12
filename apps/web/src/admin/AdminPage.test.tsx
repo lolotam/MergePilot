@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { adminApi } from '../api/admin.js';
+import { ApiClientError } from '../api/client.js';
 import * as hooks from '../api/hooks.js';
 import { AdminPage } from './AdminPage.js';
 import {
@@ -14,7 +15,8 @@ import {
 } from './admin-test-utils.js';
 
 vi.mock('../api/hooks.js');
-vi.mock('../api/admin.js', () => ({
+vi.mock('../api/admin.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/admin.js')>()),
   adminApi: {
     getOverview: vi.fn(),
     getUsers: vi.fn(),
@@ -75,7 +77,7 @@ describe('AdminPage', () => {
     expect(screen.getByText('Linked: 4 · Pending: 2')).toBeTruthy();
   });
 
-  it('users tab lists providers as badges and filters by name or email', async () => {
+  it('users tab lists providers as badges and searches by name or email on the server', async () => {
     mockMe(true);
     const user = userEvent.setup();
     renderWithProviders(<AdminPage />);
@@ -84,14 +86,22 @@ describe('AdminPage', () => {
     expect(await screen.findByText('Sara Ali')).toBeTruthy();
     expect(screen.getByText('github')).toBeTruthy();
     expect(screen.getByText('Unverified')).toBeTruthy();
+    expect(adminApi.getUsers).toHaveBeenLastCalledWith({ limit: 50, offset: 0 });
 
-    await user.type(screen.getByPlaceholderText('Search users by name or email...'), 'SARA@');
-    expect(screen.getByText('Sara Ali')).toBeTruthy();
-    expect(screen.queryByText('ops@test.com')).toBeNull();
+    const search = screen.getByPlaceholderText('Search users by name or email...');
+    await user.type(search, 'SARA@');
+    await waitFor(() =>
+      expect(adminApi.getUsers).toHaveBeenLastCalledWith({ limit: 50, offset: 0, q: 'SARA@' }),
+    );
+    // Debounced: no request for the partial terms typed on the way.
+    const terms = vi.mocked(adminApi.getUsers).mock.calls.map(([params]) => params?.q);
+    expect(terms.filter((q) => q !== undefined)).toEqual(['SARA@']);
 
-    await user.clear(screen.getByPlaceholderText('Search users by name or email...'));
-    await user.type(screen.getByPlaceholderText('Search users by name or email...'), 'nobody');
-    expect(screen.getByText('No users found.')).toBeTruthy();
+    vi.mocked(adminApi.getUsers).mockResolvedValue({ ...usersFixture, users: [], total: 0 });
+    await user.clear(search);
+    await user.type(search, 'nobody');
+    expect(await screen.findByText('No users found.')).toBeTruthy();
+    expect(adminApi.getUsers).toHaveBeenLastCalledWith({ limit: 50, offset: 0, q: 'nobody' });
   });
 
   it('cannot delete yourself; deleting another user asks for confirmation first', async () => {
@@ -112,7 +122,7 @@ describe('AdminPage', () => {
     expect(adminApi.deleteUser).toHaveBeenCalledWith('u-sara');
   });
 
-  it('runs tab shows runs across workspaces', async () => {
+  it('runs tab shows runs across workspaces and filters by workspace name on the server', async () => {
     mockMe(true);
     const user = userEvent.setup();
     renderWithProviders(<AdminPage />);
@@ -122,6 +132,41 @@ describe('AdminPage', () => {
     expect(screen.getByRole('link', { name: /#42/ }).getAttribute('href')).toBe(
       'https://github.com/acme/backend/pull/42',
     );
-    expect(screen.getByRole('option', { name: 'Acme Corp' })).toBeTruthy();
+    expect(adminApi.getRuns).toHaveBeenLastCalledWith({ limit: 50, offset: 0 });
+    expect(adminApi.getWorkspaces).not.toHaveBeenCalled();
+
+    await user.type(screen.getByPlaceholderText('Filter by workspace name...'), 'acme');
+    await waitFor(() =>
+      expect(adminApi.getRuns).toHaveBeenLastCalledWith({
+        limit: 50,
+        offset: 0,
+        workspaceQuery: 'acme',
+      }),
+    );
+  });
+
+  it('explains a refused delete when the user solely owns shared workspaces', async () => {
+    mockMe(true);
+    vi.mocked(adminApi.deleteUser).mockRejectedValue(
+      new ApiClientError('refused', 'sole_owner_of_shared_workspace', 409, {
+        workspaces: [{ id: 'ws-1', name: 'Acme Corp' }],
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AdminPage />);
+
+    await user.click(screen.getByRole('tab', { name: 'Users' }));
+    await screen.findByText('Sara Ali');
+    await user.click(screen.getByRole('button', { name: 'Delete user: Sara Ali' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete user' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Sara Ali was not deleted')).toBeTruthy();
+    expect(within(alert).getByText(/transfer their ownership/)).toBeTruthy();
+    expect(within(alert).getByText('Acme Corp')).toBeTruthy();
+    expect(screen.queryByText('refused')).toBeNull();
+
+    await user.click(within(alert).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

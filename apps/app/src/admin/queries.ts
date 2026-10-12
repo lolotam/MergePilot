@@ -1,4 +1,16 @@
-import { count, countDistinct, desc, eq, gte, isNotNull, isNull, sum } from 'drizzle-orm';
+import {
+  and,
+  count,
+  countDistinct,
+  desc,
+  eq,
+  gte,
+  ilike,
+  isNotNull,
+  isNull,
+  sum,
+  type SQL,
+} from 'drizzle-orm';
 import * as authSchema from '../auth/schema.js';
 import * as dbSchema from '../db/schema.js';
 import type { AppDb } from '../db/pg-store.js';
@@ -22,6 +34,14 @@ export function clampPagination(options: Partial<Pagination>): Pagination {
   const limit = Math.min(Math.max(Math.trunc(rawLimit), 1), ADMIN_MAX_PAGE_SIZE);
   const offset = Math.max(Math.trunc(options.offset ?? 0), 0);
   return { limit, offset };
+}
+
+/**
+ * Turns a free-text search term into a `%term%` pattern for ILIKE, escaping LIKE wildcards so
+ * `%`, `_` and `\` match literally. The pattern is always passed as a bound parameter.
+ */
+export function containsPattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
 }
 
 /** Converts a numeric/sum string from Postgres into a USD number rounded to 6 decimals. */
@@ -104,14 +124,26 @@ export interface AdminRunsPage extends Pagination {
 
 export async function getRuns(
   db: AdminDb,
-  options: Partial<Pagination> & { workspaceId?: string | undefined },
+  options: Partial<Pagination> & {
+    workspaceId?: string | undefined;
+    /** Case-insensitive substring match on the workspace name. */
+    workspaceQuery?: string | undefined;
+  },
 ): Promise<AdminRunsPage> {
   const { limit, offset } = clampPagination(options);
   const runs = dbSchema.reviewRuns;
-  const filter = options.workspaceId ? eq(runs.workspaceId, options.workspaceId) : undefined;
+  const org = authSchema.organization;
+  const conditions: SQL[] = [];
+  if (options.workspaceId) conditions.push(eq(runs.workspaceId, options.workspaceId));
+  if (options.workspaceQuery) conditions.push(ilike(org.name, containsPattern(options.workspaceQuery)));
+  const filter = conditions.length > 0 ? and(...conditions) : undefined;
 
   const [totalRows, rows] = await Promise.all([
-    db.select({ n: count() }).from(runs).where(filter),
+    db
+      .select({ n: count() })
+      .from(runs)
+      .leftJoin(org, eq(runs.workspaceId, org.id))
+      .where(filter),
     db
       .select({
         id: runs.id,

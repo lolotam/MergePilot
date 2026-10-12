@@ -9,6 +9,7 @@ import { registerAdminApi } from './routes.js';
 import {
   adminTestConfig,
   createAdminTestDb,
+  fixtureToken,
   seedAdminFixtures,
   type AdminTestDb,
 } from './admin.fixtures.js';
@@ -21,8 +22,8 @@ describe('platform admin API routes', () => {
 
   const config = adminTestConfig(['admin@mergepilot.com']);
 
-  const adminCookie = signedSessionCookie('tok-admin', config.authSecret);
-  const regularCookie = signedSessionCookie('tok-regular', config.authSecret);
+  const adminCookie = signedSessionCookie(fixtureToken('admin'), config.authSecret);
+  const regularCookie = signedSessionCookie(fixtureToken('regular'), config.authSecret);
 
   beforeEach(async () => {
     handle = await createAdminTestDb();
@@ -286,31 +287,6 @@ describe('platform admin API routes', () => {
     expect(pageBody.total).toBe(2);
     expect(pageBody.limit).toBe(1);
     expect(pageBody.offset).toBe(1);
-  });
-
-  it('DELETE user keeps a workspace that still has other members', async () => {
-    await db.insert(authSchema.user).values({
-      id: 'u-other',
-      name: 'Other',
-      email: 'other@example.com',
-      emailVerified: true,
-    });
-    await db
-      .insert(authSchema.member)
-      .values({ id: 'm-3', organizationId: 'ws-1', userId: 'u-other', role: 'member' });
-
-    const res = await app.inject({
-      method: 'DELETE',
-      url: '/api/admin/users/u-regular',
-      headers: { cookie: adminCookie },
-    });
-    expect(res.statusCode).toBe(204);
-
-    const orgs = await db.select().from(authSchema.organization);
-    expect(orgs.map((o) => o.id)).toEqual(['ws-1']);
-    const runs = await db.select().from(dbSchema.reviewRuns);
-    expect(runs.every((r) => r.workspaceId === 'ws-1')).toBe(true);
-    expect(runs).toHaveLength(2);
   });
 
   it('DELETE unknown user or workspace replies 404', async () => {

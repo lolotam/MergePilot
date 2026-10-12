@@ -1,41 +1,37 @@
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { useI18n } from '../i18n/context.js';
 import { formatDateTime, formatUsd } from './format.js';
-import { useAdminRunsQuery, useAdminWorkspacesQuery } from './hooks.js';
-import { Pager, StateMessage, StatusBadge, TableCard, tbodyClass, tdClass, thClass, theadClass } from './ui.js';
+import { useAdminRunsQuery, useDebouncedValue } from './hooks.js';
+import {
+  Pager,
+  SearchInput,
+  StateMessage,
+  StatusBadge,
+  TableCard,
+  tbodyClass,
+  tdClass,
+  thClass,
+  theadClass,
+} from './ui.js';
 
 export function RunsTab() {
   const { t, language } = useI18n();
-  const selectId = useId();
   const [offset, setOffset] = useState(0);
-  const [workspaceId, setWorkspaceId] = useState('');
-  const { data, isLoading, isError } = useAdminRunsQuery(offset, workspaceId);
-  const { data: wsData } = useAdminWorkspacesQuery({ limit: 100, offset: 0 });
+  const [workspaceSearch, setWorkspaceSearch] = useState('');
+  const workspaceQuery = useDebouncedValue(workspaceSearch.trim());
+  const { data, isLoading, isError } = useAdminRunsQuery(offset, workspaceQuery);
   const runs = data?.runs ?? [];
 
   const toolbar = (
-    <div className="flex flex-wrap items-center gap-2">
-      <label htmlFor={selectId} className="text-sm font-medium text-gray-600 dark:text-gray-300">
-        {t('filterWorkspace')}
-      </label>
-      <select
-        id={selectId}
-        value={workspaceId}
-        onChange={(e) => {
-          setWorkspaceId(e.target.value);
-          setOffset(0);
-        }}
-        className="px-3 py-2 text-sm rounded-md border border-gray-300 dark:border-ink-700 bg-white dark:bg-ink-950 focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
-      >
-        <option value="">{t('allWorkspaces')}</option>
-        {(wsData?.workspaces ?? []).map((ws) => (
-          <option key={ws.id} value={ws.id}>
-            {ws.name}
-          </option>
-        ))}
-      </select>
-    </div>
+    <SearchInput
+      value={workspaceSearch}
+      onChange={(value) => {
+        setWorkspaceSearch(value);
+        setOffset(0);
+      }}
+      placeholder={t('filterWorkspace')}
+    />
   );
 
   let body;

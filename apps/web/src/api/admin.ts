@@ -1,4 +1,4 @@
-import { fetchApi } from './client.js';
+import { ApiClientError, fetchApi } from './client.js';
 
 /** Platform operator API (`/api/admin/*`). Every route answers 404 to non-admins. */
 
@@ -78,6 +78,10 @@ export interface AdminPageParams {
   limit?: number;
   offset?: number;
   workspaceId?: string;
+  /** Users: case-insensitive match on name or email (server-side). */
+  q?: string;
+  /** Runs: case-insensitive match on workspace name (server-side). */
+  workspaceQuery?: string;
 }
 
 function withQuery(path: string, params?: AdminPageParams): string {
@@ -85,8 +89,32 @@ function withQuery(path: string, params?: AdminPageParams): string {
   if (params?.limit !== undefined) search.set('limit', String(params.limit));
   if (params?.offset !== undefined) search.set('offset', String(params.offset));
   if (params?.workspaceId) search.set('workspaceId', params.workspaceId);
+  if (params?.q) search.set('q', params.q);
+  if (params?.workspaceQuery) search.set('workspaceQuery', params.workspaceQuery);
   const qs = search.toString();
   return qs ? `${path}?${qs}` : path;
+}
+
+export const SOLE_OWNER_ERROR_CODE = 'sole_owner_of_shared_workspace';
+
+export interface AdminWorkspaceRef {
+  id: string;
+  name: string;
+}
+
+/**
+ * When a user delete was refused because the user solely owns workspaces that still have other
+ * members, returns those workspaces; otherwise null.
+ */
+export function soleOwnedWorkspaces(err: unknown): AdminWorkspaceRef[] | null {
+  if (!(err instanceof ApiClientError) || err.code !== SOLE_OWNER_ERROR_CODE) return null;
+  const raw = err.details['workspaces'];
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item: unknown) => {
+    if (typeof item !== 'object' || item === null) return [];
+    const { id, name } = item as Record<string, unknown>;
+    return typeof id === 'string' && typeof name === 'string' ? [{ id, name }] : [];
+  });
 }
 
 export const adminApi = {

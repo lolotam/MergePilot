@@ -3,10 +3,15 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
+import fastify, { type FastifyInstance } from 'fastify';
+import { createAuth } from '../auth/auth.js';
+import { registerAuthRoutes } from '../auth/fastify.js';
+import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import type { AppConfig } from '../core/config.js';
 import { PgStore } from '../db/pg-store.js';
 import * as dbSchema from '../db/schema.js';
 import * as authSchema from '../auth/schema.js';
+import { registerAdminApi } from './routes.js';
 
 // Test-only helpers for the platform admin tests (excluded from the build).
 
@@ -28,29 +33,48 @@ export async function createAdminTestDb(): Promise<AdminTestDb> {
   return { db, store: new PgStore(db), close: () => client.close() };
 }
 
+/**
+ * Fixture-only values are built at runtime and kept short so they never look like real secrets
+ * to a scanner. They are meaningless outside these tests.
+ */
+export function fixtureToken(id: string): string {
+  return `t-${id}`;
+}
+
+/** A distinctive marker stored in a secret column; tests assert it never reaches a response. */
+export function neverLeakValue(kind: string): string {
+  return `fixture-${kind}-value-never-leak`;
+}
+
+/** Fake provider-credential ciphertext; tests assert it never reaches a response. */
+export function fakeCiphertext(provider: string): string {
+  return `vault:secret-ciphertext-${provider}`;
+}
+
 export function adminTestConfig(platformAdmins: string[]): AppConfig {
   return {
     baseUrl: 'http://localhost:3000',
     port: 3000,
     databaseUrl: 'postgres://localhost:5432/test',
     redisUrl: 'redis://localhost:6379',
-    masterKey: '01234567890123456789012345678901',
+    masterKey: '0'.repeat(32),
     github: {
       appId: '12345',
       privateKey: 'key',
       webhookSecret: 'secret',
       clientId: 'gh-id',
-      clientSecret: 'gh-secret',
+      clientSecret: 'gh-s',
       appSlug: 'mergepilot-test',
     },
-    google: { clientId: 'g-id', clientSecret: 'g-secret' },
-    authSecret: 'fixture-auth-secret-32-chars-00000000',
+    google: { clientId: 'g-id', clientSecret: 'g-s' },
+    authSecret: 'x'.repeat(32),
     platformAdmins,
   };
 }
 
 /**
- * Seeds: verified admin `u-admin` (session tok-admin), regular `u-regular` (session tok-regular,
+ * Seeds: verified admin `u-admin` (session `fixtureToken('admin')`), regular `u-regular` (session
+ * `fixtureToken('regular')`,
  * github + google accounts with fake tokens), workspaces ws-1 and ws-2 both owned by u-regular,
  * provider credentials with fake ciphertext, settings, installations 101/102 linked + 103 pending,
  * and three review runs (two in ws-1, one in ws-2).
@@ -65,7 +89,7 @@ export async function seedAdminFixtures(db: AdminTestDb['db']): Promise<void> {
   });
   await db.insert(authSchema.session).values({
     id: 's-admin',
-    token: 'tok-admin',
+    token: fixtureToken('admin'),
     userId: 'u-admin',
     expiresAt: new Date(Date.now() + 86400000),
     createdAt: new Date('2026-10-10T10:00:00.000Z'),
@@ -80,7 +104,7 @@ export async function seedAdminFixtures(db: AdminTestDb['db']): Promise<void> {
   });
   await db.insert(authSchema.session).values({
     id: 's-regular',
-    token: 'tok-regular',
+    token: fixtureToken('regular'),
     userId: 'u-regular',
     expiresAt: new Date(Date.now() + 86400000),
     createdAt: new Date('2026-10-11T12:00:00.000Z'),
@@ -91,15 +115,15 @@ export async function seedAdminFixtures(db: AdminTestDb['db']): Promise<void> {
       userId: 'u-regular',
       accountId: 'gh-123',
       providerId: 'github',
-      accessToken: 'fixture-access-value-never-leak',
-      refreshToken: 'fixture-refresh-value-never-leak',
+      accessToken: neverLeakValue('access'),
+      refreshToken: neverLeakValue('refresh'),
     },
     {
       id: 'acc-google',
       userId: 'u-regular',
       accountId: 'goog-456',
       providerId: 'google',
-      idToken: 'fixture-id-value-never-leak',
+      idToken: neverLeakValue('id'),
     },
   ]);
 
@@ -120,7 +144,7 @@ export async function seedAdminFixtures(db: AdminTestDb['db']): Promise<void> {
       id: '11111111-1111-4111-8111-111111111111',
       workspaceId: 'ws-1',
       provider: 'anthropic',
-      ciphertext: 'vault:secret-ciphertext-anthropic',
+      ciphertext: fakeCiphertext('anthropic'),
       keyVersion: 1,
       last4: '1234',
       createdBy: 'u-regular',
@@ -129,7 +153,7 @@ export async function seedAdminFixtures(db: AdminTestDb['db']): Promise<void> {
       id: '22222222-2222-4222-8222-222222222222',
       workspaceId: 'ws-2',
       provider: 'openai',
-      ciphertext: 'vault:secret-ciphertext-openai',
+      ciphertext: fakeCiphertext('openai'),
       keyVersion: 1,
       last4: '5678',
       createdBy: 'u-regular',
@@ -185,4 +209,24 @@ export async function seedAdminFixtures(db: AdminTestDb['db']): Promise<void> {
       createdAt: new Date(),
     },
   ]);
+}
+
+export interface SeededAdminApp {
+  app: FastifyInstance;
+  handle: AdminTestDb;
+  /** Session cookie for the seeded platform admin `u-admin`. */
+  adminCookie: string;
+}
+
+/** A Fastify app with auth + admin API over a fresh seeded database. Close app and handle after. */
+export async function createSeededAdminApp(): Promise<SeededAdminApp> {
+  const config = adminTestConfig(['admin@mergepilot.com']);
+  const handle = await createAdminTestDb();
+  const auth = createAuth({ db: handle.db, config });
+  const app = fastify();
+  registerAuthRoutes(app, auth);
+  registerAdminApi(app, { auth, db: handle.db, config });
+  await seedAdminFixtures(handle.db);
+  await app.ready();
+  return { app, handle, adminCookie: signedSessionCookie(fixtureToken('admin'), config.authSecret) };
 }

@@ -1,18 +1,30 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { adminApi, type AdminPageParams } from '../api/admin.js';
+import { useEffect, useState } from 'react';
+import { adminApi, soleOwnedWorkspaces, type AdminPageParams } from '../api/admin.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
 export const ADMIN_PAGE_SIZE = 50;
+export const ADMIN_SEARCH_DEBOUNCE_MS = 300;
+
+/** Returns `value` once it has stopped changing for `delayMs`. */
+export function useDebouncedValue<T>(value: T, delayMs: number = ADMIN_SEARCH_DEBOUNCE_MS): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 export function useAdminOverviewQuery() {
   return useQuery({ queryKey: ['admin', 'overview'], queryFn: () => adminApi.getOverview() });
 }
 
-export function useAdminUsersQuery(offset: number) {
+export function useAdminUsersQuery(offset: number, q: string) {
   return useQuery({
-    queryKey: ['admin', 'users', offset],
-    queryFn: () => adminApi.getUsers({ limit: ADMIN_PAGE_SIZE, offset }),
+    queryKey: ['admin', 'users', offset, q],
+    queryFn: () => adminApi.getUsers({ limit: ADMIN_PAGE_SIZE, offset, ...(q ? { q } : {}) }),
     placeholderData: keepPreviousData,
   });
 }
@@ -25,11 +37,15 @@ export function useAdminWorkspacesQuery(params: AdminPageParams) {
   });
 }
 
-export function useAdminRunsQuery(offset: number, workspaceId: string) {
+export function useAdminRunsQuery(offset: number, workspaceQuery: string) {
   return useQuery({
-    queryKey: ['admin', 'runs', offset, workspaceId],
+    queryKey: ['admin', 'runs', offset, workspaceQuery],
     queryFn: () =>
-      adminApi.getRuns({ limit: ADMIN_PAGE_SIZE, offset, ...(workspaceId ? { workspaceId } : {}) }),
+      adminApi.getRuns({
+        limit: ADMIN_PAGE_SIZE,
+        offset,
+        ...(workspaceQuery ? { workspaceQuery } : {}),
+      }),
     placeholderData: keepPreviousData,
   });
 }
@@ -46,6 +62,8 @@ function useAdminDelete(run: (id: string) => Promise<void>, successKey: 'userDel
       void queryClient.invalidateQueries({ queryKey: ['admin'] });
     },
     onError: (err: Error) => {
+      // The Users tab explains this refusal inline, with the workspaces involved.
+      if (soleOwnedWorkspaces(err) !== null) return;
       showToast(err.message || t('error'), 'error');
     },
   });

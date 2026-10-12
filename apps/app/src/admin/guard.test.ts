@@ -6,7 +6,12 @@ import { registerAuthRoutes } from '../auth/fastify.js';
 import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import { loadAppConfig, parsePlatformAdmins } from '../core/config.js';
 import { isUserPlatformAdmin, requirePlatformAdmin } from './guard.js';
-import { adminTestConfig, createAdminTestDb, type AdminTestDb } from './admin.fixtures.js';
+import {
+  adminTestConfig,
+  createAdminTestDb,
+  fixtureToken,
+  type AdminTestDb,
+} from './admin.fixtures.js';
 
 describe('requirePlatformAdmin guard', () => {
   let app: FastifyInstance;
@@ -41,7 +46,7 @@ describe('requirePlatformAdmin guard', () => {
     });
     await db.insert(schema.session).values({
       id: 's-admin-verified',
-      token: 'tok-admin-verified',
+      token: fixtureToken('admin-verified'),
       userId: 'u-admin-verified',
       expiresAt: new Date(Date.now() + 86400000),
     });
@@ -55,7 +60,7 @@ describe('requirePlatformAdmin guard', () => {
     });
     await db.insert(schema.session).values({
       id: 's-admin-unverified',
-      token: 'tok-admin-unverified',
+      token: fixtureToken('admin-unverified'),
       userId: 'u-admin-unverified',
       expiresAt: new Date(Date.now() + 86400000),
     });
@@ -69,7 +74,7 @@ describe('requirePlatformAdmin guard', () => {
     });
     await db.insert(schema.session).values({
       id: 's-regular',
-      token: 'tok-regular',
+      token: fixtureToken('regular'),
       userId: 'u-regular',
       expiresAt: new Date(Date.now() + 86400000),
     });
@@ -95,7 +100,7 @@ describe('requirePlatformAdmin guard', () => {
       method: 'GET',
       url: '/api/admin/test-protected',
       headers: {
-        cookie: signedSessionCookie('tok-regular', config.authSecret),
+        cookie: signedSessionCookie(fixtureToken('regular'), config.authSecret),
       },
     });
     expect(res.statusCode).toBe(404);
@@ -106,7 +111,7 @@ describe('requirePlatformAdmin guard', () => {
       method: 'GET',
       url: '/api/admin/test-protected',
       headers: {
-        cookie: signedSessionCookie('tok-admin-unverified', config.authSecret),
+        cookie: signedSessionCookie(fixtureToken('admin-unverified'), config.authSecret),
       },
     });
     expect(res.statusCode).toBe(404);
@@ -117,7 +122,7 @@ describe('requirePlatformAdmin guard', () => {
       method: 'GET',
       url: '/api/admin/test-protected',
       headers: {
-        cookie: signedSessionCookie('tok-admin-verified', config.authSecret),
+        cookie: signedSessionCookie(fixtureToken('admin-verified'), config.authSecret),
       },
     });
     expect(res.statusCode).toBe(200);
@@ -171,15 +176,15 @@ describe('parsePlatformAdmins', () => {
       MERGEPILOT_BASE_URL: 'http://localhost:3000',
       DATABASE_URL: 'postgres://x',
       REDIS_URL: 'redis://x',
-      MERGEPILOT_MASTER_KEY: 'test-master-key',
+      MERGEPILOT_MASTER_KEY: 'mk',
       GITHUB_APP_ID: '1',
-      GITHUB_APP_PRIVATE_KEY: 'test-key',
-      GITHUB_WEBHOOK_SECRET: 'test-secret',
+      GITHUB_APP_PRIVATE_KEY: 'pk',
+      GITHUB_WEBHOOK_SECRET: 'sec',
       GITHUB_CLIENT_ID: 'id',
-      GITHUB_CLIENT_SECRET: 'test-secret',
+      GITHUB_CLIENT_SECRET: 'sec',
       GOOGLE_CLIENT_ID: 'id',
-      GOOGLE_CLIENT_SECRET: 'test-secret',
-      BETTER_AUTH_SECRET: 'test-secret',
+      GOOGLE_CLIENT_SECRET: 'sec',
+      BETTER_AUTH_SECRET: 'sec',
     };
     expect(loadAppConfig(env).platformAdmins).toEqual([]);
     expect(

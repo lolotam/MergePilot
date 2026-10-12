@@ -1,6 +1,6 @@
-import { asc, count, desc, eq, inArray, max } from 'drizzle-orm';
+import { asc, count, desc, eq, ilike, inArray, max, or } from 'drizzle-orm';
 import * as authSchema from '../auth/schema.js';
-import { clampPagination, type AdminDb, type Pagination } from './queries.js';
+import { clampPagination, containsPattern, type AdminDb, type Pagination } from './queries.js';
 
 export interface AdminUserItem {
   id: string;
@@ -19,13 +19,21 @@ export interface AdminUsersPage extends Pagination {
   total: number;
 }
 
-/** Newest users first. Selects only safe columns — never tokens or passwords. */
-export async function getUsers(db: AdminDb, options: Partial<Pagination>): Promise<AdminUsersPage> {
+/**
+ * Newest users first, optionally filtered by `q` (case-insensitive substring of name or email).
+ * Selects only safe columns — never tokens or passwords.
+ */
+export async function getUsers(
+  db: AdminDb,
+  options: Partial<Pagination> & { q?: string | undefined },
+): Promise<AdminUsersPage> {
   const { limit, offset } = clampPagination(options);
   const u = authSchema.user;
+  const pattern = options.q ? containsPattern(options.q) : undefined;
+  const filter = pattern ? or(ilike(u.name, pattern), ilike(u.email, pattern)) : undefined;
 
   const [totalRows, userRows] = await Promise.all([
-    db.select({ n: count() }).from(u),
+    db.select({ n: count() }).from(u).where(filter),
     db
       .select({
         id: u.id,
@@ -36,6 +44,7 @@ export async function getUsers(db: AdminDb, options: Partial<Pagination>): Promi
         createdAt: u.createdAt,
       })
       .from(u)
+      .where(filter)
       .orderBy(desc(u.createdAt), desc(u.id))
       .limit(limit)
       .offset(offset),

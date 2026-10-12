@@ -27,8 +27,14 @@ const PageQuerySchema = z.object({
   offset: z.coerce.number().int().catch(0),
 });
 
+/** Optional free-text search term; blank or oversized values are ignored. */
+const SearchTermSchema = z.string().trim().min(1).max(200).optional().catch(undefined);
+
+const UsersQuerySchema = PageQuerySchema.extend({ q: SearchTermSchema });
+
 const RunsQuerySchema = PageQuerySchema.extend({
-  workspaceId: z.string().trim().min(1).max(200).optional().catch(undefined),
+  workspaceId: SearchTermSchema,
+  workspaceQuery: SearchTermSchema,
 });
 
 /** Bad values fall back to defaults; clampPagination then enforces 1 ≤ limit ≤ 100, offset ≥ 0. */
@@ -38,6 +44,10 @@ function parsePage(request: FastifyRequest): Pagination {
 
 function sendAction(reply: FastifyReply, result: ActionResult): FastifyReply {
   if (!result.ok) {
+    if (result.status === 409) {
+      const { code, message, workspaces } = result;
+      return reply.status(409).send({ error: { code, message, workspaces } });
+    }
     return sendError(reply, result.status, result.code, result.message);
   }
   return reply.status(204).send();
@@ -53,7 +63,9 @@ export function registerAdminApi(app: FastifyInstance, deps: AdminApiDeps): void
   });
 
   app.get('/api/admin/users', { preHandler: [guard] }, async (request, reply) => {
-    return reply.status(200).send(await getUsers(db, parsePage(request)));
+    const query = UsersQuerySchema.parse(request.query ?? {});
+    const page = clampPagination(query);
+    return reply.status(200).send(await getUsers(db, { ...page, q: query.q }));
   });
 
   app.get('/api/admin/workspaces', { preHandler: [guard] }, async (request, reply) => {
@@ -63,7 +75,12 @@ export function registerAdminApi(app: FastifyInstance, deps: AdminApiDeps): void
   app.get('/api/admin/runs', { preHandler: [guard] }, async (request, reply) => {
     const query = RunsQuerySchema.parse(request.query ?? {});
     const page = clampPagination(query);
-    return reply.status(200).send(await getRuns(db, { ...page, workspaceId: query.workspaceId }));
+    const result = await getRuns(db, {
+      ...page,
+      workspaceId: query.workspaceId,
+      workspaceQuery: query.workspaceQuery,
+    });
+    return reply.status(200).send(result);
   });
 
   app.delete('/api/admin/users/:userId', { preHandler: [guard] }, async (request, reply) => {
