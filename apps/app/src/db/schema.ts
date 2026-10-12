@@ -45,6 +45,13 @@ export const workspaceSettings = pgTable('workspace_settings', {
   model: text('model').notNull(),
   language: text('language').notNull(),
   monthlyBudgetUsd: numeric('monthly_budget_usd', { precision: 12, scale: 4 }),
+  effort: text('effort'),
+  heavyProvider: text('heavy_provider'),
+  heavyModel: text('heavy_model'),
+  heavyEffort: text('heavy_effort'),
+  heavyThresholdLines: integer('heavy_threshold_lines').default(800),
+  fallback: jsonb('fallback').notNull().default(sql`'[]'::jsonb`),
+  minSeverity: text('min_severity').notNull().default('medium'),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),
@@ -63,6 +70,7 @@ export const providerCredentials = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
       .notNull()
       .defaultNow(),
+    baseUrl: text('base_url'),
   },
   (table) => [
     uniqueIndex('provider_credentials_workspace_provider_unique').on(

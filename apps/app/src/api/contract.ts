@@ -9,7 +9,11 @@ import { z } from 'zod';
  * `:workspaceId` and enforce the role noted next to them (ADR-0007).
  */
 
-export const ApiProviderSchema = z.enum(['anthropic', 'openai', 'gemini']);
+import { API_PROVIDER_IDS, SeveritySchema } from '@mergepilot/engine';
+
+export const ApiProviderSchema = z.enum(API_PROVIDER_IDS);
+export type ApiProvider = z.infer<typeof ApiProviderSchema>;
+export type Severity = z.infer<typeof SeveritySchema>;
 
 export const ErrorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
@@ -31,12 +35,26 @@ export const MeResponseSchema = z.object({
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 
+export const FallbackEntrySchema = z.object({
+  provider: ApiProviderSchema,
+  model: z.string().min(1),
+  effort: z.string().nullable().optional(),
+});
+export type FallbackEntry = z.infer<typeof FallbackEntrySchema>;
+
 /** GET (member) / PUT (admin) /api/workspaces/:workspaceId/settings */
 export const SettingsSchema = z.object({
   provider: ApiProviderSchema,
   model: z.string().min(1),
   language: z.enum(['ar', 'en']),
-  monthlyBudgetUsd: z.number().positive().nullable(),
+  monthlyBudgetUsd: z.number().positive().nullable().optional(),
+  effort: z.string().nullable().optional(),
+  heavyProvider: ApiProviderSchema.nullable().optional(),
+  heavyModel: z.string().nullable().optional(),
+  heavyEffort: z.string().nullable().optional(),
+  heavyThresholdLines: z.number().int().positive().nullable().optional(),
+  fallback: z.array(FallbackEntrySchema).max(3).optional().default([]),
+  minSeverity: SeveritySchema.optional().default('medium'),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable() });
@@ -44,12 +62,60 @@ export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullab
 /** GET (admin) /api/workspaces/:workspaceId/keys */
 export const KeysResponseSchema = z.object({
   keys: z.array(
-    z.object({ provider: ApiProviderSchema, last4: z.string(), createdAt: z.string(), createdBy: z.string() }),
+    z.object({
+      provider: ApiProviderSchema,
+      last4: z.string(),
+      createdAt: z.string(),
+      createdBy: z.string(),
+      baseUrl: z.string().nullable().optional(),
+    }),
   ),
 });
 /** PUT (admin) /api/workspaces/:workspaceId/keys/:provider — validated with a cheap provider call before saving. */
-export const SaveKeyRequestSchema = z.object({ apiKey: z.string().min(8).max(500) });
+export const SaveKeyRequestSchema = z.object({
+  apiKey: z.string().min(8).max(500),
+  baseUrl: z.string().url().optional(),
+});
 /** DELETE (admin) /api/workspaces/:workspaceId/keys/:provider → 204 */
+
+export const CatalogModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  efforts: z.array(z.string()),
+  contextWindow: z.number().optional(),
+});
+
+export const ModelsResponseSchema = z.object({
+  models: z.array(CatalogModelSchema),
+});
+export type ModelsResponse = z.infer<typeof ModelsResponseSchema>;
+
+export const ListModelsBodySchema = z.object({
+  apiKey: z.string().min(1),
+  baseUrl: z.string().url().optional(),
+});
+
+export const TestConnectionBodySchema = z.object({
+  apiKey: z.string().optional(),
+  baseUrl: z.string().url().optional(),
+  model: z.string().optional(),
+  effort: z.string().optional(),
+});
+
+export const TestConnectionResponseSchema = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    ms: z.number(),
+    model: z.string(),
+  }),
+  z.object({
+    ok: z.literal(false),
+    code: z.string(),
+    message: z.string(),
+    ms: z.number().optional(),
+  }),
+]);
+export type TestConnectionResponse = z.infer<typeof TestConnectionResponseSchema>;
 
 export const InstallationSchema = z.object({
   id: z.number().int(),

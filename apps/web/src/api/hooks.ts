@@ -51,8 +51,8 @@ export function useSaveKeyMutation(workspaceId: string) {
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: ({ provider, apiKey }: { provider: ApiProvider; apiKey: string }) =>
-      api.saveKey(workspaceId, provider, apiKey),
+    mutationFn: ({ provider, apiKey, baseUrl }: { provider: ApiProvider; apiKey: string; baseUrl?: string | undefined }) =>
+      api.saveKey(workspaceId, provider, apiKey, baseUrl),
     onSuccess: () => {
       showToast(t('keySavedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
@@ -60,6 +60,33 @@ export function useSaveKeyMutation(workspaceId: string) {
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
     },
+  });
+}
+
+export function useModelsQuery(workspaceId: string, provider: ApiProvider | null) {
+  return useQuery({
+    queryKey: ['workspaces', workspaceId, 'providers', provider, 'models'],
+    queryFn: () => (provider ? api.getModels(workspaceId, provider) : Promise.resolve({ models: [] })),
+    enabled: Boolean(workspaceId && provider),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useTestConnectionMutation(workspaceId: string) {
+  return useMutation({
+    mutationFn: ({
+      provider,
+      apiKey,
+      baseUrl,
+      model,
+      effort,
+    }: {
+      provider: ApiProvider;
+      apiKey?: string | undefined;
+      baseUrl?: string | undefined;
+      model?: string | undefined;
+      effort?: string | undefined;
+    }) => api.testConnection(workspaceId, provider, { apiKey, baseUrl, model, effort }),
   });
 }
 

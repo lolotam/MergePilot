@@ -9,6 +9,25 @@ import { ToastProvider } from '../components/Toast.js';
 import * as hooks from '../api/hooks.js';
 
 vi.mock('../api/hooks.js');
+vi.mock('../api/client.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client.js')>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      getModels: vi.fn().mockResolvedValue({
+        models: [
+          { id: 'claude-3-7-sonnet', name: 'Claude 3.7 Sonnet', efforts: ['low', 'medium', 'high'] },
+        ],
+      }),
+      testConnection: vi.fn().mockResolvedValue({
+        ok: true,
+        ms: 120,
+        model: 'claude-3-7-sonnet',
+      }),
+    },
+  };
+});
 
 describe('SettingsPage - validation, permissions, and key privacy', () => {
   const mockUpdateSettings = vi.fn();
@@ -108,6 +127,10 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     const user = userEvent.setup();
     setupMocks({ role: 'admin' });
     renderComponent();
+
+    // Switch to manual model entry to test manual clear and validation
+    const manualBtn = screen.getByRole('button', { name: /إدخال يدوي/i });
+    await user.click(manualBtn);
 
     const modelInput = screen.getByLabelText(/اسم النموذج/i);
     const budgetInput = screen.getByLabelText(/الميزانية الشهرية/i);

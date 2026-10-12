@@ -80,7 +80,14 @@ export class MemoryStore implements AppStore {
   }
 
   async getSettings(workspaceId: string): Promise<WorkspaceSettings | null> {
-    return this.settings.get(workspaceId) ?? null;
+    const s = this.settings.get(workspaceId);
+    if (!s) return null;
+    return {
+      ...s,
+      heavyThresholdLines: s.heavyThresholdLines ?? 800,
+      fallback: s.fallback ?? [],
+      minSeverity: s.minSeverity ?? 'medium',
+    };
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {

@@ -30,54 +30,52 @@ import { executeReview } from './execute-review.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { startRunHeartbeat } from './run-heartbeat.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
-import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
+import type { ProcessReviewCredentials, ProcessReviewDeps, ProcessReviewResult } from './types.js';
 
 const WORKSPACE_DELETED = 'workspace_deleted';
-/** Another run for the same PR head is already queued/running (migration 0004); nothing is published. */
 const DUPLICATE = 'duplicate';
 
 class WorkspaceCredentialStore implements CredentialStore {
-  constructor(
-    private readonly provider: 'anthropic' | 'openai' | 'gemini',
-    private readonly secret: Secret,
-  ) {}
+  private readonly secrets = new Map<string, Secret>();
 
-  async info(_ref: CredentialRef): Promise<CredentialInfo> {
-    return {
-      provider: this.provider,
-      configured: true,
-      source: 'env',
-      envName: 'DATABASE',
-    };
+  constructor(
+    private readonly workspaceId: string,
+    private readonly credentials: ProcessReviewCredentials,
+    primaryProvider: ApiProvider,
+    primarySecret: Secret,
+  ) {
+    this.secrets.set(primaryProvider, primarySecret);
   }
 
-  async resolve(_ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
-    return this.secret;
+  getKnownSecrets(): Secret[] {
+    return Array.from(this.secrets.values());
+  }
+
+  async info(ref: CredentialRef): Promise<CredentialInfo> {
+    return { provider: ref.provider, configured: true, source: 'env', envName: 'DATABASE' };
+  }
+
+  async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
+    const existing = this.secrets.get(ref.provider);
+    if (existing) return existing;
+    const resolved = await this.credentials.resolve(this.workspaceId, ref.provider as ApiProvider);
+    this.secrets.set(ref.provider, resolved);
+    return resolved;
   }
 }
 
-/**
- * Processes a PR review job dispatched from the webhook queue.
- */
 export async function processReviewJob(
   job: ReviewJob,
   deps: ProcessReviewDeps,
 ): Promise<ProcessReviewResult> {
   const installation = await deps.store.getInstallation(job.installationId);
   if (!installation || installation.suspended) {
-    deps.log?.(
-      `Skipping job ${job.deliveryId}: installation ${job.installationId} is ${
-        !installation ? 'unknown' : 'suspended'
-      }`,
-    );
-    return {
-      status: 'skipped',
-      detail: !installation ? 'unknown installation' : 'suspended installation',
-    };
+    const detail = !installation ? 'unknown installation' : 'suspended installation';
+    deps.log?.(`Skipping job ${job.deliveryId}: installation ${job.installationId} is ${detail}`);
+    return { status: 'skipped', detail };
   }
 
   const workspaceId = installation.workspaceId;
-
   const settings = await deps.store.getSettings(workspaceId);
   if (!settings) {
     let run: ReviewRun;
@@ -112,8 +110,11 @@ export async function processReviewJob(
   }
 
   let run: ReviewRun | undefined;
-  let secret: Secret | undefined;
+  let credStore: WorkspaceCredentialStore | undefined;
   let stopHeartbeat: (() => void) | undefined;
+  let chosenProvider = settings.provider;
+  let chosenModel = settings.model;
+  let chosenEffort = settings.effort ?? null;
 
   try {
     run = await deps.store.createReviewRun({
@@ -126,8 +127,9 @@ export async function processReviewJob(
       status: 'running',
       costUsd: null,
       detail: null,
-      provider: settings.provider,
-      model: settings.model,
+      provider: chosenProvider,
+      model: chosenModel,
+      effort: chosenEffort,
     });
     stopHeartbeat = startRunHeartbeat(deps.store, workspaceId, run.id, {
       intervalMs: deps.heartbeatIntervalMs,
@@ -135,19 +137,49 @@ export async function processReviewJob(
     });
 
     const [owner, repo] = job.repoFullName.split('/');
-    if (!owner || !repo) {
-      throw new Error(`Invalid repoFullName: ${job.repoFullName}`);
-    }
+    if (!owner || !repo) throw new Error(`Invalid repoFullName: ${job.repoFullName}`);
 
     const { client: rawClient, publisherLogin } = await deps.githubAppFactory(job.installationId);
     const client = guardWritesForWorkspace(rawClient, deps.store, job.installationId, workspaceId);
 
     const pr = await client.getPullRequest({ owner, repo, pull_number: job.pullNumber });
-    const prRecord = pr as unknown as { title?: string; body?: string | null };
+    const prRecord = pr as unknown as { title?: string; body?: string | null; additions?: number; deletions?: number };
     const prTitle = typeof prRecord.title === 'string' ? prRecord.title : '';
     const prBody = typeof prRecord.body === 'string' ? prRecord.body : '';
 
+    const additions = typeof prRecord.additions === 'number' ? prRecord.additions : 0;
+    const deletions = typeof prRecord.deletions === 'number' ? prRecord.deletions : 0;
+    const changedLines = additions + deletions;
+    const heavyThreshold = settings.heavyThresholdLines ?? 800;
+    if (Boolean(settings.heavyModel) && changedLines >= heavyThreshold) {
+      chosenProvider = settings.heavyProvider ?? settings.provider;
+      chosenModel = settings.heavyModel!;
+      chosenEffort = (settings.heavyEffort ?? settings.effort) ?? null;
+    }
+
     const repoConfigResult = await loadRepoConfig(client, { owner, repo, baseSha: job.baseSha });
+
+    const fallbackList = await Promise.all(
+      (settings.fallback ?? []).map(async (f) => {
+        let baseUrl: string | undefined;
+        if (f.provider === 'custom') {
+          const c = await deps.store.getCredential(workspaceId, 'custom');
+          baseUrl = c?.baseUrl ?? undefined;
+        }
+        return {
+          provider: f.provider,
+          model: f.model,
+          effort: f.effort ?? undefined,
+          ...(baseUrl ? { baseUrl } : {}),
+        };
+      }),
+    );
+
+    let primaryBaseUrl: string | undefined;
+    if (chosenProvider === 'custom') {
+      const c = await deps.store.getCredential(workspaceId, 'custom');
+      primaryBaseUrl = c?.baseUrl ?? undefined;
+    }
 
     let effectiveConfig: MergePilotConfig;
     let rulesFiles: FileContent[];
@@ -155,46 +187,42 @@ export async function processReviewJob(
 
     if ('missing' in repoConfigResult) {
       effectiveConfig = MergePilotConfigSchema.parse({
-        provider: settings.provider,
-        model: settings.model,
+        provider: chosenProvider,
+        model: chosenModel,
+        ...(chosenEffort ? { effort: chosenEffort } : {}),
+        ...(primaryBaseUrl ? { baseUrl: primaryBaseUrl } : {}),
+        fallback: fallbackList,
         language: settings.language,
+        review: { minSeverity: settings.minSeverity ?? 'medium' },
       });
       rulesFiles = [];
       configHash = createHash('sha256')
-        .update(
-          JSON.stringify({
-            provider: settings.provider,
-            model: settings.model,
-            language: settings.language,
-          }),
-        )
+        .update(JSON.stringify({ provider: chosenProvider, model: chosenModel, language: settings.language }))
         .digest('hex')
         .slice(0, 12);
     } else if ('errors' in repoConfigResult) {
       throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
     } else {
-      // In the SaaS the workspace's dashboard settings choose the provider, model and review
-      // language (the repo file may target the GitHub Action, e.g. `provider: claude-code`); the
-      // repo still supplies its review rules and other settings.
       const repoConfig = repoConfigResult.config;
-      const sameModel =
-        repoConfig.provider === settings.provider && repoConfig.model === settings.model;
+      const sameModel = repoConfig.provider === chosenProvider && repoConfig.model === chosenModel;
       effectiveConfig = {
         ...repoConfig,
-        provider: settings.provider,
-        model: settings.model,
+        provider: chosenProvider,
+        model: chosenModel,
+        ...(chosenEffort ? { effort: chosenEffort } : {}),
+        ...(primaryBaseUrl ? { baseUrl: primaryBaseUrl } : {}),
+        fallback: fallbackList,
         language: settings.language,
-        // Prices in the repo file describe the repo's own model; keep them only when it matches.
+        review: {
+          ...repoConfig.review,
+          minSeverity: settings.minSeverity ?? repoConfig.review.minSeverity,
+        },
         budget: sameModel ? repoConfig.budget : { ...repoConfig.budget, pricing: undefined },
       };
       rulesFiles = repoConfigResult.rulesFiles;
-      configHash = createHash('sha256')
-        .update(repoConfigResult.configText)
-        .digest('hex')
-        .slice(0, 12);
+      configHash = createHash('sha256').update(repoConfigResult.configText).digest('hex').slice(0, 12);
     }
 
-    // Check monthly budget if configured
     if (settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined) {
       const now = deps.now ? deps.now() : new Date();
       const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
@@ -235,10 +263,10 @@ export async function processReviewJob(
           status: 'skipped',
           costUsd: null,
           detail: 'monthly budget reached',
-          provider: effectiveConfig.provider,
-          model: effectiveConfig.model,
-          effort: ((effectiveConfig.review as Record<string, unknown>)?.effort as string) ?? null,
-          fallbackFrom: ((effectiveConfig as Record<string, unknown>)?.fallbackFrom as string) ?? null,
+          provider: chosenProvider,
+          model: chosenModel,
+          effort: chosenEffort,
+          fallbackFrom: null,
           findingsCount: 0,
           result: null,
           reviewUrl: budgetReviewUrl,
@@ -248,23 +276,14 @@ export async function processReviewJob(
       }
     }
 
-    secret = await deps.credentials.resolve(
-      workspaceId,
-      effectiveConfig.provider as ApiProvider,
-    );
+    const primarySecret = await deps.credentials.resolve(workspaceId, chosenProvider as ApiProvider);
+    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, chosenProvider as ApiProvider, primarySecret);
 
     let model: ReviewModel;
     if (deps.createModelForProvider) {
-      model = await deps.createModelForProvider(effectiveConfig, secret);
+      model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
-      model = await createReviewModel(
-        effectiveConfig,
-        new WorkspaceCredentialStore(
-          effectiveConfig.provider as 'anthropic' | 'openai' | 'gemini',
-          secret,
-        ),
-        { cwd: process.cwd() },
-      );
+      model = await createReviewModel(effectiveConfig, credStore, { cwd: process.cwd() });
     }
 
     const reviewResult = await executeReview({
@@ -280,7 +299,7 @@ export async function processReviewJob(
       configHash,
       rulesFiles,
       model,
-      knownSecrets: [secret],
+      knownSecrets: credStore.getKnownSecrets(),
       publisherLogin,
       ...(deps.log ? { log: deps.log } : {}),
     });
@@ -294,7 +313,6 @@ export async function processReviewJob(
 
     const costUsd = reviewResult.costUsd ?? null;
     const detail = reviewResult.detail ?? null;
-
     let payload: ReviewRunResultPayload | null = null;
     let findingsCount: number | null = null;
 
@@ -307,7 +325,7 @@ export async function processReviewJob(
         language: effectiveConfig.language,
         usage: rr.usage,
         verification: rr.verification,
-        knownSecrets: [secret],
+        knownSecrets: credStore.getKnownSecrets(),
       });
       findingsCount = rr.inline.length + rr.summaryOnly.length;
     } else if (status === 'skipped') {
@@ -318,30 +336,24 @@ export async function processReviewJob(
       status,
       costUsd,
       detail,
-      provider: effectiveConfig.provider,
-      model: effectiveConfig.model,
-      effort: ((effectiveConfig.review as Record<string, unknown>)?.effort as string) ?? null,
+      provider: chosenProvider,
+      model: chosenModel,
+      effort: chosenEffort,
       fallbackFrom: ((effectiveConfig as Record<string, unknown>)?.fallbackFrom as string) ?? null,
       findingsCount,
       result: payload,
       reviewUrl: reviewResult.reviewUrl ?? null,
     });
 
-    return {
-      status,
-      costUsd,
-      detail,
-    };
+    return { status, costUsd, detail };
   } catch (error) {
     if (error instanceof ActiveRunExistsError && !run) {
-      // Thrown only by createReviewRun, before any GitHub call: end the job without publishing.
       deps.log?.(`Skipping job ${job.deliveryId}: a run for this head is already active`);
       return { status: 'skipped', detail: DUPLICATE };
     }
     if (error instanceof WorkspaceDeletedError) {
       deps.log?.(`Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`);
       if (run) {
-        // No-op when the run was deleted with the workspace; kept for an unlink without deletion.
         await deps.store.finishReviewRun(workspaceId, run.id, {
           status: 'skipped',
           costUsd: null,
@@ -351,8 +363,8 @@ export async function processReviewJob(
       return { status: 'skipped', detail: WORKSPACE_DELETED };
     }
     const rawMessage = error instanceof Error ? error.message : String(error);
-    // Always redact: errors before the key is loaded can still carry GitHub installation tokens.
-    const redactedDetail = redactSecrets(rawMessage, secret ? [secret] : []).text.slice(0, 500);
+    const known = credStore?.getKnownSecrets() ?? [];
+    const redactedDetail = redactSecrets(rawMessage, known).text.slice(0, 500);
 
     deps.log?.(`Review job ${job.deliveryId} failed: ${redactedDetail}`);
 
@@ -361,15 +373,13 @@ export async function processReviewJob(
         status: 'failed',
         costUsd: null,
         detail: redactedDetail,
-        provider: settings?.provider ?? null,
-        model: settings?.model ?? null,
+        provider: chosenProvider,
+        model: chosenModel,
+        effort: chosenEffort,
       });
     }
 
-    return {
-      status: 'failed',
-      detail: redactedDetail,
-    };
+    return { status: 'failed', detail: redactedDetail };
   } finally {
     stopHeartbeat?.();
   }

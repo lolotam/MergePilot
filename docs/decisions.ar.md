@@ -144,3 +144,12 @@
 
 **الإجابة:** «Clone all model system and providers and fale back logic from this repo so add fall back models and add all these providers to the list»
 
+## الدفعة 5 — 2026-10-12
+
+### س17: قوائم النماذج والجهد التفكيري، اختبار المفاتيح، والنموذج الثقيل في صفحة الإعدادات
+
+**طلبات صاحب المشروع (بنصّها):**
+- «i want when addng the provider api key will show drop down list of all its models with its thinking effors so chang the model from manully enter to drop down list to show all the model under this provider»
+- «in Provider API Keys in the tabel recoords for evcery model add test icon to test if sucesfull connected or failed»
+- «yes add all these suggestion make the user slect the model for heavy duty» (الاقتراحات: effort high، نموذج أقوى للـ PRs الكبيرة، تحديد الحد الأدنى للخطورة)
+

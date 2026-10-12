@@ -26,7 +26,13 @@ const migrationsDir = fileURLToPath(new URL('../../migrations', import.meta.url)
 /** In-memory Postgres with the app + auth migrations applied directly (fast, no lock). */
 export async function createAdminTestDb(): Promise<AdminTestDb> {
   const client = new PGlite();
-  for (const file of ['0001_app.sql', '0002_auth.sql', '0003_review_run_details.sql', '0004_active_run_unique.sql']) {
+  for (const file of [
+    '0001_app.sql',
+    '0002_auth.sql',
+    '0003_review_run_details.sql',
+    '0004_active_run_unique.sql',
+    '0005_settings_models.sql',
+  ]) {
     await client.exec(readFileSync(join(migrationsDir, file), 'utf-8'));
   }
   const db = drizzle(client, { schema: dbSchema });

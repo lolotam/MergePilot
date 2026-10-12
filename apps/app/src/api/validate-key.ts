@@ -1,3 +1,5 @@
+import { providerEntry, resolveBaseUrl } from '@mergepilot/engine';
+import { assertSafeBaseUrl } from '../core/ssrf.js';
 import type { ApiProvider } from '../core/types.js';
 
 export class ValidateKeyError extends Error {
@@ -10,11 +12,22 @@ export class ValidateKeyError extends Error {
 export async function validateKey(
   provider: ApiProvider,
   apiKey: string,
-  fetchFn: typeof fetch = globalThis.fetch,
+  fetchFnOrBaseUrl?: typeof fetch | string,
+  maybeFetchFn?: typeof fetch,
 ): Promise<void> {
   const trimmed = apiKey.trim();
   if (trimmed.length === 0) {
     throw new ValidateKeyError('API key cannot be empty');
+  }
+
+  let baseUrl: string | undefined;
+  let fetchFn: typeof fetch;
+
+  if (typeof fetchFnOrBaseUrl === 'string') {
+    baseUrl = fetchFnOrBaseUrl;
+    fetchFn = maybeFetchFn ?? globalThis.fetch;
+  } else {
+    fetchFn = fetchFnOrBaseUrl ?? globalThis.fetch;
   }
 
   let url: string;
@@ -35,8 +48,20 @@ export async function validateKey(
       headers['x-goog-api-key'] = trimmed;
       break;
     default: {
-      const exhaustiveCheck: never = provider;
-      throw new ValidateKeyError(`Unsupported provider: ${String(exhaustiveCheck)}`);
+      if (provider === 'custom') {
+        if (!baseUrl) {
+          throw new ValidateKeyError('Base URL is required for custom provider');
+        }
+        baseUrl = await assertSafeBaseUrl(baseUrl);
+      }
+      const entry = providerEntry(provider);
+      if (!entry) {
+        throw new ValidateKeyError(`Unsupported provider: ${provider}`);
+      }
+      const base = resolveBaseUrl(provider, baseUrl);
+      url = `${base}/models`;
+      headers['Authorization'] = `Bearer ${trimmed}`;
+      break;
     }
   }
 
