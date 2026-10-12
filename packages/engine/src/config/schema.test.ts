@@ -148,3 +148,31 @@ describe('FallbackEntrySchema & MergePilotConfigSchema (ADR-0008)', () => {
   });
 });
 
+
+describe('review limits for huge PRs (ADR-0013)', () => {
+  it('defaults maxPromptTokens, batchTokens, callTimeoutMs and totalTimeoutMs', () => {
+    const config = MergePilotConfigSchema.parse({ provider: 'anthropic', model: 'claude-sonnet' });
+    expect(config.review).toMatchObject({
+      maxPromptTokens: 60_000,
+      batchTokens: 24_000,
+      callTimeoutMs: 300_000,
+      totalTimeoutMs: 1_200_000,
+    });
+  });
+
+  it('accepts custom limits and rejects non-positive ones', () => {
+    const config = MergePilotConfigSchema.parse({
+      provider: 'anthropic',
+      model: 'claude-sonnet',
+      review: { maxPromptTokens: 30_000, batchTokens: 10_000, callTimeoutMs: 60_000, totalTimeoutMs: 600_000 },
+    });
+    expect(config.review.batchTokens).toBe(10_000);
+    expect(config.review.totalTimeoutMs).toBe(600_000);
+    expect(() =>
+      MergePilotConfigSchema.parse({ provider: 'anthropic', model: 'm', review: { callTimeoutMs: 0 } }),
+    ).toThrow();
+    expect(() =>
+      MergePilotConfigSchema.parse({ provider: 'anthropic', model: 'm', review: { batchTokens: -1 } }),
+    ).toThrow();
+  });
+});

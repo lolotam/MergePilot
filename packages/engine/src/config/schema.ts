@@ -48,6 +48,24 @@ const PathInstructionSchema = z.strictObject({
   instructions: z.string().min(1),
 });
 
+/**
+ * Limits that keep a huge PR from failing as a whole (ADR-0013). Exported so the pipeline can
+ * apply the same defaults to a config built in code without going through the schema.
+ */
+export interface ReviewLimits {
+  maxPromptTokens: number;
+  batchTokens: number;
+  callTimeoutMs: number;
+  totalTimeoutMs: number;
+}
+
+export const REVIEW_LIMIT_DEFAULTS: Readonly<ReviewLimits> = Object.freeze({
+  maxPromptTokens: 60_000,
+  batchTokens: 24_000,
+  callTimeoutMs: 300_000,
+  totalTimeoutMs: 1_200_000,
+});
+
 const ReviewSettingsSchema = z.strictObject({
   maxFindings: z.number().int().min(1).max(20).default(5),
   minSeverity: SeveritySchema.default('medium'),
@@ -64,6 +82,14 @@ const ReviewSettingsSchema = z.strictObject({
       maxLibraries: z.number().int().min(0).max(20).default(5),
     })
     .prefault({}),
+  /** Above this estimated prompt size the single whole-PR call is skipped: the PR goes straight to batches. */
+  maxPromptTokens: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.maxPromptTokens),
+  /** Diff tokens per batch; a single file bigger than this is its own batch, its patch truncated. */
+  batchTokens: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.batchTokens),
+  /** Timeout of every single model call, retries included. */
+  callTimeoutMs: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.callTimeoutMs),
+  /** Overall review time: once reached, no new batch starts and the review finishes with what is done. */
+  totalTimeoutMs: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.totalTimeoutMs),
 });
 
 export const ModelPricingSchema = z

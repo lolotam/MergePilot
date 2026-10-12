@@ -2,14 +2,17 @@
  * The verification pass of the review pipeline (PRD v0.2 §7), budget-gated like every other
  * extra call (ADR-0011): the first verify call and its one truncation retry each run only
  * when spent so far + their estimated cost still fit perReviewUsd. Skips and failures are
- * returned as disclosed incomplete reasons, never swallowed.
+ * returned as disclosed incomplete reasons, never swallowed. An empty (reasoning-only) reply gets
+ * one gated retry with thinking off, and the pass is skipped once the review time limit is
+ * reached (ADR-0013).
  */
 
 import { z } from 'zod';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { estimateTokens } from './budget.js';
-import type { ReviewModel } from './model.js';
+import { retryEmptyWithoutThinking, type ReviewDeadline } from './call.js';
+import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { combineUsage, needsTruncationRetry, type ReviewableFileWithPatch } from './split.js';
 import { describeCallError, requestedOutputTokens, type SpendTracker } from './spend.js';
 import type { Finding } from './types.js';
@@ -32,6 +35,7 @@ export interface VerifyPassInput {
   knownSecrets: readonly Secret[];
   totalUsage: TokenUsage | undefined;
   signal?: AbortSignal | undefined;
+  deadline?: ReviewDeadline | undefined;
 }
 
 export interface VerifyPassResult {
@@ -60,45 +64,57 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
   const firstRequested = requestedOutputTokens(model, VERIFY_MAX_OUTPUT_TOKENS);
   const responseSchema = z.toJSONSchema(VerifyAnswerSchema) as Record<string, unknown>;
 
+  if (input.deadline?.expired) {
+    return unchanged('time limit reached');
+  }
   if (!spend.canAfford(promptTokens, firstRequested)) {
     return unchanged('budget limit reached');
   }
 
+  const parse = (res: ReviewModelResponse): ReturnType<typeof parseVerifyAnswer> =>
+    parseVerifyAnswer(res.text, { finishReason: res.finishReason, outputTokens: res.usage?.outputTokens });
+  const request: ReviewModelRequest = {
+    system: verifyPrompt.system,
+    user: verifyPrompt.user,
+    maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
+    responseSchema,
+    ...(signal ? { signal } : {}),
+  };
+
   let verifyParsed: ReturnType<typeof parseVerifyAnswer>;
   try {
-    const res = await model.generate({
-      system: verifyPrompt.system,
-      user: verifyPrompt.user,
-      maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
-      responseSchema,
-      ...(signal ? { signal } : {}),
-    });
+    const res = await model.generate(request);
     spend.record(promptTokens, firstRequested, res.usage);
     totalUsage = combineUsage(totalUsage, res.usage);
-    verifyParsed = parseVerifyAnswer(res.text, {
-      finishReason: res.finishReason,
-      outputTokens: res.usage?.outputTokens,
-    });
 
-    if (needsTruncationRetry(verifyParsed, res.finishReason)) {
+    const empty = await retryEmptyWithoutThinking({
+      parsed: parse(res),
+      model,
+      spend,
+      request,
+      promptTokens,
+      requestedOutputTokens: firstRequested,
+      parse,
+      knownSecrets: input.knownSecrets,
+    });
+    verifyParsed = empty.parsed;
+    totalUsage = combineUsage(totalUsage, empty.usage);
+    if (empty.note) incompleteReasons.push(`verification ${empty.note}`);
+
+    if (needsTruncationRetry(verifyParsed, (empty.response ?? res).finishReason)) {
       const retryRequested = requestedOutputTokens(model, VERIFY_RETRY_OUTPUT_TOKENS);
       if (!spend.canAfford(promptTokens, retryRequested)) {
         incompleteReasons.push('verification retry skipped: budget limit reached');
       } else {
         try {
           const retryRes = await model.generate({
-            system: verifyPrompt.system,
-            user: verifyPrompt.user,
+            ...request,
             maxOutputTokens: VERIFY_RETRY_OUTPUT_TOKENS,
-            responseSchema,
-            ...(signal ? { signal } : {}),
+            ...(empty.thinkingOff ? { thinking: 'off' as const } : {}),
           });
           spend.record(promptTokens, retryRequested, retryRes.usage);
           totalUsage = combineUsage(totalUsage, retryRes.usage);
-          verifyParsed = parseVerifyAnswer(retryRes.text, {
-            finishReason: retryRes.finishReason,
-            outputTokens: retryRes.usage?.outputTokens,
-          });
+          verifyParsed = parse(retryRes);
         } catch (err) {
           spend.record(promptTokens, retryRequested, undefined);
           incompleteReasons.push(

@@ -70146,6 +70146,12 @@ var PathInstructionSchema = external_exports.strictObject({
   path: external_exports.string().min(1),
   instructions: external_exports.string().min(1)
 });
+var REVIEW_LIMIT_DEFAULTS = Object.freeze({
+  maxPromptTokens: 6e4,
+  batchTokens: 24e3,
+  callTimeoutMs: 3e5,
+  totalTimeoutMs: 12e5
+});
 var ReviewSettingsSchema = external_exports.strictObject({
   maxFindings: external_exports.number().int().min(1).max(20).default(5),
   minSeverity: SeveritySchema.default("medium"),
@@ -70159,7 +70165,15 @@ var ReviewSettingsSchema = external_exports.strictObject({
     source: external_exports.enum(["npm", "context7", "none"]).default("npm"),
     maxCharsPerLibrary: external_exports.number().int().min(500).max(5e4).default(8e3),
     maxLibraries: external_exports.number().int().min(0).max(20).default(5)
-  }).prefault({})
+  }).prefault({}),
+  /** Above this estimated prompt size the single whole-PR call is skipped: the PR goes straight to batches. */
+  maxPromptTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.maxPromptTokens),
+  /** Diff tokens per batch; a single file bigger than this is its own batch, its patch truncated. */
+  batchTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.batchTokens),
+  /** Timeout of every single model call, retries included. */
+  callTimeoutMs: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.callTimeoutMs),
+  /** Overall review time: once reached, no new batch starts and the review finishes with what is done. */
+  totalTimeoutMs: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.totalTimeoutMs)
 });
 var ModelPricingSchema = external_exports.strictObject({
   inputPerMTok: external_exports.number().min(0),
@@ -70863,6 +70877,7 @@ function modelFromAdapter(adapter, model, effort) {
         maxOutputTokens: request2.maxOutputTokens,
         ...effort ? { effort } : {},
         ...request2.responseSchema ? { responseSchema: request2.responseSchema } : {},
+        ...request2.thinking ? { thinking: request2.thinking } : {},
         ...request2.signal ? { signal: request2.signal } : {}
       }));
       return { text: result.text, usage: result.usage, finishReason: result.finishReason };
@@ -71107,6 +71122,148 @@ function selectFindings(findings, opts = {}) {
   return result;
 }
 
+function requestedOutputTokens(model, maxOutputTokens) {
+  return model.outputTokensFor ? model.outputTokensFor(maxOutputTokens) : maxOutputTokens;
+}
+function hasRealUsage(usage) {
+  if (!usage)
+    return false;
+  return usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) > 0;
+}
+var SpendTracker = class {
+  pricing;
+  limitUsd;
+  #spentUsd = 0;
+  constructor(pricing, limitUsd) {
+    this.pricing = pricing;
+    this.limitUsd = limitUsd;
+  }
+  /** USD charged so far: real usage where reported, the estimate otherwise. 0 without pricing. */
+  get spentUsd() {
+    return this.#spentUsd;
+  }
+  get priced() {
+    return this.pricing !== void 0;
+  }
+  /** Worst-case cost of one call; 0 without pricing. */
+  estimate(promptTokens, outputTokens) {
+    if (!this.pricing)
+      return 0;
+    return estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: outputTokens }, this.pricing);
+  }
+  /** Whether one more call of this size still fits the per-review budget. Always true without pricing. */
+  canAfford(promptTokens, outputTokens) {
+    if (!this.pricing)
+      return true;
+    return this.#spentUsd + this.estimate(promptTokens, outputTokens) <= this.limitUsd;
+  }
+  /**
+   * Charges one completed (or failed) call: its real cost when usage was reported, else its
+   * estimated cost, so calls on usage-less providers still count against the budget.
+   */
+  record(promptTokens, outputTokens, usage) {
+    if (!this.pricing)
+      return;
+    this.#spentUsd += hasRealUsage(usage) ? costUsd(usage, this.pricing) : this.estimate(promptTokens, outputTokens);
+  }
+};
+function describeCallError(err, knownSecrets = []) {
+  if (err && typeof err === "object" && "code" in err && typeof err.code === "string") {
+    return err.code;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return redactSecrets(message, [...knownSecrets]).text.slice(0, 200);
+}
+
+function timeoutFailure(label, timeoutMs) {
+  return new LlmFailure({
+    code: "TIMEOUT",
+    provider: label.split(":")[0] ?? label,
+    message: `${label} did not answer within ${Math.round(timeoutMs / 1e3)}s (review.callTimeoutMs)`
+  });
+}
+async function generateWithTimeout(model, request2, timeoutMs) {
+  const outer = request2.signal;
+  if (outer?.aborted)
+    return model.generate(request2);
+  const timer = new AbortController();
+  const signal = outer ? AbortSignal.any([outer, timer.signal]) : timer.signal;
+  let handle;
+  const timedOut = new Promise((_resolve, reject) => {
+    handle = setTimeout(() => {
+      timer.abort();
+      reject(timeoutFailure(model.label, timeoutMs));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([model.generate({ ...request2, signal }), timedOut]);
+  } catch (error62) {
+    if (timer.signal.aborted && !outer?.aborted)
+      throw timeoutFailure(model.label, timeoutMs);
+    throw error62;
+  } finally {
+    clearTimeout(handle);
+  }
+}
+function withCallTimeout(model, timeoutMs) {
+  const outputTokensFor = model.outputTokensFor?.bind(model);
+  return {
+    get label() {
+      return model.label;
+    },
+    ...model.fallbacks ? { fallbacks: model.fallbacks } : {},
+    ...model.secrets ? { secrets: model.secrets } : {},
+    ...model.skippedFallbacks ? { skippedFallbacks: model.skippedFallbacks } : {},
+    ...outputTokensFor ? { outputTokensFor } : {},
+    generate: (request2) => generateWithTimeout(model, request2, timeoutMs)
+  };
+}
+var ReviewDeadline = class {
+  now;
+  #endsAt;
+  constructor(totalMs, now = Date.now) {
+    this.now = now;
+    this.#endsAt = now() + totalMs;
+  }
+  get expired() {
+    return this.now() >= this.#endsAt;
+  }
+};
+function describePaths(paths, max = 10, maxLength = 60) {
+  const shorten = (path7) => path7.length <= maxLength ? path7 : `\u2026${path7.slice(path7.length - maxLength + 1)}`;
+  const shown = paths.slice(0, max).map(shorten).join(", ");
+  return paths.length > max ? `${shown} +${paths.length - max} more` : shown;
+}
+async function retryEmptyWithoutThinking(input2) {
+  const { parsed, spend, promptTokens, requestedOutputTokens: requestedOutputTokens2 } = input2;
+  if (parsed.ok || parsed.code !== "empty-response")
+    return { parsed, thinkingOff: false };
+  if (!spend.canAfford(promptTokens, requestedOutputTokens2)) {
+    return { parsed, note: "empty-response retry skipped: budget limit reached", thinkingOff: false };
+  }
+  try {
+    const response = await input2.model.generate({ ...input2.request, thinking: "off" });
+    spend.record(promptTokens, requestedOutputTokens2, response.usage);
+    const retried = input2.parse(response);
+    if (!retried.ok && retried.code === "empty-response") {
+      return {
+        parsed: { ...retried, error: `${retried.error} (also with thinking off)` },
+        response,
+        usage: response.usage,
+        thinkingOff: true
+      };
+    }
+    return { parsed: retried, response, usage: response.usage, thinkingOff: true };
+  } catch (err) {
+    spend.record(promptTokens, requestedOutputTokens2, void 0);
+    return {
+      parsed,
+      note: `empty-response retry failed: ${describeCallError(err, input2.knownSecrets)}`,
+      thinkingOff: false
+    };
+  }
+}
+
 var PR_BODY_MAX_CHARS = 4e3;
 function escapeDelimiters(content) {
   return content.replaceAll("<<<", "\u2039\u2039\u2039").replaceAll(">>>", "\u203A\u203A\u203A");
@@ -71230,101 +71387,6 @@ function buildReviewPrompt(input2) {
   };
 }
 
-function makeRedactionFinding(path7, line, kind, idIndex) {
-  return {
-    id: `sec${idIndex}`,
-    path: path7,
-    line,
-    side: "RIGHT",
-    title: "Secret detected in patch",
-    body: `A secret of kind "${kind}" was detected in this added line and redacted before review.`,
-    severity: "high",
-    category: "security",
-    evidence: `[REDACTED:${kind}]`,
-    confidence: 1
-  };
-}
-function buildPatchLineToNewLineMap(patch) {
-  const result = /* @__PURE__ */ new Map();
-  const lines = patch.split("\n");
-  let patchLineNum = 1;
-  let newLine = 0;
-  const HUNK_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
-  for (const line of lines) {
-    if (line.startsWith("@@")) {
-      const m2 = line.match(HUNK_RE);
-      if (m2) {
-        newLine = parseInt(m2[1] ?? "1", 10);
-      }
-      patchLineNum++;
-      continue;
-    }
-    if (line.startsWith("+")) {
-      result.set(patchLineNum, newLine);
-      newLine++;
-    } else if (line.startsWith("-")) {
-    } else if (line.startsWith(" ")) {
-      result.set(patchLineNum, newLine);
-      newLine++;
-    }
-    patchLineNum++;
-  }
-  return result;
-}
-
-function requestedOutputTokens(model, maxOutputTokens) {
-  return model.outputTokensFor ? model.outputTokensFor(maxOutputTokens) : maxOutputTokens;
-}
-function hasRealUsage(usage) {
-  if (!usage)
-    return false;
-  return usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) > 0;
-}
-var SpendTracker = class {
-  pricing;
-  limitUsd;
-  #spentUsd = 0;
-  constructor(pricing, limitUsd) {
-    this.pricing = pricing;
-    this.limitUsd = limitUsd;
-  }
-  /** USD charged so far: real usage where reported, the estimate otherwise. 0 without pricing. */
-  get spentUsd() {
-    return this.#spentUsd;
-  }
-  get priced() {
-    return this.pricing !== void 0;
-  }
-  /** Worst-case cost of one call; 0 without pricing. */
-  estimate(promptTokens, outputTokens) {
-    if (!this.pricing)
-      return 0;
-    return estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: outputTokens }, this.pricing);
-  }
-  /** Whether one more call of this size still fits the per-review budget. Always true without pricing. */
-  canAfford(promptTokens, outputTokens) {
-    if (!this.pricing)
-      return true;
-    return this.#spentUsd + this.estimate(promptTokens, outputTokens) <= this.limitUsd;
-  }
-  /**
-   * Charges one completed (or failed) call: its real cost when usage was reported, else its
-   * estimated cost, so calls on usage-less providers still count against the budget.
-   */
-  record(promptTokens, outputTokens, usage) {
-    if (!this.pricing)
-      return;
-    this.#spentUsd += hasRealUsage(usage) ? costUsd(usage, this.pricing) : this.estimate(promptTokens, outputTokens);
-  }
-};
-function describeCallError(err, knownSecrets = []) {
-  if (err && typeof err === "object" && "code" in err && typeof err.code === "string") {
-    return err.code;
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  return redactSecrets(message, [...knownSecrets]).text.slice(0, 200);
-}
-
 function combineUsage(u1, u2) {
   if (!u1 && !u2)
     return void 0;
@@ -71390,87 +71452,201 @@ var reviewJsonSchema = () => external_exports.toJSONSchema(ReviewAnswerSchema);
 function needsTruncationRetry(parsed, finishReason) {
   return !parsed.ok && (parsed.code === "truncated" || finishReason === "max-tokens");
 }
+var PATCH_TRUNCATED_NOTE = "[patch truncated: the rest of this file was not sent for review]";
+function truncatePatch(patch, capTokens) {
+  const maxChars = Math.max(0, Math.floor(capTokens * 3.5) - PATCH_TRUNCATED_NOTE.length - 1);
+  let cut = patch.slice(0, maxChars);
+  const lastBreak = cut.lastIndexOf("\n");
+  if (lastBreak > 0)
+    cut = cut.slice(0, lastBreak);
+  return `${cut}
+${PATCH_TRUNCATED_NOTE}`;
+}
+function batchFilesByTokenCap(files, capTokens) {
+  const batches = [];
+  const truncatedPaths = [];
+  let current = [];
+  let currentTokens = 0;
+  const flush = () => {
+    if (current.length > 0)
+      batches.push(current);
+    current = [];
+    currentTokens = 0;
+  };
+  for (const file2 of files) {
+    const tokens = estimateTokens(file2.patch);
+    if (tokens > capTokens) {
+      flush();
+      batches.push([{ path: file2.path, patch: truncatePatch(file2.patch, capTokens) }]);
+      truncatedPaths.push(file2.path);
+      continue;
+    }
+    if (currentTokens + tokens > capTokens)
+      flush();
+    current.push({ ...file2 });
+    currentTokens += tokens;
+  }
+  flush();
+  return { batches, truncatedPaths };
+}
+
+function parseReviewResponse(response) {
+  return parseReviewAnswer(response.text, {
+    finishReason: response.finishReason,
+    outputTokens: response.usage?.outputTokens
+  });
+}
+function buildBatchPrompt(input2, files) {
+  return buildReviewPrompt({
+    language: input2.config.language,
+    maxFindings: input2.config.review.maxFindings,
+    pr: input2.pr,
+    rulesFiles: input2.rulesFiles,
+    pathInstructions: input2.config.review.pathInstructions,
+    files,
+    ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {}
+  });
+}
+async function reviewOneBatch(input2, prompt, promptTokens) {
+  const { model, spend, signal, reviewOutputTokens, retryOutputTokens } = input2;
+  const notes = [];
+  const request2 = {
+    system: prompt.system,
+    user: prompt.user,
+    maxOutputTokens: input2.maxOutputTokens,
+    responseSchema: reviewJsonSchema(),
+    ...signal ? { signal } : {}
+  };
+  const first = await model.generate(request2);
+  spend.record(promptTokens, reviewOutputTokens, first.usage);
+  let usage = first.usage;
+  const empty = await retryEmptyWithoutThinking({
+    parsed: parseReviewResponse(first),
+    model,
+    spend,
+    request: request2,
+    promptTokens,
+    requestedOutputTokens: reviewOutputTokens,
+    parse: parseReviewResponse,
+    knownSecrets: input2.knownSecrets
+  });
+  let parsed = empty.parsed;
+  usage = combineUsage(usage, empty.usage);
+  if (empty.note)
+    notes.push(empty.note);
+  if (needsTruncationRetry(parsed, (empty.response ?? first).finishReason)) {
+    const retryRequested = requestedOutputTokens(model, retryOutputTokens);
+    if (!spend.canAfford(promptTokens, retryRequested)) {
+      notes.push("truncation retry skipped: budget limit reached");
+    } else {
+      try {
+        const retry2 = await model.generate({
+          ...request2,
+          maxOutputTokens: retryOutputTokens,
+          ...empty.thinkingOff ? { thinking: "off" } : {}
+        });
+        spend.record(promptTokens, retryRequested, retry2.usage);
+        usage = combineUsage(usage, retry2.usage);
+        parsed = parseReviewResponse(retry2);
+      } catch (err) {
+        spend.record(promptTokens, retryRequested, void 0);
+        notes.push(`truncation retry failed: ${describeCallError(err, input2.knownSecrets)}`);
+      }
+    }
+  }
+  return { parsed, usage, notes };
+}
 async function executeBatchedReview(input2) {
-  const { batches, config: config2, pr, rulesFiles, model, maxOutputTokens, retryOutputTokens } = input2;
-  const { reviewOutputTokens, spend, libraryDocs, signal } = input2;
-  const reviewCfg = config2.review;
+  const { batches, spend, reviewOutputTokens } = input2;
   let totalUsage = input2.initialUsage;
   const batchSummaries = [];
   const batchFindings = [];
   const incompleteReasons = [];
-  const retryRequested = requestedOutputTokens(model, retryOutputTokens);
+  let answered = 0;
+  const labelOf = (index) => `batch ${index + 1} (${describePaths((batches[index] ?? []).map((f3) => f3.path))})`;
+  const skipFrom = (index, why) => {
+    for (let k = index; k < batches.length; k++)
+      incompleteReasons.push(`${labelOf(k)}: ${why}`);
+  };
   for (let bIdx = 0; bIdx < batches.length; bIdx++) {
-    const label = `batch ${bIdx + 1}`;
-    const batchPrompt = buildReviewPrompt({
-      language: config2.language,
-      maxFindings: reviewCfg.maxFindings,
-      pr,
-      rulesFiles,
-      pathInstructions: reviewCfg.pathInstructions,
-      files: batches[bIdx],
-      ...libraryDocs ? { libraryDocs } : {}
-    });
+    if (input2.deadline?.expired) {
+      incompleteReasons.push(`time limit reached: ${bIdx} of ${batches.length} batches reviewed`);
+      skipFrom(bIdx, "skipped: time limit reached");
+      break;
+    }
+    const label = labelOf(bIdx);
+    const batchPrompt = buildBatchPrompt(input2, batches[bIdx]);
     const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
     if (!spend.canAfford(bPromptTokens, reviewOutputTokens)) {
-      incompleteReasons.push(`${label}: budget limit reached`);
+      skipFrom(bIdx, "budget limit reached");
       break;
     }
     try {
-      const bRes = await model.generate({
-        system: batchPrompt.system,
-        user: batchPrompt.user,
-        maxOutputTokens,
-        responseSchema: reviewJsonSchema(),
-        ...signal ? { signal } : {}
-      });
-      spend.record(bPromptTokens, reviewOutputTokens, bRes.usage);
-      totalUsage = combineUsage(totalUsage, bRes.usage);
-      let bParsed = parseReviewAnswer(bRes.text, {
-        finishReason: bRes.finishReason,
-        outputTokens: bRes.usage?.outputTokens
-      });
-      if (needsTruncationRetry(bParsed, bRes.finishReason)) {
-        if (!spend.canAfford(bPromptTokens, retryRequested)) {
-          incompleteReasons.push(`${label}: truncation retry skipped: budget limit reached`);
-        } else {
-          try {
-            const bRetryRes = await model.generate({
-              system: batchPrompt.system,
-              user: batchPrompt.user,
-              maxOutputTokens: retryOutputTokens,
-              responseSchema: reviewJsonSchema(),
-              ...signal ? { signal } : {}
-            });
-            spend.record(bPromptTokens, retryRequested, bRetryRes.usage);
-            totalUsage = combineUsage(totalUsage, bRetryRes.usage);
-            bParsed = parseReviewAnswer(bRetryRes.text, {
-              finishReason: bRetryRes.finishReason,
-              outputTokens: bRetryRes.usage?.outputTokens
-            });
-          } catch (err) {
-            spend.record(bPromptTokens, retryRequested, void 0);
-            incompleteReasons.push(`${label}: truncation retry failed: ${describeCallError(err, input2.knownSecrets)}`);
-          }
-        }
-      }
-      if (bParsed.ok) {
-        if (bParsed.summary.trim().length > 0)
-          batchSummaries.push(bParsed.summary.trim());
-        batchFindings.push(...bParsed.findings);
+      const outcome = await reviewOneBatch(input2, batchPrompt, bPromptTokens);
+      totalUsage = combineUsage(totalUsage, outcome.usage);
+      incompleteReasons.push(...outcome.notes.map((note) => `${label}: ${note}`));
+      if (outcome.parsed.ok) {
+        answered++;
+        if (outcome.parsed.summary.trim().length > 0)
+          batchSummaries.push(outcome.parsed.summary.trim());
+        batchFindings.push(...outcome.parsed.findings);
       } else {
-        incompleteReasons.push(`${label}: ${bParsed.error}`);
+        incompleteReasons.push(`${label}: ${outcome.parsed.error}`);
       }
     } catch (err) {
       spend.record(bPromptTokens, reviewOutputTokens, void 0);
       incompleteReasons.push(`${label}: ${describeCallError(err, input2.knownSecrets)}`);
     }
   }
-  const merged = batchSummaries.length === 0 && batchFindings.length === 0 ? null : {
+  const merged = answered === 0 ? null : {
     summary: batchSummaries.join("\n\n") || "Review completed across file batches.",
     findings: dedupeFindings(batchFindings)
   };
   return { merged, totalUsage, incompleteReasons };
 }
+
+function makeRedactionFinding(path7, line, kind, idIndex) {
+  return {
+    id: `sec${idIndex}`,
+    path: path7,
+    line,
+    side: "RIGHT",
+    title: "Secret detected in patch",
+    body: `A secret of kind "${kind}" was detected in this added line and redacted before review.`,
+    severity: "high",
+    category: "security",
+    evidence: `[REDACTED:${kind}]`,
+    confidence: 1
+  };
+}
+function buildPatchLineToNewLineMap(patch) {
+  const result = /* @__PURE__ */ new Map();
+  const lines = patch.split("\n");
+  let patchLineNum = 1;
+  let newLine = 0;
+  const HUNK_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      const m2 = line.match(HUNK_RE);
+      if (m2) {
+        newLine = parseInt(m2[1] ?? "1", 10);
+      }
+      patchLineNum++;
+      continue;
+    }
+    if (line.startsWith("+")) {
+      result.set(patchLineNum, newLine);
+      newLine++;
+    } else if (line.startsWith("-")) {
+    } else if (line.startsWith(" ")) {
+      result.set(patchLineNum, newLine);
+      newLine++;
+    }
+    patchLineNum++;
+  }
+  return result;
+}
+
 async function recoverReviewTruncation(input2) {
   let { parseResult, totalUsage } = input2;
   const { modelResponse, prompt, promptTokens, maxOutputTokens, reviewOutputTokens } = input2;
@@ -71490,14 +71666,12 @@ async function recoverReviewTruncation(input2) {
         user: prompt.user,
         maxOutputTokens: retryOutputTokens,
         responseSchema: reviewJsonSchema(),
+        ...input2.thinkingOff ? { thinking: "off" } : {},
         ...signal ? { signal } : {}
       });
       spend.record(promptTokens, retryRequested, retryResponse.usage);
       totalUsage = combineUsage(totalUsage, retryResponse.usage);
-      const retryParse = parseReviewAnswer(retryResponse.text, {
-        finishReason: retryResponse.finishReason,
-        outputTokens: retryResponse.usage?.outputTokens
-      });
+      const retryParse = parseReviewResponse(retryResponse);
       if (retryParse.ok) {
         parseResult = retryParse;
       }
@@ -71520,7 +71694,8 @@ async function recoverReviewTruncation(input2) {
       knownSecrets: input2.knownSecrets,
       libraryDocs,
       signal,
-      initialUsage: totalUsage
+      initialUsage: totalUsage,
+      deadline: input2.deadline
     });
     totalUsage = batchResult.totalUsage;
     incompleteReasons.push(...batchResult.incompleteReasons);
@@ -71534,6 +71709,110 @@ async function recoverReviewTruncation(input2) {
     }
   }
   return { parseResult, totalUsage, incompleteReasons };
+}
+
+function failedCall(err, knownSecrets) {
+  if (err && typeof err === "object" && "code" in err) {
+    const message = "message" in err ? String(err.message ?? "") : "";
+    const detail = redactSecrets(message, [...knownSecrets]).text.slice(0, 500);
+    return { ok: false, reason: String(err.code), ...detail ? { detail } : {} };
+  }
+  return { ok: false, reason: redactSecrets(String(err), [...knownSecrets]).text.slice(0, 500) };
+}
+async function runSinglePass(ctx) {
+  const { model, spend, signal, prompt, promptTokens, reviewOutputTokens } = ctx;
+  const request2 = {
+    system: prompt.system,
+    user: prompt.user,
+    maxOutputTokens: ctx.maxOutputTokens,
+    responseSchema: reviewJsonSchema(),
+    ...signal ? { signal } : {}
+  };
+  let response;
+  try {
+    response = await model.generate(request2);
+    spend.record(promptTokens, reviewOutputTokens, response.usage);
+  } catch (err) {
+    return failedCall(err, ctx.knownSecrets);
+  }
+  const empty = await retryEmptyWithoutThinking({
+    parsed: parseReviewResponse(response),
+    model,
+    spend,
+    request: request2,
+    promptTokens,
+    requestedOutputTokens: reviewOutputTokens,
+    parse: parseReviewResponse,
+    knownSecrets: ctx.knownSecrets
+  });
+  const notes = empty.note ? [empty.note] : [];
+  const recovery = await recoverReviewTruncation({
+    parseResult: empty.parsed,
+    modelResponse: empty.response ?? response,
+    prompt,
+    promptTokens,
+    maxOutputTokens: ctx.maxOutputTokens,
+    reviewOutputTokens,
+    model,
+    config: ctx.config,
+    spend,
+    knownSecrets: ctx.knownSecrets,
+    redactedPrTitle: ctx.redactedPrTitle,
+    redactedPrBody: ctx.redactedPrBody,
+    redactedRulesFiles: ctx.redactedRulesFiles,
+    redactedReviewableFiles: ctx.redactedReviewableFiles,
+    libraryDocs: ctx.libraryDocs,
+    signal,
+    totalUsage: combineUsage(response.usage, empty.usage),
+    thinkingOff: empty.thinkingOff,
+    deadline: ctx.deadline
+  });
+  const parsed = recovery.parseResult;
+  if (!parsed.ok) {
+    const detail = [...notes, ...recovery.incompleteReasons].join("; ");
+    return { ok: false, reason: parsed.error, ...detail ? { detail } : {} };
+  }
+  return {
+    ok: true,
+    summary: parsed.summary,
+    findings: parsed.findings,
+    droppedInvalid: parsed.droppedInvalid,
+    totalUsage: recovery.totalUsage,
+    incompleteReasons: recovery.incompleteReasons
+  };
+}
+async function runBatchedPass(ctx, batches) {
+  const result = await executeBatchedReview({
+    batches,
+    config: ctx.config,
+    pr: { title: ctx.redactedPrTitle, body: ctx.redactedPrBody },
+    rulesFiles: ctx.redactedRulesFiles,
+    model: ctx.model,
+    maxOutputTokens: ctx.maxOutputTokens,
+    retryOutputTokens: Math.min(ctx.maxOutputTokens * 2, 16384),
+    reviewOutputTokens: ctx.reviewOutputTokens,
+    spend: ctx.spend,
+    knownSecrets: ctx.knownSecrets,
+    libraryDocs: ctx.libraryDocs,
+    signal: ctx.signal,
+    deadline: ctx.deadline
+  });
+  if (!result.merged) {
+    const detail = result.incompleteReasons.join("; ");
+    return {
+      ok: false,
+      reason: `no batch produced an answer (${batches.length} batches)`,
+      ...detail ? { detail } : {}
+    };
+  }
+  return {
+    ok: true,
+    summary: result.merged.summary,
+    findings: result.merged.findings,
+    droppedInvalid: 0,
+    totalUsage: result.totalUsage,
+    incompleteReasons: result.incompleteReasons
+  };
 }
 
 function escapeDelimiters2(content) {
@@ -71773,43 +72052,53 @@ async function runVerifyPass(input2) {
   const promptTokens = estimateTokens(verifyPrompt.system + verifyPrompt.user);
   const firstRequested = requestedOutputTokens(model, VERIFY_MAX_OUTPUT_TOKENS);
   const responseSchema = external_exports.toJSONSchema(VerifyAnswerSchema);
+  if (input2.deadline?.expired) {
+    return unchanged("time limit reached");
+  }
   if (!spend.canAfford(promptTokens, firstRequested)) {
     return unchanged("budget limit reached");
   }
+  const parse5 = (res) => parseVerifyAnswer(res.text, { finishReason: res.finishReason, outputTokens: res.usage?.outputTokens });
+  const request2 = {
+    system: verifyPrompt.system,
+    user: verifyPrompt.user,
+    maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
+    responseSchema,
+    ...signal ? { signal } : {}
+  };
   let verifyParsed;
   try {
-    const res = await model.generate({
-      system: verifyPrompt.system,
-      user: verifyPrompt.user,
-      maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
-      responseSchema,
-      ...signal ? { signal } : {}
-    });
+    const res = await model.generate(request2);
     spend.record(promptTokens, firstRequested, res.usage);
     totalUsage = combineUsage(totalUsage, res.usage);
-    verifyParsed = parseVerifyAnswer(res.text, {
-      finishReason: res.finishReason,
-      outputTokens: res.usage?.outputTokens
+    const empty = await retryEmptyWithoutThinking({
+      parsed: parse5(res),
+      model,
+      spend,
+      request: request2,
+      promptTokens,
+      requestedOutputTokens: firstRequested,
+      parse: parse5,
+      knownSecrets: input2.knownSecrets
     });
-    if (needsTruncationRetry(verifyParsed, res.finishReason)) {
+    verifyParsed = empty.parsed;
+    totalUsage = combineUsage(totalUsage, empty.usage);
+    if (empty.note)
+      incompleteReasons.push(`verification ${empty.note}`);
+    if (needsTruncationRetry(verifyParsed, (empty.response ?? res).finishReason)) {
       const retryRequested = requestedOutputTokens(model, VERIFY_RETRY_OUTPUT_TOKENS);
       if (!spend.canAfford(promptTokens, retryRequested)) {
         incompleteReasons.push("verification retry skipped: budget limit reached");
       } else {
         try {
           const retryRes = await model.generate({
-            system: verifyPrompt.system,
-            user: verifyPrompt.user,
+            ...request2,
             maxOutputTokens: VERIFY_RETRY_OUTPUT_TOKENS,
-            responseSchema,
-            ...signal ? { signal } : {}
+            ...empty.thinkingOff ? { thinking: "off" } : {}
           });
           spend.record(promptTokens, retryRequested, retryRes.usage);
           totalUsage = combineUsage(totalUsage, retryRes.usage);
-          verifyParsed = parseVerifyAnswer(retryRes.text, {
-            finishReason: retryRes.finishReason,
-            outputTokens: retryRes.usage?.outputTokens
-          });
+          verifyParsed = parse5(retryRes);
         } catch (err) {
           spend.record(promptTokens, retryRequested, void 0);
           incompleteReasons.push(`verification retry failed: ${describeCallError(err, input2.knownSecrets)}`);
@@ -71834,11 +72123,13 @@ async function runVerifyPass(input2) {
 
 async function runReview(input2) {
   const { config: config2, pr, files, rulesFiles, signal } = input2;
-  const fallbackModels = input2.fallbackModels ?? input2.model.fallbacks ?? [];
-  const model = new FallbackChain(input2.model, fallbackModels);
-  const knownSecrets = secretsToRedact(input2.knownSecrets, input2.model, fallbackModels);
   const reviewCfg = config2.review;
   const budgetCfg = config2.budget;
+  const limits = reviewLimits(reviewCfg);
+  const deadline = new ReviewDeadline(limits.totalTimeoutMs);
+  const fallbackModels = input2.fallbackModels ?? input2.model.fallbacks ?? [];
+  const model = new FallbackChain(withCallTimeout(input2.model, limits.callTimeoutMs), fallbackModels.map((m2) => withCallTimeout(m2, limits.callTimeoutMs)));
+  const knownSecrets = secretsToRedact(input2.knownSecrets, input2.model, fallbackModels);
   const incompleteReasons = [];
   const reviewableFiles = [];
   for (const file2 of files) {
@@ -71890,12 +72181,30 @@ async function runReview(input2) {
   if (!budgetResult.ok) {
     return { status: "skipped-budget", reason: budgetResult.reason };
   }
+  let plan;
+  if (promptTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0) {
+    plan = batchFilesByTokenCap(redactedReviewableFiles, limits.batchTokens);
+    for (const path7 of plan.truncatedPaths) {
+      incompleteReasons.push(`${path7}: patch truncated to fit review.batchTokens`);
+    }
+  }
+  const promptArgs = {
+    config: config2,
+    pr: { title: redactedPrTitle, body: redactedPrBody },
+    rulesFiles: redactedRulesFiles,
+    libraryDocs: input2.libraryDocs
+  };
+  const callPromptTokens = plan ? plan.batches.map((batch) => {
+    const batchPrompt = buildBatchPrompt(promptArgs, batch);
+    return estimateTokens(batchPrompt.system + batchPrompt.user);
+  }) : [promptTokens];
   const maxOutputTokens = 4096;
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
   const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
   let estimatedCostUsd;
   if (budgetCfg.pricing) {
-    estimatedCostUsd = estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing);
+    const pricing = budgetCfg.pricing;
+    estimatedCostUsd = callPromptTokens.reduce((sum, tokens) => sum + estimateCostUsd({ inputTokens: tokens, maxOutputTokens: reviewOutputTokens }, pricing), 0);
     if (reviewCfg.verify) {
       estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens }, budgetCfg.pricing);
     }
@@ -71907,58 +72216,35 @@ async function runReview(input2) {
     }
   }
   const spend = new SpendTracker(budgetCfg.pricing, budgetCfg.perReviewUsd);
-  let totalUsage;
-  let modelResponse;
-  try {
-    modelResponse = await model.generate({
-      system: prompt.system,
-      user: prompt.user,
-      maxOutputTokens,
-      responseSchema: external_exports.toJSONSchema(ReviewAnswerSchema),
-      ...signal ? { signal } : {}
-    });
-    totalUsage = modelResponse.usage;
-    spend.record(promptTokens, reviewOutputTokens, modelResponse.usage);
-  } catch (err) {
-    const failure2 = err;
-    const disclosure2 = model.disclosure();
-    if (failure2 && typeof failure2 === "object" && "code" in failure2) {
-      const detail = redactSecrets(String(failure2.message ?? ""), knownSecrets).text.slice(0, 500);
-      return { status: "failed", reason: failure2.code, ...detail ? { detail } : {}, ...disclosure2 };
-    }
-    return { status: "failed", reason: String(err), ...disclosure2 };
-  }
-  let parseResult = parseReviewAnswer(modelResponse.text, {
-    finishReason: modelResponse.finishReason,
-    outputTokens: modelResponse.usage?.outputTokens
-  });
-  const recovery = await recoverReviewTruncation({
-    parseResult,
-    modelResponse,
+  const passContext = {
+    config: config2,
+    model,
+    spend,
+    knownSecrets,
+    signal,
+    deadline,
     prompt,
     promptTokens,
     maxOutputTokens,
     reviewOutputTokens,
-    model,
-    config: config2,
-    spend,
-    knownSecrets,
     redactedPrTitle,
     redactedPrBody,
     redactedRulesFiles,
     redactedReviewableFiles,
-    libraryDocs: input2.libraryDocs,
-    signal,
-    totalUsage
-  });
-  parseResult = recovery.parseResult;
-  totalUsage = recovery.totalUsage;
-  incompleteReasons.push(...recovery.incompleteReasons);
-  if (!parseResult.ok) {
-    const detail = recovery.incompleteReasons.join("; ");
-    return { status: "failed", reason: parseResult.error, ...detail ? { detail } : {}, ...model.disclosure() };
+    libraryDocs: input2.libraryDocs
+  };
+  const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
+  if (!pass.ok) {
+    return {
+      status: "failed",
+      reason: pass.reason,
+      ...pass.detail ? { detail: pass.detail } : {},
+      ...model.disclosure()
+    };
   }
-  let modelFindings = parseResult.findings;
+  let totalUsage = pass.totalUsage;
+  incompleteReasons.push(...pass.incompleteReasons);
+  let modelFindings = pass.findings;
   let verification;
   if (reviewCfg.verify && modelFindings.length > 0) {
     const verified = await runVerifyPass({
@@ -71969,7 +72255,8 @@ async function runReview(input2) {
       spend,
       knownSecrets,
       totalUsage,
-      signal
+      signal,
+      deadline
     });
     modelFindings = verified.findings;
     totalUsage = verified.totalUsage;
@@ -71992,7 +72279,7 @@ async function runReview(input2) {
   const { inline, summaryOnly } = anchorFindings(selected, patchIndex);
   const complete = incompleteReasons.length === 0;
   const result = {
-    summary: parseResult.summary,
+    summary: pass.summary,
     findings: selected,
     complete,
     incompleteReasons
@@ -72004,16 +72291,24 @@ async function runReview(input2) {
   }
   return {
     status: "completed",
-    summary: parseResult.summary,
+    summary: pass.summary,
     inline,
     summaryOnly,
     result,
     usage: totalUsage,
     ...reviewCostUsd !== void 0 ? { costUsd: reviewCostUsd } : {},
-    droppedInvalid: parseResult.droppedInvalid,
+    droppedInvalid: pass.droppedInvalid,
     complete,
     ...verification !== void 0 ? { verification } : {},
     ...disclosure
+  };
+}
+function reviewLimits(review) {
+  return {
+    maxPromptTokens: review.maxPromptTokens ?? REVIEW_LIMIT_DEFAULTS.maxPromptTokens,
+    batchTokens: review.batchTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens,
+    callTimeoutMs: review.callTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.callTimeoutMs,
+    totalTimeoutMs: review.totalTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.totalTimeoutMs
   };
 }
 
@@ -118823,6 +119118,7 @@ var JSON_OBJECT_SUPPORTED_PRESETS = /* @__PURE__ */ new Set([
   "zai",
   "zai-coding"
 ]);
+var LOWEST_REASONING_EFFORT = "low";
 var OPENCODE = /^https:\/\/opencode\.ai\//;
 function mapFinish(reason) {
   if (reason === "length")
@@ -118862,6 +119158,28 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
     this.#style = entry.thinkingStyle;
     this.#streamUsage = entry.streamUsage;
   }
+  /** Whether a call with this model and configured effort thinks at all. */
+  #thinks(model, effort) {
+    if (effort === void 0)
+      return isCompatibleReasoningModel(this.provider, model, this.#style);
+    const isOff = effort === "off" || effort === "none";
+    return !isOff && Object.keys(compatibleEffortFields(this.#style, effort)).length > 0;
+  }
+  /**
+   * The effort one call really uses. A per-call `thinking: 'off'` (the retry after an empty,
+   * reasoning-only reply) wins over the configured effort: GLM gets `thinking: disabled`, an
+   * OpenAI-style reasoning model the lowest `reasoning_effort`; other styles keep the effort.
+   */
+  #effortFor(options) {
+    if (options.thinking !== "off")
+      return options.effort;
+    if (this.#style === "glm")
+      return "off";
+    if (this.#style === "reasoning_effort" && this.#thinks(options.model, options.effort)) {
+      return LOWEST_REASONING_EFFORT;
+    }
+    return options.effort;
+  }
   requestedOutputTokens(options) {
     if (options.effort !== void 0) {
       const isOff = options.effort === "off" || options.effort === "none";
@@ -118888,11 +119206,16 @@ ${instruction}`;
       else
         messages.unshift({ role: "system", content: instruction });
     }
-    const effortFields = compatibleEffortFields(this.#style, options.effort);
+    const effort = this.#effortFor(options);
+    const effortFields = compatibleEffortFields(this.#style, effort);
     return {
       model: options.model,
       messages,
-      max_tokens: this.requestedOutputTokens(options),
+      max_tokens: this.requestedOutputTokens({
+        model: options.model,
+        maxOutputTokens: options.maxOutputTokens,
+        ...effort !== void 0 ? { effort } : {}
+      }),
       stream: true,
       ...this.#streamUsage ? { stream_options: { include_usage: true } } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},

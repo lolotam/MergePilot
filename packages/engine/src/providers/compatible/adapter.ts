@@ -40,6 +40,13 @@ const JSON_OBJECT_SUPPORTED_PRESETS = new Set<string>([
   'zai-coding',
 ]);
 
+/**
+ * `reasoning_effort` sent when one call asks for thinking off on an OpenAI-style server: `off`
+ * there means "send nothing", which leaves a reasoning model at its default effort, so the
+ * lowest value every such server accepts is sent instead (ADR-0013).
+ */
+const LOWEST_REASONING_EFFORT = 'low';
+
 /** OpenCode (Zen and Go) routes by a stable conversation id and rejects requests without one. */
 const OPENCODE = /^https:\/\/opencode\.ai\//;
 
@@ -95,6 +102,27 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
     this.#streamUsage = entry.streamUsage;
   }
 
+  /** Whether a call with this model and configured effort thinks at all. */
+  #thinks(model: string, effort: string | undefined): boolean {
+    if (effort === undefined) return isCompatibleReasoningModel(this.provider, model, this.#style);
+    const isOff = effort === 'off' || effort === 'none';
+    return !isOff && Object.keys(compatibleEffortFields(this.#style, effort)).length > 0;
+  }
+
+  /**
+   * The effort one call really uses. A per-call `thinking: 'off'` (the retry after an empty,
+   * reasoning-only reply) wins over the configured effort: GLM gets `thinking: disabled`, an
+   * OpenAI-style reasoning model the lowest `reasoning_effort`; other styles keep the effort.
+   */
+  #effortFor(options: Pick<GenerateOptions, 'model' | 'effort' | 'thinking'>): string | undefined {
+    if (options.thinking !== 'off') return options.effort;
+    if (this.#style === 'glm') return 'off';
+    if (this.#style === 'reasoning_effort' && this.#thinks(options.model, options.effort)) {
+      return LOWEST_REASONING_EFFORT;
+    }
+    return options.effort;
+  }
+
   override requestedOutputTokens(options: OutputTokenRequest): number {
     if (options.effort !== undefined) {
       const isOff = options.effort === 'off' || options.effort === 'none';
@@ -123,11 +151,16 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
       if (system) system.content = `${system.content}\n\n${instruction}`;
       else messages.unshift({ role: 'system', content: instruction });
     }
-    const effortFields = compatibleEffortFields(this.#style, options.effort);
+    const effort = this.#effortFor(options);
+    const effortFields = compatibleEffortFields(this.#style, effort);
     return {
       model: options.model,
       messages,
-      max_tokens: this.requestedOutputTokens(options),
+      max_tokens: this.requestedOutputTokens({
+        model: options.model,
+        maxOutputTokens: options.maxOutputTokens,
+        ...(effort !== undefined ? { effort } : {}),
+      }),
       stream: true,
       ...(this.#streamUsage ? { stream_options: { include_usage: true } } : {}),
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
