@@ -4,7 +4,7 @@ export interface LogoProps {
   className?: string;
 }
 
-const WORDMARK_HEIGHT = { sm: 'h-6', md: 'h-8', lg: 'h-11' } as const;
+const WORDMARK_HEIGHT = { sm: 'h-5 sm:h-6', md: 'h-6 sm:h-8', lg: 'h-9 sm:h-11' } as const;
 const MARK_SIZE = { sm: 'h-6 w-6', md: 'h-8 w-8', lg: 'h-10 w-10' } as const;
 
 /**
@@ -18,9 +18,9 @@ export function Logo({ size = 'md', showWordmark = true, className = '' }: LogoP
     : ['/brand/mark.png', '/brand/mark-dark.png', MARK_SIZE[size]];
 
   return (
-    <picture dir="ltr" className={`inline-flex items-center select-none ${className}`}>
+    <picture dir="ltr" className={`inline-flex min-w-0 items-center select-none ${className}`}>
       <source srcSet={dark} media="(prefers-color-scheme: dark)" />
-      <img src={light} alt="MergePilot" className={dims} draggable={false} />
+      <img src={light} alt="MergePilot" className={`${dims} max-w-full`} draggable={false} />
     </picture>
   );
 }

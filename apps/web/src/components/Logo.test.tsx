@@ -24,8 +24,8 @@ describe('Logo Component', () => {
 
   it('applies sizing classes', () => {
     const { container: sm } = render(React.createElement(Logo, { size: 'sm' }));
-    expect(sm.querySelector('img')?.classList.contains('h-6')).toBe(true);
+    expect(sm.querySelector('img')?.classList.contains('h-5')).toBe(true);
     const { container: lg } = render(React.createElement(Logo, { size: 'lg' }));
-    expect(lg.querySelector('img')?.classList.contains('h-11')).toBe(true);
+    expect(lg.querySelector('img')?.classList.contains('sm:h-11')).toBe(true);
   });
 });
