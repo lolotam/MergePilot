@@ -1,14 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RunsPage } from './RunsPage.js';
-import { I18nProvider } from '../i18n/context.js';
-import { ToastProvider } from '../components/Toast.js';
 import * as hooks from '../api/hooks.js';
+import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import * as client from '../api/client.js';
 import type { ReviewRun } from '../api/client.js';
+import { makeGroup, renderRunsPage } from '../runs/runs-test-utils.js';
 
 vi.mock('../api/hooks.js');
 vi.mock('../api/client.js', async () => {
@@ -92,43 +87,9 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
   const renderComponent = (
     initialEntries = ['/w/ws-1/runs'],
     role: 'owner' | 'admin' | 'member' = 'admin',
-  ) => {
-    vi.mocked(hooks.useMeQuery).mockReturnValue({
-      data: {
-        user: { id: 'u1', email: 'user@test.com', name: 'User', image: null, githubLinked: true },
-        workspaces: [{ id: 'ws-1', name: 'WS 1', slug: 'ws-1', role }],
-      },
-      isLoading: false,
-    } as unknown as ReturnType<typeof hooks.useMeQuery>);
+  ) => renderRunsPage({ url: initialEntries[0], role, groups: sampleRuns.map((r) => makeGroup([r])) });
 
-    vi.mocked(hooks.useRunReposQuery).mockReturnValue({
-      data: { repos: ['acme/backend', 'acme/frontend', 'acme/mobile'] },
-      isLoading: false,
-    } as unknown as ReturnType<typeof hooks.useRunReposQuery>);
-
-    vi.mocked(hooks.useRunsQuery).mockReturnValue({
-      data: { runs: sampleRuns, total: 3 },
-      isLoading: false,
-    } as unknown as ReturnType<typeof hooks.useRunsQuery>);
-
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <I18nProvider initialLanguage="en">
-          <ToastProvider>
-            <MemoryRouter initialEntries={initialEntries}>
-              <Routes>
-                <Route path="/w/:workspaceId/runs" element={<RunsPage />} />
-              </Routes>
-            </MemoryRouter>
-          </ToastProvider>
-        </I18nProvider>
-      </QueryClientProvider>,
-    );
-  };
+  const table = () => within(screen.getByRole('table'));
 
   it('renders table columns including Provider, Model, and Result chips', () => {
     renderComponent();
@@ -137,6 +98,11 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
     expect(screen.getByText('Provider')).toBeDefined();
     expect(screen.getByText('Model')).toBeDefined();
     expect(screen.getByText('Result')).toBeDefined();
+    expect(screen.getByText('Tokens in')).toBeDefined();
+    expect(screen.getByText('Tokens out')).toBeDefined();
+    // Column order: #, selection, PR first.
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers.slice(0, 3)).toEqual(['#', '', 'Pull Request']);
 
     // Provider badges
     expect(screen.getByText('Anthropic')).toBeDefined();
@@ -163,7 +129,7 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
   it('navigates to run detail on row click and keyboard enter', () => {
     renderComponent();
 
-    const row = screen.getByText('acme/backend').closest('tr');
+    const row = table().getByText('acme/backend').closest('tr');
     expect(row).not.toBeNull();
 
     // Click row
@@ -193,7 +159,7 @@ describe('RunsPage - table columns, row navigation, filters and sorting', () => 
     fireEvent.click(modelButton);
 
     // Click triggers params update for sorting
-    expect(hooks.useRunsQuery).toHaveBeenCalled();
+    expect(hooks.useRunGroupsQuery).toHaveBeenCalled();
   });
 
   it('renders filter bar with search, repo, and status dropdowns', () => {

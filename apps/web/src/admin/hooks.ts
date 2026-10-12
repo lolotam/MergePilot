@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { adminApi, soleOwnedWorkspaces, type AdminPageParams } from '../api/admin.js';
+import { ApiClientError } from '../api/client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -75,4 +76,35 @@ export function useAdminDeleteUserMutation() {
 
 export function useAdminDeleteWorkspaceMutation() {
   return useAdminDelete((workspaceId) => adminApi.deleteWorkspace(workspaceId), 'workspaceDeletedSuccess');
+}
+
+/** The retention job's last run; polls every 3 s while it is still running. */
+export function useAdminMaintenanceQuery() {
+  return useQuery({
+    queryKey: ['admin', 'maintenance'],
+    queryFn: () => adminApi.getMaintenance(),
+    refetchInterval: (query) => {
+      const last = query.state.data?.retention.lastRun;
+      return last && last.finishedAt === null ? 3000 : false;
+    },
+  });
+}
+
+export function useRunRetentionMutation() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+
+  return useMutation({
+    mutationFn: () => adminApi.runRetention(),
+    onSuccess: () => {
+      showToast(t('adminRetentionStarted'), 'success');
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'maintenance'] });
+    },
+    onError: (err: Error) => {
+      const busy = err instanceof ApiClientError && err.code === 'already_running';
+      showToast(busy ? t('adminRetentionBusy') : err.message || t('error'), 'error');
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'maintenance'] });
+    },
+  });
 }

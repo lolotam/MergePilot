@@ -10,6 +10,8 @@ export const ALLOWED_SORT_KEYS = [
   'model',
   'findingsCount',
   'costUsd',
+  'inputTokens',
+  'outputTokens',
   'duration',
 ] as const;
 
@@ -56,6 +58,8 @@ export const RunsListQuerySchema = z.object({
   q: z.string().max(MAX_Q_LENGTH).optional(),
   sort: z.enum(ALLOWED_SORT_KEYS).optional(),
   dir: z.enum(['asc', 'desc']).optional(),
+  /** `pr`: group the runs by pull request; paging is then over PR groups. */
+  groupBy: z.enum(['pr']).optional(),
 });
 
 /** A date-only `from` starts at 00:00 UTC; a date-only `to` covers that whole UTC day. */
@@ -65,7 +69,7 @@ export function toDate(value: string, edge: 'start' | 'end'): Date {
 }
 
 export type RunsQueryParseResult =
-  | { ok: true; options: ListReviewRunsOptions }
+  | { ok: true; options: ListReviewRunsOptions; groupBy: 'pr' | undefined }
   | { ok: false; code: 'invalid_sort' | 'invalid_query'; message: string };
 
 /** Validates the runs list query; failures name the bad params but never echo their values. */
@@ -104,6 +108,7 @@ export function parseRunsListQuery(query: unknown): RunsQueryParseResult {
       sort: q.sort,
       dir: q.dir ?? 'desc',
     },
+    groupBy: q.groupBy,
   };
 }
 

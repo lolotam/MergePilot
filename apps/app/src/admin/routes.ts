@@ -2,9 +2,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Auth } from '../auth/auth.js';
 import type { AppConfig } from '../core/config.js';
+import type { AppStore } from '../core/types.js';
 import { sendError } from '../api/helpers.js';
 import { deleteUser, deleteWorkspace, type ActionResult } from './actions.js';
 import { requirePlatformAdmin } from './guard.js';
+import { registerMaintenanceRoutes } from './routes-maintenance.js';
 import {
   ADMIN_DEFAULT_PAGE_SIZE,
   clampPagination,
@@ -20,6 +22,8 @@ export interface AdminApiDeps {
   auth: Auth;
   db: AdminDb;
   config: AppConfig;
+  /** For the maintenance routes (run retention); without it they report 503 / no last run. */
+  store?: AppStore | undefined;
 }
 
 const PageQuerySchema = z.object({
@@ -100,4 +104,6 @@ export function registerAdminApi(app: FastifyInstance, deps: AdminApiDeps): void
       return sendAction(reply, await deleteWorkspace(db, adminId, workspaceId, request.log));
     },
   );
+
+  registerMaintenanceRoutes(app, guard, deps.store);
 }

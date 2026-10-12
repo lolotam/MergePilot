@@ -98,6 +98,10 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
       mutateAsync: vi.fn(),
       isPending: false,
     } as unknown as ReturnType<typeof hooks.useDeleteWorkspaceMutation>);
+
+    vi.mocked(hooks.useRunReposQuery).mockReturnValue({
+      data: { repos: [] },
+    } as unknown as ReturnType<typeof hooks.useRunReposQuery>);
   };
 
   const renderComponent = () =>

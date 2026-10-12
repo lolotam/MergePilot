@@ -9,6 +9,7 @@ import { defineDeleteWorkspaceContract } from './store-contract-delete.js';
 import { defineReviewRunLifecycleContract } from './store-contract-runs.js';
 import { defineRetryContract } from './store-contract-retry.js';
 import { defineActiveRunContract } from './store-contract-active-run.js';
+import { defineRetentionContract } from './store-contract-retention.js';
 
 /** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
 export const STORE_CONTRACT_WORKSPACES = [
@@ -18,6 +19,8 @@ export const STORE_CONTRACT_WORKSPACES = [
   'ws-runs-test',
   'ws-del-target',
   'ws-del-other',
+  'ws-k3',
+  'ws-k3-other',
 ] as const;
 
 export function describeStoreContract(
@@ -348,5 +351,6 @@ export function describeStoreContract(
     defineDeleteWorkspaceContract(createStore, cleanup);
     defineRetryContract(createStore, cleanup);
     defineActiveRunContract(createStore, cleanup);
+    defineRetentionContract(createStore, cleanup);
   });
 }

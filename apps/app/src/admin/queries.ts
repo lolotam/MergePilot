@@ -67,7 +67,8 @@ export async function getOverview(db: AdminDb, now: Date = new Date()): Promise<
   const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY_MS);
   const runs = dbSchema.reviewRuns;
 
-  const [users, workspaces, linked, pending, repos, totals, recentRuns, recentCost, statusRows] =
+  // All-time cost reads the monthly usage summary, which run retention never deletes (ADR-0014).
+  const [users, workspaces, linked, pending, repos, totals, recentRuns, recentCost, statusRows, usage] =
     await Promise.all([
       db.select({ n: count() }).from(authSchema.user),
       db.select({ n: count() }).from(authSchema.organization),
@@ -84,6 +85,7 @@ export async function getOverview(db: AdminDb, now: Date = new Date()): Promise<
       db.select({ n: count() }).from(runs).where(gte(runs.createdAt, sevenDaysAgo)),
       db.select({ cost: sum(runs.costUsd) }).from(runs).where(gte(runs.createdAt, thirtyDaysAgo)),
       db.select({ status: runs.status, n: count() }).from(runs).groupBy(runs.status),
+      db.select({ cost: sum(dbSchema.workspaceUsageMonthly.costUsd) }).from(dbSchema.workspaceUsageMonthly),
     ]);
 
   const byStatus: Record<string, number> = {};
@@ -101,7 +103,7 @@ export async function getOverview(db: AdminDb, now: Date = new Date()): Promise<
       last7Days: Number(recentRuns[0]?.n ?? 0),
       byStatus,
     },
-    costUsd: { allTime: toUsd(totals[0]?.cost), last30Days: toUsd(recentCost[0]?.cost) },
+    costUsd: { allTime: toUsd(usage[0]?.cost), last30Days: toUsd(recentCost[0]?.cost) },
   };
 }
 

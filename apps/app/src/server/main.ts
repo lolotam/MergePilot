@@ -190,6 +190,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
         auth: services.auth,
         db: services.db,
         config,
+        store,
       });
 
       // 5. SPA static files from apps/web/dist

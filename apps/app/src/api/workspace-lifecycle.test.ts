@@ -2,14 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fastify, { type FastifyInstance } from 'fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { getOrgAdapter } from 'better-auth/plugins/organization';
 import { createAuth, type Auth } from '../auth/auth.js';
 import * as authSchema from '../auth/schema.js';
 import * as dbSchema from '../db/schema.js';
 import { registerAuthRoutes } from '../auth/fastify.js';
 import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
+import { runMigrations } from '../db/migrate.js';
 import { PgStore } from '../db/pg-store.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { CredentialService } from '../credentials/service.js';
@@ -47,16 +46,8 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
 
   beforeEach(async () => {
     pglite = new PGlite();
-    const appSql = readFileSync(join(__dirname, '../../migrations/0001_app.sql'), 'utf-8');
-    const authSql = readFileSync(join(__dirname, '../../migrations/0002_auth.sql'), 'utf-8');
-    const detailsSql = readFileSync(join(__dirname, '../../migrations/0003_review_run_details.sql'), 'utf-8');
-    const activeRunSql = readFileSync(join(__dirname, '../../migrations/0004_active_run_unique.sql'), 'utf-8');
-    const settingsModelsSql = readFileSync(join(__dirname, '../../migrations/0005_settings_models.sql'), 'utf-8');
-    await pglite.exec(appSql);
-    await pglite.exec(authSql);
-    await pglite.exec(detailsSql);
-    await pglite.exec(activeRunSql);
-    await pglite.exec(settingsModelsSql);
+    // Every migration, so the stores see the current schema (0006: usage summary, lease).
+    await runMigrations(pglite);
 
     const schema = { ...authSchema, ...dbSchema };
     db = drizzle(pglite, { schema });

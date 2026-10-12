@@ -1,4 +1,7 @@
+import type { AdminMaintenanceResponse, RunRetentionResponse } from '@mergepilot/app/contract';
 import { ApiClientError, fetchApi } from './client.js';
+
+export type { AdminMaintenanceResponse, RunRetentionResponse };
 
 /** Platform operator API (`/api/admin/*`). Every route answers 404 to non-admins. */
 
@@ -131,4 +134,8 @@ export const adminApi = {
     fetchApi<void>(`/api/admin/workspaces/${encodeURIComponent(workspaceId)}`, {
       method: 'DELETE',
     }),
+  /** The run retention job: its last run (ADR-0014). */
+  getMaintenance: () => fetchApi<AdminMaintenanceResponse>('/api/admin/maintenance'),
+  /** Starts a retention cleanup now; 409 `already_running` while one runs. */
+  runRetention: () => fetchApi<RunRetentionResponse>('/api/admin/maintenance/run-retention', { method: 'POST' }),
 };

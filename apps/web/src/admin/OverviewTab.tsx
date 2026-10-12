@@ -1,6 +1,7 @@
 import { useI18n } from '../i18n/context.js';
 import { formatCount, formatUsd } from './format.js';
 import { useAdminOverviewQuery } from './hooks.js';
+import { RetentionPanel } from './RetentionPanel.js';
 import { StatCard, StateMessage, StatusBadge } from './ui.js';
 
 export function OverviewTab() {
@@ -53,6 +54,8 @@ export function OverviewTab() {
           </ul>
         )}
       </section>
+
+      <RetentionPanel />
     </div>
   );
 }

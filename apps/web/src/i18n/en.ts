@@ -1,10 +1,12 @@
 import type { I18nDictionary } from './ar.js';
 import { enSettings } from './settings-en.js';
 import { enAdmin } from './admin-en.js';
+import { enRuns } from './runs-en.js';
 
 export const en: I18nDictionary = {
   ...enSettings,
   ...enAdmin,
+  ...enRuns,
   // App
   appName: 'MergePilot',
   appTagline: 'AI-Powered Pull Request Review Engine',

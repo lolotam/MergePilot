@@ -1,4 +1,10 @@
-import { ACTIVE_RUN_STATUSES, type LatestFailedRunsOptions, type ReviewRun } from './types.js';
+import {
+  ACTIVE_RUN_STATUSES,
+  type LatestFailedRunsOptions,
+  type ListReviewRunsOptions,
+  type ReviewRun,
+} from './types.js';
+import { runTokens, type RunFilters } from './run-types.js';
 
 /** The key of the one-active-run-per-head rule (migration 0004). */
 export interface ActiveRunKey {
@@ -60,4 +66,79 @@ export function selectLatestFailedRuns(
     candidates.push({ ...latest });
   }
   return candidates.sort(newestFirst).slice(0, limit);
+}
+
+/** In-memory twin of `runFilterConditions` (pg-run-filters.ts): the runs list filters. */
+export function filterRuns(runs: Iterable<ReviewRun>, workspaceId: string, opts: RunFilters): ReviewRun[] {
+  const repos = opts.repo && opts.repo.length > 0 ? new Set(opts.repo) : null;
+  const statuses = opts.status && opts.status.length > 0 ? new Set(opts.status) : null;
+  const q = opts.q?.trim().toLowerCase() ?? '';
+  const out: ReviewRun[] = [];
+  for (const r of runs) {
+    if (r.workspaceId !== workspaceId) continue;
+    if (repos && !repos.has(r.repoFullName)) continue;
+    if (statuses && !statuses.has(r.status)) continue;
+    if (opts.from && r.createdAt < opts.from) continue;
+    if (opts.to && r.createdAt > opts.to) continue;
+    if (opts.provider && r.provider !== opts.provider) continue;
+    if (
+      q &&
+      ![r.repoFullName, String(r.pullNumber), r.model ?? '', r.detail ?? ''].some((v) => v.toLowerCase().includes(q))
+    ) {
+      continue;
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+const duration = (r: ReviewRun): number => (r.finishedAt?.getTime() ?? r.createdAt.getTime()) - r.createdAt.getTime();
+
+/** In-memory twin of `runSortOrder`: a comparator for a sort key, ties broken by id. */
+export function compareRuns(
+  sortKey: ListReviewRunsOptions['sort'],
+  dir: ListReviewRunsOptions['dir'],
+): (a: ReviewRun, b: ReviewRun) => number {
+  const sign = dir === 'asc' ? 1 : -1;
+  return (a, b) => {
+    let cmp: number;
+    switch (sortKey ?? 'createdAt') {
+      case 'repo':
+        cmp = a.repoFullName.localeCompare(b.repoFullName);
+        break;
+      case 'pullNumber':
+        cmp = a.pullNumber - b.pullNumber;
+        break;
+      case 'status':
+        cmp = a.status.localeCompare(b.status);
+        break;
+      case 'provider':
+        cmp = (a.provider ?? '').localeCompare(b.provider ?? '');
+        break;
+      case 'model':
+        cmp = (a.model ?? '').localeCompare(b.model ?? '');
+        break;
+      case 'findingsCount':
+        cmp = (a.findingsCount ?? 0) - (b.findingsCount ?? 0);
+        break;
+      case 'costUsd':
+        cmp = (a.costUsd ?? 0) - (b.costUsd ?? 0);
+        break;
+      case 'inputTokens':
+        cmp = (runTokens(a).inputTokens ?? 0) - (runTokens(b).inputTokens ?? 0);
+        break;
+      case 'outputTokens':
+        cmp = (runTokens(a).outputTokens ?? 0) - (runTokens(b).outputTokens ?? 0);
+        break;
+      case 'duration':
+        cmp = duration(a) - duration(b);
+        break;
+      case 'createdAt':
+      default:
+        cmp = a.createdAt.getTime() - b.createdAt.getTime();
+        break;
+    }
+    if (cmp !== 0) return sign * cmp;
+    return a.id.localeCompare(b.id);
+  };
 }

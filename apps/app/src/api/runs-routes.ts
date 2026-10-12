@@ -1,13 +1,15 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { requireRole } from '../auth/guard.js';
-import { computeSeverityCounts } from './contract.js';
 import { sendError } from './helpers.js';
+import { toRunDto, toRunGroupDto } from './run-dto.js';
+import { registerRunsDeleteRoutes } from './runs-delete.js';
 import { parseRunsListQuery } from './runs-query.js';
 import { registerRunsRetryRoutes } from './runs-retry.js';
 import type { DashboardApiDeps } from './routes.js';
 
 export function registerRunsRoutes(app: FastifyInstance, deps: DashboardApiDeps): void {
   registerRunsRetryRoutes(app, deps);
+  registerRunsDeleteRoutes(app, deps);
 
   // 1. GET /api/workspaces/:workspaceId/runs/repos (distinct repo names)
   app.get(
@@ -30,37 +32,20 @@ export function registerRunsRoutes(app: FastifyInstance, deps: DashboardApiDeps)
       if (!parsed.ok) {
         return sendError(reply, 400, parsed.code, parsed.message);
       }
+      if (parsed.groupBy === 'pr') {
+        const grouped = await deps.store.listReviewRunGroups(workspaceId, parsed.options);
+        return reply.status(200).send({
+          groups: grouped.groups.map(toRunGroupDto),
+          total: grouped.total,
+          totalRuns: grouped.totalRuns,
+        });
+      }
       const result = await deps.store.listReviewRuns(workspaceId, parsed.options);
 
       const runs = 'runs' in result ? result.runs : result;
       const total = 'total' in result ? result.total : runs.length;
 
-      return reply.status(200).send({
-        runs: runs.map((r) => ({
-          id: r.id,
-          repoFullName: r.repoFullName,
-          pullNumber: r.pullNumber,
-          headSha: r.headSha,
-          status: r.status,
-          costUsd: r.costUsd,
-          detail: r.detail,
-          createdAt:
-            r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString(),
-          finishedAt: r.finishedAt
-            ? r.finishedAt instanceof Date
-              ? r.finishedAt.toISOString()
-              : new Date(r.finishedAt).toISOString()
-            : null,
-          provider: r.provider ?? null,
-          model: r.model ?? null,
-          effort: r.effort ?? null,
-          fallbackFrom: r.fallbackFrom ?? null,
-          findingsCount: r.findingsCount ?? null,
-          severityCounts: r.result ? computeSeverityCounts(r.result.findings, r.result.outOfDiff) : null,
-          reviewUrl: r.reviewUrl ?? null,
-        })),
-        total,
-      });
+      return reply.status(200).send({ runs: runs.map(toRunDto), total });
     },
   );
 
@@ -75,36 +60,7 @@ export function registerRunsRoutes(app: FastifyInstance, deps: DashboardApiDeps)
         return sendError(reply, 404, 'not_found', 'Review run not found');
       }
 
-      const severityCounts = r.result
-        ? computeSeverityCounts(r.result.findings, r.result.outOfDiff)
-        : null;
-
-      return reply.status(200).send({
-        run: {
-          id: r.id,
-          repoFullName: r.repoFullName,
-          pullNumber: r.pullNumber,
-          headSha: r.headSha,
-          status: r.status,
-          costUsd: r.costUsd,
-          detail: r.detail,
-          createdAt:
-            r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString(),
-          finishedAt: r.finishedAt
-            ? r.finishedAt instanceof Date
-              ? r.finishedAt.toISOString()
-              : new Date(r.finishedAt).toISOString()
-            : null,
-          provider: r.provider ?? null,
-          model: r.model ?? null,
-          effort: r.effort ?? null,
-          fallbackFrom: r.fallbackFrom ?? null,
-          findingsCount: r.findingsCount ?? null,
-          severityCounts,
-          reviewUrl: r.reviewUrl ?? null,
-          result: r.result ?? null,
-        },
-      });
+      return reply.status(200).send({ run: { ...toRunDto(r), result: r.result ?? null } });
     },
   );
 }

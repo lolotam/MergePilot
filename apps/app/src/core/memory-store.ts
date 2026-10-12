@@ -6,16 +6,33 @@ import {
   REUSABLE_RUN_STATUSES,
   WorkspaceDeletedError,
 } from './types.js';
-import { findActiveRun, selectLatestFailedRuns } from './memory-runs.js';
+import { compareRuns, filterRuns, findActiveRun, selectLatestFailedRuns } from './memory-runs.js';
+import {
+  addMemoryUsage,
+  deleteMemoryRuns,
+  finishMemoryMaintenance,
+  groupMemoryRuns,
+  latestMemoryMaintenance,
+  memoryRetentionPolicies,
+  pruneMemoryRuns,
+  startMemoryMaintenance,
+} from './memory-maintenance.js';
+import { DEFAULT_RUN_RETENTION_DAYS, usageMonth } from './run-types.js';
 import type {
   ApiProvider,
   AppStore,
+  DeleteRunsTarget,
   FinishReviewRunOptions,
   Installation,
   LatestFailedRunsOptions,
+  ListReviewRunGroupsResult,
   ListReviewRunsOptions,
   ListReviewRunsResult,
+  MaintenanceKind,
+  MaintenanceRun,
+  MonthlyUsage,
   NewReviewRun,
+  RetentionPolicy,
   ReviewRun,
   StoredCredential,
   WorkspaceSettings,
@@ -29,6 +46,9 @@ export class MemoryStore implements AppStore {
   readonly credentials = new Map<string, StoredCredential>();
   readonly runs = new Map<string, ReviewRun>();
   readonly deletedWorkspaces = new Set<string>();
+  /** Monthly usage keyed by workspace id, a NUL separator and `YYYY-MM-01`. */
+  readonly usage = new Map<string, MonthlyUsage>();
+  readonly maintenance: MaintenanceRun[] = [];
 
   /** Mirrors the Postgres organization check: no writes for a workspace deleted in this store. */
   private assertLive(workspaceId: string): void {
@@ -87,12 +107,23 @@ export class MemoryStore implements AppStore {
       heavyThresholdLines: s.heavyThresholdLines ?? 800,
       fallback: s.fallback ?? [],
       minSeverity: s.minSeverity ?? 'medium',
+      runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
+      repoColors: { ...(s.repoColors ?? {}) },
     };
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
     this.assertLive(settings.workspaceId);
-    this.settings.set(settings.workspaceId, { ...settings });
+    // Like the Postgres store: undefined keeps the stored retention and colors.
+    const stored = this.settings.get(settings.workspaceId);
+    this.settings.set(settings.workspaceId, {
+      ...settings,
+      runRetentionDays:
+        settings.runRetentionDays !== undefined
+          ? settings.runRetentionDays
+          : stored?.runRetentionDays !== undefined ? stored.runRetentionDays : DEFAULT_RUN_RETENTION_DAYS,
+      repoColors: { ...(settings.repoColors ?? stored?.repoColors ?? {}) },
+    });
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
@@ -176,12 +207,12 @@ export class MemoryStore implements AppStore {
     const run = this.runs.get(id);
     if (!run || run.workspaceId !== workspaceId) return;
     const now = new Date();
-    this.runs.set(id, {
-      ...run,
-      ...result,
-      finishedAt: now,
-      updatedAt: now,
-    });
+    const finished: ReviewRun = { ...run, ...result, finishedAt: now, updatedAt: now };
+    this.runs.set(id, finished);
+    // A run finished twice (e.g. failed by the stale sweep, then finished by its worker) replaces
+    // its earlier usage instead of counting twice.
+    if (run.finishedAt) addMemoryUsage(this.usage, run, -1);
+    addMemoryUsage(this.usage, finished);
   }
 
   async getReviewRun(workspaceId: string, id: string): Promise<ReviewRun | null> {
@@ -226,13 +257,9 @@ export class MemoryStore implements AppStore {
         r.updatedAt < heartbeatBefore &&
         !this.deletedWorkspaces.has(r.workspaceId)
       ) {
-        this.runs.set(id, {
-          ...r,
-          status: 'failed',
-          detail: 'interrupted',
-          finishedAt: now,
-          updatedAt: now,
-        });
+        const failed: ReviewRun = { ...r, status: 'failed', detail: 'interrupted', finishedAt: now, updatedAt: now };
+        this.runs.set(id, failed);
+        addMemoryUsage(this.usage, { ...failed, costUsd: null, result: null });
         count++;
       }
     }
@@ -257,82 +284,7 @@ export class MemoryStore implements AppStore {
     }
 
     const opts = limitOrOptions;
-    let filtered = [...this.runs.values()].filter((r) => r.workspaceId === workspaceId);
-
-    if (opts.repo && opts.repo.length > 0) {
-      const allowed = new Set(opts.repo);
-      filtered = filtered.filter((r) => allowed.has(r.repoFullName));
-    }
-    if (opts.status && opts.status.length > 0) {
-      const allowed = new Set(opts.status);
-      filtered = filtered.filter((r) => allowed.has(r.status));
-    }
-    if (opts.from) {
-      filtered = filtered.filter((r) => r.createdAt >= opts.from!);
-    }
-    if (opts.to) {
-      filtered = filtered.filter((r) => r.createdAt <= opts.to!);
-    }
-    if (opts.provider) {
-      filtered = filtered.filter((r) => r.provider === opts.provider);
-    }
-    if (opts.q && opts.q.trim().length > 0) {
-      const qLower = opts.q.trim().toLowerCase();
-      filtered = filtered.filter((r) => {
-        const repo = r.repoFullName.toLowerCase();
-        const pr = String(r.pullNumber);
-        const model = (r.model ?? '').toLowerCase();
-        const detail = (r.detail ?? '').toLowerCase();
-        return (
-          repo.includes(qLower) ||
-          pr.includes(qLower) ||
-          model.includes(qLower) ||
-          detail.includes(qLower)
-        );
-      });
-    }
-
-    const sortKey = opts.sort ?? 'createdAt';
-    const isAsc = opts.dir === 'asc';
-
-    filtered.sort((a, b) => {
-      let cmp = 0;
-      switch (sortKey) {
-        case 'createdAt':
-          cmp = a.createdAt.getTime() - b.createdAt.getTime();
-          break;
-        case 'repo':
-          cmp = a.repoFullName.localeCompare(b.repoFullName);
-          break;
-        case 'pullNumber':
-          cmp = a.pullNumber - b.pullNumber;
-          break;
-        case 'status':
-          cmp = a.status.localeCompare(b.status);
-          break;
-        case 'provider':
-          cmp = (a.provider ?? '').localeCompare(b.provider ?? '');
-          break;
-        case 'model':
-          cmp = (a.model ?? '').localeCompare(b.model ?? '');
-          break;
-        case 'findingsCount':
-          cmp = (a.findingsCount ?? 0) - (b.findingsCount ?? 0);
-          break;
-        case 'costUsd':
-          cmp = (a.costUsd ?? 0) - (b.costUsd ?? 0);
-          break;
-        case 'duration': {
-          const durA = (a.finishedAt?.getTime() ?? a.createdAt.getTime()) - a.createdAt.getTime();
-          const durB = (b.finishedAt?.getTime() ?? b.createdAt.getTime()) - b.createdAt.getTime();
-          cmp = durA - durB;
-          break;
-        }
-      }
-      if (cmp !== 0) return isAsc ? cmp : -cmp;
-      return a.id.localeCompare(b.id);
-    });
-
+    const filtered = filterRuns(this.runs.values(), workspaceId, opts).sort(compareRuns(opts.sort, opts.dir));
     const total = filtered.length;
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
     const offset = Math.max(opts.offset ?? 0, 0);
@@ -342,9 +294,46 @@ export class MemoryStore implements AppStore {
   }
 
   async monthCostUsd(workspaceId: string, monthStart: Date): Promise<number> {
-    return [...this.runs.values()]
-      .filter((r) => r.workspaceId === workspaceId && r.createdAt >= monthStart)
-      .reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+    const from = usageMonth(monthStart);
+    return (await this.listMonthlyUsage(workspaceId))
+      .filter((u) => u.month >= from)
+      .reduce((sum, u) => sum + u.costUsd, 0);
+  }
+
+  async listMonthlyUsage(workspaceId: string): Promise<MonthlyUsage[]> {
+    return [...this.usage.values()]
+      .filter((u) => u.workspaceId === workspaceId)
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map((u) => ({ ...u }));
+  }
+
+  async listReviewRunGroups(workspaceId: string, options: ListReviewRunsOptions): Promise<ListReviewRunGroupsResult> {
+    return groupMemoryRuns(this.runs.values(), workspaceId, options);
+  }
+
+  async deleteReviewRuns(workspaceId: string, target: DeleteRunsTarget): Promise<number> {
+    this.assertLive(workspaceId);
+    return deleteMemoryRuns(this.runs, workspaceId, target);
+  }
+
+  async listRetentionPolicies(): Promise<RetentionPolicy[]> {
+    return memoryRetentionPolicies(this.runs.values(), this.settings);
+  }
+
+  async pruneReviewRuns(workspaceId: string, createdBefore: Date, limit: number): Promise<number> {
+    return pruneMemoryRuns(this.runs, workspaceId, createdBefore, limit);
+  }
+
+  async startMaintenanceRun(kind: MaintenanceKind, staleBefore: Date): Promise<MaintenanceRun | null> {
+    return startMemoryMaintenance(this.maintenance, kind, staleBefore);
+  }
+
+  async finishMaintenanceRun(id: string, result: { deletedCount: number; error: string | null }): Promise<void> {
+    finishMemoryMaintenance(this.maintenance, id, result);
+  }
+
+  async getLatestMaintenanceRun(kind: MaintenanceKind): Promise<MaintenanceRun | null> {
+    return latestMemoryMaintenance(this.maintenance, kind);
   }
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
@@ -359,6 +348,9 @@ export class MemoryStore implements AppStore {
       if (run.workspaceId === workspaceId) {
         this.runs.delete(key);
       }
+    }
+    for (const [key, row] of this.usage.entries()) {
+      if (row.workspaceId === workspaceId) this.usage.delete(key);
     }
     for (const [id, inst] of this.installations.entries()) {
       if ('workspaceId' in inst && inst.workspaceId === workspaceId) {

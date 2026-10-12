@@ -2,11 +2,13 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -52,6 +54,10 @@ export const workspaceSettings = pgTable('workspace_settings', {
   heavyThresholdLines: integer('heavy_threshold_lines').default(800),
   fallback: jsonb('fallback').notNull().default(sql`'[]'::jsonb`),
   minSeverity: text('min_severity').notNull().default('medium'),
+  /** Migration 0006: days to keep review runs; NULL = forever. */
+  runRetentionDays: integer('run_retention_days').default(30),
+  /** Migration 0006: `owner/repo` -> palette key. */
+  repoColors: jsonb('repo_colors').notNull().default(sql`'{}'::jsonb`),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),
@@ -127,6 +133,42 @@ export const reviewRuns = pgTable(
     uniqueIndex('idx_review_runs_active_pr_head')
       .on(table.workspaceId, table.repoFullName, table.pullNumber, table.headSha)
       .where(sql`status IN ('queued', 'running')`),
+  ],
+);
+
+/** Migration 0006: per workspace and UTC month; finished runs are added, deletions never subtract. */
+export const workspaceUsageMonthly = pgTable(
+  'workspace_usage_monthly',
+  {
+    workspaceId: text('workspace_id').notNull(),
+    /** First day of the UTC month the run was created in, `YYYY-MM-01`. */
+    month: date('month', { mode: 'string' }).notNull(),
+    runsTotal: integer('runs_total').notNull().default(0),
+    runsCompleted: integer('runs_completed').notNull().default(0),
+    runsFailed: integer('runs_failed').notNull().default(0),
+    costUsd: numeric('cost_usd', { precision: 14, scale: 6 }).notNull().default('0'),
+    inputTokens: bigint('input_tokens', { mode: 'number' }).notNull().default(0),
+    outputTokens: bigint('output_tokens', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.month] })],
+);
+
+/** Migration 0006: maintenance job log; an unfinished row per kind is the job's lease. */
+export const maintenanceRuns = pgTable(
+  'maintenance_runs',
+  {
+    id: uuid('id').primaryKey(),
+    kind: text('kind').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
+    deletedCount: integer('deleted_count').notNull().default(0),
+    error: text('error'),
+  },
+  (table) => [
+    uniqueIndex('idx_maintenance_runs_one_active')
+      .on(table.kind)
+      .where(sql`finished_at IS NULL`),
+    index('idx_maintenance_runs_kind_started_at').on(table.kind, table.startedAt.desc()),
   ],
 );
 

@@ -122,6 +122,15 @@ export function useRunsQuery(workspaceId: string, params?: GetRunsParams | numbe
   });
 }
 
+/** The runs page list, grouped by PR. */
+export function useRunGroupsQuery(workspaceId: string, params: GetRunsParams) {
+  return useQuery({
+    queryKey: ['workspaces', workspaceId, 'runs', 'groups', params],
+    queryFn: () => api.getRunGroups(workspaceId, params),
+    enabled: Boolean(workspaceId),
+  });
+}
+
 export function useRunDetailQuery(workspaceId: string, runId: string) {
   return useQuery({
     queryKey: ['workspaces', workspaceId, 'runs', runId, 'detail'],

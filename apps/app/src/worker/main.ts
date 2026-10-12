@@ -8,6 +8,7 @@ import { createQueueConnection, PAUSE_COMMAND_JOB_NAME, type QueueJobData } from
 import { createGitHubAppFactory } from './github-app-factory.js';
 import { processPauseCommandJob } from './process-pause-command.js';
 import { processReviewJob } from './process-review.js';
+import { startMaintenanceScheduler, type MaintenanceScheduler } from './retention-schedule.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
 
 /** A queued/running run with no heartbeat for this long is failed as `interrupted`. */
@@ -174,17 +175,60 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     }
   };
 
+  // Daily run retention (ADR-0014). Started in the background: a slow Redis must not hold up reviews.
+  // `stop()` awaits this promise, so a scheduler that finishes starting during shutdown is closed too.
+  const maintenanceStart: Promise<MaintenanceScheduler | undefined> = connection
+    ? startMaintenanceScheduler(services.store, connection, workerLog).then(
+        (scheduler) => {
+          workerLog.info({ event: 'worker.retention_scheduled' }, 'Daily run retention scheduled (03:00 UTC)');
+          return scheduler;
+        },
+        (err: unknown) => {
+          const name = err instanceof Error ? err.name : 'unknown error';
+          workerLog.error({ event: 'worker.retention_schedule_failed', errorName: name }, `Failed to schedule run retention: ${name}`);
+          return undefined;
+        },
+      )
+    : Promise.resolve(undefined);
+
   await sweepStale();
   const sweepTimer = setInterval(() => {
     void sweepStale();
   }, STALE_SWEEP_INTERVAL_MS);
   sweepTimer.unref?.();
 
+  // Shutdown waits at most 5 s for a scheduler still starting (a hung Redis must not block SIGTERM);
+  // one that finishes starting later is closed as soon as it appears. Each scheduler closes once.
+  let stopping = false;
+  let started: MaintenanceScheduler | undefined;
+  // maintenanceStart never rejects (a failed start resolves undefined); a failing close is logged.
+  const logCloseError = (err: unknown) => {
+    const name = err instanceof Error ? err.name : 'unknown error';
+    workerLog.warn({ event: 'worker.retention_close_failed', errorName: name }, `Failed to close run retention: ${name}`);
+  };
+  const lateClose = maintenanceStart
+    .then(async (scheduler) => {
+      started = scheduler;
+      if (stopping) await scheduler?.close();
+    })
+    .catch(logCloseError);
+  const closeMaintenance = async (): Promise<void> => {
+    if (started) {
+      await started.close().catch(logCloseError);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([lateClose, new Promise<void>((resolve) => (timer = setTimeout(resolve, 5_000)))]);
+    clearTimeout(timer);
+  };
+
   const stop = async () => {
+    stopping = true;
     clearInterval(sweepTimer);
     await Promise.allSettled([
       new Promise<void>((resolve) => healthServer.close(() => resolve())),
       worker.close(),
+      closeMaintenance(),
       services.close(),
     ]);
   };

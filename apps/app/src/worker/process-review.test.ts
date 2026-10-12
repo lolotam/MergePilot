@@ -10,7 +10,7 @@ import type {
   ListReviewsPageParams,
 } from '@mergepilot/github';
 import { MemoryStore } from '../core/memory-store.js';
-import type { ApiProvider, Installation, ReviewJob, WorkspaceSettings } from '../core/types.js';
+import { usageMonth, type ApiProvider, type Installation, type ReviewJob, type WorkspaceSettings } from '../core/types.js';
 import { processReviewJob } from './process-review.js';
 import type { ProcessReviewDeps } from './types.js';
 
@@ -68,6 +68,10 @@ describe('processReviewJob', () => {
         costUsd: options.monthlyCost,
         detail: null,
       });
+      // The budget reads the monthly usage summary (ADR-0014), recorded when runs finish.
+      const month = usageMonth(new Date('2026-10-12T12:00:00Z'));
+      const usage = { runsTotal: 1, runsCompleted: 1, runsFailed: 0, inputTokens: 0, outputTokens: 0 };
+      store.usage.set(`${workspaceId}\u0000${month}`, { workspaceId, month, costUsd: options.monthlyCost, ...usage });
     }
 
     const secretValue = options?.secretValue ?? 'sk-test-super-secret-key-123';
