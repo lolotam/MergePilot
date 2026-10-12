@@ -194,9 +194,9 @@ export async function processReviewJob(
     } else if ('errors' in repoConfigResult) {
       throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
     } else {
-      // In the SaaS the workspace's dashboard settings choose the provider and model (the repo file
-      // may target the GitHub Action, e.g. `provider: claude-code`); the repo still supplies its
-      // review rules, language and other settings.
+      // In the SaaS the workspace's dashboard settings choose the provider, model and review
+      // language (the repo file may target the GitHub Action, e.g. `provider: claude-code`); the
+      // repo still supplies its review rules and other settings.
       const repoConfig = repoConfigResult.config;
       const sameModel =
         repoConfig.provider === settings.provider && repoConfig.model === settings.model;
@@ -204,6 +204,7 @@ export async function processReviewJob(
         ...repoConfig,
         provider: settings.provider,
         model: settings.model,
+        language: settings.language,
         // Prices in the repo file describe the repo's own model; keep them only when it matches.
         budget: sameModel ? repoConfig.budget : { ...repoConfig.budget, pricing: undefined },
       };
