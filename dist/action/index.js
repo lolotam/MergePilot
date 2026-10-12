@@ -118808,6 +118808,7 @@ async function* readSse(body) {
   }
 }
 
+var JSON_MODE_REJECTED = /response[_ ]format|json[_ ]object|json mode|unsupported (?:parameter|field|argument)|unknown (?:parameter|field|argument)|unrecognized|not supported|extra (?:inputs|fields)|additional properties/i;
 var JSON_OBJECT_SUPPORTED_PRESETS = /* @__PURE__ */ new Set([
   "openrouter",
   "deepseek",
@@ -118958,7 +118959,7 @@ ${instruction}`;
       throw failureFromThrown(error62, this.provider, this.#key, options.signal);
     }
     const firstErrorBody = !response.ok && response.status === 400 && sendsJsonObject ? await response.text() : "";
-    if (firstErrorBody && /response_format|json_object|json mode/i.test(firstErrorBody)) {
+    if (firstErrorBody && JSON_MODE_REJECTED.test(firstErrorBody)) {
       try {
         const retryResponse = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
           method: "POST",
