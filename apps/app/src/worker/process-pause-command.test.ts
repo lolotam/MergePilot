@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GitHubClient } from '@mergepilot/github';
 import { MemoryStore } from '../core/memory-store.js';
 import type { PauseCommandJob } from '../core/types.js';
+import { wrapOctokit, type OctokitLike } from './octokit-client.js';
 import { processPauseCommandJob } from './process-pause-command.js';
 
 const silentLogger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() } as unknown as import('pino').Logger;
@@ -103,4 +104,48 @@ describe('processPauseCommandJob', () => {
       expect(env.githubAppFactory).not.toHaveBeenCalled();
     }
   });
+
+describe('processPauseCommandJob — real installation client (wrapOctokit + workspace guard)', () => {
+  it('sends addLabels / removeLabel to the Octokit issues API', async () => {
+    const store = new MemoryStore();
+    await store.upsertInstallation({
+      id: 7, workspaceId: 'ws-1', accountLogin: 'acme', accountType: 'Organization',
+      repositorySelection: 'all', suspended: false,
+    });
+    const calls: string[] = [];
+    const octokit = {
+      rest: {
+        pulls: {},
+        repos: {
+          getCollaboratorPermissionLevel: async () => ({ data: { permission: 'write' } }),
+        },
+        issues: {
+          addLabels: async (p: { labels: string[] }) => {
+            calls.push(`add:${p.labels.join(',')}`);
+            return { data: [] };
+          },
+          removeLabel: async (p: { name: string }) => {
+            calls.push(`remove:${p.name}`);
+            return { data: [] };
+          },
+          createComment: async () => ({ data: { id: 1 } }),
+        },
+      },
+    } as unknown as OctokitLike;
+    const deps = {
+      store,
+      logger: silentLogger,
+      githubAppFactory: async () => ({ client: wrapOctokit(octokit), publisherLogin: 'mergepilot[bot]' }),
+    };
+    const job: PauseCommandJob = {
+      kind: 'pause_command', deliveryId: 'd-9', installationId: 7, repoFullName: 'acme/repo',
+      pullNumber: 12, command: 'pause', commenterLogin: 'alice', language: 'en',
+    };
+
+    expect(await processPauseCommandJob(job, deps)).toBe('paused');
+    expect(await processPauseCommandJob({ ...job, command: 'resume' }, deps)).toBe('active');
+    // GitHub's add-labels endpoint creates a missing label, so no separate create call is needed.
+    expect(calls).toEqual(['add:mergepilot:paused', 'remove:mergepilot:paused']);
+  });
+});
 });

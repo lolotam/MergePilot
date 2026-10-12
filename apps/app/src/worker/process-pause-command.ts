@@ -4,7 +4,7 @@ import type { PauseCommandJob } from '../core/types.js';
 import type { ProcessReviewDeps } from './types.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
 
-export type PauseCommandOutcome = 'paused' | 'active' | 'unauthorized' | 'skipped';
+export type PauseCommandOutcome = 'paused' | 'active' | 'unauthorized' | 'label_error' | 'skipped';
 
 /**
  * Applies a queued `@mergepilot pause|resume` command (ADR-0012) through the installation client:
@@ -44,7 +44,9 @@ export async function processPauseCommandJob(
 
   const outcome: PauseCommandOutcome = result.success ? result.state : result.reason;
   deps.log?.(`Pause command ${job.deliveryId} (${job.command}) on ${job.repoFullName}#${job.pullNumber}: ${outcome}`);
-  logger.info(
+  // label_error: the App could not remove the label (permissions); the PR stays paused.
+  const level = outcome === 'label_error' ? 'warn' : 'info';
+  logger[level](
     { event: 'pause_command.applied', ...base, outcome, workspace: installation.workspaceId },
     `Pause command ${job.command} on ${job.repoFullName}#${job.pullNumber}: ${outcome}`,
   );

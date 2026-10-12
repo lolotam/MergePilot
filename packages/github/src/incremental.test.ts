@@ -281,7 +281,7 @@ describe('selectIncrementalFiles', () => {
     expect(client.compareCommits).not.toHaveBeenCalled();
   });
 
-  it('comparison too large (> 300 files) → full review', async () => {
+  it.each([300, 301])('comparison at or over the 300-file cap (%i files) → full review', async (count) => {
     const lastSha = 'last-sha-large';
     const headSha = 'head-sha-large';
     const marker = buildMarker({ headSha: lastSha, configHash: 'conf-1' });
@@ -291,7 +291,7 @@ describe('selectIncrementalFiles', () => {
         return [{ id: 1, user: { login: publisherLogin }, body: marker }];
       },
       async compareCommits() {
-        const largeFiles = Array.from({ length: 301 }, (_, i) => ({
+        const largeFiles = Array.from({ length: count }, (_, i) => ({
           filename: `src/file-${i}.ts`,
           status: 'modified',
           additions: 1,

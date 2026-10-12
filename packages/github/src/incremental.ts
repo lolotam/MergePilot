@@ -85,7 +85,7 @@ export async function findLastReviewedHead(
  * - Config hash changed: full ("configuration changed since last review")
  * - Same head: incremental with 0 files (nothing new to review)
  * - Ahead: incremental with intersecting files between compare and prFiles, using compare patch
- * - Too large compare: full ("comparison too large")
+ * - Compare at GitHub's 300-file cap (possibly truncated): full ("comparison too large")
  * - Compare error: full ("comparison unavailable")
  * - Diverged, behind, or 404: full ("history rewritten since last review")
  * - Partial (failed / budget-skipped) reviews are never used as the base.
@@ -154,7 +154,8 @@ export async function selectIncrementalFiles(
     };
   }
 
-  if (comparison.files.length > MAX_COMPARE_FILES) {
+  // GitHub's compare returns at most 300 files: a response at the cap may be truncated.
+  if (comparison.files.length >= MAX_COMPARE_FILES) {
     return {
       mode: 'full',
       files: prFiles,

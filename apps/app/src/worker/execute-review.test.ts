@@ -62,6 +62,7 @@ describe('executeReview — incremental review and deduplication', () => {
     totalCommits?: number;
     modelFindings?: Array<Record<string, unknown>>;
     compareThrows?: boolean;
+    extraPrFiles?: GitHubPullRequestFile[];
     modelThrows?: boolean;
   } = {}) {
     const createdReviews: CreateReviewParams[] = [];
@@ -82,6 +83,7 @@ describe('executeReview — incremental review and deduplication', () => {
             changes: 1,
             patch: '@@ -4,3 +4,4 @@\n context\n+new code\n context2',
           },
+          ...(opts.extraPrFiles ?? []),
         ];
       },
       async getPullRequest() {
@@ -313,5 +315,25 @@ describe('executeReview — incremental review and deduplication', () => {
     });
     await run(env);
     expect(env.createdReviews[0]?.comments ?? []).toHaveLength(0);
+  });
+
+  it('marks a completed but incomplete review partial (a file was not covered)', async () => {
+    const truncated: GitHubPullRequestFile = {
+      filename: 'src/huge.ts',
+      status: 'modified',
+      additions: 900,
+      deletions: 400,
+      changes: 1300,
+    };
+    const env = setup({ extraPrFiles: [truncated] });
+    const result = await run(env);
+    expect(result.outcome).toBe('completed');
+    expect(env.createdReviews[0]?.body).toContain('status=partial');
+  });
+
+  it('a complete review writes a plain marker (usable as the incremental base)', async () => {
+    const env = setup();
+    await run(env);
+    expect(env.createdReviews[0]?.body).toContain(`head=${headSha} config=${configHash} -->`);
   });
 });

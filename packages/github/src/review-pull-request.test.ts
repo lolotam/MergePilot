@@ -238,7 +238,7 @@ describe('reviewPullRequest', () => {
     expect(createdReviews).toHaveLength(0);
   });
 
-  it('still skips publishing a duplicate when only a partial review exists for this head', async () => {
+  it('publishes a completed retry when only a partial review exists for this head', async () => {
     const { ctx, fakeClient, createdReviews } = createSetup();
 
     fakeClient.listReviewsPage = async () => [
@@ -251,8 +251,10 @@ describe('reviewPullRequest', () => {
 
     const result = await reviewPullRequest(ctx);
 
-    expect(result.publish.status).toBe('skipped-duplicate');
-    expect(createdReviews).toHaveLength(0);
+    expect(result.outcome).toBe('completed');
+    expect(result.publish.status).toBe('published');
+    expect(createdReviews).toHaveLength(1);
+    expect(createdReviews[0]?.body).not.toContain('status=partial');
   });
 
   it('detects stale head sha and returns skipped-stale', async () => {

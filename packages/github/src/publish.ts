@@ -73,7 +73,8 @@ export async function publishReview(
     for (const review of reviews) {
       if (review.body && review.user?.login === publisherLogin) {
         const marker = parseMarker(review.body);
-        if (marker && marker.headSha === expectedHeadSha) {
+        // Only a completed review blocks; a partial one (failed / budget / incomplete) can be redone.
+        if (marker && marker.headSha === expectedHeadSha && marker.status !== 'partial') {
           return { status: 'skipped-duplicate', reviewId: review.id };
         }
       }

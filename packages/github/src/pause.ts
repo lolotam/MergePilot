@@ -15,7 +15,7 @@ export interface PauseCommandParams {
 
 export type ExecutePauseCommandResult =
   | { success: true; state: 'paused' | 'active' }
-  | { success: false; reason: 'unauthorized' };
+  | { success: false; reason: 'unauthorized' | 'label_error' };
 
 export interface CheckPauseParams {
   owner: string;
@@ -95,6 +95,12 @@ export async function isAuthorizedToControlPause(
   }
 
   return false;
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'status' in error && (error as { status: unknown }).status === 404
+  );
 }
 
 async function fetchAllIssueComments(
@@ -268,7 +274,8 @@ export async function executePauseCommand(
     return { success: true, state: 'paused' };
   }
 
-  // Resume command
+  // Resume command. The label takes precedence in isPrPaused, so "resumed" is only replied once
+  // the label is really gone: a 404 (label absent) is fine, any other error is a failure.
   if (client.removeLabel) {
     try {
       await client.removeLabel({
@@ -277,8 +284,21 @@ export async function executePauseCommand(
         issue_number: params.pull_number,
         name: PAUSE_LABEL,
       });
-    } catch {
-      // Ignored if label was not present
+    } catch (error: unknown) {
+      if (!isNotFound(error)) {
+        if (client.createIssueComment) {
+          const failBody = isArabic
+            ? `<div dir="rtl">\n\n⚠️ ما قدرتش أشيل الوسم \`${PAUSE_LABEL}\`، فالمراجعات لسه متوقفة. راجع صلاحيات MergePilot على الريبو (labels) أو شيل الوسم يدويًا.\n\n</div>`
+            : `⚠️ Could not remove the \`${PAUSE_LABEL}\` label, so reviews are still paused. Check MergePilot's permissions on this repository (labels) or remove the label by hand.`;
+          await client.createIssueComment({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.pull_number,
+            body: failBody,
+          });
+        }
+        return { success: false, reason: 'label_error' };
+      }
     }
   }
 

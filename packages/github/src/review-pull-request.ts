@@ -305,7 +305,8 @@ export async function reviewPullRequest(
     language: config.language,
     suggestionsAsCode: false,
     publisherLogin,
-    partial: outcome !== 'completed',
+    // Partial unless every reviewable file was covered (no failed batch, no file dropped for budget).
+    partial: !(outcome === 'completed' && reviewResult.status === 'completed' && reviewResult.complete),
     alreadyDeduplicated: true,
   });
   log?.(`Review publication outcome: ${publish.status}`);

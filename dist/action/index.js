@@ -124144,7 +124144,7 @@ async function publishReview(client, { owner, repo, pull_number, expectedHeadSha
     for (const review of reviews) {
       if (review.body && review.user?.login === publisherLogin) {
         const marker2 = parseMarker(review.body);
-        if (marker2 && marker2.headSha === expectedHeadSha) {
+        if (marker2 && marker2.headSha === expectedHeadSha && marker2.status !== "partial") {
           return { status: "skipped-duplicate", reviewId: review.id };
         }
       }
@@ -124288,7 +124288,7 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       reason: "history rewritten since last review"
     };
   }
-  if (comparison.files.length > MAX_COMPARE_FILES) {
+  if (comparison.files.length >= MAX_COMPARE_FILES) {
     return {
       mode: "full",
       files: prFiles,
@@ -124375,6 +124375,9 @@ async function isAuthorizedToControlPause(client, params) {
     }
   }
   return false;
+}
+function isNotFound(error62) {
+  return typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404;
 }
 async function fetchAllIssueComments(client, params) {
   if (!client.listIssueCommentsPage)
@@ -124525,7 +124528,23 @@ async function executePauseCommand(client, params) {
         issue_number: params.pull_number,
         name: PAUSE_LABEL
       });
-    } catch {
+    } catch (error62) {
+      if (!isNotFound(error62)) {
+        if (client.createIssueComment) {
+          const failBody = isArabic ? `<div dir="rtl">
+
+\u26A0\uFE0F \u0645\u0627 \u0642\u062F\u0631\u062A\u0634 \u0623\u0634\u064A\u0644 \u0627\u0644\u0648\u0633\u0645 \`${PAUSE_LABEL}\`\u060C \u0641\u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0627\u062A \u0644\u0633\u0647 \u0645\u062A\u0648\u0642\u0641\u0629. \u0631\u0627\u062C\u0639 \u0635\u0644\u0627\u062D\u064A\u0627\u062A MergePilot \u0639\u0644\u0649 \u0627\u0644\u0631\u064A\u0628\u0648 (labels) \u0623\u0648 \u0634\u064A\u0644 \u0627\u0644\u0648\u0633\u0645 \u064A\u062F\u0648\u064A\u064B\u0627.
+
+</div>` : `\u26A0\uFE0F Could not remove the \`${PAUSE_LABEL}\` label, so reviews are still paused. Check MergePilot's permissions on this repository (labels) or remove the label by hand.`;
+          await client.createIssueComment({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.pull_number,
+            body: failBody
+          });
+        }
+        return { success: false, reason: "label_error" };
+      }
     }
   }
   if (client.createIssueComment) {
@@ -124899,7 +124918,8 @@ async function reviewPullRequest(ctx) {
     language: config2.language,
     suggestionsAsCode: false,
     publisherLogin,
-    partial: outcome !== "completed",
+    // Partial unless every reviewable file was covered (no failed batch, no file dropped for budget).
+    partial: !(outcome === "completed" && reviewResult.status === "completed" && reviewResult.complete),
     alreadyDeduplicated: true
   });
   log?.(`Review publication outcome: ${publish.status}`);
