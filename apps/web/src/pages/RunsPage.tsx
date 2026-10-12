@@ -180,7 +180,7 @@ export function RunsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl">
+    <div className="flex flex-col gap-6 min-w-0">
       <PageHeader
         title={t('runsTitle')}
         subtitle={t('runsDesc')}

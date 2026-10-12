@@ -44,7 +44,7 @@ export function OverviewPage() {
     monthlyBudget && monthlyBudget > 0 ? Math.min(100, Math.round((monthCost / monthlyBudget) * 100)) : 0;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 max-w-7xl">
       {/* Page Header with Serif Heading */}
       <PageHeader
         title={t('overviewTitle')}

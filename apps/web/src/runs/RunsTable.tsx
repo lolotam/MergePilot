@@ -29,11 +29,18 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
   const { t } = useI18n();
   const pageIds = groups.flatMap((g) => g.runs.filter(isDeletable).map((r) => r.id));
   const pageSelected = pageIds.filter((id) => ctx.selected.has(id)).length;
+  // Repo chips show only the repo name, unless two owners on this page share that name.
+  const ownersByName = new Map<string, Set<string>>();
+  for (const g of groups) {
+    const name = g.repoFullName.slice(g.repoFullName.indexOf('/') + 1);
+    ownersByName.set(name, (ownersByName.get(name) ?? new Set()).add(g.repoFullName));
+  }
+  const shortRepo = (repo: string) => (ownersByName.get(repo.slice(repo.indexOf('/') + 1))?.size ?? 0) <= 1;
 
   const sortHeader = (labelKey: I18nKey, key: string) => {
     const isSorted = sort === key;
     return (
-      <th scope="col" aria-sort={isSorted ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-4 text-start font-semibold whitespace-nowrap">
+      <th scope="col" aria-sort={isSorted ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-2.5 px-2 text-start font-semibold leading-tight">
         <button
           type="button"
           onClick={() => onSort(key)}
@@ -56,11 +63,11 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-start text-xs">
+      <table className="w-full text-start text-[11px]">
         <thead className="bg-[#FBFBFA] dark:bg-ink-800/50 border-b border-ink-200 dark:border-ink-700 text-[11px] text-ink-500 dark:text-ink-400">
           <tr>
-            <th scope="col" className="py-3 px-4 text-start font-semibold">{t('runNumberCol')}</th>
-            <th scope="col" className="py-3 px-2 text-start">
+            <th scope="col" className="py-2.5 px-2 text-start font-semibold">{t('runNumberCol')}</th>
+            <th scope="col" className="py-2.5 px-2 text-start">
               <SelectBox
                 checked={pageIds.length > 0 && pageSelected === pageIds.length}
                 indeterminate={pageSelected > 0}
@@ -72,15 +79,14 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
             </th>
             {sortHeader('runPrCol', 'pullNumber')}
             {sortHeader('runStatusCol', 'status')}
-            {sortHeader('runProviderCol', 'provider')}
-            {sortHeader('runModelCol', 'model')}
+            {sortHeader('runProviderModelCol', 'model')}
             {sortHeader('runResultCol', 'findingsCount')}
             {sortHeader('runTokensInCol', 'inputTokens')}
             {sortHeader('runTokensOutCol', 'outputTokens')}
             {sortHeader('duration', 'duration')}
             {sortHeader('runCostCol', 'costUsd')}
             {sortHeader('runDateCol', 'createdAt')}
-            <th scope="col" className="py-3 px-4 text-center font-semibold">{t('actions')}</th>
+            <th scope="col" className="py-2.5 px-2 text-center font-semibold">{t('actions')}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-ink-100 dark:divide-ink-800/60">
@@ -92,6 +98,7 @@ export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expand
                 group={group}
                 number={offset + index + 1}
                 color={repoColor(group.repoFullName, overrides)}
+                shortRepo={shortRepo(group.repoFullName)}
                 expanded={expanded.has(key)}
                 onToggle={() => onToggleExpand(key)}
                 {...ctx}

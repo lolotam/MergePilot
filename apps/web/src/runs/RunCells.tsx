@@ -2,7 +2,7 @@ import { AlertCircle, CheckCircle2, Clock, Loader2, SkipForward } from 'lucide-r
 import type { ReviewRun } from '../api/client.js';
 import { useI18n, type Language } from '../i18n/context.js';
 
-const badge = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold';
+const badge = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold whitespace-nowrap';
 
 export function RunStatusBadge({ status }: { status: ReviewRun['status'] }) {
   const { t } = useI18n();
@@ -52,6 +52,18 @@ export function formatTokens(value: number | null | undefined, language: Languag
   return new Intl.NumberFormat(language === 'ar' ? 'ar-EG' : 'en-US').format(value);
 }
 
+/** Token counts in the table: compact from 10,000 up (152.3K); the exact number is the tooltip. */
+export function RunTokens({ value }: { value: number | null | undefined }) {
+  const { language } = useI18n();
+  const exact = formatTokens(value, language);
+  if (value === null || value === undefined || value < 10_000) return <span>{exact}</span>;
+  const compact = new Intl.NumberFormat(language === 'ar' ? 'ar-EG' : 'en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value);
+  return <span title={exact}>{compact}</span>;
+}
+
 export function formatCost(value: number | null | undefined): string {
   return value === null || value === undefined ? '—' : `$${value.toFixed(4)}`;
 }
@@ -59,4 +71,19 @@ export function formatCost(value: number | null | undefined): string {
 /** Queued and running runs are never deleted (the server skips them too). */
 export function isDeletable(run: Pick<ReviewRun, 'status'>): boolean {
   return run.status !== 'queued' && run.status !== 'running';
+}
+
+/** A run's start time on two short lines (date, time); the full timestamp is in the tooltip. */
+export function RunDate({ value }: { value: string }) {
+  const { language } = useI18n();
+  const date = new Date(value);
+  const locale = language === 'ar' ? 'ar-EG' : 'en-US';
+  return (
+    <span className="inline-flex flex-col leading-tight" title={date.toLocaleString(locale)}>
+      <span>{date.toLocaleDateString(locale, { month: 'short', day: 'numeric' })}</span>
+      <span className="text-[10px] text-ink-400 dark:text-ink-500 tabular-nums">
+        {date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+      </span>
+    </span>
+  );
 }

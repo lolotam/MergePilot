@@ -259,6 +259,7 @@ export const en: I18nDictionary = {
   runStatusCol: 'Status',
   runProviderCol: 'Provider',
   runModelCol: 'Model',
+  runProviderModelCol: 'Provider / Model',
   runResultCol: 'Result',
   runCostCol: 'Cost',
   runDateCol: 'Date',

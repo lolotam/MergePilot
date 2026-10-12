@@ -4,7 +4,7 @@ import type { ReviewRun, RunGroup } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
 import { RunActionCell } from './RunActionCell.js';
 import { RunModelBadge, RunProviderBadge, RunSeverityChips } from './RunBadges.js';
-import { RunStatusBadge, formatCost, formatTokens, isDeletable } from './RunCells.js';
+import { RunDate, RunStatusBadge, RunTokens, formatCost, isDeletable } from './RunCells.js';
 import { RunDuration } from './RunDuration.js';
 import { RepoChip } from './RepoColorPicker.js';
 import type { RepoColor } from './repo-colors.js';
@@ -25,11 +25,13 @@ interface RunGroupRowsProps extends RunRowsContext {
   /** Continuous row number across pages (offset + index + 1). */
   number: number;
   color: RepoColor;
+  /** Show only the repo name (false when another owner on the page has a repo with that name). */
+  shortRepo: boolean;
   expanded: boolean;
   onToggle: () => void;
 }
 
-const td = 'py-3 px-4';
+const td = 'py-2 px-2 align-middle';
 
 function PrLink({ run }: { run: Pick<ReviewRun, 'repoFullName' | 'pullNumber'> }) {
   const { t } = useI18n();
@@ -39,7 +41,7 @@ function PrLink({ run }: { run: Pick<ReviewRun, 'repoFullName' | 'pullNumber'> }
       target="_blank"
       rel="noreferrer"
       onClick={(e) => e.stopPropagation()}
-      className="inline-flex items-center gap-1 text-brand-700 dark:text-brand-300 hover:underline font-mono text-xs font-semibold"
+      className="inline-flex items-center gap-1 text-brand-700 dark:text-brand-300 hover:underline font-mono text-[11px] font-semibold"
       title={t('viewPrOnGitHub')}
     >
       #{run.pullNumber}
@@ -50,20 +52,23 @@ function PrLink({ run }: { run: Pick<ReviewRun, 'repoFullName' | 'pullNumber'> }
 
 /** The cells after the PR cell; a sub-row and a single-run row show the run itself. */
 function RunDetailCells({ run, ctx }: { run: ReviewRun; ctx: RunRowsContext }) {
-  const { language } = useI18n();
   return (
     <>
       <td className={td}><RunStatusBadge status={run.status} /></td>
-      <td className={td}><RunProviderBadge provider={run.provider} /></td>
-      <td className={td}><RunModelBadge model={run.model} effort={run.effort} fallbackFrom={run.fallbackFrom} /></td>
+      <td className={td}>
+        <div className="flex flex-col items-start gap-1">
+          <RunProviderBadge provider={run.provider} />
+          <RunModelBadge model={run.model} effort={run.effort} fallbackFrom={run.fallbackFrom} />
+        </div>
+      </td>
       <td className={td}>
         <RunSeverityChips status={run.status} findingsCount={run.findingsCount} severityCounts={run.severityCounts} detail={run.detail} />
       </td>
-      <td className={`${td} font-mono tabular-nums`}>{formatTokens(run.inputTokens, language)}</td>
-      <td className={`${td} font-mono tabular-nums`}>{formatTokens(run.outputTokens, language)}</td>
+      <td className={`${td} font-mono tabular-nums whitespace-nowrap`}><RunTokens value={run.inputTokens} /></td>
+      <td className={`${td} font-mono tabular-nums whitespace-nowrap`}><RunTokens value={run.outputTokens} /></td>
       <td className={`${td} font-mono tabular-nums whitespace-nowrap`} data-testid="run-duration"><RunDuration run={run} /></td>
-      <td className={`${td} font-mono text-ink-900 dark:text-ink-100`}>{formatCost(run.costUsd)}</td>
-      <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}>{new Date(run.createdAt).toLocaleString()}</td>
+      <td className={`${td} font-mono text-ink-900 dark:text-ink-100 whitespace-nowrap`}>{formatCost(run.costUsd)}</td>
+      <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}><RunDate value={run.createdAt} /></td>
       <td className={`${td} text-center`} onClick={(e) => e.stopPropagation()}>
         <RunActionCell run={run} isMember={ctx.isMember} onRetry={ctx.onRetry} isRetrying={ctx.retryingId === run.id} />
       </td>
@@ -96,8 +101,8 @@ function ClickableRow(props: { label: string; className: string; onActivate: () 
   );
 }
 
-export function RunGroupRows({ group, number, color, expanded, onToggle, ...ctx }: RunGroupRowsProps) {
-  const { t, language, dir } = useI18n();
+export function RunGroupRows({ group, number, color, shortRepo, expanded, onToggle, ...ctx }: RunGroupRowsProps) {
+  const { t, dir } = useI18n();
   const latest = group.runs[0];
   if (!latest) return null;
   const pr = `${group.repoFullName}#${group.pullNumber}`;
@@ -109,7 +114,7 @@ export function RunGroupRows({ group, number, color, expanded, onToggle, ...ctx 
 
   const prCell = (
     <td className={`${td} whitespace-nowrap`}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {multi ? (
           <button
             type="button"
@@ -126,13 +131,21 @@ export function RunGroupRows({ group, number, color, expanded, onToggle, ...ctx 
         ) : (
           <span className="w-[18px]" aria-hidden="true" />
         )}
-        <RepoChip repo={group.repoFullName} color={color} />
-        <PrLink run={latest} />
-        {multi ? (
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-300">
-            {t('runGroupCount', { n: group.runCount })}
-          </span>
-        ) : null}
+        {/* Repo on top, PR number (and run count) below: keeps the column narrow. */}
+        <div className="flex flex-col items-start gap-1">
+          <RepoChip repo={group.repoFullName} color={color} short={shortRepo} />
+          <div className="flex items-center gap-1.5">
+            <PrLink run={latest} />
+            {multi ? (
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-300"
+                title={t('runGroupCountTitle', { n: group.runCount })}
+              >
+                {t('runGroupCount', { n: group.runCount })}
+              </span>
+            ) : null}
+          </div>
+        </div>
       </div>
     </td>
   );
@@ -140,7 +153,7 @@ export function RunGroupRows({ group, number, color, expanded, onToggle, ...ctx 
   const lead = (label: string, ids: string[], checked: boolean, indeterminate: boolean, selectLabel: string) => (
     <>
       <td className={`${td} text-ink-400 tabular-nums`}>{label}</td>
-      <td className="py-3 px-2" onClick={(e) => e.stopPropagation()}>
+      <td className="py-2 px-2" onClick={(e) => e.stopPropagation()}>
         <SelectBox
           checked={checked}
           indeterminate={indeterminate}
@@ -169,17 +182,21 @@ export function RunGroupRows({ group, number, color, expanded, onToggle, ...ctx 
         {lead(String(number), deletableIds, allSelected, selectedCount > 0, t('selectPrRuns', { pr }))}
         {prCell}
         <td className={td}><RunStatusBadge status={latest.status} /></td>
-        <td className={td}><RunProviderBadge provider={latest.provider} /></td>
-        <td className={td}><RunModelBadge model={latest.model} effort={latest.effort} fallbackFrom={latest.fallbackFrom} /></td>
+        <td className={td}>
+          <div className="flex flex-col items-start gap-1">
+            <RunProviderBadge provider={latest.provider} />
+            <RunModelBadge model={latest.model} effort={latest.effort} fallbackFrom={latest.fallbackFrom} />
+          </div>
+        </td>
         <td className={td}>
           <RunSeverityChips status={latest.status} findingsCount={latest.findingsCount} severityCounts={latest.severityCounts} detail={latest.detail} />
         </td>
-        <td className={`${td} font-mono tabular-nums font-semibold`}>{formatTokens(group.inputTokens, language)}</td>
-        <td className={`${td} font-mono tabular-nums font-semibold`}>{formatTokens(group.outputTokens, language)}</td>
+        <td className={`${td} font-mono tabular-nums font-semibold whitespace-nowrap`}><RunTokens value={group.inputTokens} /></td>
+        <td className={`${td} font-mono tabular-nums font-semibold whitespace-nowrap`}><RunTokens value={group.outputTokens} /></td>
         {/* Like status, provider and model: the latest run's duration, not a sum. */}
         <td className={`${td} font-mono tabular-nums whitespace-nowrap`} data-testid="run-duration"><RunDuration run={latest} /></td>
-        <td className={`${td} font-mono font-semibold text-ink-900 dark:text-ink-100`}>{formatCost(group.costUsd)}</td>
-        <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}>{new Date(latest.createdAt).toLocaleString()}</td>
+        <td className={`${td} font-mono font-semibold text-ink-900 dark:text-ink-100 whitespace-nowrap`}>{formatCost(group.costUsd)}</td>
+        <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}><RunDate value={latest.createdAt} /></td>
         <td className={`${td} text-center text-ink-300 dark:text-ink-600`}>—</td>
       </ClickableRow>
       {expanded

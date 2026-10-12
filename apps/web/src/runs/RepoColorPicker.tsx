@@ -5,15 +5,27 @@ import { useI18n } from '../i18n/context.js';
 import { REPO_PALETTE, colorLabelKey, type RepoColor } from './repo-colors.js';
 
 /** Dot + `owner/repo`; the name is always shown, so color is never the only cue. */
-export function RepoChip({ repo, color, className = '' }: { repo: string; color: RepoColor; className?: string }) {
+/** A repository chip in its color; `short` shows only the repo name (the full name is in the tooltip). */
+export function RepoChip({
+  repo,
+  color,
+  className = '',
+  short = false,
+}: {
+  repo: string;
+  color: RepoColor;
+  className?: string;
+  short?: boolean;
+}) {
   return (
     <span
       dir="ltr"
       data-repo-color={color.key}
-      className={`inline-flex items-center gap-1.5 max-w-[220px] px-2 py-0.5 rounded-full text-[11px] font-mono font-medium ${color.chip} ${className}`}
+      title={repo}
+      className={`inline-flex items-center gap-1.5 ${short ? 'max-w-[104px]' : 'max-w-[220px]'} px-2 py-0.5 rounded-full text-[11px] font-mono font-medium ${color.chip} ${className}`}
     >
       <span aria-hidden="true" className={`w-2 h-2 rounded-full shrink-0 ${color.dot}`} />
-      <span className="truncate">{repo}</span>
+      <span className="truncate">{short ? repo.slice(repo.indexOf('/') + 1) : repo}</span>
     </span>
   );
 }
