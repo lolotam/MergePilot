@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { AppStore, ReviewJob, ReviewQueue } from '../core/types.js';
+import { handleIssueCommentEvent, type CommandQueuedResult } from './issue-comment.js';
 
 export interface WebhookContext {
   event: string;
@@ -25,7 +26,8 @@ export type WebhookResult =
   | { status: 'installation_deleted'; installationId: number }
   | { status: 'installation_suspended'; installationId: number }
   | { status: 'installation_unsuspended'; installationId: number }
-  | { status: 'enqueued'; job: ReviewJob };
+  | { status: 'enqueued'; job: ReviewJob }
+  | CommandQueuedResult;
 
 const InstallationCreatedPayloadSchema = z.object({
   action: z.literal('created'),
@@ -83,6 +85,14 @@ export async function handleWebhook(
 
   if (event === 'pull_request') {
     return handlePullRequestEvent(deliveryId, payload, store, queue, log);
+  }
+
+  if (event === 'issue_comment') {
+    const result = await handleIssueCommentEvent(deliveryId, payload, store, queue);
+    if (result.status === 'command_queued') {
+      log?.info(`Queued @mergepilot ${result.job.command} for PR #${result.job.pullNumber} (${result.job.repoFullName})`);
+    }
+    return result;
   }
 
   return { status: 'ignored', reason: `unhandled_event_${event}` };

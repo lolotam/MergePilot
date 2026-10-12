@@ -1,112 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { GitHubClient, GitHubPullRequestFile, GitHubReview } from './client.js';
+import type { GitHubClient, GitHubPullRequestFile } from './client.js';
 import { buildMarker } from './marker.js';
 import type { PullRequestFile } from './pr-files.js';
-import { findLastReviewedHead, selectIncrementalFiles } from './incremental.js';
-
-describe('findLastReviewedHead', () => {
-  const publisherLogin = 'github-actions[bot]';
-
-  it('returns null when there are no reviews on the PR', async () => {
-    const client: Partial<GitHubClient> = {
-      async listReviewsPage() { return []; },
-    };
-    const result = await findLastReviewedHead(client as GitHubClient, {
-      owner: 'acme', repo: 'repo', pull_number: 1, publisherLogin,
-    });
-    expect(result).toBeNull();
-  });
-
-  it('returns null when reviews exist but none have markers', async () => {
-    const client: Partial<GitHubClient> = {
-      async listReviewsPage() {
-        return [
-          { id: 1, user: { login: publisherLogin }, body: 'LGTM without marker' },
-          { id: 2, user: { login: publisherLogin }, body: null },
-        ];
-      },
-    };
-    const result = await findLastReviewedHead(client as GitHubClient, {
-      owner: 'acme', repo: 'repo', pull_number: 1, publisherLogin,
-    });
-    expect(result).toBeNull();
-  });
-
-  it('ignores markers from other authors', async () => {
-    const foreignMarker = buildMarker({ headSha: 'sha-foreign', configHash: 'conf-1' });
-    const client: Partial<GitHubClient> = {
-      async listReviewsPage() {
-        return [
-          { id: 1, user: { login: 'contributor' }, body: `Review comment\n${foreignMarker}` },
-          { id: 2, user: { login: 'someone-else' }, body: foreignMarker },
-          { id: 3, user: null, body: foreignMarker },
-        ];
-      },
-    };
-    const result = await findLastReviewedHead(client as GitHubClient, {
-      owner: 'acme', repo: 'repo', pull_number: 1, publisherLogin,
-    });
-    expect(result).toBeNull();
-  });
-
-  it('returns the head SHA from the marker of our review', async () => {
-    const ourMarker = buildMarker({ headSha: 'sha-valid-123', configHash: 'conf-1' });
-    const client: Partial<GitHubClient> = {
-      async listReviewsPage() {
-        return [{ id: 1, user: { login: publisherLogin }, body: `Review summary\n\n${ourMarker}` }];
-      },
-    };
-    const result = await findLastReviewedHead(client as GitHubClient, {
-      owner: 'acme', repo: 'repo', pull_number: 1, publisherLogin,
-    });
-    expect(result).toBe('sha-valid-123');
-  });
-
-  it('picks the most recent of several of our reviews', async () => {
-    const marker1 = buildMarker({ headSha: 'sha-old-1', configHash: 'conf-1' });
-    const marker2 = buildMarker({ headSha: 'sha-new-2', configHash: 'conf-2' });
-    const foreignMarker = buildMarker({ headSha: 'sha-foreign-3', configHash: 'conf-3' });
-
-    const client: Partial<GitHubClient> = {
-      async listReviewsPage() {
-        return [
-          { id: 10, user: { login: publisherLogin }, body: `First review\n${marker1}` },
-          { id: 11, user: { login: 'other-user' }, body: `Other review\n${foreignMarker}` },
-          { id: 12, user: { login: publisherLogin }, body: `Second review\n${marker2}` },
-        ];
-      },
-    };
-    const result = await findLastReviewedHead(client as GitHubClient, {
-      owner: 'acme', repo: 'repo', pull_number: 1, publisherLogin,
-    });
-    expect(result).toBe('sha-new-2');
-  });
-
-  it('paginates across multiple pages to find the most recent review on a later page', async () => {
-    const markerPage1 = buildMarker({ headSha: 'sha-page-1', configHash: 'conf-1' });
-    const markerPage2 = buildMarker({ headSha: 'sha-page-2', configHash: 'conf-2' });
-
-    const client: Partial<GitHubClient> = {
-      async listReviewsPage({ page }) {
-        if (page === 1) {
-          const reviews: GitHubReview[] = Array.from({ length: 99 }, (_, i) => ({
-            id: i + 1, user: { login: 'random-user' }, body: 'Random comment',
-          }));
-          reviews.push({ id: 100, user: { login: publisherLogin }, body: markerPage1 });
-          return reviews;
-        }
-        if (page === 2) {
-          return [{ id: 201, user: { login: publisherLogin }, body: `Latest review\n${markerPage2}` }];
-        }
-        return [];
-      },
-    };
-    const result = await findLastReviewedHead(client as GitHubClient, {
-      owner: 'acme', repo: 'repo', pull_number: 1, publisherLogin,
-    });
-    expect(result).toBe('sha-page-2');
-  });
-});
+import { selectIncrementalFiles } from './incremental.js';
 
 describe('selectIncrementalFiles', () => {
   const publisherLogin = 'github-actions[bot]';
@@ -358,5 +254,169 @@ describe('selectIncrementalFiles', () => {
       files: mockPrFiles,
       reason: 'history rewritten since last review',
     });
+  });
+
+  it('config hash changed → full review', async () => {
+    const lastSha = 'last-sha-cfg';
+    const headSha = 'head-sha-cfg';
+    const marker = buildMarker({ headSha: lastSha, configHash: 'conf-old' });
+
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [{ id: 1, user: { login: publisherLogin }, body: marker }];
+      },
+      compareCommits: vi.fn(),
+    };
+
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha,
+      publisherLogin, prFiles: mockPrFiles, configHash: 'conf-new',
+    });
+
+    expect(result).toEqual({
+      mode: 'full',
+      files: mockPrFiles,
+      reason: 'configuration changed since last review',
+    });
+    expect(client.compareCommits).not.toHaveBeenCalled();
+  });
+
+  it.each([300, 301])('comparison at or over the 300-file cap (%i files) → full review', async (count) => {
+    const lastSha = 'last-sha-large';
+    const headSha = 'head-sha-large';
+    const marker = buildMarker({ headSha: lastSha, configHash: 'conf-1' });
+
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [{ id: 1, user: { login: publisherLogin }, body: marker }];
+      },
+      async compareCommits() {
+        const largeFiles = Array.from({ length: count }, (_, i) => ({
+          filename: `src/file-${i}.ts`,
+          status: 'modified',
+          additions: 1,
+          deletions: 1,
+          changes: 2,
+        }));
+        return { status: 'ahead', files: largeFiles, totalCommits: 5 };
+      },
+    };
+
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha,
+      publisherLogin, prFiles: mockPrFiles, configHash: 'conf-1',
+    });
+
+    expect(result).toEqual({
+      mode: 'full',
+      files: mockPrFiles,
+      reason: 'comparison too large',
+    });
+  });
+
+  it('ahead returns commitCount when compare reports totalCommits', async () => {
+    const lastSha = 'last-sha-commits';
+    const headSha = 'head-sha-commits';
+    const marker = buildMarker({ headSha: lastSha, configHash: 'conf-1' });
+
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [{ id: 1, user: { login: publisherLogin }, body: marker }];
+      },
+      async compareCommits() {
+        return {
+          status: 'ahead',
+          files: [
+            {
+              filename: 'src/main.ts',
+              status: 'modified',
+              patch: '@@ -1 +1 @@',
+              additions: 1,
+              deletions: 1,
+              changes: 2,
+            },
+          ],
+          totalCommits: 3,
+        };
+      },
+    };
+
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha,
+      publisherLogin, prFiles: mockPrFiles, configHash: 'conf-1',
+    });
+
+    expect(result).toEqual({
+      mode: 'incremental',
+      files: [
+        {
+          path: 'src/main.ts',
+          status: 'modified',
+          patch: '@@ -1 +1 @@',
+          additions: 1,
+          deletions: 1,
+          changes: 2,
+        },
+      ],
+      sinceSha: lastSha,
+      commitCount: 3,
+    });
+  });
+
+  it('compare API error → full review (comparison unavailable)', async () => {
+    const marker = buildMarker({ headSha: 'last-sha', configHash: 'conf-1' });
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [{ id: 1, user: { login: publisherLogin }, body: marker }];
+      },
+      compareCommits: vi.fn(async () => {
+        throw new Error('502 Bad Gateway');
+      }),
+    };
+
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha: 'head-sha',
+      publisherLogin, prFiles: mockPrFiles, configHash: 'conf-1',
+    });
+
+    expect(result).toEqual({ mode: 'full', files: mockPrFiles, reason: 'comparison unavailable' });
+  });
+
+  it('a partial (failed / budget) review is never the incremental base', async () => {
+    const complete = buildMarker({ headSha: 'old-complete', configHash: 'conf-1' });
+    const partial = buildMarker({ headSha: 'newer-partial', configHash: 'conf-1', status: 'partial' });
+    const compareCommits = vi.fn(async () => ({ status: 'ahead' as const, files: [], totalCommits: 2 }));
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [
+          { id: 1, user: { login: publisherLogin }, body: complete },
+          { id: 2, user: { login: publisherLogin }, body: partial },
+        ];
+      },
+      compareCommits,
+    };
+
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha: 'head-sha',
+      publisherLogin, prFiles: mockPrFiles, configHash: 'conf-1',
+    });
+
+    expect(compareCommits).toHaveBeenCalledWith(expect.objectContaining({ base: 'old-complete', head: 'head-sha' }));
+    expect(result).toMatchObject({ mode: 'incremental', sinceSha: 'old-complete', commitCount: 2 });
+  });
+
+  it('ignores markers from other accounts', async () => {
+    const marker = buildMarker({ headSha: 'pasted', configHash: 'conf-1' });
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [{ id: 1, user: { login: 'mallory' }, body: marker }];
+      },
+      compareCommits: vi.fn(),
+    };
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha: 'head-sha',
+      publisherLogin, prFiles: mockPrFiles, configHash: 'conf-1',
+    });
+    expect(result.mode).toBe('full');
   });
 });

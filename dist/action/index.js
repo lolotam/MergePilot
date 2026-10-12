@@ -48847,7 +48847,7 @@ var require_websocket = __commonJS({
     var http3 = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes, createHash: createHash2 } = __require("crypto");
+    var { randomBytes, createHash: createHash3 } = __require("crypto");
     var { Duplex, Readable: Readable2 } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -49528,7 +49528,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash2("sha1").update(key + GUID).digest("base64");
+        const digest = createHash3("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -49894,7 +49894,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http3 = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash2 } = __require("crypto");
+    var { createHash: createHash3 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -50201,7 +50201,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash2("sha1").update(key + GUID).digest("base64");
+        const digest = createHash3("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -71981,7 +71981,14 @@ async function runReview(input2) {
     maxFindings: reviewCfg.maxFindings,
     minSeverity: reviewCfg.minSeverity
   });
-  const patchIndex = new Map(redactedReviewableFiles.filter((f3) => f3.patch).map((f3) => [f3.path, parsePatch(f3.patch)]));
+  const anchorSource = input2.anchorFiles ?? redactedReviewableFiles;
+  const patchIndex = /* @__PURE__ */ new Map();
+  for (const f3 of anchorSource) {
+    if (!f3.patch)
+      continue;
+    const parsed = parsePatch(f3.patch);
+    patchIndex.set(f3.path, input2.anchorFiles ? { ...parsed, leftLines: /* @__PURE__ */ new Set() } : parsed);
+  }
   const { inline, summaryOnly } = anchorFindings(selected, patchIndex);
   const complete = incompleteReasons.length === 0;
   const result = {
@@ -123727,6 +123734,7 @@ function createOctokitClient(token) {
           let page = 1;
           let status = "identical";
           const allFiles = [];
+          let totalCommits;
           while (true) {
             const response = await octokit.rest.repos.compareCommitsWithBasehead({
               owner: params.owner,
@@ -123736,6 +123744,9 @@ function createOctokitClient(token) {
               per_page: PAGE_SIZE2
             });
             status = response.data.status;
+            if (response.data.total_commits !== void 0) {
+              totalCommits = response.data.total_commits;
+            }
             const pageFiles = response.data.files ?? [];
             allFiles.push(...pageFiles);
             if (pageFiles.length < PAGE_SIZE2) {
@@ -123745,7 +123756,8 @@ function createOctokitClient(token) {
           }
           return {
             status,
-            files: allFiles
+            files: allFiles,
+            ...totalCommits !== void 0 ? { totalCommits } : {}
           };
         } catch (error62) {
           if (typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404) {
@@ -123767,6 +123779,86 @@ function createOctokitClient(token) {
             number: response.data.number,
             html_url: response.data.html_url
           };
+        } catch (error62) {
+          sanitizeError(error62, token);
+        }
+      },
+      async listReviewCommentsPage(params) {
+        try {
+          const response = await octokit.rest.pulls.listReviewComments({
+            owner: params.owner,
+            repo: params.repo,
+            pull_number: params.pull_number,
+            ...params.page !== void 0 ? { page: params.page } : {},
+            ...params.per_page !== void 0 ? { per_page: params.per_page } : {}
+          });
+          return response.data;
+        } catch (error62) {
+          sanitizeError(error62, token);
+        }
+      },
+      async listIssueCommentsPage(params) {
+        try {
+          const response = await octokit.rest.issues.listComments({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.issue_number,
+            ...params.page !== void 0 ? { page: params.page } : {},
+            ...params.per_page !== void 0 ? { per_page: params.per_page } : {}
+          });
+          return response.data;
+        } catch (error62) {
+          sanitizeError(error62, token);
+        }
+      },
+      async createIssueComment(params) {
+        try {
+          const response = await octokit.rest.issues.createComment({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.issue_number,
+            body: params.body
+          });
+          return { id: response.data.id };
+        } catch (error62) {
+          sanitizeError(error62, token);
+        }
+      },
+      async addLabels(params) {
+        try {
+          await octokit.rest.issues.addLabels({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.issue_number,
+            labels: params.labels
+          });
+        } catch (error62) {
+          sanitizeError(error62, token);
+        }
+      },
+      async removeLabel(params) {
+        try {
+          await octokit.rest.issues.removeLabel({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.issue_number,
+            name: params.name
+          });
+        } catch (error62) {
+          if (typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404) {
+            return;
+          }
+          sanitizeError(error62, token);
+        }
+      },
+      async getCollaboratorPermission(params) {
+        try {
+          const response = await octokit.rest.repos.getCollaboratorPermissionLevel({
+            owner: params.owner,
+            repo: params.repo,
+            username: params.username
+          });
+          return { permission: response.data.permission };
         } catch (error62) {
           sanitizeError(error62, token);
         }
@@ -123831,9 +123923,10 @@ async function listPullRequestFiles(client, { owner, repo, pull_number }) {
   };
 }
 
-var MARKER_REGEX = /<!--\s*mergepilot:review\s+head=([^\s>]+)\s+config=([^\s>]+)\s*-->/;
-function buildMarker({ headSha, configHash }) {
-  return `<!-- mergepilot:review head=${headSha} config=${configHash} -->`;
+var MARKER_REGEX = /<!--\s*mergepilot:review\s+head=([^\s>]+)\s+config=([^\s>]+)(?:\s+status=(partial))?\s*-->/;
+function buildMarker({ headSha, configHash, status }) {
+  const statusPart = status ? ` status=${status}` : "";
+  return `<!-- mergepilot:review head=${headSha} config=${configHash}${statusPart} -->`;
 }
 function parseMarker(body) {
   if (!body) {
@@ -123850,8 +123943,152 @@ function parseMarker(body) {
   }
   return {
     headSha,
-    configHash
+    configHash,
+    ...match2[3] === "partial" ? { status: "partial" } : {}
   };
+}
+
+import { createHash } from "node:crypto";
+var COMMENTS_PAGE_SIZE = 100;
+var FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
+var TITLE_REGEX = /^###\s+(.+)$/m;
+function normalizeTitle2(title) {
+  return title.toLowerCase().trim().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ");
+}
+function computeFindingFingerprint(finding) {
+  const normTitle = normalizeTitle2(finding.title);
+  const rule = finding.ruleRef ?? "";
+  const payload = `${finding.path}:${rule}:${normTitle}`;
+  return createHash("sha256").update(payload).digest("hex").slice(0, 16);
+}
+function parseFingerprintFromComment(body) {
+  if (!body)
+    return null;
+  const match2 = body.match(FINGERPRINT_REGEX);
+  return match2 && match2[1] ? match2[1].toLowerCase() : null;
+}
+function parseTitleFromComment(body) {
+  if (!body)
+    return null;
+  const match2 = body.match(TITLE_REGEX);
+  return match2 && match2[1] ? match2[1].trim() : null;
+}
+function areTitlesSimilar(title1, title2) {
+  const norm1 = normalizeTitle2(title1);
+  const norm2 = normalizeTitle2(title2);
+  if (!norm1 || !norm2)
+    return false;
+  if (norm1 === norm2)
+    return true;
+  const words1 = new Set(norm1.split(" ").filter(Boolean));
+  const words2 = new Set(norm2.split(" ").filter(Boolean));
+  if (words1.size === 0 || words2.size === 0)
+    return false;
+  let intersection2 = 0;
+  for (const w of words1) {
+    if (words2.has(w))
+      intersection2++;
+  }
+  const union2 = (/* @__PURE__ */ new Set([...words1, ...words2])).size;
+  const similarity = intersection2 / union2;
+  return similarity >= 0.7;
+}
+function commentLineRange(comment) {
+  const line = comment.line ?? comment.original_line;
+  if (line === null || line === void 0)
+    return null;
+  const startLine = comment.start_line ?? comment.original_start_line ?? line;
+  return {
+    start: Math.min(startLine, line),
+    end: Math.max(startLine, line)
+  };
+}
+function isMergePilotComment(comment, publisherLogin) {
+  if (!comment.body)
+    return false;
+  const login = comment.user?.login;
+  if (!login)
+    return false;
+  if (login === publisherLogin)
+    return true;
+  return login.endsWith("[bot]") && FINGERPRINT_REGEX.test(comment.body);
+}
+function rangesOverlap(r1, r2) {
+  return r1.start <= r2.end && r1.end >= r2.start;
+}
+async function deduplicateFindings(client, { owner, repo, pull_number, publisherLogin, findings }) {
+  if (findings.length === 0) {
+    return { kept: [], dropped: [] };
+  }
+  if (!client.listReviewCommentsPage) {
+    return { kept: [...findings], dropped: [] };
+  }
+  let page = 1;
+  const existingComments = [];
+  while (true) {
+    let comments;
+    try {
+      comments = await client.listReviewCommentsPage({
+        owner,
+        repo,
+        pull_number,
+        page,
+        per_page: COMMENTS_PAGE_SIZE
+      });
+    } catch {
+      return { kept: [...findings], dropped: [], skipped: true };
+    }
+    for (const comment of comments) {
+      if (isMergePilotComment(comment, publisherLogin)) {
+        existingComments.push(comment);
+      }
+    }
+    if (comments.length < COMMENTS_PAGE_SIZE) {
+      break;
+    }
+    page++;
+  }
+  if (existingComments.length === 0) {
+    return { kept: [...findings], dropped: [] };
+  }
+  const commentsByPath = /* @__PURE__ */ new Map();
+  for (const comment of existingComments) {
+    const range = commentLineRange(comment);
+    if (!range)
+      continue;
+    const path7 = comment.path;
+    const fingerprint = parseFingerprintFromComment(comment.body);
+    const title = parseTitleFromComment(comment.body);
+    const list = commentsByPath.get(path7) ?? [];
+    list.push({ range, fingerprint, title });
+    commentsByPath.set(path7, list);
+  }
+  const kept = [];
+  const dropped = [];
+  for (const finding of findings) {
+    const existing = commentsByPath.get(finding.path);
+    if (!existing || existing.length === 0) {
+      kept.push(finding);
+      continue;
+    }
+    const findingRange = { start: finding.line, end: finding.line };
+    const findingFingerprint = computeFindingFingerprint(finding);
+    const isDuplicate = existing.some((ex) => {
+      if (!rangesOverlap(findingRange, ex.range)) {
+        return false;
+      }
+      if (ex.fingerprint !== null && ex.fingerprint === findingFingerprint) {
+        return true;
+      }
+      return ex.title !== null && areTitlesSimilar(ex.title, finding.title);
+    });
+    if (isDuplicate) {
+      dropped.push(finding);
+    } else {
+      kept.push(finding);
+    }
+  }
+  return { kept, dropped };
 }
 
 var LABELS_AR = {
@@ -123889,11 +124126,13 @@ ${fence(finding.suggestion, "suggestion")}`);
 ${finding.suggestion}`);
     }
   }
+  const fingerprint = computeFindingFingerprint(finding);
+  sections.push(`<!-- mp:f=${fingerprint} -->`);
   return sections.join("\n\n");
 }
 
 var REVIEWS_PAGE_SIZE = 100;
-async function publishReview(client, { owner, repo, pull_number, expectedHeadSha, summaryMarkdown, inline, configHash, language, suggestionsAsCode, publisherLogin }) {
+async function publishReview(client, { owner, repo, pull_number, expectedHeadSha, summaryMarkdown, inline, configHash, language, suggestionsAsCode, publisherLogin, partial: partial2, alreadyDeduplicated }) {
   const pr = await client.getPullRequest({ owner, repo, pull_number });
   if (pr.head.sha !== expectedHeadSha) {
     return { status: "skipped-stale" };
@@ -123910,7 +124149,7 @@ async function publishReview(client, { owner, repo, pull_number, expectedHeadSha
     for (const review of reviews) {
       if (review.body && review.user?.login === publisherLogin) {
         const marker2 = parseMarker(review.body);
-        if (marker2 && marker2.headSha === expectedHeadSha) {
+        if (marker2 && marker2.headSha === expectedHeadSha && marker2.status !== "partial") {
           return { status: "skipped-duplicate", reviewId: review.id };
         }
       }
@@ -123920,12 +124159,23 @@ async function publishReview(client, { owner, repo, pull_number, expectedHeadSha
     }
     page++;
   }
-  const marker = buildMarker({ headSha: expectedHeadSha, configHash });
+  const marker = buildMarker({
+    headSha: expectedHeadSha,
+    configHash,
+    ...partial2 ? { status: "partial" } : {}
+  });
   const trimmedSummary = summaryMarkdown.trimEnd();
   const body = trimmedSummary ? `${trimmedSummary}
 
 ${marker}` : marker;
-  const comments = inline.map((finding) => ({
+  const dedupedInline = alreadyDeduplicated ? inline : (await deduplicateFindings(client, {
+    owner,
+    repo,
+    pull_number,
+    publisherLogin,
+    findings: inline
+  })).kept;
+  const comments = dedupedInline.map((finding) => ({
     path: finding.path,
     line: finding.line,
     side: finding.side,
@@ -123969,6 +124219,359 @@ async function readFilesAtRef(client, { owner, repo, ref, paths }) {
   return results;
 }
 
+var REVIEWS_PAGE_SIZE2 = 100;
+var MAX_COMPARE_FILES = 300;
+async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin }) {
+  let page = 1;
+  let lastMarker = null;
+  while (true) {
+    const reviews = await client.listReviewsPage({
+      owner,
+      repo,
+      pull_number,
+      page,
+      per_page: REVIEWS_PAGE_SIZE2
+    });
+    for (const review of reviews) {
+      if (review.body && review.user?.login === publisherLogin) {
+        const marker = parseMarker(review.body);
+        if (marker?.headSha && marker.status !== "partial") {
+          lastMarker = marker;
+        }
+      }
+    }
+    if (reviews.length < REVIEWS_PAGE_SIZE2) {
+      break;
+    }
+    page++;
+  }
+  return lastMarker;
+}
+async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash }) {
+  const lastMarker = await findLastReviewedMarker(client, {
+    owner,
+    repo,
+    pull_number,
+    publisherLogin
+  });
+  if (lastMarker === null) {
+    return {
+      mode: "full",
+      files: prFiles,
+      reason: "first review"
+    };
+  }
+  if (configHash && lastMarker.configHash !== configHash) {
+    return {
+      mode: "full",
+      files: prFiles,
+      reason: "configuration changed since last review"
+    };
+  }
+  if (lastMarker.headSha === headSha) {
+    return {
+      mode: "incremental",
+      files: [],
+      sinceSha: headSha
+    };
+  }
+  let comparison;
+  try {
+    comparison = await client.compareCommits({
+      owner,
+      repo,
+      base: lastMarker.headSha,
+      head: headSha
+    });
+  } catch {
+    return { mode: "full", files: prFiles, reason: "comparison unavailable" };
+  }
+  if (!comparison || comparison.status !== "ahead") {
+    return {
+      mode: "full",
+      files: prFiles,
+      reason: "history rewritten since last review"
+    };
+  }
+  if (comparison.files.length >= MAX_COMPARE_FILES) {
+    return {
+      mode: "full",
+      files: prFiles,
+      reason: "comparison too large"
+    };
+  }
+  const prFileMap = new Map(prFiles.map((file2) => [file2.path, file2]));
+  const files = [];
+  for (const compareFile of comparison.files) {
+    const prFile = prFileMap.get(compareFile.filename);
+    if (!prFile) {
+      continue;
+    }
+    const mapped = {
+      path: compareFile.filename,
+      status: compareFile.status ?? prFile.status,
+      additions: compareFile.additions ?? prFile.additions,
+      deletions: compareFile.deletions ?? prFile.deletions,
+      changes: compareFile.changes ?? prFile.changes
+    };
+    if (compareFile.patch !== void 0) {
+      mapped.patch = compareFile.patch;
+    }
+    const previousPath = compareFile.previous_filename ?? prFile.previousPath;
+    if (previousPath !== void 0) {
+      mapped.previousPath = previousPath;
+    }
+    files.push(mapped);
+  }
+  return {
+    mode: "incremental",
+    files,
+    sinceSha: lastMarker.headSha,
+    ...comparison.totalCommits !== void 0 ? { commitCount: comparison.totalCommits } : {}
+  };
+}
+function reviewScopeOf(selection) {
+  if (selection.mode === "incremental") {
+    return {
+      mode: "incremental",
+      sinceSha: selection.sinceSha,
+      ...selection.commitCount !== void 0 ? { commitCount: selection.commitCount } : {}
+    };
+  }
+  return { mode: "full", reason: selection.reason };
+}
+function hasNothingNewToReview(selection) {
+  return selection.mode === "incremental" && selection.files.length === 0;
+}
+var NOTHING_NEW_DETAIL = "no new changes since the last review";
+
+var PAUSE_STATE_REGEX = /<!--\s*mergepilot:state\s+(paused|active)\s*-->/i;
+var PAUSE_NOTICE_MARKER = "<!-- mergepilot:pause-notice -->";
+var PAUSE_LABEL = "mergepilot:paused";
+var WRITE_PERMISSIONS = /* @__PURE__ */ new Set(["admin", "maintain", "write"]);
+var COMMAND_REGEX = /(?:^|\s)@mergepilot\s+(pause|resume|إيقاف|استئناف)(?=[\s.,!?؟،]|$)/i;
+var COMMENTS_PAGE_SIZE2 = 100;
+function parsePauseCommandWithLanguage(body) {
+  if (!body)
+    return null;
+  const word = body.match(COMMAND_REGEX)?.[1]?.toLowerCase();
+  if (word === "pause")
+    return { command: "pause", language: "en" };
+  if (word === "resume")
+    return { command: "resume", language: "en" };
+  if (word === "\u0625\u064A\u0642\u0627\u0641")
+    return { command: "pause", language: "ar" };
+  if (word === "\u0627\u0633\u062A\u0626\u0646\u0627\u0641")
+    return { command: "resume", language: "ar" };
+  return null;
+}
+async function isAuthorizedToControlPause(client, params) {
+  const { owner, repo, username, authorAssociation } = params;
+  if (!username)
+    return false;
+  if (authorAssociation?.toUpperCase() === "OWNER") {
+    return true;
+  }
+  if (client.getCollaboratorPermission) {
+    try {
+      const res = await client.getCollaboratorPermission({ owner, repo, username });
+      return WRITE_PERMISSIONS.has(res.permission?.toLowerCase() ?? "");
+    } catch {
+    }
+  }
+  return false;
+}
+function isNotFound(error62) {
+  return typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404;
+}
+async function fetchAllIssueComments(client, params) {
+  if (!client.listIssueCommentsPage)
+    return [];
+  const comments = [];
+  let page = 1;
+  while (true) {
+    const pageComments = await client.listIssueCommentsPage({
+      owner: params.owner,
+      repo: params.repo,
+      issue_number: params.pull_number,
+      page,
+      per_page: COMMENTS_PAGE_SIZE2
+    });
+    comments.push(...pageComments);
+    if (pageComments.length < COMMENTS_PAGE_SIZE2) {
+      break;
+    }
+    page++;
+  }
+  return comments;
+}
+async function isPrPaused(client, params) {
+  const { labels = [] } = params;
+  if (labels.includes(PAUSE_LABEL)) {
+    return true;
+  }
+  const comments = await fetchAllIssueComments(client, params);
+  for (let i2 = comments.length - 1; i2 >= 0; i2--) {
+    const comment = comments[i2];
+    if (comment && comment.user?.login === params.publisherLogin && comment.body) {
+      const match2 = comment.body.match(PAUSE_STATE_REGEX);
+      if (match2 && match2[1]) {
+        return match2[1].toLowerCase() === "paused";
+      }
+    }
+  }
+  return false;
+}
+async function hasPauseNoticeBeenPosted(client, params) {
+  const comments = await fetchAllIssueComments(client, params);
+  let posted = false;
+  for (const c of comments) {
+    if (c.user?.login !== params.publisherLogin || !c.body)
+      continue;
+    if (PAUSE_STATE_REGEX.test(c.body))
+      posted = false;
+    if (c.body.includes(PAUSE_NOTICE_MARKER))
+      posted = true;
+  }
+  return posted;
+}
+async function postPauseNoticeOnce(client, params) {
+  const alreadyPosted = await hasPauseNoticeBeenPosted(client, params);
+  if (alreadyPosted) {
+    return false;
+  }
+  if (!client.createIssueComment) {
+    return false;
+  }
+  const isArabic = params.language === "ar";
+  let body;
+  if (isArabic) {
+    body = `<div dir="rtl">
+
+> \u23F8\uFE0F **\u062A\u0645 \u062A\u062E\u0637\u064A \u0645\u0631\u0627\u062C\u0639\u0629 MergePilot**
+>
+> \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0627\u062A \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A\u0629 \u0645\u062A\u0648\u0642\u0641\u0629 \u0645\u0624\u0642\u062A\u064B\u0627 \u0644\u0647\u0630\u0627 \u0627\u0644\u0637\u0644\u0628. \u0627\u0643\u062A\u0628 \`@mergepilot \u0627\u0633\u062A\u0626\u0646\u0627\u0641\` \u0644\u0644\u0627\u0633\u062A\u0626\u0646\u0627\u0641.
+
+</div>
+
+${PAUSE_NOTICE_MARKER}`;
+  } else {
+    body = `> \u23F8\uFE0F **MergePilot review skipped**
+>
+> Automatic reviews are paused on this PR. Comment \`@mergepilot resume\` to resume.
+
+${PAUSE_NOTICE_MARKER}`;
+  }
+  await client.createIssueComment({
+    owner: params.owner,
+    repo: params.repo,
+    issue_number: params.pull_number,
+    body
+  });
+  return true;
+}
+async function executePauseCommand(client, params) {
+  const authorized = await isAuthorizedToControlPause(client, {
+    owner: params.owner,
+    repo: params.repo,
+    username: params.username,
+    authorAssociation: params.authorAssociation
+  });
+  const isArabic = params.language === "ar";
+  if (!authorized) {
+    if (client.createIssueComment) {
+      const rejectBody = isArabic ? `<div dir="rtl">
+
+\u26A0\uFE0F \u0639\u0630\u0631\u064B\u0627 @${params.username}\u060C \u064A\u062C\u0628 \u0623\u0646 \u062A\u0645\u062A\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0643\u062A\u0627\u0628\u0629 (write access) \u0644\u0625\u064A\u0642\u0627\u0641 \u0623\u0648 \u0627\u0633\u062A\u0626\u0646\u0627\u0641 \u0645\u0631\u0627\u062C\u0639\u0627\u062A MergePilot.
+
+</div>` : `\u26A0\uFE0F Sorry @${params.username}, you need write access to pause or resume MergePilot reviews.`;
+      await client.createIssueComment({
+        owner: params.owner,
+        repo: params.repo,
+        issue_number: params.pull_number,
+        body: rejectBody
+      });
+    }
+    return { success: false, reason: "unauthorized" };
+  }
+  if (params.command === "pause") {
+    if (client.addLabels) {
+      try {
+        await client.addLabels({
+          owner: params.owner,
+          repo: params.repo,
+          issue_number: params.pull_number,
+          labels: [PAUSE_LABEL]
+        });
+      } catch {
+      }
+    }
+    if (client.createIssueComment) {
+      const reply = isArabic ? `<div dir="rtl">
+
+\u23F8\uFE0F \u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0627\u062A \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A\u0629 \u0645\u0624\u0642\u062A\u064B\u0627 \u0644\u0647\u0630\u0627 \u0627\u0644\u0637\u0644\u0628. \u0644\u0644\u0627\u0633\u062A\u0626\u0646\u0627\u0641\u060C \u0627\u0643\u062A\u0628 \`@mergepilot \u0627\u0633\u062A\u0626\u0646\u0627\u0641\`.
+
+</div>
+
+<!-- mergepilot:state paused -->` : `\u23F8\uFE0F Automatic reviews paused on this PR. To resume, comment \`@mergepilot resume\`.
+
+<!-- mergepilot:state paused -->`;
+      await client.createIssueComment({
+        owner: params.owner,
+        repo: params.repo,
+        issue_number: params.pull_number,
+        body: reply
+      });
+    }
+    return { success: true, state: "paused" };
+  }
+  if (client.removeLabel) {
+    try {
+      await client.removeLabel({
+        owner: params.owner,
+        repo: params.repo,
+        issue_number: params.pull_number,
+        name: PAUSE_LABEL
+      });
+    } catch (error62) {
+      if (!isNotFound(error62)) {
+        if (client.createIssueComment) {
+          const failBody = isArabic ? `<div dir="rtl">
+
+\u26A0\uFE0F \u0645\u0627 \u0642\u062F\u0631\u062A\u0634 \u0623\u0634\u064A\u0644 \u0627\u0644\u0648\u0633\u0645 \`${PAUSE_LABEL}\`\u060C \u0641\u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0627\u062A \u0644\u0633\u0647 \u0645\u062A\u0648\u0642\u0641\u0629. \u0631\u0627\u062C\u0639 \u0635\u0644\u0627\u062D\u064A\u0627\u062A MergePilot \u0639\u0644\u0649 \u0627\u0644\u0631\u064A\u0628\u0648 (labels) \u0623\u0648 \u0634\u064A\u0644 \u0627\u0644\u0648\u0633\u0645 \u064A\u062F\u0648\u064A\u064B\u0627.
+
+</div>` : `\u26A0\uFE0F Could not remove the \`${PAUSE_LABEL}\` label, so reviews are still paused. Check MergePilot's permissions on this repository (labels) or remove the label by hand.`;
+          await client.createIssueComment({
+            owner: params.owner,
+            repo: params.repo,
+            issue_number: params.pull_number,
+            body: failBody
+          });
+        }
+        return { success: false, reason: "label_error" };
+      }
+    }
+  }
+  if (client.createIssueComment) {
+    const reply = isArabic ? `<div dir="rtl">
+
+\u25B6\uFE0F \u062A\u0645 \u0627\u0633\u062A\u0626\u0646\u0627\u0641 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0627\u062A \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A\u0629 \u0644\u0647\u0630\u0627 \u0627\u0644\u0637\u0644\u0628.
+
+</div>
+
+<!-- mergepilot:state active -->` : `\u25B6\uFE0F Automatic reviews resumed on this PR.
+
+<!-- mergepilot:state active -->`;
+    await client.createIssueComment({
+      owner: params.owner,
+      repo: params.repo,
+      issue_number: params.pull_number,
+      body: reply
+    });
+  }
+  return { success: true, state: "active" };
+}
+
 function neutralize2(text) {
   return text.replaceAll("<!--", "&lt;!--").replace(/<\/div/gi, "&lt;/div").replace(/(^|[^\w`])@(?=[A-Za-z0-9-])/g, "$1@\u200B");
 }
@@ -124004,6 +124607,21 @@ function renderFallbackLine(input2, isArabic) {
   const from = neutralize2(input2.fallback?.from ?? "");
   const code = neutralize2(input2.fallback?.code ?? "");
   return isArabic ? `> \u26A0\uFE0F \u0627\u0633\u062A\u064F\u062E\u062F\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \`${used}\` \u0644\u0623\u0646 \`${from}\` \u0641\u0634\u0644 (${code})` : `> \u26A0\uFE0F Fallback model \`${used}\` was used because \`${from}\` failed (${code})`;
+}
+function renderScopeLine(scope, isArabic) {
+  if (scope.mode === "incremental") {
+    const count = scope.commitCount ?? 1;
+    const shortSha = scope.sinceSha.slice(0, 7);
+    if (isArabic) {
+      return `> \u062A\u0645\u062A \u0645\u0631\u0627\u062C\u0639\u0629 ${count} \u0645\u0646 \u0627\u0644\u0627\u0644\u062A\u0632\u0627\u0645\u0627\u062A \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0645\u0646\u0630 \`${shortSha}\``;
+    }
+    const plural2 = count === 1 ? "1 new commit" : `${count} new commits`;
+    return `> Reviewed ${plural2} since \`${shortSha}\``;
+  }
+  if (isArabic) {
+    return scope.reason ? `> \u0645\u0631\u0627\u062C\u0639\u0629 \u0643\u0627\u0645\u0644\u0629 (${neutralize2(scope.reason)})` : "> \u0645\u0631\u0627\u062C\u0639\u0629 \u0643\u0627\u0645\u0644\u0629";
+  }
+  return scope.reason ? `> Full review (${neutralize2(scope.reason)})` : "> Full review";
 }
 function renderFindingsOutsideDiff(findings, isArabic) {
   const heading = isArabic ? "### \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u062E\u0627\u0631\u062C \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A" : "### Findings outside the diff";
@@ -124080,6 +124698,9 @@ function renderReviewSummary(input2) {
   if (input2.fallback) {
     sections.push(renderFallbackLine(input2, isArabic));
   }
+  if (input2.scope) {
+    sections.push(renderScopeLine(input2.scope, isArabic));
+  }
   if (input2.outcome !== "completed") {
     sections.push(renderNotCompletedNotice(input2.outcome, input2.reason, isArabic));
   }
@@ -124143,6 +124764,30 @@ var PROVIDER_ENV_MAP2 = {
 };
 async function reviewPullRequest(ctx) {
   const { client, owner, repo, pullNumber, headSha, prTitle, prBody, config: config2, configHash, rulesFiles, model, knownSecrets = [], publisherLogin = "github-actions[bot]", log } = ctx;
+  const pr = await client.getPullRequest({ owner, repo, pull_number: pullNumber });
+  const prLabels = pr.labels?.map((l) => l.name) ?? [];
+  const paused = await isPrPaused(client, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    publisherLogin,
+    labels: prLabels
+  });
+  if (paused) {
+    log?.("MergePilot skipped: automatic reviews are paused on this PR");
+    await postPauseNoticeOnce(client, {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      publisherLogin,
+      language: config2.language
+    });
+    return {
+      outcome: "skipped",
+      detail: "automatic reviews are paused on this PR",
+      publish: { status: "skipped-paused" }
+    };
+  }
   log?.(`Listing files for pull request #${pullNumber}...`);
   const { files: prFiles } = await listPullRequestFiles(client, {
     owner,
@@ -124150,6 +124795,21 @@ async function reviewPullRequest(ctx) {
     pull_number: pullNumber
   });
   log?.(`Found ${prFiles.length} files in PR diff`);
+  const selection = await selectIncrementalFiles(client, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    headSha,
+    publisherLogin,
+    prFiles,
+    configHash
+  });
+  const filesToReview = selection.files;
+  log?.(selection.mode === "incremental" ? `Incremental review: ${filesToReview.length} files changed since ${selection.sinceSha.slice(0, 7)}` : `Full review: ${selection.reason}`);
+  if (hasNothingNewToReview(selection)) {
+    log?.(`MergePilot skipped: ${NOTHING_NEW_DETAIL}`);
+    return { outcome: "skipped", detail: NOTHING_NEW_DETAIL, publish: { status: "skipped-no-changes" } };
+  }
   log?.("Running review...");
   const reviewResult = await runReview({
     config: config2,
@@ -124157,7 +124817,8 @@ async function reviewPullRequest(ctx) {
       title: prTitle,
       body: prBody
     },
-    files: prFiles,
+    files: filesToReview,
+    anchorFiles: prFiles,
     rulesFiles,
     model,
     knownSecrets
@@ -124167,6 +124828,7 @@ async function reviewPullRequest(ctx) {
     modelLabel: reviewResult.modelUsed ?? model.label,
     fallback: { from: reviewResult.fallbackFrom, code: reviewResult.fallbackCode }
   } : {};
+  const scope = reviewScopeOf(selection);
   const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";
   let summaryMarkdown;
   let inlineFindings;
@@ -124176,16 +124838,30 @@ async function reviewPullRequest(ctx) {
   if (reviewResult.status === "completed") {
     outcome = "completed";
     costUsd2 = reviewResult.costUsd;
-    inlineFindings = reviewResult.inline;
+    const deduped = await deduplicateFindings(client, {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      publisherLogin,
+      findings: reviewResult.inline
+    });
+    inlineFindings = deduped.kept;
+    if (deduped.skipped) {
+      log?.("Could not read existing review comments; publishing without duplicate filtering");
+    }
+    if (deduped.dropped.length > 0) {
+      log?.(`Dropped ${deduped.dropped.length} duplicate findings already commented on this PR`);
+    }
     summaryMarkdown = renderReviewSummary({
       language: config2.language,
       summary: reviewResult.summary,
       summaryOnly: reviewResult.summaryOnly,
-      inlineCount: reviewResult.inline.length,
+      inlineCount: inlineFindings.length,
       complete: reviewResult.complete,
       incompleteReasons: reviewResult.result.incompleteReasons,
       modelLabel: model.label,
       ...fallbackSummary,
+      scope,
       outcome: "completed",
       ...reviewResult.costUsd !== void 0 ? { costUsd: reviewResult.costUsd } : {},
       ...reviewResult.usage?.inputTokens !== void 0 ? { inputTokens: reviewResult.usage.inputTokens } : {},
@@ -124203,6 +124879,7 @@ async function reviewPullRequest(ctx) {
       complete: false,
       incompleteReasons: [reviewResult.reason],
       modelLabel: model.label,
+      scope,
       outcome: "skipped-budget",
       reason: reviewResult.reason
     });
@@ -124232,6 +124909,7 @@ async function reviewPullRequest(ctx) {
       incompleteReasons: [reason],
       modelLabel: model.label,
       ...fallbackSummary,
+      scope,
       outcome: "failed",
       reason
     });
@@ -124247,7 +124925,10 @@ async function reviewPullRequest(ctx) {
     configHash,
     language: config2.language,
     suggestionsAsCode: false,
-    publisherLogin
+    publisherLogin,
+    // Partial unless every reviewable file was covered (no failed batch, no file dropped for budget).
+    partial: !(outcome === "completed" && reviewResult.status === "completed" && reviewResult.complete),
+    alreadyDeduplicated: true
   });
   log?.(`Review publication outcome: ${publish.status}`);
   return {
@@ -124405,11 +125086,77 @@ ${parseResult.errors.join("\n")}`);
   }
 }
 
+// src/issue-comment.ts
+import { readFile as fsReadFile2 } from "node:fs/promises";
+async function runIssueComment(deps) {
+  const env2 = deps?.env ?? process.env;
+  const readFile2 = deps?.readFile ?? ((p) => fsReadFile2(p, "utf8"));
+  const createClient = deps?.createClient ?? createOctokitClient;
+  const log = deps?.log ?? ((msg) => process.stdout.write(`${msg}
+`));
+  const eventName = env2.GITHUB_EVENT_NAME;
+  if (eventName !== "issue_comment") {
+    log(`MergePilot skipped: event "${eventName ?? ""}" is not issue_comment`);
+    return;
+  }
+  const eventPath = env2.GITHUB_EVENT_PATH;
+  if (!eventPath) {
+    throw new Error("GITHUB_EVENT_PATH is not set");
+  }
+  const eventRaw = await readFile2(eventPath, "utf8");
+  const payload = JSON.parse(eventRaw);
+  if (payload.action !== void 0 && payload.action !== "created") {
+    log(`MergePilot skipped: issue_comment action "${payload.action}" is not created`);
+    return;
+  }
+  if (!payload.issue?.pull_request) {
+    log("MergePilot skipped: comment is not on a pull request");
+    return;
+  }
+  const commenter = payload.comment?.user;
+  if (!commenter?.login || commenter.type === "Bot" || commenter.login.endsWith("[bot]")) {
+    log("MergePilot skipped: comment was posted by a bot");
+    return;
+  }
+  const parsed = parsePauseCommandWithLanguage(payload.comment?.body);
+  if (!parsed) {
+    log("MergePilot skipped: comment does not contain @mergepilot pause/resume command");
+    return;
+  }
+  const { command, language } = parsed;
+  const repository = env2.GITHUB_REPOSITORY;
+  if (!repository) {
+    throw new Error("GITHUB_REPOSITORY is not set");
+  }
+  const [owner, repo] = repository.split("/");
+  if (!owner || !repo) {
+    throw new Error(`Invalid GITHUB_REPOSITORY format: ${repository}`);
+  }
+  const githubToken = env2.GITHUB_TOKEN || env2["INPUT_GITHUB-TOKEN"] || env2.INPUT_GITHUB_TOKEN;
+  if (!githubToken) {
+    throw new Error("GITHUB_TOKEN (or input github-token) is not set");
+  }
+  const publisherLogin = env2["INPUT_PUBLISHER-LOGIN"] || env2.INPUT_PUBLISHER_LOGIN || "github-actions[bot]";
+  const username = commenter.login;
+  const client = createClient(githubToken);
+  const result = await executePauseCommand(client, {
+    owner,
+    repo,
+    pull_number: payload.issue.number,
+    command,
+    username,
+    authorAssociation: payload.comment?.author_association,
+    publisherLogin,
+    language
+  });
+  log(`MergePilot pause command "${command}" executed with result: ${result.success ? result.state : result.reason}`);
+}
+
 // src/pull-request.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import {
   mkdtemp as fsMkdtemp2,
-  readFile as fsReadFile2,
+  readFile as fsReadFile3,
   readdir as fsReaddir2,
   rm as fsRm2
 } from "node:fs/promises";
@@ -124529,7 +125276,7 @@ var defaultCreateModel = async (config2, store, opts) => {
 };
 async function runPullRequestReview(deps) {
   const env2 = deps?.env ?? process.env;
-  const readFile2 = deps?.readFile ?? ((p) => fsReadFile2(p, "utf8"));
+  const readFile2 = deps?.readFile ?? ((p) => fsReadFile3(p, "utf8"));
   const createClient = deps?.createClient ?? createOctokitClient;
   const createModel = deps?.createModel ?? defaultCreateModel;
   const log = deps?.log ?? ((msg) => process.stdout.write(msg + "\n"));
@@ -124592,6 +125339,26 @@ ${configResult.errors.join("\n")}`);
   }
   const { config: config2, configText, rulesFiles } = configResult;
   log(`Loaded configuration for provider: ${config2.provider}`);
+  const publisherLogin = env2["INPUT_PUBLISHER-LOGIN"] || env2.INPUT_PUBLISHER_LOGIN || "github-actions[bot]";
+  const prLabels = payload.pull_request.labels?.map((l) => l.name) ?? [];
+  const paused = await isPrPaused(client, {
+    owner,
+    repo,
+    pull_number: pr.number,
+    publisherLogin,
+    labels: prLabels
+  });
+  if (paused) {
+    log("MergePilot skipped: automatic reviews are paused on this PR");
+    await postPauseNoticeOnce(client, {
+      owner,
+      repo,
+      pull_number: pr.number,
+      publisherLogin,
+      language: config2.language
+    });
+    return;
+  }
   const store = new EnvCredentialStore(env2);
   const providerSecrets = await resolveReviewSecrets(config2, store);
   const githubSecret = new Secret(githubToken);
@@ -124637,8 +125404,7 @@ ${configResult.errors.join("\n")}`);
     for (const skipped of model.skippedFallbacks ?? []) {
       log(`Fallback ${skipped.label} skipped: ${skipped.reason}`);
     }
-    const configHash = createHash("sha256").update(configText).digest("hex").slice(0, 12);
-    const publisherLogin = env2["INPUT_PUBLISHER-LOGIN"] || env2.INPUT_PUBLISHER_LOGIN || "github-actions[bot]";
+    const configHash = createHash2("sha256").update(configText).digest("hex").slice(0, 12);
     await reviewPullRequest({
       client,
       owner,
@@ -124674,8 +125440,9 @@ async function run(deps) {
 `));
   const eventName = env2.GITHUB_EVENT_NAME;
   if (eventName === "pull_request") return runPullRequestReview(deps);
+  if (eventName === "issue_comment") return runIssueComment(deps);
   if (eventName === "workflow_dispatch" || eventName === "schedule") return runAudit2(deps);
-  log(`MergePilot skipped: event "${eventName ?? ""}" is not pull_request`);
+  log(`MergePilot skipped: event "${eventName ?? ""}" is not pull_request, issue_comment, workflow_dispatch, or schedule`);
 }
 
 // src/index.ts

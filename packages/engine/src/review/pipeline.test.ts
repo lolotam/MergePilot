@@ -321,5 +321,58 @@ describe('runReview', () => {
       expect(allInlineIds).not.toContain(summaryFinding?.id);
     }
   });
-});
 
+  it('anchors findings against anchorFiles when provided (incremental diff anchoring to PR diff)', async () => {
+    // Incremental patch modifies line 50
+    const incrementalPatch = '@@ -50,1 +50,2 @@\n existing\n+incremental added';
+    // Full PR diff only touches lines 1-10, does NOT touch line 50
+    const prPatch = '@@ -1,1 +1,2 @@\n existing\n+pr added';
+
+    const answer = JSON.stringify({
+      summary: 'Incremental review finding.',
+      findings: [validFindingJson({ line: 51 })],
+    });
+    const model = makeModel(answer);
+
+    const result = await runReview({
+      config: makeConfig(),
+      pr: { title: 'T', body: 'B' },
+      files: [{ path: 'src/index.ts', status: 'modified', patch: incrementalPatch, changes: 1 }],
+      anchorFiles: [{ path: 'src/index.ts', status: 'modified', patch: prPatch, changes: 1 }],
+      rulesFiles: [],
+      model,
+      knownSecrets: [],
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      // Finding on line 51 is NOT in PR patch lines, so it must be placed into summaryOnly
+      expect(result.summaryOnly.some((f) => f.line === 51)).toBe(true);
+      expect(result.inline.some((f) => f.line === 51)).toBe(false);
+    }
+  });
+
+  it('with anchorFiles, a LEFT-side finding is never inline (the reviewed patch is not the PR base)', async () => {
+    const prPatch = '@@ -1,2 +1,2 @@\n-old line\n+new line\n context';
+    const answer = JSON.stringify({
+      summary: 'Incremental.',
+      findings: [validFindingJson({ line: 1, side: 'LEFT' }), validFindingJson({ line: 1, title: 'Right side' })],
+    });
+
+    const result = await runReview({
+      config: makeConfig(),
+      pr: { title: 'T', body: 'B' },
+      files: [{ path: 'src/index.ts', status: 'modified', patch: prPatch, changes: 2 }],
+      anchorFiles: [{ path: 'src/index.ts', status: 'modified', patch: prPatch, changes: 2 }],
+      rulesFiles: [],
+      model: makeModel(answer),
+      knownSecrets: [],
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.inline.map((f) => f.side)).toEqual(['RIGHT']);
+      expect(result.summaryOnly.some((f) => f.side === 'LEFT')).toBe(true);
+    }
+  });
+});

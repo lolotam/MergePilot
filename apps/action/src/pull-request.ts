@@ -19,7 +19,9 @@ import {
 } from '@mergepilot/engine';
 import {
   createOctokitClient,
+  isPrPaused,
   loadRepoConfig,
+  postPauseNoticeOnce,
   reviewPullRequest,
 } from '@mergepilot/github';
 import { trustedCustomBaseUrl, warnIgnoredBaseUrls } from './custom-base-url.js';
@@ -154,6 +156,33 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
   const { config, configText, rulesFiles } = configResult;
   log(`Loaded configuration for provider: ${config.provider}`);
 
+  const publisherLogin =
+    env['INPUT_PUBLISHER-LOGIN'] ||
+    env.INPUT_PUBLISHER_LOGIN ||
+    'github-actions[bot]';
+
+  const prLabels =
+    (payload.pull_request as { labels?: Array<{ name: string }> }).labels?.map((l) => l.name) ?? [];
+  const paused = await isPrPaused(client, {
+    owner,
+    repo,
+    pull_number: pr.number,
+    publisherLogin,
+    labels: prLabels,
+  });
+
+  if (paused) {
+    log('MergePilot skipped: automatic reviews are paused on this PR');
+    await postPauseNoticeOnce(client, {
+      owner,
+      repo,
+      pull_number: pr.number,
+      publisherLogin,
+      language: config.language,
+    });
+    return;
+  }
+
   const store = new EnvCredentialStore(env);
   // The primary key (none for a keyless custom server) plus every configured fallback key, so
   // all of them are redacted from the prompt before any model is called.
@@ -214,11 +243,6 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
       .update(configText)
       .digest('hex')
       .slice(0, 12);
-
-    const publisherLogin =
-      env['INPUT_PUBLISHER-LOGIN'] ||
-      env.INPUT_PUBLISHER_LOGIN ||
-      'github-actions[bot]';
 
     await reviewPullRequest({
       client,

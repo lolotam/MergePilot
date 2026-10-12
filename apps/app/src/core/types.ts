@@ -281,8 +281,25 @@ export interface ReviewJob {
   baseSha: string;
 }
 
+/**
+ * A `@mergepilot pause|resume` PR comment (ADR-0012). The webhook only queues it; the worker checks
+ * the commenter's write access and applies it, so the web process never writes to GitHub.
+ */
+export interface PauseCommandJob {
+  kind: 'pause_command';
+  deliveryId: string;
+  installationId: number;
+  repoFullName: string;
+  pullNumber: number;
+  command: 'pause' | 'resume';
+  commenterLogin: string;
+  language: 'ar' | 'en';
+}
+
 export interface ReviewQueue {
   enqueue(job: ReviewJob): Promise<void>;
+  /** Queues a pause/resume command; optional so queues that cannot carry one leave it ignored. */
+  enqueueCommand?(job: PauseCommandJob): Promise<void>;
 }
 
 /** The authenticated caller of a dashboard request. */

@@ -1,5 +1,6 @@
 import type { Finding } from '@mergepilot/engine';
 import type { GitHubClient, GitHubDraftReviewComment } from './client.js';
+import { deduplicateFindings } from './dedupe.js';
 import { buildMarker, parseMarker } from './marker.js';
 import { renderFindingComment } from './render.js';
 
@@ -18,11 +19,17 @@ export interface PublishReviewParams {
    * count as duplicates, so a marker pasted by anyone else cannot suppress a review.
    */
   publisherLogin: string;
+  /** Marks the review as not completed (failed/budget), so it never anchors an incremental review. */
+  partial?: boolean | undefined;
+  /** Set when the caller already dropped duplicates (avoids fetching the PR's comments twice). */
+  alreadyDeduplicated?: boolean | undefined;
 }
 
 export type PublishReviewResult =
   | { status: 'skipped-stale' }
   | { status: 'skipped-duplicate'; reviewId: number }
+  | { status: 'skipped-paused' }
+  | { status: 'skipped-no-changes' }
   | { status: 'published'; reviewId: number };
 
 const REVIEWS_PAGE_SIZE = 100;
@@ -44,6 +51,8 @@ export async function publishReview(
     language,
     suggestionsAsCode,
     publisherLogin,
+    partial,
+    alreadyDeduplicated,
   }: PublishReviewParams,
 ): Promise<PublishReviewResult> {
   const pr = await client.getPullRequest({ owner, repo, pull_number });
@@ -64,7 +73,8 @@ export async function publishReview(
     for (const review of reviews) {
       if (review.body && review.user?.login === publisherLogin) {
         const marker = parseMarker(review.body);
-        if (marker && marker.headSha === expectedHeadSha) {
+        // Only a completed review blocks; a partial one (failed / budget / incomplete) can be redone.
+        if (marker && marker.headSha === expectedHeadSha && marker.status !== 'partial') {
           return { status: 'skipped-duplicate', reviewId: review.id };
         }
       }
@@ -76,11 +86,27 @@ export async function publishReview(
     page++;
   }
 
-  const marker = buildMarker({ headSha: expectedHeadSha, configHash });
+  const marker = buildMarker({
+    headSha: expectedHeadSha,
+    configHash,
+    ...(partial ? { status: 'partial' as const } : {}),
+  });
   const trimmedSummary = summaryMarkdown.trimEnd();
   const body = trimmedSummary ? `${trimmedSummary}\n\n${marker}` : marker;
 
-  const comments: GitHubDraftReviewComment[] = inline.map((finding) => ({
+  const dedupedInline = alreadyDeduplicated
+    ? inline
+    : (
+        await deduplicateFindings(client, {
+          owner,
+          repo,
+          pull_number,
+          publisherLogin,
+          findings: inline,
+        })
+      ).kept;
+
+  const comments: GitHubDraftReviewComment[] = dedupedInline.map((finding) => ({
     path: finding.path,
     line: finding.line,
     side: finding.side,

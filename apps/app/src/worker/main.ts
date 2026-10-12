@@ -3,9 +3,10 @@ import { Worker, type ConnectionOptions, type Job } from 'bullmq';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
-import type { ReviewJob } from '../core/types.js';
-import { createQueueConnection } from '../queue/bullmq-queue.js';
+import type { PauseCommandJob, ReviewJob } from '../core/types.js';
+import { createQueueConnection, PAUSE_COMMAND_JOB_NAME, type QueueJobData } from '../queue/bullmq-queue.js';
 import { createGitHubAppFactory } from './github-app-factory.js';
+import { processPauseCommandJob } from './process-pause-command.js';
 import { processReviewJob } from './process-review.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
 
@@ -47,15 +48,21 @@ export function startHealthServer(port: number): Promise<http.Server> {
 export function createReviewWorker(
   deps: ProcessReviewDeps,
   options?: ReviewWorkerOptions,
-): Worker<ReviewJob> {
+): Worker<QueueJobData> {
   const concurrency = options?.concurrency ?? 2;
   const connection = options?.connection ?? { host: 'localhost', port: 6379 };
 
-  const worker = new Worker<ReviewJob>(
+  const worker = new Worker<QueueJobData>(
     'reviews',
-    async (job: Job<ReviewJob>) => {
-      deps.log?.(`Processing review job ${job.data.deliveryId} for #${job.data.pullNumber}`);
-      await processReviewJob(job.data, deps);
+    async (job: Job<QueueJobData>) => {
+      // Pause/resume commands share the queue under their own job name (ADR-0012).
+      if (job.name === PAUSE_COMMAND_JOB_NAME) {
+        await processPauseCommandJob(job.data as PauseCommandJob, deps);
+        return;
+      }
+      const reviewJob = job.data as ReviewJob;
+      deps.log?.(`Processing review job ${reviewJob.deliveryId} for #${reviewJob.pullNumber}`);
+      await processReviewJob(reviewJob, deps);
     },
     {
       concurrency,
@@ -93,7 +100,7 @@ export function attachShutdownHandlers(
 }
 
 export interface WorkerInstance {
-  worker: Worker<ReviewJob>;
+  worker: Worker<QueueJobData>;
   services: AppServices;
   healthServer: http.Server;
   config: AppConfig;

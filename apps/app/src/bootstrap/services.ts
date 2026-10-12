@@ -3,7 +3,7 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { createAuth, type Auth } from '../auth/index.js';
 import type { AppConfig } from '../core/config.js';
 import { MemoryStore } from '../core/memory-store.js';
-import type { AppStore, ReviewJob, ReviewQueue } from '../core/types.js';
+import type { AppStore, PauseCommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
 import { CredentialService } from '../credentials/index.js';
 import { createDb, runMigrations } from '../db/index.js';
 import * as dbSchema from '../db/schema.js';
@@ -13,8 +13,14 @@ import { EnvelopeVault } from '../vault/index.js';
 export class InMemoryReviewQueue implements ReviewQueue {
   readonly jobs: ReviewJob[] = [];
 
+  readonly commandJobs: PauseCommandJob[] = [];
+
   async enqueue(job: ReviewJob): Promise<void> {
     this.jobs.push(job);
+  }
+
+  async enqueueCommand(job: PauseCommandJob): Promise<void> {
+    this.commandJobs.push(job);
   }
 
   async ready(): Promise<boolean> {
@@ -23,6 +29,7 @@ export class InMemoryReviewQueue implements ReviewQueue {
 
   async close(): Promise<void> {
     this.jobs.length = 0;
+    this.commandJobs.length = 0;
   }
 }
 

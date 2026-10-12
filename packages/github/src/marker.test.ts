@@ -38,4 +38,14 @@ describe('marker', () => {
     expect(parseMarker('')).toBeNull();
     expect(parseMarker('   \n  ')).toBeNull();
   });
+
+  it('round-trips a partial marker and keeps the legacy format parseable', () => {
+    const marker = buildMarker({ headSha: 'abc', configHash: 'cfg', status: 'partial' });
+    expect(marker).toBe('<!-- mergepilot:review head=abc config=cfg status=partial -->');
+    expect(parseMarker(marker)).toEqual({ headSha: 'abc', configHash: 'cfg', status: 'partial' });
+    expect(parseMarker('<!-- mergepilot:review head=abc config=cfg -->')).toEqual({
+      headSha: 'abc',
+      configHash: 'cfg',
+    });
+  });
 });

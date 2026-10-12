@@ -8,9 +8,14 @@ import {
   type Secret,
 } from '@mergepilot/engine';
 import {
+  deduplicateFindings,
+  hasNothingNewToReview,
   listPullRequestFiles,
+  NOTHING_NEW_DETAIL,
   publishReview,
   renderReviewSummary,
+  reviewScopeOf,
+  selectIncrementalFiles,
   type FileContent,
   type GitHubClient,
   type PublishReviewResult,
@@ -35,7 +40,7 @@ export interface ExecuteReviewParams {
 }
 
 export interface ExecuteReviewOutcome {
-  outcome: 'completed' | 'skipped-budget' | 'failed';
+  outcome: 'completed' | 'skipped' | 'skipped-budget' | 'failed';
   costUsd?: number | undefined;
   detail?: string | undefined;
   publish: PublishReviewResult;
@@ -82,6 +87,25 @@ export async function executeReview(
   });
   log?.(`Found ${prFiles.length} files in PR diff`);
 
+  log?.('Selecting files for review (incremental check)...');
+  const incremental = await selectIncrementalFiles(client, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    headSha,
+    prFiles,
+    publisherLogin,
+    configHash,
+  });
+
+  const filesToReview = incremental.files;
+  const scope = reviewScopeOf(incremental);
+  log?.(`Review scope: ${scope.mode} (${filesToReview.length} files)`);
+  if (hasNothingNewToReview(incremental)) {
+    log?.(`Review skipped: ${NOTHING_NEW_DETAIL}`);
+    return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL, publish: { status: 'skipped-no-changes' } };
+  }
+
   log?.('Running review...');
   const reviewResult = await runReview({
     config,
@@ -89,7 +113,8 @@ export async function executeReview(
       title: prTitle,
       body: prBody,
     },
-    files: prFiles,
+    files: filesToReview,
+    anchorFiles: prFiles,
     rulesFiles,
     model,
     knownSecrets,
@@ -109,22 +134,45 @@ export async function executeReview(
   const envVar = PROVIDER_ENV_MAP[config.provider] ?? 'API key';
   let summaryMarkdown: string;
   let inlineFindings: Finding[];
-  let outcome: 'completed' | 'skipped-budget' | 'failed';
+  let outcome: 'completed' | 'skipped' | 'skipped-budget' | 'failed';
   let costUsd: number | undefined;
   let detail: string | undefined;
 
   if (reviewResult.status === 'completed') {
     outcome = 'completed';
     costUsd = reviewResult.costUsd;
-    inlineFindings = reviewResult.inline;
+
+    let deduplicated = reviewResult.inline;
+    if (deduplicated.length > 0) {
+      log?.('Checking for duplicate findings against existing comments...');
+      const dedupeResult = await deduplicateFindings(client, {
+        owner,
+        repo,
+        pull_number: pullNumber,
+        findings: deduplicated,
+        publisherLogin,
+      });
+      deduplicated = dedupeResult.kept;
+      if (dedupeResult.skipped) {
+        log?.('Could not read existing review comments; publishing without duplicate filtering');
+      }
+      if (deduplicated.length < reviewResult.inline.length) {
+        log?.(
+          `Dropped ${reviewResult.inline.length - deduplicated.length} duplicate findings (${deduplicated.length} remaining)`,
+        );
+      }
+    }
+    inlineFindings = deduplicated;
+
     summaryMarkdown = renderReviewSummary({
       language: config.language,
       summary: reviewResult.summary,
       summaryOnly: reviewResult.summaryOnly,
-      inlineCount: reviewResult.inline.length,
+      inlineCount: inlineFindings.length,
       complete: reviewResult.complete,
       incompleteReasons: reviewResult.result.incompleteReasons,
       modelLabel: model.label,
+      scope,
       ...fallbackSummary,
       outcome: 'completed',
       ...(reviewResult.costUsd !== undefined ? { costUsd: reviewResult.costUsd } : {}),
@@ -147,6 +195,7 @@ export async function executeReview(
       complete: false,
       incompleteReasons: [reviewResult.reason],
       modelLabel: model.label,
+      scope,
       outcome: 'skipped-budget',
       reason: reviewResult.reason,
     });
@@ -175,6 +224,7 @@ export async function executeReview(
       complete: false,
       incompleteReasons: [reason],
       modelLabel: model.label,
+      scope,
       ...fallbackSummary,
       outcome: 'failed',
       reason,
@@ -205,6 +255,9 @@ export async function executeReview(
     language: config.language,
     suggestionsAsCode: false,
     publisherLogin,
+    // Partial unless every reviewable file was covered (no failed batch, no file dropped for budget).
+    partial: !(outcome === 'completed' && reviewResult.status === 'completed' && reviewResult.complete),
+    alreadyDeduplicated: true,
   });
   log?.(`Review publication outcome: ${publish.status}`);
 

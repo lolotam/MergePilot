@@ -1,5 +1,9 @@
 import type { Finding } from '@mergepilot/engine';
 
+export type ReviewScope =
+  | { mode: 'incremental'; sinceSha: string; commitCount?: number }
+  | { mode: 'full'; reason?: string };
+
 export interface ReviewSummaryInput {
   language: 'ar' | 'en';
   /** The model's overall summary; empty when the review was skipped or failed. */
@@ -22,6 +26,8 @@ export interface ReviewSummaryInput {
    * `modelLabel` is then the fallback model. Always disclosed in the summary.
    */
   fallback?: { from: string; code: string };
+  /** Review scope (incremental vs full). */
+  scope?: ReviewScope;
 }
 
 /**
@@ -76,6 +82,23 @@ function renderFallbackLine(input: ReviewSummaryInput, isArabic: boolean): strin
   return isArabic
     ? `> ⚠️ استُخدم النموذج الاحتياطي \`${used}\` لأن \`${from}\` فشل (${code})`
     : `> ⚠️ Fallback model \`${used}\` was used because \`${from}\` failed (${code})`;
+}
+
+function renderScopeLine(scope: ReviewScope, isArabic: boolean): string {
+  if (scope.mode === 'incremental') {
+    const count = scope.commitCount ?? 1;
+    const shortSha = scope.sinceSha.slice(0, 7);
+    if (isArabic) {
+      return `> تمت مراجعة ${count} من الالتزامات الجديدة منذ \`${shortSha}\``;
+    }
+    const plural = count === 1 ? '1 new commit' : `${count} new commits`;
+    return `> Reviewed ${plural} since \`${shortSha}\``;
+  }
+
+  if (isArabic) {
+    return scope.reason ? `> مراجعة كاملة (${neutralize(scope.reason)})` : '> مراجعة كاملة';
+  }
+  return scope.reason ? `> Full review (${neutralize(scope.reason)})` : '> Full review';
 }
 
 function renderFindingsOutsideDiff(findings: Finding[], isArabic: boolean): string {
@@ -162,6 +185,10 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
 
   if (input.fallback) {
     sections.push(renderFallbackLine(input, isArabic));
+  }
+
+  if (input.scope) {
+    sections.push(renderScopeLine(input.scope, isArabic));
   }
 
   if (input.outcome !== 'completed') {

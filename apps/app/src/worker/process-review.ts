@@ -29,6 +29,7 @@ import {
 import { workerLogger } from '../core/logger.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { executeReview } from './execute-review.js';
+import { pausedWithNotice, PAUSED_DETAIL } from './pause-check.js';
 import { changedLinesOf, chooseModel, fallbackChain, skippedFallbacksNote, customBaseUrlFor, usedModel, type ModelChoice } from './model-choice.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { startRunHeartbeat } from './run-heartbeat.js';
@@ -157,6 +158,12 @@ export async function processReviewJob(
     const client = guardWritesForWorkspace(rawClient, deps.store, job.installationId, workspaceId);
 
     const pr = await client.getPullRequest({ owner, repo, pull_number: job.pullNumber });
+    const pauseParams = { owner, repo, pullNumber: job.pullNumber, publisherLogin, labels: pr.labels, language: settings.language };
+    if (await pausedWithNotice(client, pauseParams)) {
+      await deps.store.finishReviewRun(workspaceId, run.id, { status: 'skipped', costUsd: null, detail: PAUSED_DETAIL });
+      logSkip('paused', `Skipping job ${job.deliveryId}: ${PAUSED_DETAIL}`, { runId: run.id });
+      return { status: 'skipped', detail: PAUSED_DETAIL };
+    }
     const prRecord = pr as unknown as { title?: string; body?: string | null; additions?: number; deletions?: number };
     const prTitle = typeof prRecord.title === 'string' ? prRecord.title : '';
     const prBody = typeof prRecord.body === 'string' ? prRecord.body : '';
@@ -321,7 +328,7 @@ export async function processReviewJob(
     const status: ReviewRunStatus =
       reviewResult.outcome === 'completed'
         ? 'completed'
-        : reviewResult.outcome === 'skipped-budget'
+        : reviewResult.outcome === 'skipped-budget' || reviewResult.outcome === 'skipped'
           ? 'skipped'
           : 'failed';
 
