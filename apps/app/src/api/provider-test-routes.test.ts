@@ -97,6 +97,25 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('glm-4-free');
   });
 
+  it('never caches an unsaved key catalog, and skips a retired default the provider no longer lists', async () => {
+    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model: 'x', reply: 'OK' });
+    vi.mocked(listModels).mockResolvedValue([{ id: 'mimo-v2.6', name: 'MiMo v2.6', efforts: [] }]);
+
+    await test('xiaomi', h.adminCookie(), { apiKey: keyFor('xa') });
+    expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('mimo-v2.6');
+    await test('xiaomi', h.adminCookie(), { apiKey: keyFor('xb') });
+    // Each unsaved key lists its own models: nothing was served from the workspace cache.
+    expect(vi.mocked(listModels)).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the registry default when listing models fails', async () => {
+    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model: 'x', reply: 'OK' });
+    vi.mocked(listModels).mockRejectedValue(new Error('boom'));
+    const res = await test('xiaomi', h.adminCookie(), { apiKey: keyFor('xc') });
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('mimo-v2.5');
+  });
+
   it('without a model, tests the custom key with the model the workspace uses it for (heavy, then fallback)', async () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 2, model: 'x', reply: 'OK' });
     await h.credentials.saveKey({

@@ -136,11 +136,14 @@ export function testModelFor(
 ): string {
   const configured = configuredModelFor(settings, provider);
   if (configured) return configured;
+  const fallback = providerEntry(provider).defaultModel;
   if (models && models.length > 0) {
     const free = pickFreeModel(provider, models);
     if (free) return free;
+    // A registry default the provider no longer lists (retired model) would fail a valid key.
+    if (!models.some((m) => m.id === fallback)) return models[0]?.id ?? fallback;
   }
-  return providerEntry(provider).defaultModel;
+  return fallback;
 }
 
 function sendTargetError(reply: FastifyReply, result: Exclude<TargetResult, { ok: true }>): FastifyReply {
@@ -289,17 +292,23 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const settings = await deps.store.getSettings(workspaceId);
       let model = body.model?.trim() || configuredModelFor(settings, provider);
       if (!model) {
-        const cacheKey = `${workspaceId}:${provider}`;
+        // The workspace cache belongs to the stored key: an unsaved key never reads or fills it.
+        const cacheKey = apiKey ? undefined : `${workspaceId}:${provider}`;
         let models: CatalogModel[] | undefined;
-        const cached = modelsCache.get(cacheKey);
+        const cached = cacheKey ? modelsCache.get(cacheKey) : undefined;
         if (cached && Date.now() < cached.expiresAt) {
           models = cached.models;
         } else {
           try {
             models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
-            cacheModels(cacheKey, models);
-          } catch {
-            // If listing models fails, ignore and fall back to default
+            if (cacheKey) cacheModels(cacheKey, models);
+          } catch (error: unknown) {
+            if (signal.aborted) throw error;
+            // Not fatal: the test still runs on the registry default, and the reply names that model.
+            request.log.warn(
+              { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
+              'Could not list models to pick a test model; using the registry default',
+            );
           }
         }
         model = testModelFor(settings, provider, models);

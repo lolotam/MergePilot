@@ -147,7 +147,7 @@ const ENTRIES: Record<ApiProviderId, EntryInit> = {
     baseUrl: 'https://api.xiaomimimo.com/v1',
     keyHint: 'sk-',
     thinkingStyle: 'none',
-    defaultModel: 'mimo-v2-flash',
+    defaultModel: 'mimo-v2.5',
     envName: 'XIAOMI_API_KEY',
   },
   'xiaomi-token-plan': {
@@ -156,7 +156,7 @@ const ENTRIES: Record<ApiProviderId, EntryInit> = {
     baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1',
     keyHint: 'tp-',
     thinkingStyle: 'none',
-    defaultModel: 'mimo-v2-flash',
+    defaultModel: 'mimo-v2.5',
     envName: 'XIAOMI_TOKEN_PLAN_API_KEY',
   },
   'xiaomi-token-plan-cn': {
@@ -165,7 +165,7 @@ const ENTRIES: Record<ApiProviderId, EntryInit> = {
     baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
     keyHint: 'tp-',
     thinkingStyle: 'none',
-    defaultModel: 'mimo-v2-flash',
+    defaultModel: 'mimo-v2.5',
     envName: 'XIAOMI_TOKEN_PLAN_API_KEY',
   },
 };

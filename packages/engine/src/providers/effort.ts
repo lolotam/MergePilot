@@ -180,7 +180,8 @@ export function isCompatibleReasoningModel(
       return true;
     }
   }
-  if (lowerModel.includes('mimo-v2-pro') || lowerModel.includes('mimo-v2-omni')) {
+  // Xiaomi MiMo: V2 pro/omni and the whole V2.5 family (which replaced V2 on 2026-06-30) think.
+  if (/mimo-v2-(?:pro|omni)|mimo-v2\.5/.test(lowerModel)) {
     return true;
   }
   return false;

@@ -122,19 +122,19 @@ describe('testConnection', () => {
       });
     });
 
-    it('tests Xiaomi MiMo connection with default model mimo-v2-flash and no extra headroom', async () => {
+    it('tests Xiaomi MiMo connection with default model mimo-v2.5 with reasoning headroom', async () => {
       const { fetch, calls } = mockFetch(
         jsonResponse({
           choices: [{ message: { content: 'OK' } }],
         }),
       );
 
-      const result = await testConnection('xiaomi', KEY, 'mimo-v2-flash', { fetch });
+      const result = await testConnection('xiaomi', KEY, 'mimo-v2.5', { fetch });
 
       expect(result.ok).toBe(true);
       expect(calls[0]?.url).toBe('https://api.xiaomimimo.com/v1/chat/completions');
       expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
-      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16);
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16 + 8192);
     });
 
     it('tests Xiaomi MiMo mimo-v2-pro and reserves headroom for reasoning', async () => {
@@ -158,7 +158,7 @@ describe('testConnection', () => {
         }),
       );
 
-      const result = await testConnection('xiaomi-token-plan', KEY, 'mimo-v2-flash', { fetch });
+      const result = await testConnection('xiaomi-token-plan', KEY, 'mimo-v2.5', { fetch });
 
       expect(result.ok).toBe(true);
       expect(calls[0]?.url).toBe('https://token-plan-sgp.xiaomimimo.com/v1/chat/completions');

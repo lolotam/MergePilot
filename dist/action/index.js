@@ -50457,7 +50457,7 @@ var ENTRIES = {
     baseUrl: "https://api.xiaomimimo.com/v1",
     keyHint: "sk-",
     thinkingStyle: "none",
-    defaultModel: "mimo-v2-flash",
+    defaultModel: "mimo-v2.5",
     envName: "XIAOMI_API_KEY"
   },
   "xiaomi-token-plan": {
@@ -50466,7 +50466,7 @@ var ENTRIES = {
     baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
     keyHint: "tp-",
     thinkingStyle: "none",
-    defaultModel: "mimo-v2-flash",
+    defaultModel: "mimo-v2.5",
     envName: "XIAOMI_TOKEN_PLAN_API_KEY"
   },
   "xiaomi-token-plan-cn": {
@@ -50475,7 +50475,7 @@ var ENTRIES = {
     baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
     keyHint: "tp-",
     thinkingStyle: "none",
-    defaultModel: "mimo-v2-flash",
+    defaultModel: "mimo-v2.5",
     envName: "XIAOMI_TOKEN_PLAN_API_KEY"
   }
 };
@@ -94858,7 +94858,7 @@ function isCompatibleReasoningModel(provider, model, style) {
       return true;
     }
   }
-  if (lowerModel.includes("mimo-v2-pro") || lowerModel.includes("mimo-v2-omni")) {
+  if (/mimo-v2-(?:pro|omni)|mimo-v2\.5/.test(lowerModel)) {
     return true;
   }
   return false;

@@ -140,6 +140,8 @@ describe('default thinking headroom (P0.1)', () => {
     expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2-pro')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2-omni')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2-flash')).toBe(false);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2.5')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2.5-pro')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-pro')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-omni')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-flash')).toBe(false);

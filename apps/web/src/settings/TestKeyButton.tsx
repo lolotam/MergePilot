@@ -79,7 +79,10 @@ export function TestKeyButton({ workspaceId, provider, disabled = false }: TestK
         disabled={disabled || isLoading}
         onFocus={() => setWantModels(true)}
         onMouseDown={() => setWantModels(true)}
-        onChange={(e) => setSelectedModel(e.target.value)}
+        onChange={(e) => {
+          setSelectedModel(e.target.value);
+          setResult(null);
+        }}
         className="px-2 py-1 text-[11px] rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 max-w-[130px] truncate focus:ring-1 focus:ring-brand-500 focus:outline-hidden disabled:opacity-50"
       >
         <option value="">{t('testModelAuto')}</option>
