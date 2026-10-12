@@ -126,9 +126,13 @@ export async function getWorkspaces(
       set.add(row.provider);
       providers.set(row.wsId, set);
     }
-    const usageCost = new Map(usageRows.map((row) => [row.wsId, toUsd(row.cost)]));
     for (const row of runRows) {
-      runStats.set(row.wsId, { n: Number(row.n), cost: usageCost.get(row.wsId) ?? toUsd(row.cost), last: row.last });
+      runStats.set(row.wsId, { n: Number(row.n), cost: toUsd(row.cost), last: row.last });
+    }
+    // The usage summary wins for cost, also for a workspace whose runs were all pruned.
+    for (const row of usageRows) {
+      const stats = runStats.get(row.wsId) ?? { n: 0, cost: 0, last: null };
+      runStats.set(row.wsId, { ...stats, cost: toUsd(row.cost) });
     }
   }
 

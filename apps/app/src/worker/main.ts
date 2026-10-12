@@ -176,18 +176,20 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   };
 
   // Daily run retention (ADR-0014). Started in the background: a slow Redis must not hold up reviews.
-  let maintenance: MaintenanceScheduler | undefined;
-  if (connection) {
-    startMaintenanceScheduler(services.store, connection, workerLog)
-      .then((scheduler) => {
-        maintenance = scheduler;
-        workerLog.info({ event: 'worker.retention_scheduled' }, 'Daily run retention scheduled (03:00 UTC)');
-      })
-      .catch((err: unknown) => {
-        const name = err instanceof Error ? err.name : 'unknown error';
-        workerLog.error({ event: 'worker.retention_schedule_failed', errorName: name }, `Failed to schedule run retention: ${name}`);
-      });
-  }
+  // `stop()` awaits this promise, so a scheduler that finishes starting during shutdown is closed too.
+  const maintenanceStart: Promise<MaintenanceScheduler | undefined> = connection
+    ? startMaintenanceScheduler(services.store, connection, workerLog).then(
+        (scheduler) => {
+          workerLog.info({ event: 'worker.retention_scheduled' }, 'Daily run retention scheduled (03:00 UTC)');
+          return scheduler;
+        },
+        (err: unknown) => {
+          const name = err instanceof Error ? err.name : 'unknown error';
+          workerLog.error({ event: 'worker.retention_schedule_failed', errorName: name }, `Failed to schedule run retention: ${name}`);
+          return undefined;
+        },
+      )
+    : Promise.resolve(undefined);
 
   await sweepStale();
   const sweepTimer = setInterval(() => {
@@ -200,7 +202,7 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     await Promise.allSettled([
       new Promise<void>((resolve) => healthServer.close(() => resolve())),
       worker.close(),
-      maintenance?.close(),
+      maintenanceStart.then((maintenance) => maintenance?.close()),
       services.close(),
     ]);
   };

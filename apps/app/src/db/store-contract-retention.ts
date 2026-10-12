@@ -87,6 +87,25 @@ export function defineRetentionContract(
     }
   });
 
+  it('a run finished twice replaces its earlier usage instead of counting twice', async () => {
+    const store = await createStore();
+    try {
+      const run = await seed(store, { pullNumber: 7 }, 'failed', 0.1);
+      // e.g. the stale sweep failed it, then its worker finished it for real
+      await store.finishReviewRun(WS, run.id, {
+        status: 'completed',
+        costUsd: 0.4,
+        detail: null,
+        result: { v: 1, summary: '', highlights: [], findings: [], language: 'en', usage: { inputTokens: 10, outputTokens: 5 } },
+      });
+      const [row] = await store.listMonthlyUsage(WS);
+      expect(row).toMatchObject({ runsTotal: 1, runsCompleted: 1, runsFailed: 0, inputTokens: 10, outputTokens: 5 });
+      expect(row?.costUsd).toBeCloseTo(0.4, 6);
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   it('bulk delete by ids never deletes queued/running runs and rejects ids of another workspace', async () => {
     const store = await createStore();
     try {

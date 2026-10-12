@@ -20,7 +20,8 @@ import type { ListReviewRunsOptions, ReviewRun, WorkspaceSettings } from './type
 // In-memory twins of pg-usage.ts, pg-run-groups.ts and pg-maintenance.ts, used by MemoryStore.
 
 /** Adds a finished run to its month's usage (the run's createdAt picks the month). */
-export function addMemoryUsage(usage: Map<string, MonthlyUsage>, run: ReviewRun): void {
+/** Adds (sign 1) or takes back (sign -1) one finished run in its month's usage. */
+export function addMemoryUsage(usage: Map<string, MonthlyUsage>, run: ReviewRun, sign: 1 | -1 = 1): void {
   if (!FINISHED_RUN_STATUSES.includes(run.status)) return;
   const month = usageMonth(run.createdAt);
   const key = `${run.workspaceId}\u0000${month}`;
@@ -37,12 +38,12 @@ export function addMemoryUsage(usage: Map<string, MonthlyUsage>, run: ReviewRun)
   const tokens = runTokens(run);
   usage.set(key, {
     ...row,
-    runsTotal: row.runsTotal + 1,
-    runsCompleted: row.runsCompleted + (run.status === 'completed' ? 1 : 0),
-    runsFailed: row.runsFailed + (run.status === 'failed' ? 1 : 0),
-    costUsd: row.costUsd + (run.costUsd ?? 0),
-    inputTokens: row.inputTokens + (tokens.inputTokens ?? 0),
-    outputTokens: row.outputTokens + (tokens.outputTokens ?? 0),
+    runsTotal: row.runsTotal + sign * 1,
+    runsCompleted: row.runsCompleted + sign * (run.status === 'completed' ? 1 : 0),
+    runsFailed: row.runsFailed + sign * (run.status === 'failed' ? 1 : 0),
+    costUsd: row.costUsd + sign * (run.costUsd ?? 0),
+    inputTokens: row.inputTokens + sign * (tokens.inputTokens ?? 0),
+    outputTokens: row.outputTokens + sign * (tokens.outputTokens ?? 0),
   });
 }
 

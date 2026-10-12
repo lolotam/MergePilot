@@ -35,6 +35,18 @@ function deltaFor(
   };
 }
 
+function negate(d: UsageDelta): UsageDelta {
+  return {
+    ...d,
+    runsTotal: -d.runsTotal,
+    runsCompleted: -d.runsCompleted,
+    runsFailed: -d.runsFailed,
+    costUsd: -d.costUsd,
+    inputTokens: -d.inputTokens,
+    outputTokens: -d.outputTokens,
+  };
+}
+
 /** Adds one delta to the month's summary row (insert, or add to the existing counters). */
 async function addUsage(tx: PgBase, d: UsageDelta): Promise<void> {
   const t = workspaceUsageMonthly;
@@ -79,6 +91,19 @@ export async function finishPgReviewRun(
 
   const pg: PgBase = db;
   await pg.transaction(async (tx) => {
+    // A run finished twice (e.g. failed by the stale sweep, then finished by its worker) replaces
+    // its earlier usage instead of counting twice.
+    const before = await tx
+      .select({ status: reviewRuns.status, costUsd: reviewRuns.costUsd, result: reviewRuns.result, createdAt: reviewRuns.createdAt })
+      .from(reviewRuns)
+      .where(and(eq(reviewRuns.id, id), eq(reviewRuns.workspaceId, workspaceId)))
+      .for('update');
+    const prior = before[0];
+    if (prior && FINISHED_RUN_STATUSES.includes(prior.status as ReviewRunStatus)) {
+      const usage = (prior.result as { usage?: { inputTokens: number; outputTokens: number } } | null)?.usage;
+      const d = deltaFor(workspaceId, new Date(prior.createdAt), prior.status as ReviewRunStatus, prior.costUsd === null ? null : Number(prior.costUsd), usage);
+      await addUsage(tx, negate(d));
+    }
     const rows = await tx
       .update(reviewRuns)
       .set(updateValues)

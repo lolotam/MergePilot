@@ -209,6 +209,9 @@ export class MemoryStore implements AppStore {
     const now = new Date();
     const finished: ReviewRun = { ...run, ...result, finishedAt: now, updatedAt: now };
     this.runs.set(id, finished);
+    // A run finished twice (e.g. failed by the stale sweep, then finished by its worker) replaces
+    // its earlier usage instead of counting twice.
+    addMemoryUsage(this.usage, run, -1);
     addMemoryUsage(this.usage, finished);
   }
 
