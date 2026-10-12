@@ -201,10 +201,10 @@ describe('processReviewJob', () => {
     expect(runs[0]?.detail).toBe('workspace not configured');
   });
 
-  it('uses the workspace provider and model even when the repo config targets claude-code', async () => {
+  it('uses the workspace provider, model and language even when the repo config differs', async () => {
     const claudeCodeYaml = `
 provider: claude-code
-language: en
+language: ar
 review:
   maxFindings: 5
 budget:
