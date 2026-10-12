@@ -145,3 +145,14 @@ export function runTokens(run: Pick<ReviewRun, 'result'>): { inputTokens: number
     outputTokens: typeof usage?.outputTokens === 'number' ? usage.outputTokens : null,
   };
 }
+
+/**
+ * How long a run took: finishedAt minus createdAt (runs have no separate start time, so a queued
+ * wait counts). Null while the run is queued or running, or when the timestamps are missing or
+ * out of order. `runDurationExpr` (pg-run-filters.ts) is the SQL twin used for sorting.
+ */
+export function runDurationMs(run: Pick<ReviewRun, 'status' | 'createdAt' | 'finishedAt'>): number | null {
+  if (!FINISHED_RUN_STATUSES.includes(run.status) || !run.finishedAt) return null;
+  const ms = run.finishedAt.getTime() - run.createdAt.getTime();
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}

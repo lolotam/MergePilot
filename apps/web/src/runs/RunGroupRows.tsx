@@ -5,6 +5,7 @@ import { useI18n } from '../i18n/context.js';
 import { RunActionCell } from './RunActionCell.js';
 import { RunModelBadge, RunProviderBadge, RunSeverityChips } from './RunBadges.js';
 import { RunStatusBadge, formatCost, formatTokens, isDeletable } from './RunCells.js';
+import { RunDuration } from './RunDuration.js';
 import { RepoChip } from './RepoColorPicker.js';
 import type { RepoColor } from './repo-colors.js';
 import { SelectBox } from './SelectBox.js';
@@ -60,6 +61,7 @@ function RunDetailCells({ run, ctx }: { run: ReviewRun; ctx: RunRowsContext }) {
       </td>
       <td className={`${td} font-mono tabular-nums`}>{formatTokens(run.inputTokens, language)}</td>
       <td className={`${td} font-mono tabular-nums`}>{formatTokens(run.outputTokens, language)}</td>
+      <td className={`${td} font-mono tabular-nums whitespace-nowrap`} data-testid="run-duration"><RunDuration run={run} /></td>
       <td className={`${td} font-mono text-ink-900 dark:text-ink-100`}>{formatCost(run.costUsd)}</td>
       <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}>{new Date(run.createdAt).toLocaleString()}</td>
       <td className={`${td} text-center`} onClick={(e) => e.stopPropagation()}>
@@ -174,6 +176,8 @@ export function RunGroupRows({ group, number, color, expanded, onToggle, ...ctx 
         </td>
         <td className={`${td} font-mono tabular-nums font-semibold`}>{formatTokens(group.inputTokens, language)}</td>
         <td className={`${td} font-mono tabular-nums font-semibold`}>{formatTokens(group.outputTokens, language)}</td>
+        {/* Like status, provider and model: the latest run's duration, not a sum. */}
+        <td className={`${td} font-mono tabular-nums whitespace-nowrap`} data-testid="run-duration"><RunDuration run={latest} /></td>
         <td className={`${td} font-mono font-semibold text-ink-900 dark:text-ink-100`}>{formatCost(group.costUsd)}</td>
         <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}>{new Date(latest.createdAt).toLocaleString()}</td>
         <td className={`${td} text-center text-ink-300 dark:text-ink-600`}>—</td>

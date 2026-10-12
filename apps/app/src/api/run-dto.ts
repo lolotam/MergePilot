@@ -1,10 +1,10 @@
-import { runTokens, type ReviewRunGroup } from '../core/run-types.js';
+import { runDurationMs, runTokens, type ReviewRunGroup } from '../core/run-types.js';
 import type { ReviewRun } from '../core/types.js';
 import { computeSeverityCounts, type ReviewRun as ReviewRunDto, type RunGroup } from './contract.js';
 
 const iso = (d: Date | string) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
 
-/** A run as the runs list returns it (no result payload; tokens and severity counts from it). */
+/** A run as the runs list returns it (no result payload; tokens, severity counts and duration from it). */
 export function toRunDto(r: ReviewRun): ReviewRunDto {
   const tokens = runTokens(r);
   return {
@@ -26,6 +26,7 @@ export function toRunDto(r: ReviewRun): ReviewRunDto {
     reviewUrl: r.reviewUrl ?? null,
     inputTokens: tokens.inputTokens,
     outputTokens: tokens.outputTokens,
+    durationMs: runDurationMs(r),
   };
 }
 

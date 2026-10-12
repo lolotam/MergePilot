@@ -4,7 +4,7 @@ import {
   type ListReviewRunsOptions,
   type ReviewRun,
 } from './types.js';
-import { runTokens, type RunFilters } from './run-types.js';
+import { runDurationMs, runTokens, type RunFilters } from './run-types.js';
 
 /** The key of the one-active-run-per-head rule (migration 0004). */
 export interface ActiveRunKey {
@@ -92,8 +92,6 @@ export function filterRuns(runs: Iterable<ReviewRun>, workspaceId: string, opts:
   return out;
 }
 
-const duration = (r: ReviewRun): number => (r.finishedAt?.getTime() ?? r.createdAt.getTime()) - r.createdAt.getTime();
-
 /** In-memory twin of `runSortOrder`: a comparator for a sort key, ties broken by id. */
 export function compareRuns(
   sortKey: ListReviewRunsOptions['sort'],
@@ -130,9 +128,18 @@ export function compareRuns(
       case 'outputTokens':
         cmp = (runTokens(a).outputTokens ?? 0) - (runTokens(b).outputTokens ?? 0);
         break;
-      case 'duration':
-        cmp = duration(a) - duration(b);
+      case 'duration': {
+        // Like the SQL `nulls last`: runs with no duration go last in both directions.
+        const da = runDurationMs(a);
+        const db = runDurationMs(b);
+        if (da === null || db === null) {
+          if (da !== db) return da === null ? 1 : -1;
+          cmp = 0;
+        } else {
+          cmp = da - db;
+        }
         break;
+      }
       case 'createdAt':
       default:
         cmp = a.createdAt.getTime() - b.createdAt.getTime();

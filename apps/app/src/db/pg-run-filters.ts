@@ -47,6 +47,15 @@ export function tokensExpr(result: SQLWrapper, field: 'inputTokens' | 'outputTok
     THEN (${result} -> 'usage' ->> ${key})::numeric END)`;
 }
 
+/**
+ * A run's duration in seconds (finished_at - created_at); NULL while queued/running or when the
+ * timestamps are missing or out of order. SQL twin of `runDurationMs` (core/run-types.ts).
+ */
+export function runDurationExpr(cols: Pick<SortableRunColumns, 'status' | 'createdAt' | 'finishedAt'>): SQL {
+  return sql`(CASE WHEN ${cols.status} NOT IN ('queued', 'running') AND ${cols.finishedAt} >= ${cols.createdAt}
+    THEN extract(epoch from (${cols.finishedAt} - ${cols.createdAt})) END)`;
+}
+
 /** The columns a sort key reads: the review_runs table itself or a subquery over it. */
 export interface SortableRunColumns {
   repoFullName: SQLWrapper;
@@ -97,7 +106,7 @@ export function runSortOrder(
       column = tokensExpr(cols.result, 'outputTokens');
       break;
     case 'duration':
-      column = sql`coalesce(extract(epoch from (${cols.finishedAt} - ${cols.createdAt})), 0)`;
+      column = runDurationExpr(cols);
       break;
     case 'createdAt':
     default:
