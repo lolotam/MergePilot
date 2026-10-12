@@ -11,6 +11,7 @@ import {
   ClaudeCodeRunner,
   createReviewModel,
   EnvCredentialStore,
+  resolveReviewSecrets,
   Secret,
   type CredentialStore,
   type MergePilotConfig,
@@ -153,7 +154,9 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
   log(`Loaded configuration for provider: ${config.provider}`);
 
   const store = new EnvCredentialStore(env);
-  const providerSecret = await store.resolve({ provider: config.provider }, 'review');
+  // The primary key (none for a keyless custom server) plus every configured fallback key, so
+  // all of them are redacted from the prompt before any model is called.
+  const providerSecrets = await resolveReviewSecrets(config, store);
   const githubSecret = new Secret(githubToken);
 
   let sandbox: SanitizedWorkspace | undefined;
@@ -199,6 +202,9 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
       ...(tempConfigDir ? { configDir: tempConfigDir } : {}),
     });
     log(`Created review model: ${model.label}`);
+    for (const skipped of model.skippedFallbacks ?? []) {
+      log(`Fallback ${skipped.label} skipped: ${skipped.reason}`);
+    }
 
     const configHash = createHash('sha256')
       .update(configText)
@@ -223,7 +229,7 @@ export async function runPullRequestReview(deps?: PullRequestReviewDeps): Promis
       configHash,
       rulesFiles,
       model,
-      knownSecrets: [providerSecret, githubSecret],
+      knownSecrets: [...providerSecrets, githubSecret],
       publisherLogin,
       log,
     });

@@ -1,10 +1,10 @@
-import type { FallbackEntry, MergePilotConfig } from '../config/schema.js';
+import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
-import type { AnyCredentialStore } from '../credentials/store.js';
+import { credentialEnvName, type AnyCredentialStore } from '../credentials/store.js';
 import type { LlmAdapter } from '../llm/adapter.js';
 import { LlmFailure } from '../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, withRetry } from '../llm/retry.js';
-import { modelFromAdapter, type ReviewModel } from '../review/model.js';
+import { modelFromAdapter, type ReviewModel, type SkippedFallback } from '../review/model.js';
 import { AnthropicAdapter } from './anthropic/adapter.js';
 import { ClaudeCodeRunner } from './claude-code/runner.js';
 import { OpenAICompatibleAdapter } from './compatible/adapter.js';
@@ -37,6 +37,7 @@ function withRetries(adapter: LlmAdapter, model: string, effort: string | undefi
   const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
   return {
     label: base.label,
+    ...(base.outputTokensFor ? { outputTokensFor: base.outputTokensFor } : {}),
     generate(request) {
       return withRetry(
         () => base.generate(request),
@@ -64,30 +65,61 @@ async function resolveKey(store: AnyCredentialStore, provider: ApiProviderId): P
   return store.resolve({ provider }, 'review');
 }
 
-/**
- * A fallback model whose key is resolved on first use, so a missing fallback key never stops a
- * review the primary model can finish; it fails as `auth` and the chain moves on.
- */
-function lazyFallback(entry: FallbackEntry, store: AnyCredentialStore): ReviewModel {
-  let built: Promise<ReviewModel> | undefined;
-  return {
-    label: `${entry.provider}:${entry.model}`,
-    async generate(request) {
-      built ??= resolveKey(store, entry.provider).then((key) =>
-        withRetries(createAdapter(entry.provider, key, entry.baseUrl), entry.model, entry.effort),
-      );
-      const model = await built.catch((error: unknown) => {
-        built = undefined;
-        throw error;
-      });
-      return model.generate(request);
-    },
-  };
+export interface ResolvedFallbacks {
+  /** Usable fallback models, in configured order; each honours its own `effort`. */
+  models: ReviewModel[];
+  /** The fallback keys, resolved BEFORE any model call so the prompt can be redacted of them. */
+  secrets: Secret[];
+  /** Entries left out (no key, or not buildable), each with a reason the review discloses. */
+  skipped: SkippedFallback[];
 }
 
-/** The configured fallback chain (ADR-0008) as lazy review models, in order. */
-export function createFallbackModels(config: MergePilotConfig, store: AnyCredentialStore): ReviewModel[] {
-  return (config.fallback ?? []).map((entry) => lazyFallback(entry, store));
+/**
+ * The configured fallback chain (ADR-0008), resolved up front. A missing fallback key never
+ * stops a review the primary model can finish: that entry is skipped with a disclosed reason.
+ */
+export async function resolveFallbacks(config: MergePilotConfig, store: AnyCredentialStore): Promise<ResolvedFallbacks> {
+  const resolved: ResolvedFallbacks = { models: [], secrets: [], skipped: [] };
+  for (const entry of config.fallback ?? []) {
+    const label = `${entry.provider}:${entry.model}`;
+    let key: Secret | undefined;
+    try {
+      key = await resolveKey(store, entry.provider);
+    } catch {
+      resolved.skipped.push({ label, reason: `no API key is configured (${credentialEnvName(entry.provider)})` });
+      continue;
+    }
+    if (key) resolved.secrets.push(key);
+    try {
+      resolved.models.push(withRetries(createAdapter(entry.provider, key, entry.baseUrl), entry.model, entry.effort));
+    } catch {
+      resolved.skipped.push({ label, reason: 'the provider could not be set up' });
+    }
+  }
+  return resolved;
+}
+
+/**
+ * Every provider key a review with this config may send: the primary key (none for a keyless
+ * `custom` server) plus each configured fallback key that is present. Shells pass these to the
+ * pipeline as known secrets. A missing primary key still throws, as before.
+ */
+export async function resolveReviewSecrets(config: MergePilotConfig, store: AnyCredentialStore): Promise<Secret[]> {
+  const primary =
+    config.provider === 'custom'
+      ? await resolveKey(store, 'custom')
+      : await store.resolve({ provider: config.provider }, 'review');
+  const fallbacks = await resolveFallbacks(config, store);
+  return [...(primary ? [primary] : []), ...fallbacks.secrets];
+}
+
+/** What rides along on the primary model: fallbacks, every key to redact, and skipped entries. */
+function attachments(primaryKey: Secret | undefined, fallbacks: ResolvedFallbacks) {
+  return {
+    ...(fallbacks.models.length > 0 ? { fallbacks: fallbacks.models } : {}),
+    secrets: [...(primaryKey ? [primaryKey] : []), ...fallbacks.secrets],
+    ...(fallbacks.skipped.length > 0 ? { skippedFallbacks: fallbacks.skipped } : {}),
+  };
 }
 
 /**
@@ -100,7 +132,6 @@ export async function createReviewModel(
   store: AnyCredentialStore,
   opts: CreateReviewModelOptions,
 ): Promise<ReviewModel> {
-  const fallbacks = createFallbackModels(config, store);
   if (config.provider === 'claude-code') {
     const token = await store.resolve({ provider: 'claude-code' }, 'review');
     const runner = new ClaudeCodeRunner({
@@ -109,7 +140,7 @@ export async function createReviewModel(
       ...(config.model ? { model: config.model } : {}),
       ...(opts.configDir ? { configDir: opts.configDir } : {}),
     });
-    return fallbacks.length > 0 ? Object.assign(runner, { fallbacks }) : runner;
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config, store)));
   }
 
   if (!isApiProviderId(config.provider)) {
@@ -124,5 +155,5 @@ export async function createReviewModel(
     throw new Error(`Model is required for provider: ${config.provider}`);
   }
   const model = withRetries(adapter, config.model, config.effort);
-  return fallbacks.length > 0 ? { ...model, fallbacks } : model;
+  return { ...model, ...attachments(apiKey, await resolveFallbacks(config, store)) };
 }

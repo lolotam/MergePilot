@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import type { Secret } from '../../credentials/secret.js';
-import { LlmAdapter } from '../../llm/adapter.js';
+import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import type { FinishReason, GenerateOptions, StreamChunk } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
@@ -44,6 +44,12 @@ export class GeminiAdapter extends LlmAdapter {
     }
   }
 
+  override requestedOutputTokens(options: OutputTokenRequest): number {
+    const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
+    const thinks = thinkingConfig !== undefined && !('thinkingBudget' in thinkingConfig && thinkingConfig.thinkingBudget === 0);
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
+
   async *stream(options: GenerateOptions): AsyncGenerator<StreamChunk> {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -67,9 +73,8 @@ export class GeminiAdapter extends LlmAdapter {
       }));
 
     const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
-    const thinks = thinkingConfig !== undefined && !('thinkingBudget' in thinkingConfig && thinkingConfig.thinkingBudget === 0);
     const config: Record<string, unknown> = {
-      maxOutputTokens: options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0),
+      maxOutputTokens: this.requestedOutputTokens(options),
       ...(thinkingConfig ? { thinkingConfig } : {}),
       ...(options.signal ? { abortSignal: options.signal } : {}),
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),

@@ -32,6 +32,9 @@ audit:
     workspaceFiles?: Array<{ path: string; size: number }>;
     modelResponseText?: string;
     provider?: 'anthropic' | 'claude-code';
+    configYaml?: string;
+    env?: Record<string, string | undefined>;
+    fileContent?: string;
   }
 
   function setupTest(options: SetupOptions = {}) {
@@ -41,7 +44,7 @@ audit:
     const logs: string[] = [];
     const log = (msg: string) => logs.push(msg);
 
-    const configYaml = baseConfigYaml(auditEnabled, output, options.provider ?? 'anthropic');
+    const configYaml = options.configYaml ?? baseConfigYaml(auditEnabled, output, options.provider ?? 'anthropic');
     const filesAtRef = options.filesAtRef ?? {
       [`${sha}:.mergepilot.yml`]: configYaml,
       [`${sha}:CLAUDE.md`]: '# Claude guidelines',
@@ -55,6 +58,7 @@ audit:
       ANTHROPIC_API_KEY: 'sk-ant-test-key-456',
       CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-test-789',
       GITHUB_STEP_SUMMARY: '/fake/step_summary.md',
+      ...options.env,
     };
 
     const createdIssues: CreateIssueParams[] = [];
@@ -106,7 +110,7 @@ audit:
     });
 
     const fileStore: Record<string, string> = {
-      'src/index.ts': 'export const hello = "world";',
+      'src/index.ts': options.fileContent ?? 'export const hello = "world";',
     };
 
     const readFile = vi.fn(async (path: string) => {
@@ -210,5 +214,49 @@ audit:
     expect(opts?.cwd).toBeDefined();
     expect(opts?.cwd).not.toBe('/fake/workspace');
     expect(opts?.configDir).toBeDefined();
+  });
+
+  it('runs a keyless custom provider without asking for a credential', async () => {
+    const { deps, createModel, summariesWritten } = setupTest({
+      configYaml: `
+provider: custom
+model: local-model
+baseUrl: http://localhost:8080/v1
+language: en
+audit:
+  enabled: true
+`,
+      env: { ANTHROPIC_API_KEY: undefined, CUSTOM_LLM_API_KEY: undefined },
+    });
+
+    await runAudit(deps);
+
+    expect(createModel).toHaveBeenCalled();
+    expect(summariesWritten).toHaveLength(1);
+  });
+
+  it('redacts a configured fallback key from the audit prompt', async () => {
+    const fallbackKey = ['zq', 'x9'.repeat(8), 'mn'].join('');
+    const { deps, createModel } = setupTest({
+      configYaml: `
+provider: anthropic
+model: claude-3-5-sonnet
+language: en
+fallback:
+  - provider: xai
+    model: grok-4
+audit:
+  enabled: true
+`,
+      env: { XAI_API_KEY: fallbackKey },
+      fileContent: `// ${fallbackKey}`,
+    });
+
+    await runAudit(deps);
+
+    const model = (await createModel.mock.results[0]?.value) as ReviewModel;
+    const prompts = (model.generate as ReturnType<typeof vi.fn>).mock.calls.map((c) => JSON.stringify(c[0]));
+    expect(prompts.length).toBeGreaterThan(0);
+    expect(prompts.join('')).not.toContain(fallbackKey);
   });
 });

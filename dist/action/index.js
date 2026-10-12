@@ -50476,6 +50476,9 @@ var PROVIDER_ENV_MAP = {
   ...Object.fromEntries(Object.values(PROVIDER_REGISTRY).map((entry) => [entry.id, entry.envName])),
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
 };
+function credentialEnvName(provider) {
+  return PROVIDER_ENV_MAP[provider];
+}
 var EnvCredentialStore = class {
   #env;
   constructor(env2 = process.env) {
@@ -70688,6 +70691,13 @@ var FallbackChain = class {
   constructor(primary, fallbacks = []) {
     this.#models = [primary, ...fallbacks];
   }
+  /**
+   * The largest output-token limit any model in the chain would request, so a budget
+   * preflight stays a true ceiling whichever model ends up answering.
+   */
+  outputTokensFor(maxOutputTokens) {
+    return Math.max(...this.#models.map((m2) => m2.outputTokensFor?.(maxOutputTokens) ?? maxOutputTokens));
+  }
   get label() {
     return this.#current().label;
   }
@@ -70713,9 +70723,11 @@ var FallbackChain = class {
     }
   }
   disclosure() {
+    const skipped = this.#models[0]?.skippedFallbacks ?? [];
     return {
       modelUsed: this.label,
-      ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {}
+      ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {},
+      ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}
     };
   }
 };
@@ -70772,9 +70784,15 @@ async function collectText(stream2) {
   return { text, usage, finishReason };
 }
 
+function secretsToRedact(known, model, fallbacks = model.fallbacks ?? []) {
+  return [...known, ...model.secrets ?? [], ...fallbacks.flatMap((m2) => m2.secrets ?? [])];
+}
 function modelFromAdapter(adapter, model, effort) {
   return {
     label: `${adapter.provider}:${model}`,
+    outputTokensFor(maxOutputTokens) {
+      return adapter.requestedOutputTokens({ model, maxOutputTokens, ...effort ? { effort } : {} });
+    },
     async generate(request2) {
       const result = await collectText(adapter.stream({
         model,
@@ -71443,8 +71461,10 @@ function combineUsage(u1, u2) {
   };
 }
 async function runReview(input2) {
-  const { config: config2, pr, files, rulesFiles, knownSecrets, signal } = input2;
-  const model = new FallbackChain(input2.model, input2.fallbackModels ?? input2.model.fallbacks ?? []);
+  const { config: config2, pr, files, rulesFiles, signal } = input2;
+  const fallbackModels = input2.fallbackModels ?? input2.model.fallbacks ?? [];
+  const model = new FallbackChain(input2.model, fallbackModels);
+  const knownSecrets = secretsToRedact(input2.knownSecrets, input2.model, fallbackModels);
   const reviewCfg = config2.review;
   const budgetCfg = config2.budget;
   const incompleteReasons = [];
@@ -71499,11 +71519,13 @@ async function runReview(input2) {
     return { status: "skipped-budget", reason: budgetResult.reason };
   }
   const maxOutputTokens = 4096;
+  const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
+  const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
   let estimatedCostUsd;
   if (budgetCfg.pricing) {
-    estimatedCostUsd = estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing);
+    estimatedCostUsd = estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing);
     if (reviewCfg.verify) {
-      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS }, budgetCfg.pricing);
+      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens }, budgetCfg.pricing);
     }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return {
@@ -71588,7 +71610,7 @@ async function runReview(input2) {
   const disclosure = model.disclosure();
   let reviewCostUsd;
   if (budgetCfg.pricing && !disclosure.fallbackFrom) {
-    reviewCostUsd = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : estimatedCostUsd ?? estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens }, budgetCfg.pricing);
+    reviewCostUsd = totalUsage ? costUsd(totalUsage, budgetCfg.pricing) : estimatedCostUsd ?? estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: reviewOutputTokens }, budgetCfg.pricing);
   }
   return {
     status: "completed",
@@ -71607,6 +71629,14 @@ async function runReview(input2) {
 
 var LlmAdapter = class {
   retryPolicy;
+  /**
+   * The output-token limit one call actually sends for this model and effort: the answer
+   * budget plus any thinking headroom. Adapters build their request from it and the budget
+   * preflight prices it, so the two never disagree.
+   */
+  requestedOutputTokens(options) {
+    return options.maxOutputTokens;
+  }
 };
 
 var DEFAULT_RETRY_POLICY = Object.freeze({
@@ -94420,6 +94450,10 @@ var OpenAIAdapter = class extends LlmAdapter {
     this.#apiKey = options.apiKey;
     this.#client = options.client ?? new OpenAI({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
+  requestedOutputTokens(options) {
+    const reasoningEffort = openAIReasoningEffort(options.effort);
+    return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
+  }
   async *stream(options) {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -94436,7 +94470,7 @@ var OpenAIAdapter = class extends LlmAdapter {
     const params = {
       model: options.model,
       messages,
-      max_completion_tokens: options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0),
+      max_completion_tokens: this.requestedOutputTokens(options),
       ...reasoningEffort ? { reasoning_effort: reasoningEffort } : {},
       stream: true,
       stream_options: {
@@ -94602,6 +94636,10 @@ var AnthropicAdapter = class extends LlmAdapter {
     this.#apiKey = options.apiKey;
     this.#client = options.client ?? new Anthropic({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
+  requestedOutputTokens(options) {
+    const thinks = anthropicThinking(options.model, options.effort) !== void 0;
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
   async *stream(options) {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -94634,7 +94672,7 @@ ${schemaStr}`);
     const thinking = anthropicThinking(options.model, options.effort);
     const streamParams = {
       model: options.model,
-      max_tokens: options.maxOutputTokens + (thinking ? thinkingHeadroom(options.effort) : 0),
+      max_tokens: this.requestedOutputTokens(options),
       messages,
       ...system ? { system } : {},
       ...options.temperature !== void 0 && !thinking ? { temperature: options.temperature } : {},
@@ -118098,6 +118136,11 @@ var GeminiAdapter = class extends LlmAdapter {
       this.#client = new GoogleGenAI2({ apiKey: options.apiKey.reveal() });
     }
   }
+  requestedOutputTokens(options) {
+    const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
+    const thinks = thinkingConfig !== void 0 && !("thinkingBudget" in thinkingConfig && thinkingConfig.thinkingBudget === 0);
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
   async *stream(options) {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -118113,9 +118156,8 @@ var GeminiAdapter = class extends LlmAdapter {
       parts: [{ text: m2.content }]
     }));
     const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
-    const thinks = thinkingConfig !== void 0 && !("thinkingBudget" in thinkingConfig && thinkingConfig.thinkingBudget === 0);
     const config2 = {
-      maxOutputTokens: options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0),
+      maxOutputTokens: this.requestedOutputTokens(options),
       ...thinkingConfig ? { thinkingConfig } : {},
       ...options.signal ? { abortSignal: options.signal } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
@@ -118385,6 +118427,10 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
     this.#style = entry.thinkingStyle;
     this.#streamUsage = entry.streamUsage;
   }
+  requestedOutputTokens(options) {
+    const thinks = Object.keys(compatibleEffortFields(this.#style, options.effort)).length > 0;
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
   /** The JSON request body; exposed for tests of the effort mapping. */
   requestBody(options) {
     const messages = options.messages.map((m2) => ({ role: m2.role, content: m2.content }));
@@ -118400,11 +118446,10 @@ ${instruction}`;
         messages.unshift({ role: "system", content: instruction });
     }
     const effortFields = compatibleEffortFields(this.#style, options.effort);
-    const headroom = Object.keys(effortFields).length > 0 ? thinkingHeadroom(options.effort) : 0;
     return {
       model: options.model,
       messages,
-      max_tokens: options.maxOutputTokens + headroom,
+      max_tokens: this.requestedOutputTokens(options),
       stream: true,
       ...this.#streamUsage ? { stream_options: { include_usage: true } } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
@@ -118510,6 +118555,7 @@ function withRetries(adapter, model, effort) {
   const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
   return {
     label: base.label,
+    ...base.outputTokensFor ? { outputTokensFor: base.outputTokensFor } : {},
     generate(request2) {
       return withRetry(() => base.generate(request2), policy, request2.signal ? { sleep: (ms) => new Promise((resolve2) => setTimeout(resolve2, ms)), random: Math.random, signal: request2.signal } : void 0);
     }
@@ -118525,25 +118571,40 @@ async function resolveKey(store, provider) {
   }
   return store.resolve({ provider }, "review");
 }
-function lazyFallback(entry, store) {
-  let built;
-  return {
-    label: `${entry.provider}:${entry.model}`,
-    async generate(request2) {
-      built ??= resolveKey(store, entry.provider).then((key) => withRetries(createAdapter(entry.provider, key, entry.baseUrl), entry.model, entry.effort));
-      const model = await built.catch((error62) => {
-        built = void 0;
-        throw error62;
-      });
-      return model.generate(request2);
+async function resolveFallbacks(config2, store) {
+  const resolved = { models: [], secrets: [], skipped: [] };
+  for (const entry of config2.fallback ?? []) {
+    const label = `${entry.provider}:${entry.model}`;
+    let key;
+    try {
+      key = await resolveKey(store, entry.provider);
+    } catch {
+      resolved.skipped.push({ label, reason: `no API key is configured (${credentialEnvName(entry.provider)})` });
+      continue;
     }
+    if (key)
+      resolved.secrets.push(key);
+    try {
+      resolved.models.push(withRetries(createAdapter(entry.provider, key, entry.baseUrl), entry.model, entry.effort));
+    } catch {
+      resolved.skipped.push({ label, reason: "the provider could not be set up" });
+    }
+  }
+  return resolved;
+}
+async function resolveReviewSecrets(config2, store) {
+  const primary = config2.provider === "custom" ? await resolveKey(store, "custom") : await store.resolve({ provider: config2.provider }, "review");
+  const fallbacks = await resolveFallbacks(config2, store);
+  return [...primary ? [primary] : [], ...fallbacks.secrets];
+}
+function attachments(primaryKey, fallbacks) {
+  return {
+    ...fallbacks.models.length > 0 ? { fallbacks: fallbacks.models } : {},
+    secrets: [...primaryKey ? [primaryKey] : [], ...fallbacks.secrets],
+    ...fallbacks.skipped.length > 0 ? { skippedFallbacks: fallbacks.skipped } : {}
   };
 }
-function createFallbackModels(config2, store) {
-  return (config2.fallback ?? []).map((entry) => lazyFallback(entry, store));
-}
 async function createReviewModel(config2, store, opts) {
-  const fallbacks = createFallbackModels(config2, store);
   if (config2.provider === "claude-code") {
     const token = await store.resolve({ provider: "claude-code" }, "review");
     const runner = new ClaudeCodeRunner({
@@ -118552,7 +118613,7 @@ async function createReviewModel(config2, store, opts) {
       ...config2.model ? { model: config2.model } : {},
       ...opts.configDir ? { configDir: opts.configDir } : {}
     });
-    return fallbacks.length > 0 ? Object.assign(runner, { fallbacks }) : runner;
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store)));
   }
   if (!isApiProviderId(config2.provider)) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
@@ -118564,7 +118625,7 @@ async function createReviewModel(config2, store, opts) {
     throw new Error(`Model is required for provider: ${config2.provider}`);
   }
   const model = withRetries(adapter, config2.model, config2.effort);
-  return fallbacks.length > 0 ? { ...model, fallbacks } : model;
+  return { ...model, ...attachments(apiKey, await resolveFallbacks(config2, store)) };
 }
 
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
@@ -118760,7 +118821,8 @@ function buildAuditPrompt(input2) {
 }
 
 async function runAudit(input2) {
-  const { config: config2, rulesFiles, readFile: readFile2, files, model, knownSecrets = [], signal } = input2;
+  const { config: config2, rulesFiles, readFile: readFile2, files, model, signal } = input2;
+  const knownSecrets = secretsToRedact(input2.knownSecrets ?? [], model);
   const plan = planAudit({
     files: files.map((f3) => ({ path: f3.path, size: f3.size ?? 0 })),
     include: config2.audit?.include,
@@ -123756,7 +123818,7 @@ ${parseResult.errors.join("\n")}`);
   const files = await listFiles(cwd);
   log(`Found ${files.length} candidate files`);
   const store = new EnvCredentialStore(env2);
-  const providerSecret = await store.resolve({ provider: config2.provider }, "review");
+  const providerSecrets = await resolveReviewSecrets(config2, store);
   const githubSecret = new Secret(githubToken);
   const isolated = [];
   if (config2.provider === "claude-code") {
@@ -123769,6 +123831,9 @@ ${parseResult.errors.join("\n")}`);
     ...configDir ? { configDir } : {}
   });
   log(`Created audit model: ${model.label}`);
+  for (const skipped of model.skippedFallbacks ?? []) {
+    log(`Fallback ${skipped.label} skipped: ${skipped.reason}`);
+  }
   log("Running repository audit...");
   const result = await runAudit({
     config: config2,
@@ -123776,7 +123841,7 @@ ${parseResult.errors.join("\n")}`);
     readFile: async (p) => readFile2(join2(cwd, p), "utf8"),
     files,
     model,
-    knownSecrets: [providerSecret, githubSecret]
+    knownSecrets: [...providerSecrets, githubSecret]
   }).finally(async () => {
     await Promise.all(isolated.map((dir) => rm(dir, { recursive: true, force: true })));
   });
@@ -123996,7 +124061,7 @@ ${configResult.errors.join("\n")}`);
   const { config: config2, configText, rulesFiles } = configResult;
   log(`Loaded configuration for provider: ${config2.provider}`);
   const store = new EnvCredentialStore(env2);
-  const providerSecret = await store.resolve({ provider: config2.provider }, "review");
+  const providerSecrets = await resolveReviewSecrets(config2, store);
   const githubSecret = new Secret(githubToken);
   let sandbox;
   let tempConfigDir;
@@ -124034,6 +124099,9 @@ ${configResult.errors.join("\n")}`);
       ...tempConfigDir ? { configDir: tempConfigDir } : {}
     });
     log(`Created review model: ${model.label}`);
+    for (const skipped of model.skippedFallbacks ?? []) {
+      log(`Fallback ${skipped.label} skipped: ${skipped.reason}`);
+    }
     const configHash = createHash("sha256").update(configText).digest("hex").slice(0, 12);
     const publisherLogin = env2["INPUT_PUBLISHER-LOGIN"] || env2.INPUT_PUBLISHER_LOGIN || "github-actions[bot]";
     await reviewPullRequest({
@@ -124049,7 +124117,7 @@ ${configResult.errors.join("\n")}`);
       configHash,
       rulesFiles,
       model,
-      knownSecrets: [providerSecret, githubSecret],
+      knownSecrets: [...providerSecrets, githubSecret],
       publisherLogin,
       log
     });

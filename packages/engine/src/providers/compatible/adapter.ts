@@ -5,7 +5,7 @@
  * the agent parts (tools, notebook, screenshots, message compaction) are not ported.
  */
 import { randomUUID } from 'node:crypto';
-import { LlmAdapter } from '../../llm/adapter.js';
+import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
@@ -79,6 +79,11 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
     this.#streamUsage = entry.streamUsage;
   }
 
+  override requestedOutputTokens(options: OutputTokenRequest): number {
+    const thinks = Object.keys(compatibleEffortFields(this.#style, options.effort)).length > 0;
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
+
   /** The JSON request body; exposed for tests of the effort mapping. */
   requestBody(options: GenerateOptions): Record<string, unknown> {
     const messages = options.messages.map((m) => ({ role: m.role, content: m.content }));
@@ -90,11 +95,10 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
       else messages.unshift({ role: 'system', content: instruction });
     }
     const effortFields = compatibleEffortFields(this.#style, options.effort);
-    const headroom = Object.keys(effortFields).length > 0 ? thinkingHeadroom(options.effort) : 0;
     return {
       model: options.model,
       messages,
-      max_tokens: options.maxOutputTokens + headroom,
+      max_tokens: this.requestedOutputTokens(options),
       stream: true,
       ...(this.#streamUsage ? { stream_options: { include_usage: true } } : {}),
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),

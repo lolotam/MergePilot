@@ -237,4 +237,61 @@ budget:
     expect(reviewBody).toContain('0.006');
     expect(reviewBody).toContain('Cost:');
   });
+
+  it('runs a keyless custom provider without asking for a credential', async () => {
+    const { deps, createModel, createdReviews } = setupTest({
+      configYaml: `
+provider: custom
+model: local-model
+baseUrl: http://localhost:8080/v1
+language: en
+`,
+      env: { CLAUDE_CODE_OAUTH_TOKEN: undefined, CUSTOM_LLM_API_KEY: undefined },
+    });
+
+    await runPullRequestReview(deps);
+
+    expect(createModel).toHaveBeenCalled();
+    expect(createdReviews).toHaveLength(1);
+  });
+
+  it('redacts a configured fallback key from the prompt before any model call', async () => {
+    const fallbackKey = ['zq', 'x9'.repeat(8), 'mn'].join('');
+    const prompts: string[] = [];
+    const { deps, fakeClient } = setupTest({
+      configYaml: `
+provider: openai
+model: gpt-5
+language: en
+fallback:
+  - provider: xai
+    model: grok-4
+review:
+  verify: false
+`,
+      env: { OPENAI_API_KEY: 'k1', XAI_API_KEY: fallbackKey },
+      modelGenerateMock: async (req) => {
+        prompts.push(JSON.stringify(req));
+        return { text: JSON.stringify({ summary: 'ok', findings: [] }), finishReason: 'stop' };
+      },
+    });
+    fakeClient.listPullRequestFilesPage = async () => [
+      {
+        filename: 'src/index.ts',
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        patch: `@@ -1,1 +1,2 @@
+ context
++// ${fallbackKey}`,
+      },
+    ];
+
+    await runPullRequestReview(deps);
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).not.toContain(fallbackKey);
+    expect(prompts[0]).toContain('[REDACTED:known]');
+  });
 });

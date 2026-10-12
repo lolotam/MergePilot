@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Secret } from '../../credentials/secret.js';
-import { LlmAdapter } from '../../llm/adapter.js';
+import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import type { FinishReason, GenerateOptions, StreamChunk, TokenUsage } from '../../llm/types.js';
@@ -52,6 +52,11 @@ export class AnthropicAdapter extends LlmAdapter {
     this.#client = options.client ?? new Anthropic({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
 
+  override requestedOutputTokens(options: OutputTokenRequest): number {
+    const thinks = anthropicThinking(options.model, options.effort) !== undefined;
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+  }
+
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     if (options.signal?.aborted) {
       throw new LlmFailure({
@@ -91,7 +96,7 @@ export class AnthropicAdapter extends LlmAdapter {
     const thinking = anthropicThinking(options.model, options.effort);
     const streamParams: AnthropicStreamParams = {
       model: options.model,
-      max_tokens: options.maxOutputTokens + (thinking ? thinkingHeadroom(options.effort) : 0),
+      max_tokens: this.requestedOutputTokens(options),
       messages,
       ...(system ? { system } : {}),
       ...(options.temperature !== undefined && !thinking ? { temperature: options.temperature } : {}),

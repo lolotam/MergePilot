@@ -11,6 +11,7 @@ import { join, relative } from 'node:path';
 import {
   createReviewModel,
   EnvCredentialStore,
+  resolveReviewSecrets,
   parseConfig,
   renderAuditReport,
   runAudit as engineRunAudit,
@@ -122,7 +123,9 @@ export async function runAudit(deps?: AuditActionDeps): Promise<void> {
   log(`Found ${files.length} candidate files`);
 
   const store = new EnvCredentialStore(env);
-  const providerSecret = await store.resolve({ provider: config.provider }, 'review');
+  // The primary key (none for a keyless custom server) plus every configured fallback key, so
+  // all of them are redacted from the prompt before any model is called.
+  const providerSecrets = await resolveReviewSecrets(config, store);
   const githubSecret = new Secret(githubToken);
   // The audit sends file contents in the prompt itself, so in subscription mode the CLI gets an
   // EMPTY working directory and an isolated config dir: nothing in the repository (CLAUDE.md,
@@ -138,6 +141,9 @@ export async function runAudit(deps?: AuditActionDeps): Promise<void> {
     ...(configDir ? { configDir } : {}),
   });
   log(`Created audit model: ${model.label}`);
+  for (const skipped of model.skippedFallbacks ?? []) {
+    log(`Fallback ${skipped.label} skipped: ${skipped.reason}`);
+  }
 
   log('Running repository audit...');
   const result = await engineRunAudit({
@@ -146,7 +152,7 @@ export async function runAudit(deps?: AuditActionDeps): Promise<void> {
     readFile: async (p: string) => readFile(join(cwd, p), 'utf8'),
     files,
     model,
-    knownSecrets: [providerSecret, githubSecret],
+    knownSecrets: [...providerSecrets, githubSecret],
   }).finally(async () => {
     await Promise.all(isolated.map((dir) => rm(dir, { recursive: true, force: true })));
   });
