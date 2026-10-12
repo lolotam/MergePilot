@@ -216,6 +216,27 @@ describe('listModels', () => {
       expect(calls[1]?.headers.authorization).toBeUndefined();
       expect(models).toEqual([{ id: 'deepseek-chat', name: 'DeepSeek Chat', efforts: [] }]);
     });
+
+    it('lists models for Xiaomi MiMo endpoint with bearer auth', async () => {
+      const body = {
+        data: [
+          { id: 'mimo-v2-flash', name: 'MiMo v2 Flash' },
+          { id: 'mimo-v2-pro', name: 'MiMo v2 Pro' },
+          { id: 'mimo-v2-omni', name: 'MiMo v2 Omni' },
+          { id: 'mimo-embedding-1', type: 'embedding' },
+        ],
+      };
+      const { fetch, calls } = mockFetch(jsonResponse(body));
+      const models = await listModels('xiaomi', KEY, { fetch });
+
+      expect(calls[0]?.url).toBe('https://api.xiaomimimo.com/v1/models');
+      expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
+      expect(models).toEqual([
+        { id: 'mimo-v2-flash', name: 'MiMo v2 Flash', efforts: [] },
+        { id: 'mimo-v2-omni', name: 'MiMo v2 Omni', efforts: [] },
+        { id: 'mimo-v2-pro', name: 'MiMo v2 Pro', efforts: [] },
+      ]);
+    });
   });
 
   describe('Deduplication and sorting', () => {

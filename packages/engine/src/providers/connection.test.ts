@@ -121,6 +121,48 @@ describe('testConnection', () => {
         thinking: { type: 'enabled' },
       });
     });
+
+    it('tests Xiaomi MiMo connection with default model mimo-v2-flash and no extra headroom', async () => {
+      const { fetch, calls } = mockFetch(
+        jsonResponse({
+          choices: [{ message: { content: 'OK' } }],
+        }),
+      );
+
+      const result = await testConnection('xiaomi', KEY, 'mimo-v2-flash', { fetch });
+
+      expect(result.ok).toBe(true);
+      expect(calls[0]?.url).toBe('https://api.xiaomimimo.com/v1/chat/completions');
+      expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16);
+    });
+
+    it('tests Xiaomi MiMo mimo-v2-pro and reserves headroom for reasoning', async () => {
+      const { fetch, calls } = mockFetch(
+        jsonResponse({
+          choices: [{ message: { content: 'OK' } }],
+        }),
+      );
+
+      const result = await testConnection('xiaomi', KEY, 'mimo-v2-pro', { fetch });
+
+      expect(result.ok).toBe(true);
+      expect(calls[0]?.url).toBe('https://api.xiaomimimo.com/v1/chat/completions');
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16 + 8192);
+    });
+
+    it('tests Xiaomi MiMo Token Plan default Singapore region', async () => {
+      const { fetch, calls } = mockFetch(
+        jsonResponse({
+          choices: [{ message: { content: 'OK' } }],
+        }),
+      );
+
+      const result = await testConnection('xiaomi-token-plan', KEY, 'mimo-v2-flash', { fetch });
+
+      expect(result.ok).toBe(true);
+      expect(calls[0]?.url).toBe('https://token-plan-sgp.xiaomimimo.com/v1/chat/completions');
+    });
   });
 
   describe('Empty replies', () => {

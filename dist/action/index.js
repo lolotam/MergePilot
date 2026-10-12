@@ -50332,7 +50332,11 @@ var API_PROVIDER_IDS = [
   "opencode-go",
   "zai",
   "zai-coding",
-  "custom"
+  "custom",
+  "xiaomi",
+  "xiaomi-token-plan",
+  "xiaomi-token-plan-sgp",
+  "xiaomi-token-plan-cn"
 ];
 var PROVIDER_IDS = [...API_PROVIDER_IDS, "claude-code"];
 function isApiProviderId(value) {
@@ -50447,6 +50451,42 @@ var ENTRIES = {
     defaultModel: "",
     envName: "CUSTOM_LLM_API_KEY",
     requiresBaseUrl: true
+  },
+  xiaomi: {
+    label: "Xiaomi MiMo",
+    kind: "openai-compatible",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    keyHint: "sk-",
+    thinkingStyle: "none",
+    defaultModel: "mimo-v2-flash",
+    envName: "XIAOMI_API_KEY"
+  },
+  "xiaomi-token-plan": {
+    label: "Xiaomi MiMo Token Plan",
+    kind: "openai-compatible",
+    baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+    keyHint: "tp-",
+    thinkingStyle: "none",
+    defaultModel: "mimo-v2-flash",
+    envName: "XIAOMI_TOKEN_PLAN_API_KEY"
+  },
+  "xiaomi-token-plan-sgp": {
+    label: "Xiaomi MiMo Token Plan (Singapore)",
+    kind: "openai-compatible",
+    baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+    keyHint: "tp-",
+    thinkingStyle: "none",
+    defaultModel: "mimo-v2-flash",
+    envName: "XIAOMI_TOKEN_PLAN_API_KEY"
+  },
+  "xiaomi-token-plan-cn": {
+    label: "Xiaomi MiMo Token Plan (China)",
+    kind: "openai-compatible",
+    baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+    keyHint: "tp-",
+    thinkingStyle: "none",
+    defaultModel: "mimo-v2-flash",
+    envName: "XIAOMI_TOKEN_PLAN_API_KEY"
   }
 };
 var PROVIDER_REGISTRY = Object.freeze(Object.fromEntries(API_PROVIDER_IDS.map((id) => [
@@ -94827,6 +94867,9 @@ function isCompatibleReasoningModel(provider, model, style) {
     if (lowerModel.includes(":thinking") || /nemotron|qwq|deepseek-r1/.test(lowerModel) || lowerModel.includes("reasoner") || lowerModel.includes("r1") || lowerModel.includes("thinking") || /\b(?:o1|o3|o4|gpt-5)\b/.test(lowerModel) || /gemini-(?:[3-9]|2\.[5-9])/.test(lowerModel)) {
       return true;
     }
+  }
+  if (lowerModel.includes("mimo-v2-pro") || lowerModel.includes("mimo-v2-omni")) {
+    return true;
   }
   return false;
 }

@@ -6,7 +6,7 @@ vi.mock('@mergepilot/engine', async (importOriginal) => {
   return { ...actual, listModels: vi.fn(actual.listModels), testConnection: vi.fn(actual.testConnection) };
 });
 
-const { testConnection } = await import('@mergepilot/engine');
+const { listModels, testConnection } = await import('@mergepilot/engine');
 
 describe('connection test route (J2)', { timeout: 25000 }, () => {
   let h: ProviderHarness;
@@ -70,6 +70,31 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
 
     const custom = await test('custom', h.adminCookie(), { apiKey: keyFor('c'), baseUrl: 'https://llm.example.com/v1' });
     expect([custom.statusCode, custom.json().error.code]).toEqual([400, 'model_required']);
+  });
+
+  it('prefers a FREE model when none is configured for OpenRouter (:free) or OpenCode Zen (free)', async () => {
+    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model: 'x', reply: 'OK' });
+    vi.mocked(listModels).mockImplementation(async (provider) => {
+      if (provider === 'openrouter') {
+        return [
+          { id: 'openai/gpt-5', name: 'GPT 5', efforts: [] },
+          { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 Free', efforts: [] },
+        ];
+      }
+      if (provider === 'opencode-zen') {
+        return [
+          { id: 'glm-5.3', name: 'GLM 5.3', efforts: [] },
+          { id: 'glm-4-free', name: 'GLM 4 Free', efforts: [] },
+        ];
+      }
+      return [];
+    });
+
+    await test('openrouter', h.adminCookie(), { apiKey: keyFor('or') });
+    expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('meta-llama/llama-3.3-70b-instruct:free');
+
+    await test('opencode-zen', h.adminCookie(), { apiKey: keyFor('zen') });
+    expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('glm-4-free');
   });
 
   it('without a model, tests the custom key with the model the workspace uses it for (heavy, then fallback)', async () => {

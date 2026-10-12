@@ -137,6 +137,12 @@ describe('default thinking headroom (P0.1)', () => {
     expect(isCompatibleReasoningModel('openrouter', 'anthropic/claude-sonnet-5:thinking')).toBe(true);
     expect(isCompatibleReasoningModel('openrouter', 'nvidia/llama-3.3-nemotron-super-49b')).toBe(true);
     expect(isCompatibleReasoningModel('openrouter', 'qwen/qwq-32b')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2-pro')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2-omni')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2-flash')).toBe(false);
+    expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-pro')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-omni')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-flash')).toBe(false);
   });
 
   it('adds default thinking headroom to requestedOutputTokens when effort is undefined', async () => {
@@ -166,5 +172,13 @@ describe('default thinking headroom (P0.1)', () => {
     expect(deepseek.requestedOutputTokens({ model: 'deepseek-reasoner', maxOutputTokens: 4096 })).toBe(4096 + 8192);
     // DeepSeek chat does not add headroom
     expect(deepseek.requestedOutputTokens({ model: 'deepseek-chat', maxOutputTokens: 4096 })).toBe(4096);
+
+    const xiaomi = new OpenAICompatibleAdapter({ provider: 'xiaomi', apiKey: fakeKey });
+    // Xiaomi mimo-v2-pro reasons by default and adds 8192
+    expect(xiaomi.requestedOutputTokens({ model: 'mimo-v2-pro', maxOutputTokens: 4096 })).toBe(4096 + 8192);
+    // Xiaomi mimo-v2-omni reasons by default and adds 8192
+    expect(xiaomi.requestedOutputTokens({ model: 'mimo-v2-omni', maxOutputTokens: 4096 })).toBe(4096 + 8192);
+    // Xiaomi mimo-v2-flash does not reason by default
+    expect(xiaomi.requestedOutputTokens({ model: 'mimo-v2-flash', maxOutputTokens: 4096 })).toBe(4096);
   });
 });

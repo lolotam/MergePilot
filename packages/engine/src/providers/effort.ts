@@ -180,5 +180,8 @@ export function isCompatibleReasoningModel(
       return true;
     }
   }
+  if (lowerModel.includes('mimo-v2-pro') || lowerModel.includes('mimo-v2-omni')) {
+    return true;
+  }
   return false;
 }
