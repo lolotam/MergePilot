@@ -5,6 +5,17 @@ import type {
   StoredCredential,
   WorkspaceSettings,
 } from '../core/types.js';
+import { defineDeleteWorkspaceContract } from './store-contract-delete.js';
+
+/** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
+export const STORE_CONTRACT_WORKSPACES = [
+  'ws-alpha',
+  'ws-settings-test',
+  'ws-cred-test',
+  'ws-runs-test',
+  'ws-del-target',
+  'ws-del-other',
+] as const;
 
 export function describeStoreContract(
   suiteName: string,
@@ -238,5 +249,7 @@ export function describeStoreContract(
         await cleanup?.();
       }
     });
+
+    defineDeleteWorkspaceContract(createStore, cleanup);
   });
 }

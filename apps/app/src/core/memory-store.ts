@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { InstallationAlreadyLinkedError } from './types.js';
+import { InstallationAlreadyLinkedError, WorkspaceDeletedError } from './types.js';
 import type {
   ApiProvider,
   AppStore,
@@ -17,6 +17,12 @@ export class MemoryStore implements AppStore {
   readonly settings = new Map<string, WorkspaceSettings>();
   readonly credentials = new Map<string, StoredCredential>();
   readonly runs = new Map<string, ReviewRun>();
+  readonly deletedWorkspaces = new Set<string>();
+
+  /** Mirrors the Postgres organization check: no writes for a workspace deleted in this store. */
+  private assertLive(workspaceId: string): void {
+    if (this.deletedWorkspaces.has(workspaceId)) throw new WorkspaceDeletedError(workspaceId);
+  }
 
   async recordDelivery(deliveryId: string): Promise<boolean> {
     if (this.deliveries.has(deliveryId)) return false;
@@ -34,6 +40,7 @@ export class MemoryStore implements AppStore {
   }
 
   async linkInstallation(installationId: number, workspaceId: string): Promise<void> {
+    this.assertLive(workspaceId);
     const existing = this.installations.get(installationId);
     if (!existing) throw new Error(`installation ${installationId} not found`);
     const current = 'workspaceId' in existing ? existing.workspaceId : undefined;
@@ -66,10 +73,12 @@ export class MemoryStore implements AppStore {
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
+    this.assertLive(settings.workspaceId);
     this.settings.set(settings.workspaceId, { ...settings });
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
+    this.assertLive(credential.workspaceId);
     this.credentials.set(`${credential.workspaceId}:${credential.provider}`, { ...credential });
   }
 
@@ -88,6 +97,7 @@ export class MemoryStore implements AppStore {
   }
 
   async createReviewRun(run: Omit<ReviewRun, 'id' | 'createdAt' | 'finishedAt'>): Promise<ReviewRun> {
+    this.assertLive(run.workspaceId);
     const created: ReviewRun = { ...run, id: randomUUID(), createdAt: new Date(), finishedAt: null };
     this.runs.set(created.id, created);
     return created;
@@ -114,5 +124,27 @@ export class MemoryStore implements AppStore {
     return [...this.runs.values()]
       .filter((r) => r.workspaceId === workspaceId && r.createdAt >= monthStart)
       .reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  }
+
+  async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
+    this.deletedWorkspaces.add(workspaceId);
+    for (const [key, cred] of this.credentials.entries()) {
+      if (cred.workspaceId === workspaceId) {
+        this.credentials.delete(key);
+      }
+    }
+    this.settings.delete(workspaceId);
+    for (const [key, run] of this.runs.entries()) {
+      if (run.workspaceId === workspaceId) {
+        this.runs.delete(key);
+      }
+    }
+    for (const [id, inst] of this.installations.entries()) {
+      if ('workspaceId' in inst && inst.workspaceId === workspaceId) {
+        const { workspaceId: _, ...unlinked } = inst;
+        this.installations.set(id, unlinked);
+      }
+    }
+    return { organizationDeleted: false };
   }
 }

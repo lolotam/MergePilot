@@ -17,9 +17,58 @@ import {
   renderReviewSummary,
   reviewPullRequest,
   type FileContent,
+  type GitHubClient,
 } from '@mergepilot/github';
-import type { ApiProvider, ReviewJob, ReviewRun, ReviewRunStatus } from '../core/types.js';
+import {
+  WorkspaceDeletedError,
+  type ApiProvider,
+  type AppStore,
+  type ReviewJob,
+  type ReviewRun,
+  type ReviewRunStatus,
+} from '../core/types.js';
 import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
+
+const WORKSPACE_DELETED = 'workspace_deleted';
+
+/**
+ * Wraps the GitHub client so every write (review, issue) first re-checks that the installation is
+ * still linked to the workspace the job started with. A workspace deleted mid-review therefore
+ * never gets a review published on its behalf.
+ */
+function guardWritesForWorkspace(
+  client: GitHubClient,
+  store: AppStore,
+  installationId: number,
+  workspaceId: string,
+): GitHubClient {
+  const ensureStillLinked = async (): Promise<void> => {
+    const current = await store.getInstallation(installationId);
+    if (!current || current.workspaceId !== workspaceId) {
+      throw new WorkspaceDeletedError(workspaceId);
+    }
+  };
+  const createIssue = client.createIssue?.bind(client);
+  return {
+    listPullRequestFilesPage: (params) => client.listPullRequestFilesPage(params),
+    getPullRequest: (params) => client.getPullRequest(params),
+    listReviewsPage: (params) => client.listReviewsPage(params),
+    getFileContent: (params) => client.getFileContent(params),
+    compareCommits: (params) => client.compareCommits(params),
+    createReview: async (params) => {
+      await ensureStillLinked();
+      return client.createReview(params);
+    },
+    ...(createIssue
+      ? {
+          createIssue: async (params: Parameters<typeof createIssue>[0]) => {
+            await ensureStillLinked();
+            return createIssue(params);
+          },
+        }
+      : {}),
+  };
+}
 
 class WorkspaceCredentialStore implements CredentialStore {
   constructor(
@@ -65,16 +114,23 @@ export async function processReviewJob(
 
   const settings = await deps.store.getSettings(workspaceId);
   if (!settings) {
-    const run = await deps.store.createReviewRun({
-      workspaceId,
-      installationId: job.installationId,
-      repoFullName: job.repoFullName,
-      pullNumber: job.pullNumber,
-      headSha: job.headSha,
-      status: 'running',
-      costUsd: null,
-      detail: null,
-    });
+    let run: ReviewRun;
+    try {
+      run = await deps.store.createReviewRun({
+        workspaceId,
+        installationId: job.installationId,
+        repoFullName: job.repoFullName,
+        pullNumber: job.pullNumber,
+        headSha: job.headSha,
+        status: 'running',
+        costUsd: null,
+        detail: null,
+      });
+    } catch (error) {
+      if (!(error instanceof WorkspaceDeletedError)) throw error;
+      deps.log?.(`Skipping job ${job.deliveryId}: workspace ${workspaceId} was deleted`);
+      return { status: 'skipped', detail: WORKSPACE_DELETED };
+    }
     await deps.store.finishReviewRun(workspaceId, run.id, {
       status: 'skipped',
       costUsd: null,
@@ -104,7 +160,8 @@ export async function processReviewJob(
       throw new Error(`Invalid repoFullName: ${job.repoFullName}`);
     }
 
-    const { client, publisherLogin } = await deps.githubAppFactory(job.installationId);
+    const { client: rawClient, publisherLogin } = await deps.githubAppFactory(job.installationId);
+    const client = guardWritesForWorkspace(rawClient, deps.store, job.installationId, workspaceId);
 
     const pr = await client.getPullRequest({ owner, repo, pull_number: job.pullNumber });
     const prRecord = pr as unknown as { title?: string; body?: string | null };
@@ -255,6 +312,18 @@ export async function processReviewJob(
       detail,
     };
   } catch (error) {
+    if (error instanceof WorkspaceDeletedError) {
+      deps.log?.(`Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`);
+      if (run) {
+        // No-op when the run was deleted with the workspace; kept for an unlink without deletion.
+        await deps.store.finishReviewRun(workspaceId, run.id, {
+          status: 'skipped',
+          costUsd: null,
+          detail: WORKSPACE_DELETED,
+        });
+      }
+      return { status: 'skipped', detail: WORKSPACE_DELETED };
+    }
     const rawMessage = error instanceof Error ? error.message : String(error);
     // Always redact: errors before the key is loaded can still carry GitHub installation tokens.
     const redactedDetail = redactSecrets(rawMessage, secret ? [secret] : []).text.slice(0, 500);

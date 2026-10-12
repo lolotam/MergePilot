@@ -68,6 +68,16 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
       mutateAsync: mockDeleteKey,
       isPending: false,
     } as unknown as ReturnType<typeof hooks.useDeleteKeyMutation>);
+
+    vi.mocked(hooks.useRenameWorkspaceMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof hooks.useRenameWorkspaceMutation>);
+
+    vi.mocked(hooks.useDeleteWorkspaceMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof hooks.useDeleteWorkspaceMutation>);
   };
 
   const renderComponent = () =>
@@ -137,6 +147,20 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
 
     // Add key button should not be present
     expect(screen.queryByRole('button', { name: /إضافة مفتاح جديد/i })).toBeNull();
+  });
+
+  it('shows the rename card to admin/owner and the danger zone to the owner only', () => {
+    setupMocks({ role: 'admin' });
+    const { unmount } = renderComponent();
+    expect((screen.getByLabelText(/اسم مساحة العمل/i) as HTMLInputElement).value).toBe('Workspace 1');
+    expect(screen.getByRole('button', { name: /تغيير الاسم/i })).toBeDefined();
+    expect(screen.queryByText(/منطقة الخطر/i)).toBeNull();
+    unmount();
+
+    setupMocks({ role: 'owner' });
+    renderComponent();
+    expect(screen.getByText(/منطقة الخطر/i)).toBeDefined();
+    expect(screen.getByRole('button', { name: /حذف مساحة العمل/i })).toBeDefined();
   });
 
   it('add-key never shows the key after save', async () => {

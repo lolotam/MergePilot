@@ -14,9 +14,24 @@ export interface TestDbHandle {
   close: () => Promise<void>;
 }
 
-export async function createTestDb(migrationsDir?: string): Promise<TestDbHandle> {
+export interface CreateTestDbOptions {
+  /** Organization (workspace) ids to seed so review runs can be recorded for them. */
+  workspaces?: readonly string[];
+}
+
+export async function createTestDb(
+  migrationsDir?: string,
+  options?: CreateTestDbOptions,
+): Promise<TestDbHandle> {
   const client = new PGlite();
   await runMigrations(client, migrationsDir ? { migrationsDir } : undefined);
+  for (const id of options?.workspaces ?? []) {
+    await client.query('INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3);', [
+      id,
+      `Workspace ${id}`,
+      id,
+    ]);
+  }
   const db = drizzlePglite(client, { schema });
   const store = new PgStore(db);
   return {

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryStore } from '../core/memory-store.js';
 import { EnvelopeVault } from './envelope-vault.js';
 import { reencryptAll } from './rotate.js';
@@ -93,5 +93,34 @@ describe('reencryptAll', () => {
     const cred3 = await store.getCredential('ws-2', 'gemini');
     expect(cred3?.keyVersion).toBe(1);
     expect(cred3?.ciphertext.startsWith('v1.1.')).toBe(true);
+  });
+
+  it('does not recreate credentials of a workspace deleted mid-rotation', async () => {
+    const key1 = randomBytes(32);
+    const key2 = randomBytes(32);
+    const vaultV1 = new EnvelopeVault({ current: 1, keys: new Map([[1, key1]]) });
+    const vaultV2 = new EnvelopeVault({ current: 2, keys: new Map([[1, key1], [2, key2]]) });
+    const store = new MemoryStore();
+    await store.saveCredential({
+      id: 'cred-del',
+      workspaceId: 'ws-del',
+      provider: 'anthropic',
+      ciphertext: await vaultV1.encrypt('plain-value', { workspaceId: 'ws-del', provider: 'anthropic' }),
+      keyVersion: 1,
+      last4: 'alue',
+      createdBy: 'user-1',
+      createdAt: new Date(),
+    });
+    const getCredential = store.getCredential.bind(store);
+    vi.spyOn(store, 'getCredential').mockImplementation(async (wsId, provider) => {
+      const full = await getCredential(wsId, provider);
+      await store.deleteWorkspace(wsId);
+      return full;
+    });
+
+    const result = await reencryptAll(store, vaultV2, ['ws-del']);
+
+    expect(result).toEqual({ reencrypted: 0, skipped: 0 });
+    expect(await store.listCredentials('ws-del')).toEqual([]);
   });
 });

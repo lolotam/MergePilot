@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { StoredCredential, WorkspaceSettings } from '../core/types.js';
+import {
+  WorkspaceDeletedError,
+  type StoredCredential,
+  type WorkspaceSettings,
+} from '../core/types.js';
 import { createTestDb } from './test-db.js';
-import { describeStoreContract } from './store-contract.js';
+import { describeStoreContract, STORE_CONTRACT_WORKSPACES } from './store-contract.js';
+
+const ISOLATION_WORKSPACES = ['ws-a', 'ws-b', 'ws-num'];
 
 // 1. Shared AppStore contract tests against PgStore
 describeStoreContract(
   'PgStore',
   async () => {
-    const handle = await createTestDb();
+    const handle = await createTestDb(undefined, { workspaces: STORE_CONTRACT_WORKSPACES });
     return handle.store;
   },
 );
@@ -15,7 +21,7 @@ describeStoreContract(
 // 2. Negative isolation tests and specific requirements
 describe('PgStore isolation and specific requirements', { timeout: 20000 }, () => {
   it('prevents workspace B from reading, listing, deleting or altering workspace A credentials', async () => {
-    const { store, close } = await createTestDb();
+    const { store, close } = await createTestDb(undefined, { workspaces: ISOLATION_WORKSPACES });
     try {
       const credA: StoredCredential = {
         id: '11111111-1111-4111-8111-111111111111',
@@ -54,7 +60,7 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
   });
 
   it('prevents workspace B from reading or altering workspace A settings', async () => {
-    const { store, close } = await createTestDb();
+    const { store, close } = await createTestDb(undefined, { workspaces: ISOLATION_WORKSPACES });
     try {
       const settingsA: WorkspaceSettings = {
         workspaceId: 'ws-a',
@@ -79,7 +85,7 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
   });
 
   it('prevents workspace B from listing or finishing workspace A review runs', async () => {
-    const { store, close } = await createTestDb();
+    const { store, close } = await createTestDb(undefined, { workspaces: ISOLATION_WORKSPACES });
     try {
       const runA = await store.createReviewRun({
         workspaceId: 'ws-a',
@@ -128,7 +134,7 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
   });
 
   it('prevents workspace B from listing workspace A installations', async () => {
-    const { store, close } = await createTestDb();
+    const { store, close } = await createTestDb(undefined, { workspaces: ISOLATION_WORKSPACES });
     try {
       await store.upsertInstallation({
         id: 7001,
@@ -152,7 +158,7 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
   });
 
   it('duplicate webhook delivery returns false', async () => {
-    const { store, close } = await createTestDb();
+    const { store, close } = await createTestDb(undefined, { workspaces: ISOLATION_WORKSPACES });
     try {
       const first = await store.recordDelivery('delivery-dup-test', 'pull_request');
       expect(first).toBe(true);
@@ -168,7 +174,7 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
   });
 
   it('monthCostUsd sums only that workspace and month', async () => {
-    const { store, client, close } = await createTestDb();
+    const { store, client, close } = await createTestDb(undefined, { workspaces: ISOLATION_WORKSPACES });
     try {
       const now = Date.now();
       const monthStart = new Date(now - 10 * 24 * 60 * 60 * 1000); // 10 days ago
@@ -249,7 +255,7 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
   });
 
   it('maps numeric columns to JS numbers', async () => {
-    const { store, close } = await createTestDb();
+    const { store, close } = await createTestDb(undefined, { workspaces: ISOLATION_WORKSPACES });
     try {
       await store.upsertInstallation({
         id: 987654321,
@@ -298,6 +304,86 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
       expect(typeof runs[0].pullNumber).toBe('number');
       expect(typeof runs[0].costUsd).toBe('number');
       expect(runs[0].costUsd).toBe(0.001234);
+    } finally {
+      await close();
+    }
+  });
+
+  it('refuses to record a review run for a workspace whose organization does not exist', async () => {
+    const { store, close } = await createTestDb();
+    try {
+      await expect(
+        store.createReviewRun({
+          workspaceId: 'ws-missing',
+          installationId: 1,
+          repoFullName: 'org/repo',
+          pullNumber: 1,
+          headSha: 'sha',
+          status: 'running',
+          costUsd: null,
+          detail: null,
+        }),
+      ).rejects.toBeInstanceOf(WorkspaceDeletedError);
+      expect(await store.listReviewRuns('ws-missing', 10)).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('deleteWorkspace removes the organization and its members in the same transaction', async () => {
+    const { store, client, close } = await createTestDb(undefined, { workspaces: ['ws-a', 'ws-b'] });
+    try {
+      await client.query(
+        "INSERT INTO \"user\" (id, name, email, \"emailVerified\") VALUES ('u-1', 'U', 'u@test.local', true);",
+      );
+      await client.query(
+        "INSERT INTO member (id, \"organizationId\", \"userId\", role) VALUES ('m-a', 'ws-a', 'u-1', 'owner'), ('m-b', 'ws-b', 'u-1', 'owner');",
+      );
+
+      const result = await store.deleteWorkspace('ws-a');
+      expect(result).toEqual({ organizationDeleted: true });
+
+      const orgs = await client.query<{ id: string }>('SELECT id FROM organization ORDER BY id;');
+      expect(orgs.rows.map((r) => r.id)).toEqual(['ws-b']);
+      const members = await client.query<{ id: string }>('SELECT id FROM member ORDER BY id;');
+      expect(members.rows.map((r) => r.id)).toEqual(['m-b']);
+    } finally {
+      await close();
+    }
+  });
+
+  it('deleteWorkspace rolls back everything when a later step fails', async () => {
+    const { store, client, close } = await createTestDb(undefined, { workspaces: ['ws-a'] });
+    try {
+      await store.saveSettings({
+        workspaceId: 'ws-a',
+        provider: 'anthropic',
+        model: 'claude-test',
+        language: 'en',
+        monthlyBudgetUsd: null,
+      });
+      await store.upsertInstallation({
+        id: 9100,
+        workspaceId: 'ws-a',
+        accountLogin: 'acme',
+        accountType: 'Organization',
+        repositorySelection: 'all',
+        suspended: false,
+      });
+      // Force the last step (unlinking installations) to fail.
+      await client.exec(`
+        CREATE FUNCTION fail_unlink() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'forced failure'; END; $$ LANGUAGE plpgsql;
+        CREATE TRIGGER fail_unlink BEFORE UPDATE ON installations
+          FOR EACH ROW EXECUTE FUNCTION fail_unlink();
+      `);
+
+      await expect(store.deleteWorkspace('ws-a')).rejects.toThrow();
+
+      const orgs = await client.query<{ id: string }>('SELECT id FROM organization;');
+      expect(orgs.rows.map((r) => r.id)).toEqual(['ws-a']);
+      expect(await store.getSettings('ws-a')).not.toBeNull();
+      expect((await store.getInstallation(9100))?.workspaceId).toBe('ws-a');
     } finally {
       await close();
     }
