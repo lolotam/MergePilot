@@ -5,6 +5,7 @@ import {
 } from '@mergepilot/engine';
 import {
   deduplicateFindings,
+  fallbackReasonOf,
   judgeBudgetLeft,
   dedupeJudgeOf,
   judgeSummaryInput,
@@ -105,13 +106,12 @@ export async function executeReview(
 
   // ADR-0008: when an explicit fallback model answered, the summary names it and says why.
   const disclosure = reviewResult.status === 'skipped-budget' ? undefined : reviewResult;
-  const fallbackSummary =
-    disclosure?.fallbackFrom && disclosure.fallbackCode
-      ? {
-          modelLabel: disclosure.modelUsed ?? model.label,
-          fallback: { from: disclosure.fallbackFrom, code: disclosure.fallbackCode },
-        }
-      : {};
+  const fallback = disclosure ? fallbackReasonOf(disclosure, knownSecrets) : undefined;
+  const fallbackSummary = fallback ? { modelLabel: disclosure?.modelUsed ?? model.label, fallback } : {};
+  if (fallbackSummary.fallback) {
+    const { from, code, detail: why } = fallbackSummary.fallback;
+    log?.(`Fallback used: ${from} failed (${code})${why ? `: ${why}` : ''}`);
+  }
 
   const envVar = PROVIDER_ENV_MAP[config.provider] ?? 'API key';
   let summaryMarkdown: string;

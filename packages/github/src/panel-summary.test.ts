@@ -69,4 +69,16 @@ describe('renderPanelSummary (consensus, ADR-0017)', () => {
     expect(body).toContain('\\|');
     expect(body).toContain('`a:b c`');
   });
+
+  it('says per bot why a fallback model answered, with the provider answer', async () => {
+    const withFallback: PanelBotRow[] = [
+      bots[0]!,
+      { ...bots[1]!, modelLabel: 'zai-coding:glm-5.3', fallback: { from: 'opencode-zen:cat-jam-free', code: 'auth', detail: 'HTTP 401: not enabled' } },
+    ];
+    const body = renderPanelSummary({ language: 'en', baseUrl: BASE, bots: withFallback, merge: await merged(), minAgreement: 2, inlineCount: 1 });
+    expect(body).toContain(
+      '> ⚠️ Fallback model `zai-coding:glm-5.3` was used because `opencode-zen:cat-jam-free` failed (auth: HTTP 401: not enabled) — **Owl**',
+    );
+    expect(body.match(/Fallback model/g)).toHaveLength(1);
+  });
 });

@@ -7,12 +7,14 @@ import {
   type Secret,
 } from '@mergepilot/engine';
 import {
+  fallbackReasonOf,
   hasNothingNewToReview,
   listPullRequestFiles,
   NOTHING_NEW_DETAIL,
   reviewScopeOf,
   selectIncrementalFiles,
   withJudgeUsage,
+  type FallbackReason,
   type FileContent,
   type GitHubClient,
   type PullRequestFile,
@@ -128,6 +130,8 @@ export interface ReviewOnlyOutcome {
   runResult?: ReviewRunResult | undefined;
   modelUsed?: string | undefined;
   fallbackFrom?: string | undefined;
+  /** Why a fallback model took over: the provider's answer, redacted and cut (ADR-0008). */
+  fallback?: FallbackReason | undefined;
   scope?: ReviewScope | undefined;
 }
 
@@ -145,6 +149,7 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
       costUsd: totals.costUsd,
       ...(r.modelUsed ? { modelUsed: r.modelUsed } : {}),
       ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}),
+      ...withFallback(r, secrets),
     };
   }
   if (r.status === 'skipped-budget') {
@@ -156,5 +161,11 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
     detail: redactSecrets(r.detail ?? r.reason, secrets).text,
     ...(r.modelUsed ? { modelUsed: r.modelUsed } : {}),
     ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}),
+    ...withFallback(r, secrets),
   };
+}
+
+function withFallback(r: Parameters<typeof fallbackReasonOf>[0], secrets: Secret[]): { fallback?: FallbackReason } {
+  const fallback = fallbackReasonOf(r, secrets);
+  return fallback ? { fallback } : {};
 }

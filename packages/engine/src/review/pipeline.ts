@@ -270,7 +270,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       status: 'failed',
       reason: pass.reason,
       ...(pass.detail ? { detail: pass.detail } : {}),
-      ...model.disclosure(),
+      ...model.disclosure(knownSecrets),
     };
   }
   let totalUsage = pass.totalUsage;
@@ -349,7 +349,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   };
 
   // Pricing belongs to the configured model; after a fallback the cost is unknown (tokens still count).
-  const disclosure = model.disclosure();
+  const disclosure = model.disclosure(knownSecrets);
   let reviewCostUsd: number | undefined;
   if (budgetCfg.pricing && !disclosure.fallbackFrom) {
     // Real cost where usage was reported, the estimate for calls without usage (ADR-0011).
