@@ -44,7 +44,7 @@ describe('runReview — what an unusable answer said', () => {
   });
 
   it('never puts a known secret into the preview', async () => {
-    const token = 'xai-oauth-token-1234567890abcdef';
+    const token = ['fake', 'oauth', 'z'.repeat(24)].join('-');
     const result = await runReview({
       config: makeConfig(),
       pr: { title: 'T', body: 'B' },
