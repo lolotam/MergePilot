@@ -19,6 +19,7 @@ import type {
   ExportBackupBody,
 } from '@mergepilot/app/contract';
 
+export type { PricesResponse } from '@mergepilot/app/contract';
 export type {
   BackupPreview,
   BackupSection,
