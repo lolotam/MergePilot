@@ -11,6 +11,7 @@ import { PricesCard } from './PricesCard.js';
 vi.mock('../api/client.js', async () => ({ ...(await vi.importActual('../api/client.js')), fetchApi: vi.fn() }));
 
 const FETCHED = '2026-10-13T02:30:00.000Z';
+const PRICES_LOAD_ERROR = 'Could not load the model prices.';
 
 const prices: PricesResponse = {
   models: [
@@ -71,12 +72,13 @@ const prices: PricesResponse = {
 const deepseekOverride = { provider: 'deepseek', model: 'deepseek-chat', inputPerMTok: 1, outputPerMTok: 2 };
 const unusedOverride = { provider: 'openai', model: 'gpt-5', inputPerMTok: 5, outputPerMTok: 10 };
 
-function renderCard(options: { isMember?: boolean; putError?: Error } = {}) {
+function renderCard(options: { isMember?: boolean; putError?: Error; pricesData?: PricesResponse; settingsError?: Error } = {}) {
   const settings: Settings = { ...baseSettings, priceOverrides: [deepseekOverride, unusedOverride] };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], { settings });
+  if (!options.settingsError) queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], { settings });
   vi.mocked(client.fetchApi).mockImplementation(async (path: string, init?: RequestInit) => {
-    if (path.endsWith('/prices')) return prices;
+    if (path.endsWith('/prices')) return options.pricesData ?? prices;
+    if (options.settingsError && !init?.method) throw options.settingsError;
     if (init?.method === 'PUT') {
       if (options.putError) throw options.putError;
       return { settings: { ...settings, ...(JSON.parse(String(init.body)) as object) } };
@@ -111,6 +113,20 @@ async function rowOf(model: string): Promise<HTMLElement> {
 describe('PricesCard (model prices)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('opens one editor when the same model is listed twice (main and heavy)', async () => {
+    const twice: PricesResponse = { ...prices, models: [prices.models[0]!, { ...prices.models[0]!, role: 'heavy' }] };
+    renderCard({ pricesData: twice });
+    const edits = await screen.findAllByRole('button', { name: 'Edit price' });
+    expect(edits).toHaveLength(2);
+    fireEvent.click(edits[1]!);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1));
+  });
+
+  it('reports a failed settings load instead of loading forever', async () => {
+    renderCard({ settingsError: new Error('boom') });
+    expect(await screen.findByText(PRICES_LOAD_ERROR)).toBeTruthy();
   });
 
   it('lists every model with its role, prices, source badge and fetch time; Unknown shows dashes', async () => {

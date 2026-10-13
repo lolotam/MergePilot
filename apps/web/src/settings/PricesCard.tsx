@@ -20,7 +20,8 @@ const badgeClass = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] f
 const thClass = 'py-2.5 px-3 text-start font-semibold';
 const dash = <span className="text-ink-400 dark:text-ink-500">—</span>;
 
-const keyOf = (m: PricedModel) => `${m.provider}\u0000${m.model}`;
+/** One table row: the same model may appear twice (e.g. main and heavy), so rows are told apart by role and position. */
+const rowKey = (m: PricedModel, index: number) => `${m.role}:${index}`;
 
 function SourceBadge({ source }: { source: string }) {
   const { t } = useI18n();
@@ -44,8 +45,14 @@ interface PricesCardProps {
 export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
   const { t, language } = useI18n();
   const queryClient = useQueryClient();
-  const settings = useWorkspaceSettings(workspaceId).data?.settings;
-  const pricesKey = ['workspaces', workspaceId, 'prices'];
+  const settingsQuery = useWorkspaceSettings(workspaceId);
+  const settings = settingsQuery.data?.settings;
+  // The model list follows the configured models: a new main, heavy, fallback or Jev model
+  // gets its own cache entry, so the card refetches right after the settings change.
+  const modelsKey = settings
+    ? JSON.stringify([settings.provider, settings.model, settings.heavyProvider, settings.heavyModel, settings.fallback, settings.judge])
+    : null;
+  const pricesKey = ['workspaces', workspaceId, 'prices', modelsKey];
   const pricesQuery = useQuery({
     queryKey: pricesKey,
     queryFn: () => fetchApi<PricesResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/prices`),
@@ -67,7 +74,7 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
       {
         onSuccess: () => onDone?.(),
         onError: (err: Error) => setServerError(err.message || t('error')),
-        onSettled: () => void queryClient.invalidateQueries({ queryKey: pricesKey }),
+        onSettled: () => void queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] }),
       },
     );
   };
@@ -86,7 +93,8 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
     );
 
   let body: ReactNode;
-  if (settings === null) body = <p className="text-xs text-ink-500 dark:text-ink-400">{t('pricesNone')}</p>;
+  if (settingsQuery.isError) body = <p className="text-xs text-amber-700 dark:text-amber-300">{t('pricesLoadError')}</p>;
+  else if (settings === null) body = <p className="text-xs text-ink-500 dark:text-ink-400">{t('pricesNone')}</p>;
   else if (!settings || pricesQuery.isLoading) body = <div className="text-sm text-ink-400">{t('loading')}</div>;
   else if (pricesQuery.isError) body = <p className="text-xs text-amber-700 dark:text-amber-300">{t('pricesLoadError')}</p>;
   else
@@ -155,7 +163,7 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
                           disabled={disabled}
                           onClick={() => {
                             setServerError(null);
-                            setEditing(keyOf(m));
+                            setEditing(rowKey(m, index));
                           }}
                           title={t('pricesEdit')}
                           aria-label={t('pricesEdit')}
@@ -167,7 +175,7 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
                     </td>
                   )}
                 </tr>,
-                !isMember && editing === keyOf(m) ? (
+                !isMember && editing === rowKey(m, index) ? (
                   <PriceEditRow
                     key={`${m.role}-${index}-edit`}
                     model={m}
