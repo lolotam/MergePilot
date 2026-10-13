@@ -185,6 +185,21 @@ describe('useRunsLive (ADR-0021)', () => {
     act(() => vi.advanceTimersByTime(LIVE_FALLBACK_POLL_MS * 2));
     expect(invalidate).not.toHaveBeenCalled();
   });
+
+  it('restarts a first load still in flight instead of letting it absorb the catch-up', async () => {
+    const queryClient = new QueryClient();
+    void queryClient.prefetchQuery({ queryKey: ['workspaces', 'ws-1', 'runs', 'list'], queryFn: () => new Promise(() => {}) });
+    const cancel = vi.spyOn(queryClient, 'cancelQueries');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      React.createElement(QueryClientProvider, { client: queryClient }, children);
+    renderHook(() => useRunsLive('ws-1'), { wrapper });
+
+    latest().open();
+    expect(cancel).toHaveBeenCalledWith({ queryKey: ['workspaces', 'ws-1', 'runs'] });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['workspaces', 'ws-1', 'runs'] });
+  });
 });
 
 describe('useRunsLive without EventSource', () => {

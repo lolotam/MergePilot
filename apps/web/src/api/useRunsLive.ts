@@ -43,6 +43,16 @@ export function useRunsLive(workspaceId: string, options: RunsLiveOptions = {}):
     if (!workspaceId || typeof EventSource === 'undefined') return undefined;
     const queryKey = runId ? ['workspaces', workspaceId, 'runs', runId] : ['workspaces', workspaceId, 'runs'];
     const refetch = () => {
+      // A first load still in flight (no data yet) would absorb the refetch and could answer with
+      // what it read before the event: cancel it so a fresh request starts.
+      const firstLoadInFlight = queryClient
+        .getQueryCache()
+        .findAll({ queryKey })
+        .some((q) => q.state.data === undefined && q.state.fetchStatus === 'fetching');
+      if (firstLoadInFlight) {
+        void queryClient.cancelQueries({ queryKey }).then(() => queryClient.invalidateQueries({ queryKey }));
+        return;
+      }
       void queryClient.invalidateQueries({ queryKey });
     };
 
