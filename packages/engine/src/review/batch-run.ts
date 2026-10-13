@@ -9,7 +9,7 @@ import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { FINDINGS_MISSING_REASON, parseReviewAnswer, type ParseReviewAnswerResult } from './answer.js';
 import { estimateTokens } from './budget.js';
-import { describePaths, retryEmptyWithoutThinking, type ReviewDeadline } from './call.js';
+import { describePaths, retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import {
@@ -101,7 +101,7 @@ async function reviewOneBatch(
   spend.record(promptTokens, reviewOutputTokens, first.usage);
   let usage = first.usage;
 
-  const empty = await retryEmptyWithoutThinking({
+  const empty = await retryUnusableAnswer({
     parsed: parseReviewResponse(first),
     model,
     spend,

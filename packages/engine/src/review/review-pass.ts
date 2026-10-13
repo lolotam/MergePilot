@@ -10,7 +10,7 @@ import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
 import { FINDINGS_MISSING_REASON } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
-import { retryEmptyWithoutThinking, type ReviewDeadline } from './call.js';
+import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import type { LibraryDoc } from './prompt.js';
 import { combineUsage, reviewJsonSchema, type ReviewableFileWithPatch, type RulesFileInput } from './split.js';
@@ -78,7 +78,7 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     return failedCall(err, ctx.knownSecrets);
   }
 
-  const empty = await retryEmptyWithoutThinking({
+  const empty = await retryUnusableAnswer({
     parsed: parseReviewResponse(response),
     model,
     spend,

@@ -90,3 +90,23 @@ style:
 
 The empty batches on #84 came from the heavy model `deepseek-v4-pro`, whose default reasoning used
 up the generic 8192-token headroom.
+
+## Amendment (2026-10-13): one JSON-only retry for an answer without the JSON
+
+**Context:** On lolotam/PayPos.systems#198 the `xai:grok-4.7` subscription bot failed twice with
+`invalid-json: no valid JSON object found matching review schema`. Its answer had no JSON object
+at all. Subscription backends cannot enforce the response schema the API backends send, so a
+model can answer in prose.
+
+**Decision:**
+- `retryUnusableAnswer` (formerly `retryEmptyWithoutThinking`) still retries an empty answer once
+  with thinking off.
+- It also retries an `invalid-json` answer once: the same request, with a reminder appended to the
+  user prompt to reply with only the JSON object. Thinking is not changed for that retry.
+- The retry is budget-gated like the other retries (`invalid-json retry skipped: budget limit
+  reached`).
+- A second unusable answer fails with `… (also after asking for JSON only)`. There is never a third
+  call.
+- When there is no JSON object at all, the error now says so and gives the answer's length:
+  `invalid-json: the answer has no JSON object (N characters)`.
+- The retry applies to the single pass, each batch, and the verify pass alike.
