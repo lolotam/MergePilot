@@ -81,9 +81,14 @@ export async function publishConsensus(
     ...runs.map((br) => row(br.bot, outcomes.find((o) => o.slot === br.bot.slot))),
     ...noKey.map((bot) => ({ slot: bot.slot, name: bot.name, logo: bot.logo, modelLabel: `${bot.provider}:${bot.model}`, status: 'skipped' as const })),
   ].sort((a, b) => a.slot - b.slot);
-  const incompleteReasons = completed.flatMap(({ br, rr }) =>
-    rr.complete ? [] : [`${br.bot.name}: ${rr.result.incompleteReasons.join('; ') || 'incomplete'}`],
-  );
+  // The panel's review is complete only when every bot that ran completed: a bot that failed
+  // never looked at these changes, so the head must not count as reviewed for the whole panel.
+  const incompleteReasons = [
+    ...completed.flatMap(({ br, rr }) =>
+      rr.complete ? [] : [`${br.bot.name}: ${rr.result.incompleteReasons.join('; ') || 'incomplete'}`],
+    ),
+    ...rows.filter((r) => r.status === 'failed').map((r) => `${r.name}: did not complete`),
+  ];
   const summaryMarkdown = renderPanelSummary({
     language,
     baseUrl: ctx.baseUrl,
@@ -140,7 +145,11 @@ function addJudgeUsage(
 ): void {
   if (!report || report.attempts.length === 0) return;
   const finish = pending.finish;
-  if (report.costUsd !== undefined) finish.costUsd = (finish.costUsd ?? 0) + report.costUsd;
+  // Known only when both parts are: an unpriced bot run or an unpriced judge leaves it unknown.
+  finish.costUsd =
+    finish.costUsd === null || finish.costUsd === undefined || report.costUsd === undefined
+      ? null
+      : finish.costUsd + report.costUsd;
   const usage = finish.result?.usage;
   if (finish.result && usage) {
     finish.result = {

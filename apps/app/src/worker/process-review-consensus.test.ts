@@ -75,6 +75,23 @@ describe('processReviewJob — consensus mode', () => {
     expect(h.created[0]?.body).toContain('| **Owl** | `openai:bot2-model` | ❌ failed |');
     expect(h.created[0]?.comments[0]?.body).toContain('_Found by: MergePilot (1/1)_');
     expect((await h.runs()).map((r) => r.status)).toEqual(['completed', 'failed']);
+    // A failed member never saw these changes: the panel review stays partial, so the head is reviewed again.
+    expect(h.created[0]?.body).toMatch(/<!-- mergepilot:review head=\S+ config=[a-f0-9]{12} status=partial -->$/);
+    expect(h.created[0]?.body).toContain('Owl: did not complete');
+  });
+
+  it('does not run or publish when another job holds the main bot run (no slot-1 race)', async () => {
+    const h = await panelSetup({ settings: consensus(1), bots: [{ slot: 2, name: 'Owl' }] });
+    await h.store.createReviewRun({
+      workspaceId: 'ws-panel', jobId: 'other-job', installationId: 31, repoFullName: 'acme/repo', pullNumber: 7,
+      headSha: h.job.headSha, status: 'running', costUsd: null, detail: null,
+    });
+    const result = await processReviewJob(h.job, h.deps);
+    expect(result).toEqual({ status: 'skipped', detail: 'duplicate' });
+    expect(h.created).toHaveLength(0);
+    expect(h.calledModels).toEqual([]);
+    const mine = (await h.runs()).filter((r) => r.jobId === h.job.deliveryId);
+    expect(mine.map((r) => [r.botSlot, r.status, r.detail])).toEqual([[2, 'skipped', 'duplicate']]);
   });
 
   it('publishes nothing when every bot failed', async () => {

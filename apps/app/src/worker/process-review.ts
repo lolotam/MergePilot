@@ -111,6 +111,16 @@ export async function processReviewJob(
   const duplicate: ProcessReviewResult = { status: 'skipped', detail: DUPLICATE };
   const lead = main ?? runs[0];
   if (!lead) return duplicate;
+  // Consensus publishes as slot 1: without its run (another job holds it), this job must not
+  // race that job's publication, so the extra bots it started are closed as duplicates.
+  if (!main && panelActive && mode === 'consensus') {
+    for (const br of runs) {
+      br.stopHeartbeat();
+      await deps.store.finishReviewRun(workspaceId, br.run.id, { status: 'skipped', costUsd: null, detail: DUPLICATE });
+    }
+    logSkip(DUPLICATE, `Skipping job ${job.deliveryId}: the main bot's run for this head is active elsewhere (consensus)`);
+    return duplicate;
+  }
 
   try {
     logger.info({
