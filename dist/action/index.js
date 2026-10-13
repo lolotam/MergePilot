@@ -95915,7 +95915,7 @@ function isCompatibleReasoningModel(provider, model, style) {
       return true;
     }
   }
-  if (/mimo-v2-(?:pro|omni)|mimo-v2\.5/.test(lowerModel)) {
+  if (/mimo-v2-(?:pro|omni)|mimo-v(?:2\.(?:[5-9]|\d{2})|[3-9]|\d{2})/.test(lowerModel)) {
     return true;
   }
   return false;
