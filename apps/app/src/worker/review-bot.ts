@@ -227,6 +227,14 @@ export async function finishBotRun(
     findingsCount: finish.findingsCount ?? 0, inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0,
     cost: finish.costUsd, durationMs: Math.round(performance.now() - ctx.startTime), reviewUrl: finish.reviewUrl ?? null,
   }, `Review job ${ctx.job.deliveryId} finished with status ${finish.status}`);
+  if (runResult?.status === 'failed' && runResult.answerAttempts) {
+    // What the model said instead of the JSON: logs only, never the dashboard or the PR.
+    ctx.logger.warn({
+      event: 'review.unusable-answer', jobId: ctx.job.deliveryId, runId: br.run.id,
+      ...(ctx.panelActive ? { botSlot: br.bot.slot } : {}),
+      provider: finish.provider, model: finish.model, attempts: runResult.answerAttempts,
+    }, `Review job ${ctx.job.deliveryId}: the model answered without the JSON asked for`);
+  }
 }
 
 /**

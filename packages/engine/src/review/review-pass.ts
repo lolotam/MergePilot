@@ -47,7 +47,27 @@ export type ReviewPassResult =
       totalUsage: TokenUsage | undefined;
       incompleteReasons: string[];
     }
-  | { ok: false; reason: string; detail?: string | undefined };
+  | { ok: false; reason: string; detail?: string | undefined; answerAttempts?: AnswerAttempt[] | undefined };
+
+/** What one answer without the JSON asked for looked like; for the operator's logs only. */
+export interface AnswerAttempt {
+  chars: number;
+  finishReason: string;
+  outputTokens?: number;
+  /** The first characters of the answer, secret-redacted. */
+  preview: string;
+}
+
+const ANSWER_PREVIEW_CHARS = 200;
+
+function answerAttemptOf(response: ReviewModelResponse, knownSecrets: readonly Secret[]): AnswerAttempt {
+  return {
+    chars: response.text.length,
+    finishReason: response.finishReason,
+    ...(response.usage ? { outputTokens: response.usage.outputTokens } : {}),
+    preview: redactSecrets(response.text, [...knownSecrets]).text.slice(0, ANSWER_PREVIEW_CHARS),
+  };
+}
 
 /** A thrown model call as a failed pass: the LlmFailure code, the message secret-redacted. */
 function failedCall(err: unknown, knownSecrets: readonly Secret[]): ReviewPassResult {
@@ -116,7 +136,10 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
   if (!parsed.ok) {
     // Skipped or failed recovery steps are disclosed alongside the parse error.
     const detail = [...notes, ...recovery.incompleteReasons].join('; ');
-    return { ok: false, reason: parsed.error, ...(detail ? { detail } : {}) };
+    const answerAttempts = parsed.code === 'invalid-json'
+      ? [response, empty.response].filter((r) => r !== undefined).map((r) => answerAttemptOf(r, ctx.knownSecrets))
+      : undefined;
+    return { ok: false, reason: parsed.error, ...(detail ? { detail } : {}), ...(answerAttempts ? { answerAttempts } : {}) };
   }
   return {
     ok: true,
