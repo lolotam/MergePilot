@@ -66,7 +66,7 @@ export class CredentialService {
 
     if (trimmed.startsWith('sk-ant-oat')) {
       throw new Error(
-        'Claude subscription tokens (sk-ant-oat...) are not supported in the SaaS. An Anthropic API key is required.',
+        'Claude subscription tokens cannot be saved as an API key. Use the Claude subscription sign-in method.',
       );
     }
 

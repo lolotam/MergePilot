@@ -53,7 +53,7 @@ MergePilot بيراجع Pull Requests عن طريق GitHub Action أو GitHub Ap
 >    - الزقه كامل، من غير مسافات ولا علامات تنصيص.
 > 4. MergePilot ما بيقراش التوكن ده ولا بيخزنه ولا بيجدده؛ هو فقط بيمرره للأداة الرسمية بصلاحيات قراءة فقط (وفق [ADR-0006](adr/0006-subscriptions-via-official-agent-clis.md)).
 
-السلوك ده خاص بـ `claude-code` في الـ Action. اشتراك Claude في لوحة التحكم بيتخزّن مشفّر وبيتجدّد على السيرفر حسب [ADR-0019](adr/0019-dashboard-subscription-auth.md).
+السلوك ده خاص بـ `claude-code` في الـ Action. اشتراك Claude في لوحة التحكم بيتخزّن مشفّر وبيتجدّد على السيرفر حسب [ADR-0020](adr/0020-dashboard-subscription-auth.md).
 
 ---
 

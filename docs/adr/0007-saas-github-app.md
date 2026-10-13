@@ -38,7 +38,7 @@
 
 ### المزودين في الـ SaaS
 
-- **مفاتيح API أو اشتراكات OpenAI/Codex وAnthropic/Claude وxAI/Grok** من لوحة التحكم، ببيانات دخول مشفّرة ([ADR-0019](0019-dashboard-subscription-auth.md)).
+- **مفاتيح API أو اشتراكات OpenAI/Codex وAnthropic/Claude وxAI/Grok** من لوحة التحكم، ببيانات دخول مشفّرة ([ADR-0020](0020-dashboard-subscription-auth.md)).
 - **`claude-code`** بيفضل وضع تشغيل CLI خاص بالـ Action. اشتراك Claude في الـ SaaS بيستخدم بروتوكول pi-ai، من غير تشغيل CLI.
 
 ### المسار

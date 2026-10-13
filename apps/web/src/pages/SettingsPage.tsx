@@ -160,7 +160,7 @@ export function SettingsPage() {
                         )}
                       </div>
                     </td>
-                     <td className="py-2.5 px-3 font-mono text-xs">{k.authMethod === 'subscription' ? t('authMethodSubscription') : `••••${k.last4}`}</td>
+                    <td className="py-2.5 px-3 font-mono text-xs">{k.authMethod === 'subscription' ? t('authMethodSubscription') : `••••${k.last4}`}</td>
                     <td className="py-2.5 px-3 text-xs text-ink-500 dark:text-ink-400 truncate max-w-[150px]">
                       {k.createdBy}
                     </td>

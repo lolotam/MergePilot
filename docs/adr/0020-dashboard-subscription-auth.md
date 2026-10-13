@@ -1,4 +1,4 @@
-# ADR-0019: Dashboard API-Key and Consumer-Subscription Authentication
+# ADR-0020: Dashboard API-Key and Consumer-Subscription Authentication
 
 - **Status:** Accepted (owner request, 2026-10-13).
 - **Related:** ADR-0002, ADR-0003, ADR-0004, ADR-0006, ADR-0007, ADR-0016, ADR-0018.
