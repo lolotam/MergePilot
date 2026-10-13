@@ -147,7 +147,10 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   };
 
   const concurrencyStr = env.WORKER_CONCURRENCY?.trim();
-  const concurrency = concurrencyStr ? parseInt(concurrencyStr, 10) : DEFAULT_WORKER_CONCURRENCY;
+  const concurrency = concurrencyStr ? Number(concurrencyStr) : DEFAULT_WORKER_CONCURRENCY;
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error('WORKER_CONCURRENCY must be a whole number of at least 1');
+  }
 
   let connection = options?.connection;
   if (!connection && !config.redisUrl.startsWith('memory:')) {

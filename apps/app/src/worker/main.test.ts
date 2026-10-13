@@ -210,6 +210,18 @@ describe('worker/main', { timeout: 20000 }, () => {
       }
     });
 
+    it.each(['abc', '0', '-2', '2.5'])('refuses to start with WORKER_CONCURRENCY=%s', async (value) => {
+      await expect(createWorker({
+        env: {
+          MERGEPILOT_BASE_URL: 'https://test.mergepilot.com', PORT: '3000', DATABASE_URL: 'memory:', REDIS_URL: 'memory:',
+          MERGEPILOT_MASTER_KEY: masterKey, GITHUB_APP_ID: '12345', GITHUB_APP_PRIVATE_KEY: 'fake-private-key',
+          GITHUB_WEBHOOK_SECRET: 'fake-webhook-secret', GITHUB_CLIENT_ID: 'gh-id', GITHUB_CLIENT_SECRET: 'gh-sec',
+          GOOGLE_CLIENT_ID: 'goog-id', GOOGLE_CLIENT_SECRET: 'goog-sec', BETTER_AUTH_SECRET: 'better-auth-secret-1234567890',
+          WORKER_CONCURRENCY: value, WORKER_HEALTH_PORT: '0',
+        },
+      })).rejects.toThrow('WORKER_CONCURRENCY must be a whole number of at least 1');
+    });
+
     it('attaches graceful shutdown handlers to SIGTERM and SIGINT', async () => {
       const store = new MemoryStore();
       const deps: ProcessReviewDeps = {

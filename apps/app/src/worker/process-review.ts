@@ -207,7 +207,12 @@ async function sharedSteps(
     const now = deps.now ? deps.now() : new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
     const currentMonthCost = await deps.store.monthCostUsd(workspaceId, monthStart);
-    if (currentMonthCost >= settings.monthlyBudgetUsd) {
+    // Reviews of this workspace running at the same time have not recorded their cost yet: each
+    // other job's run is reserved at the per-review budget, so parallel jobs cannot all pass.
+    const inFlight = await deps.store.listReviewRuns(workspaceId, { status: ['queued', 'running'], limit: 500 });
+    const others = (Array.isArray(inFlight) ? inFlight : inFlight.runs).filter((r) => r.jobId !== job.deliveryId).length;
+    const reserved = others * mainConfig.effectiveConfig.budget.perReviewUsd;
+    if (currentMonthCost + reserved >= settings.monthlyBudgetUsd) {
       for (const br of runs) {
         const own = br === main ? mainChoice : br.bot;
         let reviewUrl: string | null = null;
