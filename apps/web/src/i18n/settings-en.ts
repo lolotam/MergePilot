@@ -77,7 +77,6 @@ export const enSettings = {
   effortMinimal: 'Minimal',
   effortXhigh: 'Extra high',
   effortMax: 'Max',
-  effortsInModel: 'Efforts',
   heavyModelRequired: 'Choose the heavy-duty model, or turn it off.',
   fallbackModelRequired: 'Choose a model for every fallback, or remove the empty one.',
   noKeyedProviders: 'Add an API key first: heavy-duty and fallback models use providers that have a saved key.',

@@ -77,7 +77,6 @@ export const arSettings = {
   effortMinimal: 'أدنى (Minimal)',
   effortXhigh: 'مرتفع جدًا (XHigh)',
   effortMax: 'أقصى (Max)',
-  effortsInModel: 'مستويات التفكير',
   heavyModelRequired: 'اختر نموذج المهام الثقيلة أو ألغِ تفعيله.',
   fallbackModelRequired: 'اختر نموذجًا لكل نموذج احتياطي أو احذف الفارغ منها.',
   noKeyedProviders: 'أضف مفتاح API أولًا: نموذج المهام الثقيلة والنماذج الاحتياطية تستخدم مزودين لهم مفتاح محفوظ.',
