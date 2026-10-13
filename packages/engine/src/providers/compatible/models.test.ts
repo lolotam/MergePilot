@@ -67,6 +67,38 @@ describe('Vercel AI Gateway model list', () => {
     ]);
   });
 
+  it('offers only the efforts reasoning_options lists, none for toggle or budget-only models', async () => {
+    const data = [
+      {
+        id: 'anthropic/claude-sonnet-4.5',
+        type: 'language',
+        supported_parameters: ['reasoning'],
+        reasoning_options: [{ type: 'toggle' }, { type: 'budget_tokens', min: 1024 }],
+      },
+      {
+        id: 'openai/gpt-5',
+        type: 'language',
+        supported_parameters: ['reasoning'],
+        reasoning_options: [{ type: 'effort', values: ['minimal', 'low', 'medium', 'high'] }],
+      },
+      {
+        id: 'x/odd',
+        type: 'language',
+        supported_parameters: ['reasoning'],
+        reasoning_options: [{ type: 'toggle' }, { type: 'effort', values: ['instant', 'low', 'xhigh'] }],
+      },
+      { id: 'y/no-reasoning', type: 'language', supported_parameters: ['reasoning'], reasoning_options: [] },
+    ];
+    const { fetch } = mockFetch(jsonResponse({ data }));
+    const models = await listModels('vercel-gateway', KEY, { fetch });
+    expect(models.map((m) => [m.id, m.efforts])).toEqual([
+      ['anthropic/claude-sonnet-4.5', []],
+      ['openai/gpt-5', ['off', 'minimal', 'low', 'medium', 'high']],
+      ['x/odd', ['off', 'low', 'xhigh']],
+      ['y/no-reasoning', []],
+    ]);
+  });
+
   it('drops evaluation models from every compatible list', async () => {
     const data = [
       { id: 'openai/gpt-5', type: 'chat' },
