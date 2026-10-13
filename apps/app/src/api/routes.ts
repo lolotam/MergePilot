@@ -6,7 +6,7 @@ import type { FetchLike } from '@mergepilot/engine';
 import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
-import type { AppStore, KeyProvider, ReviewQueue } from '../core/types.js';
+import { BotNameTakenError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
 import type { CredentialService } from '../credentials/service.js';
 import type { GitHubAppClientFactory } from '../worker/types.js';
 import { KeyProviderSchema, SettingsUpdateSchema, SaveKeyRequestSchema } from './contract.js';
@@ -115,7 +115,15 @@ export function registerDashboardApi(
         return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
       }
 
-      await deps.store.saveSettings(merged);
+      try {
+        await deps.store.saveSettings(merged);
+      } catch (error) {
+        // A bot saved the same name between the check above and this write (the store re-checks it under a lock).
+        if (error instanceof BotNameTakenError) {
+          return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
+        }
+        throw error;
+      }
       request.log.info(
         {
           event: 'settings.changed',

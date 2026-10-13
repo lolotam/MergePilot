@@ -89,6 +89,11 @@ export function defineReviewerBotContract(
       );
       await store.upsertReviewerBot(WS, bot({ slot: 3, name: 'MergePilot' }));
       expect((await store.listReviewerBots(WS)).map((b) => b.name)).toEqual(['Owl', 'MergePilot']);
+      // The main bot's name is checked in the same locked write: it cannot take an extra bot's.
+      await expect(
+        store.saveSettings({ workspaceId: WS, provider: 'anthropic', model: 'm', language: 'en', monthlyBudgetUsd: null, botName: ' OWL ' }),
+      ).rejects.toBeInstanceOf(BotNameTakenError);
+      expect((await store.getSettings(WS))?.botName).toBe('Hawk');
     } finally {
       await cleanup?.();
     }

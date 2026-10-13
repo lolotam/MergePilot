@@ -12,7 +12,7 @@ import {
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
-import { withLiveWorkspace } from './workspace-lock.js';
+import { lockBotNames, withLiveWorkspace } from './workspace-lock.js';
 
 // The reviewer panel's extra bots, slots 2-5 (ADR-0017). The main bot (slot 1) is the settings row.
 
@@ -72,6 +72,7 @@ export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: R
   };
   try {
     return await withLiveWorkspace(db, workspaceId, async (tx) => {
+      await lockBotNames(tx, workspaceId);
       const main = await tx
         .select({ name: workspaceSettings.botName })
         .from(workspaceSettings)

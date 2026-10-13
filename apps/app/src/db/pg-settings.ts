@@ -1,9 +1,10 @@
 import { eq } from 'drizzle-orm';
+import { BotNameTakenError, sameBotName } from '../core/types.js';
 import type { ApiProvider, BotLogo, JudgeSettings, PanelMode, WorkspaceSettings } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
-import { workspaceSettings } from './schema.js';
-import { withLiveWorkspace } from './workspace-lock.js';
+import { reviewerBots, workspaceSettings } from './schema.js';
+import { lockBotNames, withLiveWorkspace } from './workspace-lock.js';
 
 export async function getPgSettings(db: AppDb, workspaceId: string): Promise<WorkspaceSettings | null> {
   const rows = await db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
@@ -57,6 +58,7 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
  * Upserts the settings. `runRetentionDays`, `repoColors`, `judge` and the panel fields (`botName`,
  * `botLogo`, `panelMode`, `panelMinAgreement`) left undefined keep the stored value (a new row gets
  * the column defaults: 30 days, no colors, the "MergePilot" bot, separate reviews).
+ * Throws BotNameTakenError when `botName` matches an extra bot's name.
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
   const budgetStr = settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined
@@ -83,6 +85,16 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
   if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
   if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
   await withLiveWorkspace(db, settings.workspaceId, async (tx) => {
+    const botName = settings.botName;
+    if (botName !== undefined) {
+      // The main bot's name must differ from every extra bot's, checked under the bot-name lock.
+      await lockBotNames(tx, settings.workspaceId);
+      const extras = await tx
+        .select({ name: reviewerBots.name })
+        .from(reviewerBots)
+        .where(eq(reviewerBots.workspaceId, settings.workspaceId));
+      if (extras.some((bot) => sameBotName(bot.name, botName))) throw new BotNameTakenError(botName);
+    }
     await tx
       .insert(workspaceSettings)
       .values({

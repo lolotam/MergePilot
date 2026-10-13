@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { organization } from '../auth/schema.js';
 import { WorkspaceDeletedError } from '../core/types.js';
@@ -13,6 +13,15 @@ import {
 import type * as schema from './schema.js';
 
 export type AppTx = Parameters<Parameters<AppDb['transaction']>[0]>[0];
+
+/**
+ * Serializes every write that can change a bot name in this workspace (the main bot's name in
+ * the settings, an extra bot's row) until the transaction ends, so the "names differ" check and
+ * the write are atomic across both tables (ADR-0017).
+ */
+export async function lockBotNames(tx: AppTx, workspaceId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mergepilot:bot-names:${workspaceId}`}))`);
+}
 
 /**
  * The driver-neutral base of AppDb and AppTx. Some builder overloads (e.g. `returning({...})`)

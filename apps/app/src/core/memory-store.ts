@@ -15,7 +15,7 @@ import {
   panelSettingsOrDefaults,
   upsertMemoryBot,
 } from './memory-bots.js';
-import type { ReviewerBot } from './bot-types.js';
+import { BotNameTakenError, sameBotName, type ReviewerBot } from './bot-types.js';
 import {
   addMemoryUsage,
   deleteMemoryRuns,
@@ -127,6 +127,10 @@ export class MemoryStore implements AppStore {
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
     this.assertLive(settings.workspaceId);
+    const botName = settings.botName;
+    if (botName !== undefined && listMemoryBots(this.bots, settings.workspaceId).some((bot) => sameBotName(bot.name, botName))) {
+      throw new BotNameTakenError(botName);
+    }
     // Like the Postgres store: undefined keeps the stored retention, colors and judge.
     const stored = this.settings.get(settings.workspaceId);
     this.settings.set(settings.workspaceId, {
