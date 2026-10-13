@@ -1,7 +1,6 @@
 /** The Jev judge settings card and its key types (ADR-0015). */
 export const arJudge = {
   providerTypesafe: 'TypeSafe (لـ Jev فقط)',
-  providerVercelGateway: 'Vercel AI Gateway (لـ Jev فقط)',
   judgeCardTitle: 'الحَكَم (Jev)',
   judgeCardDesc:
     'نموذج قرار رخيص يراجع كل ملاحظة قبل نشرها (يستبعد الملاحظات الخاطئة) ويكتشف التعليقات المكررة لتعليق موجود. يُحاسب على توكنات المدخلات فقط.',

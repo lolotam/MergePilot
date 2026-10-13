@@ -63,6 +63,29 @@ jobs:
 - While paused, each push is skipped and a notice is posted once per pause.
 - Comments from bots, edited comments and comments on plain issues are ignored.
 
+## Provider keys
+
+Set `provider` and `model` in `.mergepilot.yml` (`model` is optional only for `claude-code`), then pass that provider's key as a secret in the step's `env`. Every preset calls its fixed endpoint; only `custom` takes a server URL, from the `custom-base-url` input or `CUSTOM_LLM_BASE_URL`.
+
+| Provider | Example `model` | Key (env) |
+|---|---|---|
+| `anthropic` | `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` |
+| `openai` | `gpt-5` | `OPENAI_API_KEY` |
+| `gemini` | `gemini-3.8-flash` | `GEMINI_API_KEY` |
+| `xai` | `grok-4` | `XAI_API_KEY` |
+| `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| `nvidia` | `nvidia/nemotron-3-super-120b-a12b` | `NVIDIA_API_KEY` |
+| `openrouter` | `openai/gpt-5` | `OPENROUTER_API_KEY` |
+| `vercel-gateway` | `anthropic/claude-sonnet-4.5` (any language model the gateway lists) | `AI_GATEWAY_API_KEY` |
+| `opencode-zen`, `opencode-go` | `glm-5.3` | `OPENCODE_API_KEY` |
+| `zai`, `zai-coding` | `glm-4.6` | `ZAI_API_KEY` |
+| `xiaomi` | `mimo-v2.5` | `XIAOMI_API_KEY` |
+| `xiaomi-token-plan`, `xiaomi-token-plan-cn` | `mimo-v2.5` | `XIAOMI_TOKEN_PLAN_API_KEY` |
+| `custom` | your server's model id | `CUSTOM_LLM_API_KEY` |
+| `claude-code` | optional: the CLI picks its model | `CLAUDE_CODE_OAUTH_TOKEN` |
+
+`vercel-gateway` is the same key the Jev judge uses below: one `AI_GATEWAY_API_KEY` serves review models on `https://ai-gateway.vercel.sh/v1` and the judge on its fixed Jev endpoint.
+
 ## Jev judge (optional)
 
 A "System One" decision model ([TypeSafe Jev](https://docs.typesafe.ai/introduction/coding-agents), ADR-0015) can check every finding before it is published and spot comments that repeat an existing MergePilot comment. It only answers typed questions and is billed on input tokens only.

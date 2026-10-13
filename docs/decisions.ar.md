@@ -330,3 +330,20 @@
   - R1 (دي): التخزين والإعدادات والـ API بس، والمراجعات لسه شغالة بالبوت الأساسي لوحده زي ما هي.
   - R2: تشغيل البوتات مع بعض في الـ worker والنشر المنفصل أو بالإجماع.
   - R3: شاشة الإعدادات بالتابات وعلامة البوت في جدول المراجعات.
+
+## الدفعة 12 — 2026-10-13
+
+### س31: Vercel AI Gateway مزود مراجعة كامل
+
+**طلب صاحب المشروع (بنصّه):**
+«add the versel gateway as developed with the fist models with full dropdown list but in jev judg only let is sho jev only but with other providers as reviewer bot make it show all the models»
+
+**القرار والنتيجة (تعديل على ADR-0008، وملاحظة في ADR-0015):**
+- Vercel AI Gateway بقى مزود مراجعة عادي زي OpenRouter، بعنوان ثابت `https://ai-gateway.vercel.sh/v1`.
+- المفتاح بيتحفظ مرة واحدة (`AI_GATEWAY_API_KEY` في الـ Action)، وبيخدم المراجعة والحَكَم مع بعض.
+- النموذج الرئيسي والاحتياطي والنموذج التقيل بيعرضوا قايمة نماذج المحادثة كلها من Vercel.
+- القايمة بتشيل: أي نموذج مش `language`، والنسخ اللي آخرها `-batch`، ونموذج Jev نفسه (`typesafe-ai/jev`).
+- مستويات التفكير لكل نموذج بتيجي من بيانات Vercel نفسها (`supported_parameters`).
+- كارت الحَكَم ماتغيرش: Vercel فيه بيعرض Jev بس (`typesafe-ai/jev`).
+- اختبار المفتاح قبل الحفظ بقى بقايمة النماذج، واختبار الحَكَم زي ما هو.
+- مفيش migration.
