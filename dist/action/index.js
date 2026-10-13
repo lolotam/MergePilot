@@ -71680,20 +71680,27 @@ var FallbackChain = class {
       }
     }
   }
-  /** What to disclose about the chain; the primary's error message is redacted with `secrets`. */
-  disclosure(secrets = []) {
+  /**
+   * What to disclose about the chain. `secrets` is required: the primary's raw error message is
+   * redacted with it first, and only then put on one line and bounded.
+   */
+  disclosure(secrets) {
     const skipped = this.#models[0]?.skippedFallbacks ?? [];
     return {
       modelUsed: this.label,
       ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {},
-      ...this.#from?.detail ? { fallbackDetail: redactSecrets(this.#from.detail, secrets).text } : {},
+      ...this.#from?.detail ? { fallbackDetail: disclosedDetail(this.#from.detail, secrets) } : {},
       ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}
     };
   }
 };
 function detailOf(error62) {
-  const message = error62 instanceof Error ? error62.message.replace(/\s+/g, " ").trim() : "";
-  return message || void 0;
+  return error62 instanceof Error && error62.message.trim() ? error62.message : void 0;
+}
+var MAX_DISCLOSED_DETAIL = 2e3;
+function disclosedDetail(raw, secrets) {
+  const oneLine2 = redactSecrets(raw, secrets).text.replace(/\s+/g, " ").trim();
+  return oneLine2.length > MAX_DISCLOSED_DETAIL ? oneLine2.slice(0, MAX_DISCLOSED_DETAIL) : oneLine2;
 }
 
 function costUsd(usage, pricing) {

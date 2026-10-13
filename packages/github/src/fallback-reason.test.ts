@@ -12,10 +12,12 @@ describe('fallbackReasonOf', () => {
   });
 
   it('redacts a known secret even when it straddles the display cut', () => {
-    const message = `${'x'.repeat(MAX_FALLBACK_DETAIL - 10)} key=${KEY} rejected`;
+    // The key starts 20 characters before the cut: unredacted, 20 of its characters would show.
+    const message = `${'x'.repeat(MAX_FALLBACK_DETAIL - 25)} key=${KEY} rejected`;
     const reason = fallbackReasonOf({ fallbackFrom: 'opencode-zen:m', fallbackCode: 'auth', fallbackDetail: message }, [new Secret(KEY)]);
     const detail = reason?.detail ?? '';
     expect(Array.from(detail)).toHaveLength(MAX_FALLBACK_DETAIL);
+    expect(detail).toContain('[REDACTED');
     for (let n = 6; n <= KEY.length; n++) expect(detail).not.toContain(KEY.slice(0, n));
   });
 

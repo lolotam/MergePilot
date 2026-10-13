@@ -41,10 +41,10 @@ export interface FallbackDisclosure {
   /** Why the primary model was left. */
   fallbackCode?: FailureKind;
   /**
-   * The primary model's whole error message on one line, so the summary and logs say what the
-   * provider answered, not only the category. `runReview` redacts it with every secret of the
-   * model chain; it is never cut here, so a secret is never split before redaction. Display
-   * callers cut it afterwards (`fallbackReasonOf` in @mergepilot/github).
+   * The primary model's error message, so the summary and logs say what the provider answered,
+   * not only the category. `runReview` redacts the raw message with every secret of the model
+   * chain, then puts it on one line and bounds it (2000 characters); display callers cut it
+   * further (`fallbackReasonOf` in @mergepilot/github, 300).
    */
   fallbackDetail?: string;
   /** Configured fallbacks that could not take part (e.g. no key), with the reason. */
@@ -93,19 +93,30 @@ export class FallbackChain implements ReviewModel {
     }
   }
 
-  /** What to disclose about the chain; the primary's error message is redacted with `secrets`. */
-  disclosure(secrets: Secret[] = []): FallbackDisclosure {
+  /**
+   * What to disclose about the chain. `secrets` is required: the primary's raw error message is
+   * redacted with it first, and only then put on one line and bounded.
+   */
+  disclosure(secrets: Secret[]): FallbackDisclosure {
     const skipped = this.#models[0]?.skippedFallbacks ?? [];
     return {
       modelUsed: this.label,
       ...(this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {}),
-      ...(this.#from?.detail ? { fallbackDetail: redactSecrets(this.#from.detail, secrets).text } : {}),
+      ...(this.#from?.detail ? { fallbackDetail: disclosedDetail(this.#from.detail, secrets) } : {}),
       ...(skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}),
     };
   }
 }
 
+/** The raw message, untouched: whitespace is collapsed only after redaction, so a secret still matches. */
 function detailOf(error: unknown): string | undefined {
-  const message = error instanceof Error ? error.message.replace(/\s+/g, ' ').trim() : '';
-  return message || undefined;
+  return error instanceof Error && error.message.trim() ? error.message : undefined;
+}
+
+// A bound on what is kept and logged; applied after redaction, so it never splits a secret.
+const MAX_DISCLOSED_DETAIL = 2000;
+
+function disclosedDetail(raw: string, secrets: Secret[]): string {
+  const oneLine = redactSecrets(raw, secrets).text.replace(/\s+/g, ' ').trim();
+  return oneLine.length > MAX_DISCLOSED_DETAIL ? oneLine.slice(0, MAX_DISCLOSED_DETAIL) : oneLine;
 }

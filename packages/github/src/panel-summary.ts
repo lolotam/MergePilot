@@ -117,7 +117,8 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   if (input.scope) sections.push(renderScopeLine(input.scope, isArabic));
   sections.push(renderTable(input, labels));
   for (const bot of input.bots) {
-    if (bot.fallback) sections.push(`${renderFallbackNotice(bot.modelLabel, bot.fallback, isArabic)} — **${escapeInline(bot.name)}**`);
+    // A failed bot's row already says it failed; the notice is for a fallback that answered.
+    if (bot.fallback && bot.status === 'completed') sections.push(`${renderFallbackNotice(bot.modelLabel, bot.fallback, isArabic)} — **${escapeInline(bot.name)}**`);
   }
   if (input.minAgreement > 1) sections.push(labels.agreement(input.minAgreement, merge.total));
   if (input.judgeUnavailable) sections.push(labels.judgeUnavailable(neutralize(input.judgeUnavailable)));
