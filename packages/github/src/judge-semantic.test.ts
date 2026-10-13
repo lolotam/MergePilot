@@ -163,6 +163,15 @@ describe('judge disclosure in the summary', () => {
     expect(renderReviewSummary({ ...base, language: 'ar', judge })).toContain('> استخدامات Jev: `annotate`، `dedupe`');
   });
 
+  it('discloses the configured uses even when the judge made no request', () => {
+    const idle = { attempts: [], inputTokens: 0, outputTokens: 0 };
+    expect(judgeSummaryInput(idle, undefined, ['consensus'])).toEqual({ uses: ['consensus'] });
+    expect(judgeSummaryInput(undefined, undefined, ['filter', 'dedupe'])).toEqual({ uses: ['filter', 'dedupe'] });
+    expect(renderReviewSummary({ ...base, judge: judgeSummaryInput(idle, undefined, []) })).toContain('> Jev uses: —');
+    // No judge configured: nothing to disclose.
+    expect(judgeSummaryInput(undefined, undefined, undefined)).toBeUndefined();
+  });
+
   it('says the judge was unavailable (Arabic too)', () => {
     const judge = judgeSummaryInput(
       { attempts: [{ provider: 'typesafe', model: 'jev-latest', ok: false, code: 'auth', ms: 1 }], inputTokens: 0, outputTokens: 0, unavailable: 'auth' },

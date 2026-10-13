@@ -40,7 +40,11 @@ export function judgeSummaryInput(
   filter: JudgeFilterSummary | undefined,
   uses?: readonly JudgeUse[] | undefined,
 ): JudgeSummaryInput | undefined {
-  if (!report || report.attempts.length === 0) return undefined;
+  // A configured judge that made no request (no findings, no duplicate candidates, or no use
+  // that calls it) still discloses its uses, so "enabled but nothing ran" is visible.
+  if (!report || report.attempts.length === 0) {
+    return uses !== undefined ? { uses: normalizeJudgeUses(uses) } : undefined;
+  }
   const unavailable = filter?.unavailable;
   // A report-level failure the filter did not have came from the later duplicate check.
   const duplicatesUnavailable = !unavailable ? report.unavailable : undefined;

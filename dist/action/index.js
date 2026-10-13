@@ -125857,8 +125857,9 @@ function dedupeJudgeOf(judge) {
   return judge && hasJudgeUse(judge.uses, "dedupe") ? judge.judge : void 0;
 }
 function judgeSummaryInput(report, filter, uses) {
-  if (!report || report.attempts.length === 0)
-    return void 0;
+  if (!report || report.attempts.length === 0) {
+    return uses !== void 0 ? { uses: normalizeJudgeUses(uses) } : void 0;
+  }
   const unavailable = filter?.unavailable;
   const duplicatesUnavailable = !unavailable ? report.unavailable : void 0;
   const activeUses = uses ?? filter?.uses;
