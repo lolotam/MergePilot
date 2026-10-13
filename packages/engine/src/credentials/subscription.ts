@@ -42,6 +42,11 @@ export function decodeSubscription(value: string, provider?: string): z.infer<ty
 
 /** Redact individual tokens as well as the serialized envelope. */
 export function credentialSecretValues(value: string): string[] {
-  const subscription = decodeSubscription(value);
-  return subscription ? [value, subscription.credential.access, subscription.credential.refresh] : [value];
+  try {
+    const subscription = decodeSubscription(value);
+    return subscription ? [value, subscription.credential.access, subscription.credential.refresh] : [value];
+  } catch {
+    // Malformed persisted/env credentials still need their raw value redacted from error output.
+    return [value];
+  }
 }

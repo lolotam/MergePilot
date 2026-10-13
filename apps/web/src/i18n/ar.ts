@@ -20,7 +20,8 @@ export const ar = {
 
   // Common
   authMethodLabel: 'طريقة تسجيل الدخول',
-  authMethodApiKey: 'مفتاح API',
+  authMethodApi: 'مفتاح API',
+  authMethodUnknown: 'بيانات الدخول مش قابلة للقراءة',
   authMethodSubscription: 'اشتراك',
   subscriptionHelp: 'اربط اشتراكك من المتصفح. ده بيستبدل بيانات الدخول الحالية للمزوّد في مساحة العمل. التوكنات بتتشفّر وبتتجدّد تلقائيًا.',
   subscriptionChatgpt: 'تسجيل الدخول بـ ChatGPT (Codex)',

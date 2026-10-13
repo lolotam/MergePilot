@@ -100,7 +100,7 @@ export const KeysResponseSchema = z.object({
   keys: z.array(
     z.object({
       provider: KeyProviderSchema,
-      authMethod: z.enum(['api-key', 'subscription']).optional(),
+      authMethod: z.enum(['api-key', 'subscription', 'unknown']).optional(),
       last4: z.string(),
       createdAt: z.string(),
       createdBy: z.string(),

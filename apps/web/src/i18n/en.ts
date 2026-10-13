@@ -21,7 +21,8 @@ export const en: I18nDictionary = {
 
   // Common
   authMethodLabel: 'Authentication method',
-  authMethodApiKey: 'API key',
+  authMethodApi: 'API key',
+  authMethodUnknown: 'Credential unreadable',
   authMethodSubscription: 'Subscription',
   subscriptionHelp: 'Connect your subscription in your browser. This replaces this provider’s current credential in the workspace. Tokens are encrypted and refreshed automatically.',
   subscriptionChatgpt: 'Sign in with ChatGPT (Codex)',

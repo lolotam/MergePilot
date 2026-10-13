@@ -48,7 +48,7 @@ export interface MeResponseWithAdmin extends MeResponse {
 
 export interface KeyItem {
   provider: KeyProvider;
-  authMethod?: 'api-key' | 'subscription';
+  authMethod?: 'api-key' | 'subscription' | 'unknown';
   last4: string;
   createdAt: string;
   createdBy: string;

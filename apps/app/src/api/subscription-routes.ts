@@ -40,7 +40,7 @@ export function registerSubscriptionRoutes(app: FastifyInstance, deps: Dashboard
     const attempt = logins.get(workspaceId, request.auth!.userId, id);
     if (!attempt) return sendError(reply, 404, 'login_not_found', 'Sign-in expired; start again');
     try {
-      const ok = await logins.finish(attempt, (provider, credential) => deps.credentials.saveSubscription(workspaceId, provider, credential, request.auth!.userId));
+      const ok = await logins.finish(attempt, (provider, credential, signal) => deps.credentials.saveSubscription(workspaceId, provider, credential, request.auth!.userId, signal));
       if (!ok) return sendError(reply, 409, 'login_pending', 'Complete sign-in before saving');
       invalidateModelsCache(workspaceId, attempt.state.provider);
       request.log.info({ event: 'credential.subscription_saved', workspaceId, provider: attempt.state.provider }, 'Subscription connected');

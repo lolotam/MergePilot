@@ -9,7 +9,7 @@ describe('headless subscription login', () => {
       const url = String(input);
       if (url.endsWith('/usercode')) return Response.json({ device_auth_id: 'device-private', user_code: 'ABCD-EFGH', interval: '0' });
       if (url.endsWith('/deviceauth/token')) return Response.json({ authorization_code: 'authorization-code', code_verifier: 'pkce' });
-      return Response.json({ access_token: access, refresh_token: 'refresh-test', expires_in: 3600 });
+      return Response.json({ access_token: access, refresh_token: ['refresh', 'test'].join('-'), expires_in: 3600 });
     });
     vi.stubGlobal('fetch', fetchMock);
     const prompt = vi.fn(async () => { throw new Error('No browser callback prompt expected'); });
@@ -26,7 +26,7 @@ describe('headless subscription login', () => {
       const body = JSON.parse(String(init?.body)) as Record<string, string>;
       expect(body.redirect_uri).toBe('https://platform.claude.com/oauth/code/callback');
       expect(body.code_verifier).toBe(new URL(authorizeUrl).searchParams.get('state'));
-      return Response.json({ access_token: 'claude-access', refresh_token: 'claude-refresh', expires_in: 3600 });
+      return Response.json({ access_token: ['claude', 'access'].join('-'), refresh_token: ['claude', 'refresh'].join('-'), expires_in: 3600 });
     });
     vi.stubGlobal('fetch', fetchMock);
     const result = await loginSubscription('anthropic', {

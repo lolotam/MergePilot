@@ -1,8 +1,37 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SubscriptionLogins } from './subscription-login.js';
+import { MemoryStore } from '../core/memory-store.js';
+import { CredentialService } from './service.js';
+import { EnvelopeVault } from '../vault/envelope-vault.js';
 
 afterEach(() => vi.useRealTimers());
 describe('subscription attempt lifecycle', () => {
+  it('honors cancellation while completion is waiting for the credential lock', async () => {
+    const store = new MemoryStore();
+    const service = new CredentialService({ store, vault: new EnvelopeVault(Buffer.alloc(32, 8).toString('base64')) });
+    await service.saveKey({ workspaceId: 'ws', provider: 'xai', apiKey: ['previous', 'api', 'key'].join('-'), userId: 'user' });
+    const modify = vi.spyOn(store, 'modifyCredential');
+    let release!: () => void;
+    let acquired!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const locked = new Promise<void>((resolve) => { acquired = resolve; });
+    const holding = store.modifyCredential('ws', 'xai', async (current) => { acquired(); await held; return current; });
+    await locked;
+    const logins = new SubscriptionLogins(async () => ({ type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 3600000 }));
+    const state = logins.start('ws', 'user', 'xai');
+    await Promise.resolve();
+    const attempt = logins.get('ws', 'user', state.id)!;
+    const finishing = logins.finish(attempt, (provider, credential, signal) => service.saveSubscription('ws', provider, credential, 'user', signal));
+    const rejected = expect(finishing).rejects.toThrow();
+    await vi.waitFor(() => expect(modify).toHaveBeenCalledTimes(2));
+    logins.cancel(attempt);
+    release();
+    await holding;
+    await rejected;
+    expect((await service.resolve('ws', 'xai')).reveal()).toBe('previous-api-key');
+    expect(logins.snapshot(attempt).status).toBe('cancelled');
+    logins.close();
+  });
   it('isolates attempts by both initiating user and workspace', () => {
     const logins = new SubscriptionLogins(async (_provider, interaction) => {
       await interaction.prompt({ type: 'manual_code', message: 'Code' });

@@ -121,7 +121,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
           <select id="credential-auth-method" value={authMethod} onChange={(event) => {
             setAuthMethod(event.target.value as 'api-key' | 'subscription'); setApiKeyInput(''); setKeyError(''); setTestResult(null);
           }} className="w-full px-3.5 py-2 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-xs">
-            <option value="api-key">{t('authMethodApiKey')}</option>
+            <option value="api-key">{t('authMethodApi')}</option>
             <option value="subscription">{t('authMethodSubscription')}</option>
           </select>
         </div>}

@@ -18,7 +18,7 @@ Each workspace has one active credential per provider. Connecting a subscription
 
 Access tokens, refresh tokens, expiry, and provider-specific account data are stored together in a versioned envelope inside the existing vault-encrypted credential column. Dashboard responses expose only the authentication method and normal credential metadata. Individual token values are included in review redaction. No provider CLI or agent tools run in subscription mode.
 
-Expired tokens are refreshed under a workspace/provider-specific Postgres advisory lock. Login, API-key replacement, backup restore, deletion, and refresh use the same lock, including across web and worker processes. Failed refresh preserves the stored credential and asks the user to sign in again. Tokens are resolved again before model calls during a review.
+Expired tokens are refreshed under a workspace/provider-specific Postgres advisory lock. Fresh credentials use a lock-free read. Duplicate refreshes share one promise, and at most two refresh transactions run per process to leave database connections available for ordinary requests. Login, API-key replacement, backup restore, deletion, and refresh use the same lock, including across web and worker processes. Failed refresh preserves the stored credential and asks the user to sign in again. Tokens are resolved again before model calls during a review.
 
 Subscription model calls report token usage but have **$0 incremental API cost**; the subscription itself is billed separately by the provider. Paid API fallbacks retain the existing unknown-cost-after-fallback behavior, and judge calls keep their own prices.
 
@@ -28,4 +28,4 @@ Credential-inclusive backups passphrase-encrypt the entire subscription envelope
 
 Only workspace admins and owners can start, complete, or cancel a login. Attempts are bound to the initiating user and workspace, expire after 15 minutes, and are cancelled when the dialog closes. Device codes and authorization codes are transient; authorization codes are never written to the database. Saving requires an authenticated completion request, so a finished provider login alone cannot write credentials after workspace access has been revoked.
 
-Pending login conversations live in the web process. A web-process restart requires starting a new login. Multiple web replicas need sticky routing for the `/subscriptions/*` routes for the duration of a login; saved credentials and refresh coordination are shared through Postgres.
+Pending login conversations live in the web process. A web-process restart requires starting a new login. Multiple web replicas need sticky routing for `/api/workspaces/*/subscriptions/*` for the duration of a login; saved credentials and refresh coordination are shared through Postgres.

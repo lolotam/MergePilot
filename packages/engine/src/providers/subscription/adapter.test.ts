@@ -16,6 +16,12 @@ const sse = (events: Record<string, unknown>[]) => new Response(events.map((even
 
 afterEach(() => vi.unstubAllGlobals());
 describe('subscription model protocols', () => {
+  it('redacts malformed credential envelopes without throwing from the redaction path', () => {
+    const value = 'mergepilot:oauth:v1:invalid-envelope';
+    const result = redactSecrets(`Provider echoed ${value}`, [new Secret(value)]);
+    expect(result.text).not.toContain(value);
+    expect(result.text).toContain('[REDACTED:known]');
+  });
   it.each(['openai', 'anthropic', 'xai'] as const)('routes %s subscription credentials to their subscription protocol and redacts individual tokens', async (provider) => {
     const secret = secretFor(provider);
     expect(createAdapter(provider, secret)).toBeInstanceOf(SubscriptionAdapter);

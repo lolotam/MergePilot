@@ -7,6 +7,7 @@ import { CredentialService } from './service.js';
 const credential = (expires = Date.now() + 3_600_000): SubscriptionCredential => ({
   type: 'oauth', access: ['test', 'access', '1111'].join('-'), refresh: ['test', 'refresh'].join('-'), expires,
 });
+const fakeValue = (...parts: string[]) => parts.join('-');
 function fixture() {
   const store = new MemoryStore();
   const vault = new EnvelopeVault(Buffer.alloc(32, 7).toString('base64'));
@@ -15,6 +16,49 @@ function fixture() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('workspace subscription credentials', () => {
+  it('bounds expired refreshes to two active transactions while fresh reads use no transaction', async () => {
+    const { service, store } = fixture();
+    await service.saveSubscription('fresh', 'xai', credential(), 'user');
+    const modify = vi.spyOn(store, 'modifyCredential');
+    await service.resolve('fresh', 'xai');
+    expect(modify).not.toHaveBeenCalled();
+    for (const workspaceId of ['one', 'two', 'three']) await service.saveSubscription(workspaceId, 'xai', credential(0), 'user');
+    modify.mockClear();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let active = 0;
+    let maximum = 0;
+    const fetchMock = vi.fn(async () => {
+      active++; maximum = Math.max(maximum, active);
+      await gate;
+      active--;
+      return Response.json({ access_token: fakeValue('new', 'access'), refresh_token: fakeValue('new', 'refresh'), expires_in: 3600 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const reads = Promise.all(['one', 'two', 'three'].map((workspaceId) => service.resolve(workspaceId, 'xai')));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(modify).toHaveBeenCalledTimes(2);
+    release();
+    await reads;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(maximum).toBe(2);
+  });
+  it('keeps malformed or undecryptable credentials visible for deletion without claiming subscription pricing', async () => {
+    const { service, store, vault } = fixture();
+    await service.saveSubscription('ws', 'openai', credential(), 'user');
+    await service.saveKey({ workspaceId: 'ws', provider: 'xai', apiKey: fakeValue('test', 'api', 'key'), userId: 'user' });
+    const stored = (await store.getCredential('ws', 'openai'))!;
+    await store.saveCredential({ ...stored, ciphertext: 'invalid-ciphertext' });
+    expect(await service.listKeys('ws')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'openai', authMethod: 'unknown' }),
+      expect.objectContaining({ provider: 'xai', authMethod: 'api-key' }),
+    ]));
+    const malformed = await vault.encrypt('mergepilot:oauth:v1:invalid', { workspaceId: 'ws', provider: 'openai' });
+    await store.saveCredential({ ...stored, ciphertext: malformed });
+    expect((await service.listKeys('ws')).find((key) => key.provider === 'openai')?.authMethod).toBe('unknown');
+    await service.deleteKey('ws', 'openai');
+    expect(await store.getCredential('ws', 'openai')).toBeNull();
+  });
   it.each(['openai', 'anthropic', 'xai'] as const)('encrypts %s tokens and exposes only method metadata', async (provider) => {
     const { service, store } = fixture();
     await service.saveSubscription('ws', provider, credential(), 'user');
@@ -25,7 +69,7 @@ describe('workspace subscription credentials', () => {
     expect(JSON.stringify(keys)).not.toContain(credential().refresh);
     const secret = await service.resolve('ws', provider);
     expect(decodeSubscription(secret.reveal(), provider)?.credential.access).toBe(credential().access);
-    await service.saveKey({ workspaceId: 'ws', provider, userId: 'user', apiKey: 'test-api-key-2222' });
+    await service.saveKey({ workspaceId: 'ws', provider, userId: 'user', apiKey: fakeValue('test', 'api', 'key', '2222') });
     expect((await service.listKeys('ws'))[0]?.authMethod).toBe('api-key');
     expect((await service.resolve('ws', provider)).reveal()).toBe('test-api-key-2222');
   });
@@ -37,7 +81,7 @@ describe('workspace subscription credentials', () => {
     const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
       expect(String(init?.body)).toContain('grant_type=refresh_token');
       await new Promise((resolve) => setTimeout(resolve, 20));
-      return Response.json({ access_token: 'rotated-access', refresh_token: 'rotated-refresh', expires_in: 3600 });
+      return Response.json({ access_token: fakeValue('rotated', 'access'), refresh_token: fakeValue('rotated', 'refresh'), expires_in: 3600 });
     });
     vi.stubGlobal('fetch', fetchMock);
     const values = await Promise.all([service.resolve('ws', 'xai'), other.resolve('ws', 'xai')]);
@@ -68,7 +112,7 @@ describe('workspace subscription credentials', () => {
     await service.saveSubscription('ws', 'xai', credential(0), 'user');
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { release = resolve; });
-    const fetchMock = vi.fn(async () => { await waiting; return Response.json({ access_token: 'next-access', refresh_token: 'next-refresh', expires_in: 3600 }); });
+    const fetchMock = vi.fn(async () => { await waiting; return Response.json({ access_token: fakeValue('next', 'access'), refresh_token: fakeValue('next', 'refresh'), expires_in: 3600 }); });
     vi.stubGlobal('fetch', fetchMock);
     const resolve = service.resolve('ws', 'xai');
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());

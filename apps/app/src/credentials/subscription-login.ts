@@ -92,11 +92,11 @@ export class SubscriptionLogins {
     return true;
   }
 
-  async finish(attempt: Attempt, save: (provider: SubscriptionProvider, credential: SubscriptionCredential) => Promise<void>): Promise<boolean> {
+  async finish(attempt: Attempt, save: (provider: SubscriptionProvider, credential: SubscriptionCredential, signal: AbortSignal) => Promise<void>): Promise<boolean> {
     if (attempt.state.status === 'completed') return true;
     if (attempt.state.status !== 'ready' || !attempt.credential || attempt.controller.signal.aborted) return false;
     if (!attempt.committing) {
-      attempt.committing = save(attempt.state.provider, attempt.credential).then(() => {
+      attempt.committing = save(attempt.state.provider, attempt.credential, attempt.controller.signal).then(() => {
         attempt.state.status = 'completed';
         delete attempt.credential;
         delete attempt.state.notice;
@@ -107,7 +107,7 @@ export class SubscriptionLogins {
   }
 
   cancel(attempt: Attempt): void {
-    if (attempt.state.status === 'completed' || attempt.committing) return;
+    if (attempt.state.status === 'completed') return;
     attempt.state.status = 'cancelled';
     attempt.controller.abort();
     delete attempt.credential;

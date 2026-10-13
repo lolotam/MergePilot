@@ -50,7 +50,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 var FifoQueue, EventStream, AssistantMessageEventStream;
 var init_event_stream = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js"() {
+  "@earendil-works/pi-ai/dist/utils/event-stream.js"() {
     FifoQueue = class {
       incoming = [];
       outgoing = [];
@@ -223,7 +223,7 @@ function lazyApi(load, capabilities) {
   return api;
 }
 var init_lazy = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/lazy.js"() {
+  "@earendil-works/pi-ai/dist/api/lazy.js"() {
     init_event_stream();
   }
 });
@@ -245,7 +245,7 @@ function __classPrivateFieldGet(receiver, state3, kind, f3) {
   return kind === "m" ? f3 : kind === "a" ? f3.call(receiver) : f3 ? f3.value : state3.get(receiver);
 }
 var init_tslib = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/tslib.mjs"() {
+  "@anthropic-ai/sdk/internal/tslib.mjs"() {
   }
 });
 
@@ -256,7 +256,7 @@ function isAbortError(err) {
 }
 var castToError;
 var init_errors = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/errors.mjs"() {
+  "@anthropic-ai/sdk/internal/errors.mjs"() {
     castToError = (err) => {
       if (err instanceof Error)
         return err;
@@ -287,7 +287,7 @@ var init_errors = __esm({
 
 var AnthropicError, APIError, APIUserAbortError, APIConnectionError, APIConnectionTimeoutError, RetryableError, BadRequestError, AuthenticationError, PermissionDeniedError, NotFoundError, ConflictError, UnprocessableEntityError, RateLimitError, InternalServerError;
 var init_error = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/error.mjs"() {
+  "@anthropic-ai/sdk/core/error.mjs"() {
     init_errors();
     AnthropicError = /* @__PURE__ */ (() => {
       class AnthropicError3 extends Error {
@@ -416,7 +416,7 @@ function checkNever(_value) {
 }
 var startsWithSchemeRegexp, isAbsoluteURL, isArray, isReadonlyArray, validatePositiveInteger, safeJSON;
 var init_values = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/values.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/values.mjs"() {
     init_error();
     startsWithSchemeRegexp = /^[a-z][a-z0-9+.-]*:/i;
     isAbsoluteURL = (url2) => {
@@ -445,7 +445,7 @@ var init_values = __esm({
 
 var sleep;
 var init_sleep = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
     sleep = (ms, signal) => new Promise((resolve3) => {
       if (signal?.aborted)
         return resolve3();
@@ -464,7 +464,7 @@ var init_sleep = __esm({
 
 var VERSION;
 var init_version = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/version.mjs"() {
+  "@anthropic-ai/sdk/version.mjs"() {
     VERSION = "0.129.0";
   }
 });
@@ -506,7 +506,7 @@ function getBrowserInfo() {
 }
 var isRunningInBrowser, getPlatformProperties, normalizeArch, normalizePlatform, _platformHeaders, getPlatformHeaders;
 var init_detect_platform = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs"() {
+  "@anthropic-ai/sdk/internal/detect-platform.mjs"() {
     init_version();
     isRunningInBrowser = () => {
       return (
@@ -627,7 +627,7 @@ function releaseRequestSignal(controller) {
 }
 var cleanups, registry2;
 var init_request_signal = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/request-signal.mjs"() {
+  "@anthropic-ai/sdk/internal/request-signal.mjs"() {
     cleanups = /* @__PURE__ */ new WeakMap();
     registry2 = typeof globalThis.FinalizationRegistry === "function" ? new globalThis.FinalizationRegistry((controller) => releaseRequestSignal(controller)) : null;
   }
@@ -704,13 +704,13 @@ async function CancelReadableStream(stream6) {
   await cancelPromise;
 }
 var init_shims = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/shims.mjs"() {
+  "@anthropic-ai/sdk/internal/shims.mjs"() {
   }
 });
 
 var FallbackEncoder;
 var init_request_options = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/request-options.mjs"() {
+  "@anthropic-ai/sdk/internal/request-options.mjs"() {
     FallbackEncoder = ({ headers, body }) => {
       return {
         bodyHeaders: {
@@ -724,7 +724,7 @@ var init_request_options = __esm({
 
 var default_format, default_formatter, formatters, RFC1738;
 var init_formats = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs"() {
+  "@anthropic-ai/sdk/internal/qs/formats.mjs"() {
     default_format = "RFC3986";
     default_formatter = (v) => String(v);
     formatters = {
@@ -753,7 +753,7 @@ function maybe_map(val, fn) {
 }
 var has, hex_table, limit, encode3;
 var init_utils = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs"() {
+  "@anthropic-ai/sdk/internal/qs/utils.mjs"() {
     init_formats();
     init_values();
     has = (obj, key) => (has = Object.hasOwn ?? Function.prototype.call.bind(Object.prototype.hasOwnProperty), has(obj, key));
@@ -1059,7 +1059,7 @@ function stringify(object2, opts = {}) {
 }
 var array_prefix_generators, push_to_array, toISOString, defaults, sentinel;
 var init_stringify = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs"() {
+  "@anthropic-ai/sdk/internal/qs/stringify.mjs"() {
     init_utils();
     init_formats();
     init_values();
@@ -1108,7 +1108,7 @@ function stringifyQuery(query) {
   return stringify(query, { arrayFormat: "brackets" });
 }
 var init_query = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/query.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/query.mjs"() {
     init_stringify();
   }
 });
@@ -1131,7 +1131,7 @@ import * as path from "node:path";
 import * as stream from "node:stream";
 import * as util from "node:util";
 var init_node = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/node.mjs"() {
+  "@anthropic-ai/sdk/internal/node.mjs"() {
   }
 });
 
@@ -1280,7 +1280,7 @@ async function readLimitedText(resp) {
 }
 var GRANT_TYPE_JWT_BEARER, GRANT_TYPE_REFRESH_TOKEN, TOKEN_ENDPOINT, OAUTH_API_BETA_HEADER, FEDERATION_BETA_HEADER, ADVISORY_REFRESH_THRESHOLD_IN_SECONDS, MANDATORY_REFRESH_THRESHOLD_IN_SECONDS, ADVISORY_REFRESH_BACKOFF_IN_SECONDS, MAX_TOKEN_RESPONSE_BYTES, MAX_ERROR_BODY_CHARS, SAFE_ERROR_KEYS, WorkloadIdentityError;
 var init_types = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/types.mjs"() {
     init_error();
     GRANT_TYPE_JWT_BEARER = "urn:ietf:params:oauth:grant-type:jwt-bearer";
     GRANT_TYPE_REFRESH_TOKEN = "refresh_token";
@@ -1308,13 +1308,13 @@ function nowAsSeconds() {
   return Math.floor(Date.now() / 1e3);
 }
 var init_time = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/time.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/time.mjs"() {
   }
 });
 
 var TokenCache;
 var init_token_cache = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/token-cache.mjs"() {
     init_types();
     init_time();
     TokenCache = class {
@@ -1409,7 +1409,7 @@ var init_token_cache = __esm({
 
 var readEnv;
 var init_env = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/env.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/env.mjs"() {
     readEnv = (env2) => {
       if (typeof globalThis.process !== "undefined") {
         return globalThis.process.env?.[env2]?.trim() || void 0;
@@ -1445,13 +1445,13 @@ function decodeUTF8(bytes) {
 }
 var encodeUTF8_, decodeUTF8_;
 var init_bytes = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/bytes.mjs"() {
   }
 });
 
 var fromBase64;
 var init_base64 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/base64.mjs"() {
     init_error();
     fromBase64 = (str) => {
       if (typeof globalThis.Buffer !== "undefined") {
@@ -1518,7 +1518,7 @@ function debugLogRequestDetails(logger, message, details) {
 }
 var defaultLogLevel, levelNumbers, parseLogLevel, noopLogger, cachedLoggers, lastEnvLevel, cachedDefaultLogger, formatRequestDetails;
 var init_log = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/log.mjs"() {
     init_values();
     init_env();
     defaultLogLevel = "warn";
@@ -1570,7 +1570,7 @@ var init_log = __esm({
 
 var uuid42;
 var init_uuid = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/uuid.mjs"() {
     uuid42 = function() {
       const { crypto: crypto6 } = globalThis;
       if (crypto6?.randomUUID) {
@@ -1585,7 +1585,7 @@ var init_uuid = __esm({
 });
 
 var init_utils2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils.mjs"() {
+  "@anthropic-ai/sdk/internal/utils.mjs"() {
     init_values();
     init_base64();
     init_env();
@@ -1612,7 +1612,7 @@ function validateProfileName(name) {
 }
 var CREDENTIALS_FILE_VERSION, PROFILE_NAME_PATTERN, loadConfigWithSource, getCredentialsPath, getRootConfigPath, supportsLocalConfigFiles, getActiveProfileName;
 var init_credentials = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/credentials.mjs"() {
+  "@anthropic-ai/sdk/core/credentials.mjs"() {
     init_detect_platform();
     init_utils2();
     CREDENTIALS_FILE_VERSION = "1.0";
@@ -1800,7 +1800,7 @@ function identityTokenFromValue(token) {
   return () => token;
 }
 var init_identity_token = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/identity-token.mjs"() {
     init_error();
   }
 });
@@ -1862,7 +1862,7 @@ function oidcFederationProvider(config2) {
   };
 }
 var init_oidc_federation = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs"() {
     init_types();
     init_time();
     init_version();
@@ -1942,7 +1942,7 @@ function userOAuthProvider(config2) {
   };
 }
 var init_user_oauth = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/user-oauth.mjs"() {
     init_credentials();
     init_types();
     init_time();
@@ -2081,7 +2081,7 @@ function cachedExchangeProvider(exchange, credentialsPath, onCacheWriteError, on
   };
 }
 var init_credential_chain = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/credential-chain.mjs"() {
     init_env();
     init_credentials();
     init_types();
@@ -2107,7 +2107,7 @@ function findNewlineIndex(buffer, startIndex) {
 }
 var _LineDecoder_buffer, _LineDecoder_carriageReturnIndex, LineDecoder;
 var init_line = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs"() {
+  "@anthropic-ai/sdk/internal/decoders/line.mjs"() {
     init_tslib();
     init_bytes();
     LineDecoder = /* @__PURE__ */ (() => {
@@ -2193,7 +2193,7 @@ function partition(str, delimiter3) {
 }
 var _Stream_client, Stream, SSEDecoder;
 var init_streaming = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/streaming.mjs"() {
+  "@anthropic-ai/sdk/core/streaming.mjs"() {
     init_tslib();
     init_error();
     init_shims();
@@ -2470,7 +2470,7 @@ function addResponseIDs(value, response) {
   });
 }
 var init_parse = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/parse.mjs"() {
+  "@anthropic-ai/sdk/internal/parse.mjs"() {
     init_streaming();
     init_log();
     init_request_signal();
@@ -2572,7 +2572,7 @@ function applyMiddleware(fetchFn, middleware, options, client) {
 }
 var fetchOriginErrors;
 var init_middleware = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/middleware.mjs"() {
+  "@anthropic-ai/sdk/core/middleware.mjs"() {
     init_errors();
     init_parse();
     init_log();
@@ -2584,7 +2584,7 @@ var init_middleware = __esm({
 
 var _APIPromise_client, APIPromise;
 var init_api_promise = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/api-promise.mjs"() {
+  "@anthropic-ai/sdk/core/api-promise.mjs"() {
     init_tslib();
     init_parse();
     APIPromise = /* @__PURE__ */ (() => {
@@ -2660,7 +2660,7 @@ var init_api_promise = __esm({
 
 var _AbstractPage_client, AbstractPage, PagePromise, Page, PageCursor, BidirectionalPageCursor;
 var init_pagination = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/pagination.mjs"() {
+  "@anthropic-ai/sdk/core/pagination.mjs"() {
     init_tslib();
     init_error();
     init_parse();
@@ -2851,7 +2851,7 @@ function supportsFormData(fetchObject) {
 }
 var checkFileSupport, isAsyncIterable, multipartFormRequestOptions, supportsFormDataMap, createForm, addFormValue;
 var init_uploads = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/uploads.mjs"() {
+  "@anthropic-ai/sdk/internal/uploads.mjs"() {
     init_shims();
     checkFileSupport = () => {
       if (typeof File === "undefined") {
@@ -2962,7 +2962,7 @@ function propsForError(value) {
 }
 var isBlobLike, isFileLike, isResponseLike;
 var init_to_file = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/to-file.mjs"() {
+  "@anthropic-ai/sdk/internal/to-file.mjs"() {
     init_uploads();
     init_uploads();
     isBlobLike = (value) => value != null && typeof value === "object" && typeof value.size === "number" && typeof value.type === "string" && typeof value.text === "function" && typeof value.slice === "function" && typeof value.arrayBuffer === "function";
@@ -2972,19 +2972,19 @@ var init_to_file = __esm({
 });
 
 var init_uploads2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/uploads.mjs"() {
+  "@anthropic-ai/sdk/core/uploads.mjs"() {
     init_to_file();
   }
 });
 
 var init_shared = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/shared.mjs"() {
+  "@anthropic-ai/sdk/resources/shared.mjs"() {
   }
 });
 
 var APIResource;
 var init_resource = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/resource.mjs"() {
+  "@anthropic-ai/sdk/core/resource.mjs"() {
     APIResource = class {
       constructor(client) {
         this._client = client;
@@ -3033,7 +3033,7 @@ function* iterateHeaders(headers) {
 }
 var brand_privateNullableHeaders, clearSentinel, APPEND_HEADERS, appendHeaderValue, buildHeaders;
 var init_headers = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/headers.mjs"() {
+  "@anthropic-ai/sdk/internal/headers.mjs"() {
     init_values();
     brand_privateNullableHeaders = /* @__PURE__ */ Symbol.for("brand.privateNullableHeaders");
     clearSentinel = /* @__PURE__ */ Symbol("clear");
@@ -3090,7 +3090,7 @@ function encodeURIPath(str) {
 }
 var EMPTY, createPathTagFunction, path2;
 var init_path = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/path.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/path.mjs"() {
     init_error();
     EMPTY = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null));
     createPathTagFunction = (pathEncoder = encodeURIPath) => function path11(statics, ...params) {
@@ -3147,7 +3147,7 @@ ${underline}`);
 
 var DeploymentRuns;
 var init_deployment_runs = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/deployment-runs.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -3208,7 +3208,7 @@ var init_deployment_runs = __esm({
 
 var Deployments;
 var init_deployments = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/deployments.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -3428,7 +3428,7 @@ var init_deployments = __esm({
 
 var Dreams;
 var init_dreams = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/dreams.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -3647,7 +3647,7 @@ function stainlessHelperHeaderFromFile(file2) {
 }
 var STAINLESS_HELPER_HEADER, STAINLESS_HELPER_METHOD_HEADER, SDK_HELPER_SYMBOL;
 var init_stainless_helper_header = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs"() {
+  "@anthropic-ai/sdk/internal/stainless-helper-header.mjs"() {
     STAINLESS_HELPER_HEADER = "x-stainless-helper";
     STAINLESS_HELPER_METHOD_HEADER = "x-stainless-helper-method";
     SDK_HELPER_SYMBOL = /* @__PURE__ */ Symbol("anthropic.sdk.stainlessHelper");
@@ -3656,7 +3656,7 @@ var init_stainless_helper_header = __esm({
 
 var Files;
 var init_files = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/files.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/files.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -3793,7 +3793,7 @@ var init_files = __esm({
 
 var Models;
 var init_models = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/models.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/models.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -3859,7 +3859,7 @@ var init_models = __esm({
 
 var UserProfiles;
 var init_user_profiles = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/user-profiles.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -3991,7 +3991,7 @@ var init_user_profiles = __esm({
 });
 
 var require_base64 = __commonJS({
-  "../../node_modules/.pnpm/@stablelib+base64@1.0.1/node_modules/@stablelib/base64/lib/base64.js"(exports) {
+  "@stablelib/base64/lib/base64.js"(exports) {
     "use strict";
     var __extends = exports && exports.__extends || /* @__PURE__ */ (function() {
       var extendStatics = function(d, b) {
@@ -4203,7 +4203,7 @@ var require_base64 = __commonJS({
 });
 
 var require_sha256 = __commonJS({
-  "../../node_modules/.pnpm/fast-sha256@1.3.0/node_modules/fast-sha256/sha256.js"(exports, module) {
+  "fast-sha256/sha256.js"(exports, module) {
     (function(root, factory) {
       var exports2 = {};
       factory(exports2);
@@ -4626,7 +4626,7 @@ var require_sha256 = __commonJS({
 });
 
 var require_timing_safe_equal = __commonJS({
-  "../../node_modules/.pnpm/standardwebhooks@1.1.1/node_modules/standardwebhooks/dist/timing_safe_equal.js"(exports) {
+  "standardwebhooks/dist/timing_safe_equal.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.timingSafeEqual = timingSafeEqual;
@@ -4659,7 +4659,7 @@ var require_timing_safe_equal = __commonJS({
 });
 
 var require_dist = __commonJS({
-  "../../node_modules/.pnpm/standardwebhooks@1.1.1/node_modules/standardwebhooks/dist/index.js"(exports) {
+  "standardwebhooks/dist/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Webhook = exports.WebhookVerificationError = void 0;
@@ -4776,7 +4776,7 @@ var require_dist = __commonJS({
 
 var import_standardwebhooks, Webhooks;
 var init_webhooks = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/webhooks.mjs"() {
     init_resource();
     import_standardwebhooks = __toESM(require_dist(), 1);
     Webhooks = class extends APIResource {
@@ -4809,7 +4809,7 @@ var init_webhooks = __esm({
 
 var Versions;
 var init_versions = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/agents/versions.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -4848,7 +4848,7 @@ var init_versions = __esm({
 
 var Agents;
 var init_agents = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/agents/agents.mjs"() {
     init_resource();
     init_versions();
     init_versions();
@@ -5008,7 +5008,7 @@ function linkAbort(external, controller) {
   return () => external.removeEventListener("abort", onAbort);
 }
 var init_abort = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/abort.mjs"() {
   }
 });
 
@@ -5031,7 +5031,7 @@ function applyJitter(ms) {
   return ms * (1 - Math.random() * 0.25);
 }
 var init_backoff = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/backoff.mjs"() {
     init_error();
   }
 });
@@ -5061,7 +5061,7 @@ function copyClientForHelper(client, { authToken, helper }) {
   });
 }
 var init_helper_client = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/helper-client.mjs"() {
+  "@anthropic-ai/sdk/lib/helper-client.mjs"() {
     init_error();
     init_headers();
     init_stainless_helper_header();
@@ -5078,7 +5078,7 @@ function defaultWorkerId() {
 }
 var _WorkPoller_runnerClient, _WorkPoller_consumed, _WorkPoller_controller, _WorkPoller_detachExternal, _WorkPoller_autoStop, _WorkPoller_drain, _WorkPoller_blockMs, _WorkPoller_reclaimOlderThanMs, _WorkPoller_requestOpts, _IdleLog_log, _IdleLog_environmentId, _IdleLog_idleSince, _IdleLog_lastReport, POLL_BLOCK_MS, POLL_BACKOFF_BASE_MS, POLL_BACKOFF_CAP_MS, IDLE_REPORT_INTERVAL_MS, WorkPoller, IdleLog;
 var init_poller = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs"() {
+  "@anthropic-ai/sdk/lib/environments/poller.mjs"() {
     init_tslib();
     init_error();
     init_log();
@@ -5238,7 +5238,7 @@ var init_poller = __esm({
 
 var _AsyncQueue_items, _AsyncQueue_waiters, _AsyncQueue_closed, AsyncQueue;
 var init_async_queue = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/async-queue.mjs"() {
     init_tslib();
     AsyncQueue = /* @__PURE__ */ (() => {
       class AsyncQueue3 {
@@ -5309,7 +5309,7 @@ var init_async_queue = __esm({
 
 var ToolError;
 var init_ToolError = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs"() {
+  "@anthropic-ai/sdk/lib/tools/ToolError.mjs"() {
     ToolError = /* @__PURE__ */ (() => {
       class ToolError3 extends Error {
         constructor(content) {
@@ -5344,7 +5344,7 @@ async function runRunnableTool(tool, rawInput, context) {
   }
 }
 var init_BetaRunnableTool = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs"() {
+  "@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs"() {
     init_ToolError();
   }
 });
@@ -5381,7 +5381,7 @@ function toSessionContent(content) {
 }
 var _IdleClock_maxIdleMs, _IdleClock_onExpire, _IdleClock_blockers, _IdleClock_armPending, _IdleClock_timer, _SessionToolRunner_instances, _SessionToolRunner_consumed, _SessionToolRunner_controller, _SessionToolRunner_detachExternal, _SessionToolRunner_requestOpts, _SessionToolRunner_toolByName, _SessionToolRunner_logger, _SessionToolRunner_seen, _SessionToolRunner_answered, _SessionToolRunner_confirmationVerdicts, _SessionToolRunner_awaitingConfirmation, _SessionToolRunner_results, _SessionToolRunner_inFlightCount, _SessionToolRunner_sendRetryWindowMs, _SessionToolRunner_onIdle, _SessionToolRunner_idleClock, _SessionToolRunner_requestOptions, _SessionToolRunner_streamLoop, _SessionToolRunner_reconcile, _SessionToolRunner_ingestHistory, _SessionToolRunner_handleStreamEvent, _SessionToolRunner_routeToolEvent, _SessionToolRunner_noteConfirmation, _SessionToolRunner_applyVerdict, _SessionToolRunner_surfaceCall, _SessionToolRunner_execute, _SessionToolRunner_sendResult, _SessionToolRunner_drain, STREAM_BACKOFF_START_MS, STREAM_BACKOFF_CAP_MS, TOOL_TIMEOUT_MS, DRAIN_TIMEOUT_MS, SEND_BACKOFF_START_MS, SEND_BACKOFF_CAP_MS, SEND_RETRY_WINDOW_MS, DEFAULT_MAX_IDLE_MS, IdleClock, SessionToolRunner;
 var init_SessionToolRunner = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs"() {
+  "@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs"() {
     init_tslib();
     init_error();
     init_log();
@@ -5893,7 +5893,7 @@ function checkMemorySyncInterval(ms, option) {
 }
 var DEFAULT_MEMORY_SYNC_INTERVAL_MS, MIN_MEMORY_SYNC_INTERVAL_MS;
 var init_sync_interval = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/sync-interval.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/sync-interval.mjs"() {
     init_error();
     DEFAULT_MEMORY_SYNC_INTERVAL_MS = 15e3;
     MIN_MEMORY_SYNC_INTERVAL_MS = 5e3;
@@ -5915,7 +5915,7 @@ function betaTool(options) {
   };
 }
 var init_json_schema = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs"() {
+  "@anthropic-ai/sdk/helpers/beta/json-schema.mjs"() {
   }
 });
 
@@ -5929,7 +5929,7 @@ function promiseWithResolvers() {
   return { promise: promise2, resolve: resolve3, reject };
 }
 var init_promise = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/promise.mjs"() {
   }
 });
 
@@ -6047,7 +6047,7 @@ function fsErrorMessage(err, file2) {
 }
 var fs2, DIR_CREATE_MODE, FILE_CREATE_MODE, MAX_SYMLINK_HOPS;
 var init_fs_util = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs"() {
     init_node();
     init_ToolError();
     fs2 = fs.promises;
@@ -6245,7 +6245,7 @@ async function readHead(file2, n) {
 }
 var fs3, execFileAsync, INCONSISTENT_LISTING, PLAIN_TYPE_CHARS;
 var init_skills = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/skills.mjs"() {
     init_node();
     init_error();
     init_log();
@@ -6438,7 +6438,7 @@ function oldEnoughToCache(st, walkStartNs) {
 }
 var fsp, C, OWNER_ONLY_DIR_MODE, OWNER_ONLY_FILE_MODE, OWNER_ONLY_EXEC_MODE, O_NOFOLLOW, O_NONBLOCK, FileStoreError, FileStore, TIMESTAMP_TRUST_MARGIN_NS, _internals, LocalFileStore, asyncDispose;
 var init_file_store = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/file-store.mjs"() {
+  "@anthropic-ai/sdk/internal/file-store.mjs"() {
     init_node();
     init_bytes();
     fsp = fs.promises;
@@ -6731,7 +6731,7 @@ async function settledOrAborted(p, signal) {
 }
 var _SessionMemoryStores_instances, _SessionMemoryStores_client, _SessionMemoryStores_workdir, _SessionMemoryStores_syncIntervalMs, _SessionMemoryStores_syncDeletions, _SessionMemoryStores_log, _SessionMemoryStores_lastSyncAt, _SessionMemoryStores_finished, _SessionMemoryStores_stores, _SessionMemoryStores_storeRoot, _SessionMemoryStores_scanMarker, _SessionMemoryStores_syncStore, _SessionMemoryStores_flushStore, _SessionMemoryStores_recover, _SessionMemoryStores_stampAndPull, _SessionMemoryStores_syncPath, _SessionMemoryStores_removeLocal, _SessionMemoryStores_write, _SessionMemoryStores_pullAll, _SessionMemoryStores_uploadAll, _SessionMemoryStores_listMemories, _SessionMemoryStores_upload, _SessionMemoryStores_corroboratedDelete, _SessionMemoryStores_deleteRemote, MEMORY_FLUSH_TIMEOUT_MS, MARKER_PATH, MARKER_VERSION, DELETE_CORROBORATION_MS, LIST_PAGE_SIZE, FULL_LIST_PAGE_SIZE, FETCH_CONCURRENCY, UPLOAD_CONCURRENCY, DELETE_CAP_FLOOR, DELETE_CAP_CEILING, SessionMemoryError, DeletePass, SessionMemoryStores;
 var init_memories = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/memories.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/memories.mjs"() {
     init_tslib();
     init_node();
     init_error();
@@ -7918,7 +7918,7 @@ async function findRg() {
 }
 var _BashSession_instances, _BashSession_proc, _BashSession_buf, _BashSession_truncated, _BashSession_closed, _BashSession_waiting, _BashSession_append, _LineRangeCollector_instances, _LineRangeCollector_filePath, _LineRangeCollector_startLine, _LineRangeCollector_endLine, _LineRangeCollector_start, _LineRangeCollector_end, _LineRangeCollector_limit, _LineRangeCollector_line, _LineRangeCollector_collected, _LineRangeCollector_collectedBytes, _LineRangeCollector_collect, _LineRangeCollector_overLimitError, BASH_OUTPUT_LIMIT, BASH_DEFAULT_TIMEOUT_MS, DEFAULT_MAX_FILE_BYTES, READ_STREAM_CHUNK_BYTES, NEWLINE, GREP_OUTPUT_LIMIT, GREP_MAX_LINE_LENGTH, GLOB_RESULT_LIMIT, BashTimeoutError, ANSI_RE, fsGlob, BashSession, LineRangeCollector, WALK_MAX_DEPTH, WALK_MAX_ENTRIES;
 var init_node2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/node.mjs"() {
     init_tslib();
     init_error();
     init_ToolError();
@@ -8259,7 +8259,7 @@ async function heartbeatLoop(client, work, lease, logger, requestOptions, onLeas
 }
 var _EnvironmentWorker_instances, _EnvironmentWorker_signal, _EnvironmentWorker_handleItem, _Lease_ctrl, _Lease_endReason, HEARTBEAT_DEFAULT_MS, HEARTBEAT_TTL_DEFAULT_MS, NO_HEARTBEAT_SENTINEL, EnvironmentWorker, Lease;
 var init_worker = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs"() {
+  "@anthropic-ai/sdk/lib/environments/worker.mjs"() {
     init_tslib();
     init_error();
     init_log();
@@ -8558,7 +8558,7 @@ var init_worker = __esm({
 
 var Work;
 var init_work = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/environments/work.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -8826,7 +8826,7 @@ var init_work = __esm({
 
 var Environments;
 var init_environments = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/environments/environments.mjs"() {
     init_resource();
     init_work();
     init_work();
@@ -8996,7 +8996,7 @@ var init_environments = __esm({
 
 var Memories;
 var init_memories2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -9141,7 +9141,7 @@ var init_memories2 = __esm({
 
 var MemoryVersions;
 var init_memory_versions = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -9231,7 +9231,7 @@ var init_memory_versions = __esm({
 
 var MemoryStores;
 var init_memory_stores = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs"() {
     init_resource();
     init_memories2();
     init_memories2();
@@ -9395,14 +9395,14 @@ var init_memory_stores = __esm({
 });
 
 var init_error2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/error.mjs"() {
+  "@anthropic-ai/sdk/error.mjs"() {
     init_error();
   }
 });
 
 var JSONLDecoder;
 var init_jsonl = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs"() {
+  "@anthropic-ai/sdk/internal/decoders/jsonl.mjs"() {
     init_error();
     init_shims();
     init_line();
@@ -9444,7 +9444,7 @@ var init_jsonl = __esm({
 
 var Batches;
 var init_batches = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/messages/batches.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -9663,7 +9663,7 @@ var init_batches = __esm({
 
 var MODEL_NONSTREAMING_TOKENS;
 var init_constants = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/constants.mjs"() {
+  "@anthropic-ai/sdk/internal/constants.mjs"() {
     MODEL_NONSTREAMING_TOKENS = {
       "claude-opus-4@20250514": 8192,
       "anthropic.claude-opus-4-1-20250805-v1:0": 8192,
@@ -9744,20 +9744,20 @@ function parseBetaOutputFormat(params, content) {
   }
 }
 var init_beta_parser = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs"() {
+  "@anthropic-ai/sdk/lib/beta-parser.mjs"() {
     init_error();
   }
 });
 
 var init_streaming2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/streaming.mjs"() {
+  "@anthropic-ai/sdk/streaming.mjs"() {
     init_streaming();
   }
 });
 
 var tokenize, strip, unstrip, generate, partialParse;
 var init_parser = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs"() {
+  "@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs"() {
     tokenize = (input2) => {
       let current = 0;
       let tokens = [];
@@ -10014,7 +10014,7 @@ function withLazyInput(prev, jsonBuf) {
 }
 var JSON_BUF_PROPERTY;
 var init_message_stream_utils = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs"() {
+  "@anthropic-ai/sdk/internal/message-stream-utils.mjs"() {
     init_parser();
     JSON_BUF_PROPERTY = "__json_buf";
   }
@@ -10025,7 +10025,7 @@ function tracksToolInput(content) {
 }
 var _BetaMessageStream_instances, _BetaMessageStream_currentMessageSnapshot, _BetaMessageStream_params, _BetaMessageStream_connectedPromise, _BetaMessageStream_resolveConnectedPromise, _BetaMessageStream_rejectConnectedPromise, _BetaMessageStream_endPromise, _BetaMessageStream_resolveEndPromise, _BetaMessageStream_rejectEndPromise, _BetaMessageStream_listeners, _BetaMessageStream_ended, _BetaMessageStream_errored, _BetaMessageStream_aborted, _BetaMessageStream_catchingPromiseCreated, _BetaMessageStream_response, _BetaMessageStream_request_id, _BetaMessageStream_workspace_id, _BetaMessageStream_logger, _BetaMessageStream_getFinalMessage, _BetaMessageStream_getFinalText, _BetaMessageStream_handleError, _BetaMessageStream_beginRequest, _BetaMessageStream_addStreamEvent, _BetaMessageStream_endRequest, _BetaMessageStream_accumulateMessage, _BetaMessageStream_toolInputParseError, BetaMessageStream;
 var init_BetaMessageStream = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs"() {
+  "@anthropic-ai/sdk/lib/BetaMessageStream.mjs"() {
     init_tslib();
     init_stainless_helper_header();
     init_error2();
@@ -10661,7 +10661,7 @@ var init_BetaMessageStream = __esm({
 
 var _BetaToolRunnerStream_instances, _BetaToolRunnerStream_onToolCall, _BetaToolRunnerStream_emitted, _BetaToolRunnerStream_readers, _BetaToolRunnerStream_toolCalls, _BetaToolRunnerStream_closed, _BetaToolRunnerStream_ready, _BetaToolRunnerStream_fallback, _BetaToolRunnerStream_track, _BetaToolRunnerStream_release, _BetaToolRunnerStream_removeReader, BetaToolRunnerStream;
 var init_BetaToolRunnerStream = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/internal/BetaToolRunnerStream.mjs"() {
+  "@anthropic-ai/sdk/lib/internal/BetaToolRunnerStream.mjs"() {
     init_tslib();
     init_stainless_helper_header();
     init_BetaMessageStream();
@@ -10926,7 +10926,7 @@ function determineNextStepFromStopReason(stopReason) {
 }
 var _BetaToolRunner_instances, _BetaToolRunner_consumed, _BetaToolRunner_mutated, _BetaToolRunner_state, _BetaToolRunner_options, _BetaToolRunner_message, _BetaToolRunner_stream, _BetaToolRunner_toolResponse, _BetaToolRunner_completion, _BetaToolRunner_iterationCount, _BetaToolRunner_compaction, _BetaToolRunner_calls, _BetaToolRunner_lastStopReason, _BetaToolRunner_toolOverrides, _BetaToolRunner_pendingToolChanges, _BetaToolRunner_send, _BetaToolRunner_streamThatStartsTools, _BetaToolRunner_startedCallsSettled, _BetaToolRunner_compact, _BetaToolRunner_runnableTools, _BetaToolRunner_availableToolNames, _BetaToolRunner_recordRemovalsFromHistory, _BetaToolRunner_compactAfterFinalTurn, _BetaToolRunner_generateToolResponse, _BetaToolRunner_flushPendingToolChanges, _BetaToolRunner_pendingToolChangesMessage, BetaToolRunner;
 var init_BetaToolRunner = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs"() {
+  "@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs"() {
     init_tslib();
     init_ToolError();
     init_error();
@@ -11460,7 +11460,7 @@ function transformOutputFormat(params) {
 }
 var DEPRECATED_MODELS, MODELS_TO_WARN_WITH_THINKING_ENABLED, Messages;
 var init_messages = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/messages/messages.mjs"() {
     init_error2();
     init_batches();
     init_resource();
@@ -11592,7 +11592,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
 
 var APIKeys;
 var init_api_keys = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/api-keys.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/api-keys.mjs"() {
     init_resource();
     init_pagination();
     init_path();
@@ -11648,7 +11648,7 @@ var init_api_keys = __esm({
 
 var ComplianceSettings;
 var init_compliance_settings = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/compliance-settings.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/compliance-settings.mjs"() {
     init_resource();
     ComplianceSettings = class extends APIResource {
       /**
@@ -11700,7 +11700,7 @@ var init_compliance_settings = __esm({
 
 var ExternalKeys;
 var init_external_keys = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/external-keys.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/external-keys.mjs"() {
     init_resource();
     init_pagination();
     init_path();
@@ -11819,7 +11819,7 @@ var init_external_keys = __esm({
 
 var Invites;
 var init_invites = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/invites.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/invites.mjs"() {
     init_resource();
     init_pagination();
     init_path();
@@ -11895,7 +11895,7 @@ var init_invites = __esm({
 
 var RateLimits;
 var init_rate_limits = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/rate-limits.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/rate-limits.mjs"() {
     init_resource();
     init_pagination();
     RateLimits = class extends APIResource {
@@ -11926,7 +11926,7 @@ var init_rate_limits = __esm({
 
 var Users;
 var init_users = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/users.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/users.mjs"() {
     init_resource();
     init_pagination();
     init_path();
@@ -11993,7 +11993,7 @@ var init_users = __esm({
 
 var Issuers;
 var init_issuers = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/federation/issuers.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/federation/issuers.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -12162,7 +12162,7 @@ var init_issuers = __esm({
 
 var Workspaces;
 var init_workspaces = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/federation/rules/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/federation/rules/workspaces.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -12276,7 +12276,7 @@ var init_workspaces = __esm({
 
 var Rules;
 var init_rules = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/federation/rules/rules.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/federation/rules/rules.mjs"() {
     init_resource();
     init_workspaces();
     init_workspaces();
@@ -12476,7 +12476,7 @@ var init_rules = __esm({
 
 var Federation;
 var init_federation = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/federation/federation.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/federation/federation.mjs"() {
     init_resource();
     init_issuers();
     init_issuers();
@@ -12499,7 +12499,7 @@ var init_federation = __esm({
 
 var Workspaces2;
 var init_workspaces2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/service-accounts/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/service-accounts/workspaces.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -12624,7 +12624,7 @@ var init_workspaces2 = __esm({
 
 var ServiceAccounts;
 var init_service_accounts = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/service-accounts/service-accounts.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/service-accounts/service-accounts.mjs"() {
     init_resource();
     init_workspaces2();
     init_workspaces2();
@@ -12800,7 +12800,7 @@ var init_service_accounts = __esm({
 
 var Members;
 var init_members = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/workspaces/members.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/workspaces/members.mjs"() {
     init_resource();
     init_pagination();
     init_path();
@@ -12902,7 +12902,7 @@ var init_members = __esm({
 
 var RateLimits2;
 var init_rate_limits2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/workspaces/rate-limits.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/workspaces/rate-limits.mjs"() {
     init_resource();
     init_pagination();
     init_path();
@@ -12938,7 +12938,7 @@ var init_rate_limits2 = __esm({
 
 var ServiceAccounts2;
 var init_service_accounts2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/workspaces/service-accounts.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/workspaces/service-accounts.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -13127,7 +13127,7 @@ var init_service_accounts2 = __esm({
 
 var Workspaces3;
 var init_workspaces3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/workspaces/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/workspaces/workspaces.mjs"() {
     init_resource();
     init_members();
     init_members();
@@ -13241,7 +13241,7 @@ var init_workspaces3 = __esm({
 
 var Organization;
 var init_organization = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/organization.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/organization.mjs"() {
     init_resource();
     init_api_keys();
     init_api_keys();
@@ -13305,7 +13305,7 @@ var init_organization = __esm({
 
 var Events;
 var init_events = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/events.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -13435,7 +13435,7 @@ var init_events = __esm({
 
 var Resources;
 var init_resources = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/resources.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -13582,7 +13582,7 @@ var init_resources = __esm({
 
 var Events2;
 var init_events2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -13649,7 +13649,7 @@ var init_events2 = __esm({
 
 var Threads;
 var init_threads = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs"() {
     init_resource();
     init_events2();
     init_events2();
@@ -13748,7 +13748,7 @@ var init_threads = __esm({
 
 var Sessions;
 var init_sessions = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs"() {
     init_resource();
     init_events();
     init_events();
@@ -13926,7 +13926,7 @@ var init_sessions = __esm({
 
 var Versions2;
 var init_versions2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/skills/versions.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -14068,7 +14068,7 @@ var init_versions2 = __esm({
 
 var Skills;
 var init_skills2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/skills/skills.mjs"() {
     init_resource();
     init_versions2();
     init_versions2();
@@ -14186,7 +14186,7 @@ var init_skills2 = __esm({
 
 var Certificates;
 var init_certificates = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -14327,7 +14327,7 @@ var init_certificates = __esm({
 
 var Tunnels;
 var init_tunnels = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs"() {
     init_resource();
     init_certificates();
     init_certificates();
@@ -14528,7 +14528,7 @@ var init_tunnels = __esm({
 
 var Credentials;
 var init_credentials2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -14726,7 +14726,7 @@ var init_credentials2 = __esm({
 
 var Vaults;
 var init_vaults = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs"() {
     init_resource();
     init_credentials2();
     init_credentials2();
@@ -14895,7 +14895,7 @@ var init_vaults = __esm({
 
 var Beta;
 var init_beta = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/beta.mjs"() {
     init_resource();
     init_deployment_runs();
     init_deployment_runs();
@@ -14974,7 +14974,7 @@ var init_beta = __esm({
 
 var Completions;
 var init_completions = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/completions.mjs"() {
+  "@anthropic-ai/sdk/resources/completions.mjs"() {
     init_resource();
     init_headers();
     Completions = class extends APIResource {
@@ -15000,7 +15000,7 @@ var init_completions = __esm({
 
 var Files2;
 var init_files2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/files.mjs"() {
+  "@anthropic-ai/sdk/resources/files.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -15179,7 +15179,7 @@ function parseOutputFormat(params, content) {
   }
 }
 var init_parser2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/parser.mjs"() {
+  "@anthropic-ai/sdk/lib/parser.mjs"() {
     init_error();
   }
 });
@@ -15189,7 +15189,7 @@ function tracksToolInput2(content) {
 }
 var _MessageStream_instances, _MessageStream_currentMessageSnapshot, _MessageStream_params, _MessageStream_connectedPromise, _MessageStream_resolveConnectedPromise, _MessageStream_rejectConnectedPromise, _MessageStream_endPromise, _MessageStream_resolveEndPromise, _MessageStream_rejectEndPromise, _MessageStream_listeners, _MessageStream_ended, _MessageStream_errored, _MessageStream_aborted, _MessageStream_catchingPromiseCreated, _MessageStream_response, _MessageStream_request_id, _MessageStream_workspace_id, _MessageStream_logger, _MessageStream_getFinalMessage, _MessageStream_getFinalText, _MessageStream_handleError, _MessageStream_beginRequest, _MessageStream_addStreamEvent, _MessageStream_endRequest, _MessageStream_accumulateMessage, MessageStream;
 var init_MessageStream = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs"() {
+  "@anthropic-ai/sdk/lib/MessageStream.mjs"() {
     init_tslib();
     init_stainless_helper_header();
     init_errors();
@@ -15777,7 +15777,7 @@ var init_MessageStream = __esm({
 
 var Batches2;
 var init_batches2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs"() {
+  "@anthropic-ai/sdk/resources/messages/batches.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -15975,7 +15975,7 @@ var init_batches2 = __esm({
 
 var Messages2, DEPRECATED_MODELS2, MODELS_TO_WARN_WITH_THINKING_ENABLED2;
 var init_messages2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs"() {
+  "@anthropic-ai/sdk/resources/messages/messages.mjs"() {
     init_resource();
     init_headers();
     init_stainless_helper_header();
@@ -16108,7 +16108,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
 
 var Models2;
 var init_models2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/models.mjs"() {
+  "@anthropic-ai/sdk/resources/models.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -16172,7 +16172,7 @@ var init_models2 = __esm({
 
 var Versions3;
 var init_versions3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/skills/versions.mjs"() {
+  "@anthropic-ai/sdk/resources/skills/versions.mjs"() {
     init_resource();
     init_pagination();
     init_headers();
@@ -16273,7 +16273,7 @@ var init_versions3 = __esm({
 
 var Skills2;
 var init_skills3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/skills/skills.mjs"() {
+  "@anthropic-ai/sdk/resources/skills/skills.mjs"() {
     init_resource();
     init_versions3();
     init_versions3();
@@ -16374,7 +16374,7 @@ var init_skills3 = __esm({
 });
 
 var init_resources2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/index.mjs"() {
+  "@anthropic-ai/sdk/resources/index.mjs"() {
     init_shared();
     init_beta();
     init_completions();
@@ -16387,7 +16387,7 @@ var init_resources2 = __esm({
 
 var _BaseAnthropic_instances, _a3, _BaseAnthropic_encoder, _BaseAnthropic_baseURLOverridden, HUMAN_PROMPT, AI_PROMPT, BaseAnthropic, Anthropic;
 var init_client = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/client.mjs"() {
+  "@anthropic-ai/sdk/client.mjs"() {
     init_tslib();
     init_values();
     init_sleep();
@@ -17198,7 +17198,7 @@ var init_client = __esm({
 });
 
 var init_sdk = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.129.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/index.mjs"() {
+  "@anthropic-ai/sdk/index.mjs"() {
     init_client();
   }
 });
@@ -17228,14 +17228,14 @@ function getProviderEnvValue(name, env2) {
 }
 var procEnvCache;
 var init_provider_env = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/provider-env.js"() {
+  "@earendil-works/pi-ai/dist/utils/provider-env.js"() {
     procEnvCache = null;
   }
 });
 
 var __rewriteRelativeImportExtension, _existsSync, _homedir, _join, dynamicImport, NODE_FS_SPECIFIER, NODE_OS_SPECIFIER, NODE_PATH_SPECIFIER, ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV, ANTHROPIC_FEDERATION_RULE_ID_ENV, ANTHROPIC_ORGANIZATION_ID_ENV, ANTHROPIC_SERVICE_ACCOUNT_ID_ENV, ANTHROPIC_IDENTITY_TOKEN_FILE_ENV, ANTHROPIC_WORKSPACE_ID_ENV;
 var init_env_api_keys = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/env-api-keys.js"() {
+  "@earendil-works/pi-ai/dist/env-api-keys.js"() {
     __rewriteRelativeImportExtension = function(path11, preserveJsx) {
       if (typeof path11 === "string" && /^\.\.?\//.test(path11)) {
         return path11.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function(m2, tsx, d, ext, cm) {
@@ -17301,7 +17301,7 @@ function defaultProviderAuthContext() {
 }
 var __rewriteRelativeImportExtension2, importNodeModule;
 var init_context = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/auth/context.js"() {
+  "@earendil-works/pi-ai/dist/auth/context.js"() {
     __rewriteRelativeImportExtension2 = function(path11, preserveJsx) {
       if (typeof path11 === "string" && /^\.\.?\//.test(path11)) {
         return path11.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function(m2, tsx, d, ext, cm) {
@@ -17359,13 +17359,13 @@ function raceWithAbortSignal(operation, signal) {
   });
 }
 var init_abort2 = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/abort.js"() {
+  "@earendil-works/pi-ai/dist/utils/abort.js"() {
   }
 });
 
 var InMemoryCredentialStore;
 var init_credential_store = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/auth/credential-store.js"() {
+  "@earendil-works/pi-ai/dist/auth/credential-store.js"() {
     init_abort2();
     InMemoryCredentialStore = class {
       credentials = /* @__PURE__ */ new Map();
@@ -17441,7 +17441,7 @@ function appendAssistantMessageDiagnostic(message, diagnostic) {
   message.diagnostics = [...message.diagnostics ?? [], diagnostic];
 }
 var init_diagnostics = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/diagnostics.js"() {
+  "@earendil-works/pi-ai/dist/utils/diagnostics.js"() {
   }
 });
 
@@ -17455,7 +17455,7 @@ function withCauseDetail(message, cause) {
 }
 var ModelsError;
 var init_models_error = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/models-error.js"() {
+  "@earendil-works/pi-ai/dist/utils/models-error.js"() {
     init_diagnostics();
     ModelsError = class extends Error {
       code;
@@ -17567,7 +17567,7 @@ async function readCredential(credentials, providerId, signal) {
 }
 var DEFAULT_OAUTH_MINIMUM_VALIDITY_MS, DEFAULT_OAUTH_REFRESH_TIMEOUT_MS;
 var init_resolve = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js"() {
+  "@earendil-works/pi-ai/dist/auth/resolve.js"() {
     init_abort2();
     init_models_error();
     init_models_error();
@@ -17578,7 +17578,7 @@ var init_resolve = __esm({
 
 var InMemoryModelsStore;
 var init_models_store = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/models-store.js"() {
+  "@earendil-works/pi-ai/dist/models-store.js"() {
     InMemoryModelsStore = class {
       entries = /* @__PURE__ */ new Map();
       async read(providerId, options) {
@@ -17647,7 +17647,7 @@ function classifierErrorResult(model, error62, aborted3 = false) {
   };
 }
 var init_model_operations = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/model-operations.js"() {
+  "@earendil-works/pi-ai/dist/utils/model-operations.js"() {
     init_models_error();
   }
 });
@@ -17678,7 +17678,7 @@ ${value}`);
   return parts.join("\n\n");
 }
 var init_text = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/text.js"() {
+  "@earendil-works/pi-ai/dist/utils/text.js"() {
   }
 });
 
@@ -17788,7 +17788,7 @@ function resolveTranscriptTools(messages, supportsToolAdditions) {
   };
 }
 var init_transcript = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/transcript.js"() {
+  "@earendil-works/pi-ai/dist/utils/transcript.js"() {
     init_text();
   }
 });
@@ -17978,7 +17978,7 @@ function clampThinkingLevel(model, level) {
 }
 var KNOWN_MODEL_TYPES, ModelsImpl, EXTENDED_THINKING_LEVELS;
 var init_models3 = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/models.js"() {
+  "@earendil-works/pi-ai/dist/models.js"() {
     init_lazy();
     init_context();
     init_credential_store();
@@ -18460,12 +18460,12 @@ function headersToRecord(headers) {
   return result;
 }
 var init_headers2 = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/headers.js"() {
+  "@earendil-works/pi-ai/dist/utils/headers.js"() {
   }
 });
 
 var require_options = __commonJS({
-  "../../node_modules/.pnpm/partial-json@0.1.7/node_modules/partial-json/dist/options.js"(exports) {
+  "partial-json/dist/options.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Allow = exports.ALL = exports.COLLECTION = exports.ATOM = exports.SPECIAL = exports.INF = exports._INFINITY = exports.INFINITY = exports.NAN = exports.BOOL = exports.NULL = exports.OBJ = exports.ARR = exports.NUM = exports.STR = void 0;
@@ -18489,7 +18489,7 @@ var require_options = __commonJS({
 });
 
 var require_dist2 = __commonJS({
-  "../../node_modules/.pnpm/partial-json@0.1.7/node_modules/partial-json/dist/index.js"(exports) {
+  "partial-json/dist/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -18794,7 +18794,7 @@ function parseStreamingJson(partialJson) {
 }
 var import_partial_json, VALID_JSON_ESCAPES;
 var init_json_parse = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/json-parse.js"() {
+  "@earendil-works/pi-ai/dist/utils/json-parse.js"() {
     import_partial_json = __toESM(require_dist2(), 1);
     VALID_JSON_ESCAPES = /* @__PURE__ */ new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
   }
@@ -18811,7 +18811,7 @@ function getPiUserAgent() {
 }
 var nodeOs;
 var init_pi_user_agent = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/pi-user-agent.js"() {
+  "@earendil-works/pi-ai/dist/utils/pi-user-agent.js"() {
     nodeOs = loadNodeOs();
   }
 });
@@ -18898,7 +18898,7 @@ async function retryProviderRequest(request2, options = {}) {
 }
 var DEFAULT_MAX_RETRY_DELAY_MS;
 var init_provider_retry = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/provider-retry.js"() {
+  "@earendil-works/pi-ai/dist/utils/provider-retry.js"() {
     DEFAULT_MAX_RETRY_DELAY_MS = 6e4;
   }
 });
@@ -18907,7 +18907,7 @@ function sanitizeSurrogates(text) {
   return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
 }
 var init_sanitize_unicode = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/sanitize-unicode.js"() {
+  "@earendil-works/pi-ai/dist/utils/sanitize-unicode.js"() {
   }
 });
 
@@ -19114,7 +19114,7 @@ function createGrammarToolInputProperties(tools, supportsOpenAIGrammarTools) {
 }
 var UnsupportedStrictJsonSchemaError, UNSUPPORTED_STRICT_SCHEMA_KEYS;
 var init_constrained_sampling = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/constrained-sampling.js"() {
+  "@earendil-works/pi-ai/dist/api/constrained-sampling.js"() {
     UnsupportedStrictJsonSchemaError = class extends Error {
     };
     UNSUPPORTED_STRICT_SCHEMA_KEYS = [
@@ -19164,7 +19164,7 @@ function buildCopilotDynamicHeaders(params) {
   return headers;
 }
 var init_github_copilot_headers = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/github-copilot-headers.js"() {
+  "@earendil-works/pi-ai/dist/api/github-copilot-headers.js"() {
   }
 });
 
@@ -19251,7 +19251,7 @@ function estimateToolsTokens(tools) {
 }
 var CHARS_PER_TOKEN, ESTIMATED_IMAGE_CHARS;
 var init_estimate = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/estimate.js"() {
+  "@earendil-works/pi-ai/dist/utils/estimate.js"() {
     init_text();
     CHARS_PER_TOKEN = 3.5;
     ESTIMATED_IMAGE_CHARS = 4800;
@@ -19315,7 +19315,7 @@ function adjustMaxTokensForThinking(baseMaxTokens, modelMaxTokens, reasoningLeve
 }
 var CONTEXT_SAFETY_TOKENS, MIN_MAX_TOKENS, MIN_ANSWER_TOKENS, DEFAULT_THINKING_BUDGETS;
 var init_simple_options = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/simple-options.js"() {
+  "@earendil-works/pi-ai/dist/api/simple-options.js"() {
     init_models3();
     init_estimate();
     CONTEXT_SAFETY_TOKENS = 4096;
@@ -19492,7 +19492,7 @@ function transformMessages(messages, model, normalizeToolCallId2) {
 }
 var NON_VISION_USER_IMAGE_PLACEHOLDER, NON_VISION_TOOL_IMAGE_PLACEHOLDER;
 var init_transform_messages = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/transform-messages.js"() {
+  "@earendil-works/pi-ai/dist/api/transform-messages.js"() {
     NON_VISION_USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)";
     NON_VISION_TOOL_IMAGE_PLACEHOLDER = "(tool image omitted: model does not support images)";
   }
@@ -20224,7 +20224,7 @@ function mapStopReason(reason, stopDetails) {
 }
 var claudeCodeVersion, claudeCodeTools, ccToolLookup, toClaudeCodeName, fromClaudeCodeName, FINE_GRAINED_TOOL_STREAMING_BETA, INTERLEAVED_THINKING_BETA, SERVER_SIDE_FALLBACK_BETA, MID_CONVERSATION_OUTPUT_CONFIG_BETA, THINKING_BINDING_CONTROLS_BETA, INLINE_TOOLS_BETA, DEFERRED_TOOL_PLACEHOLDER, PiAnthropic, federationClient, ANTHROPIC_MESSAGE_EVENTS, stream2, streamSimple, ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS, ANTHROPIC_STRICT_STRING_FORMATS, isAnthropicStrictUnsupportedKeyword;
 var init_anthropic_messages = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js"() {
+  "@earendil-works/pi-ai/dist/api/anthropic-messages.js"() {
     init_sdk();
     init_env_api_keys();
     init_models3();
@@ -20659,7 +20659,7 @@ function registerSessionResourceCleanup(cleanup) {
 }
 var sessionResourceCleanups;
 var init_session_resources = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/session-resources.js"() {
+  "@earendil-works/pi-ai/dist/session-resources.js"() {
     sessionResourceCleanups = /* @__PURE__ */ new Set();
   }
 });
@@ -20700,7 +20700,7 @@ function combineAbortSignals(signals) {
   };
 }
 var init_abort_signals = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/abort-signals.js"() {
+  "@earendil-works/pi-ai/dist/utils/abort-signals.js"() {
   }
 });
 
@@ -20785,7 +20785,7 @@ function safeJsonStringify2(value) {
 }
 var MAX_PROVIDER_ERROR_BODY_CHARS;
 var init_error_body = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/error-body.js"() {
+  "@earendil-works/pi-ai/dist/utils/error-body.js"() {
     MAX_PROVIDER_ERROR_BODY_CHARS = 4e3;
   }
 });
@@ -20907,7 +20907,7 @@ function resolveHttpProxyUrlForTarget(targetUrl, env2) {
 }
 var DEFAULT_PROXY_PORTS, UNSUPPORTED_PROXY_PROTOCOL_MESSAGE;
 var init_node_http_proxy = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/node-http-proxy.js"() {
+  "@earendil-works/pi-ai/dist/utils/node-http-proxy.js"() {
     init_provider_env();
     DEFAULT_PROXY_PORTS = {
       ftp: 21,
@@ -20953,7 +20953,7 @@ function uuidv72(timestampMs) {
 }
 var MAX_UUID_V7_TIMESTAMP, MAX_SEQUENCE, lastOrdinaryTimestamp, sequence;
 var init_uuid2 = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/uuid.js"() {
+  "@earendil-works/pi-ai/dist/utils/uuid.js"() {
     MAX_UUID_V7_TIMESTAMP = 281474976710655;
     MAX_SEQUENCE = (1n << 41n) - 1n;
     lastOrdinaryTimestamp = -1;
@@ -20970,7 +20970,7 @@ function clampOpenAIPromptCacheKey(key) {
 }
 var OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH;
 var init_openai_prompt_cache = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/openai-prompt-cache.js"() {
+  "@earendil-works/pi-ai/dist/api/openai-prompt-cache.js"() {
     OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH = 64;
   }
 });
@@ -20988,7 +20988,7 @@ function shortHash(str) {
   return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
 }
 var init_hash = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/utils/hash.js"() {
+  "@earendil-works/pi-ai/dist/utils/hash.js"() {
   }
 });
 
@@ -21619,7 +21619,7 @@ function mapStopReason2(status, incompleteReason) {
   }
 }
 var init_openai_responses_shared = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js"() {
+  "@earendil-works/pi-ai/dist/api/openai-responses-shared.js"() {
     init_models3();
     init_hash();
     init_json_parse();
@@ -22578,7 +22578,7 @@ function buildWebSocketHeaders(initHeaders, additionalHeaders, accountId, token,
 }
 var DEFAULT_CODEX_BASE_URL, JWT_CLAIM_PATH, DEFAULT_MAX_RETRIES, BASE_DELAY_MS, DEFAULT_MAX_RETRY_DELAY_MS2, DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS, REQUEST_COMPRESSION_ZSTD_LEVEL, CODEX_TOOL_CALL_PROVIDERS, WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE, WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE, PREVIOUS_RESPONSE_NOT_FOUND_CODE, CODEX_RESPONSE_STATUSES, RetryDelayExceededError, stream3, streamSimple2, CodexApiError, CodexProtocolError, ProviderStreamEventCallbackError, OPENAI_BETA_RESPONSES_WEBSOCKETS, SESSION_WEBSOCKET_CACHE_TTL_MS, SESSION_WEBSOCKET_MAX_AGE_MS, websocketSessionCache, websocketDebugStats, websocketSseFallbackSessions, _cachedWebsocket, WebSocketCloseError;
 var init_openai_codex_responses = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js"() {
+  "@earendil-works/pi-ai/dist/api/openai-codex-responses.js"() {
     init_models3();
     init_session_resources();
     init_abort_signals();
@@ -22894,13 +22894,13 @@ function __classPrivateFieldGet2(receiver, state3, kind, f3) {
   return kind === "m" ? f3 : kind === "a" ? f3.call(receiver) : f3 ? f3.value : state3.get(receiver);
 }
 var init_tslib2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/tslib.mjs"() {
+  "openai/internal/tslib.mjs"() {
   }
 });
 
 var uuid43;
 var init_uuid3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/uuid.mjs"() {
+  "openai/internal/utils/uuid.mjs"() {
     uuid43 = function() {
       const { crypto: crypto6 } = globalThis;
       if (crypto6?.randomUUID) {
@@ -22921,7 +22921,7 @@ function isAbortError2(err) {
 }
 var castToError2;
 var init_errors2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/errors.mjs"() {
+  "openai/internal/errors.mjs"() {
     castToError2 = (err) => {
       if (err instanceof Error)
         return err;
@@ -22952,7 +22952,7 @@ var init_errors2 = __esm({
 
 var OpenAIError, APIError2, APIUserAbortError2, APIConnectionError2, APIConnectionTimeoutError2, BadRequestError2, AuthenticationError2, PermissionDeniedError2, NotFoundError2, ConflictError2, UnprocessableEntityError2, RateLimitError2, InternalServerError2, LengthFinishReasonError, ContentFilterFinishReasonError, InvalidWebhookSignatureError, OAuthError, SubjectTokenProviderError;
 var init_error3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/core/error.mjs"() {
+  "openai/core/error.mjs"() {
     init_errors2();
     OpenAIError = class extends Error {
     };
@@ -23110,7 +23110,7 @@ function isObj2(obj) {
 }
 var startsWithSchemeRegexp2, isAbsoluteURL2, isArray2, isReadonlyArray2, validatePositiveInteger2, safeJSON2;
 var init_values2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/values.mjs"() {
+  "openai/internal/utils/values.mjs"() {
     init_error3();
     startsWithSchemeRegexp2 = /^[a-z][a-z0-9+.-]*:/i;
     isAbsoluteURL2 = (url2) => {
@@ -23139,7 +23139,7 @@ var init_values2 = __esm({
 
 var sleep3;
 var init_sleep2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/sleep.mjs"() {
+  "openai/internal/utils/sleep.mjs"() {
     sleep3 = (ms, ...signals) => new Promise((resolve3, reject) => {
       const activeSignals = [...new Set(signals.filter((signal) => signal != null))];
       let timeout;
@@ -23252,7 +23252,7 @@ function addRequestAbortListener(signal, abort, requestSignal) {
 }
 var weakGlobals, finalizer, callbackOwners, subscriptions;
 var init_abort3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/abort.mjs"() {
+  "openai/internal/utils/abort.mjs"() {
     weakGlobals = globalThis;
     finalizer = // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Weak references and finalizers are optional host capabilities, so probe them before constructing either.
     typeof weakGlobals.FinalizationRegistry === "function" ? new weakGlobals.FinalizationRegistry((cleanup) => {
@@ -23337,7 +23337,7 @@ async function CancelReadableStream2(stream6) {
   await cancelPromise;
 }
 var init_shims2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/shims.mjs"() {
+  "openai/internal/shims.mjs"() {
   }
 });
 
@@ -23351,7 +23351,7 @@ function decodeUTF82(bytes) {
 }
 var encodeUTF8_2, decodeUTF8_2;
 var init_bytes2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/bytes.mjs"() {
+  "openai/internal/utils/bytes.mjs"() {
   }
 });
 
@@ -23394,7 +23394,7 @@ function lineEndingLength(buffer, index) {
 }
 var _LineDecoder_instances, _LineDecoder_buffer2, _LineDecoder_start, _LineDecoder_end, _LineDecoder_searchIndex, _LineDecoder_skipLeadingLF, _LineDecoder_append, MAX_RETAINED_BUFFER_BYTES, LineDecoder2;
 var init_line2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/decoders/line.mjs"() {
+  "openai/internal/decoders/line.mjs"() {
     init_tslib2();
     init_bytes2();
     MAX_RETAINED_BUFFER_BYTES = 64 * 1024;
@@ -23564,7 +23564,7 @@ function redactURL(value) {
 }
 var levelNumbers2, parseLogLevel2, noopLogger2, cachedLoggers2, sensitiveQueryNames, sensitiveHeaderNames, formatRequestDetails2;
 var init_log2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/log.mjs"() {
+  "openai/internal/utils/log.mjs"() {
     init_values2();
     levelNumbers2 = {
       off: 0,
@@ -23923,7 +23923,7 @@ function partition2(str, delimiter3) {
 }
 var _Stream_instances, _Stream_client2, _Stream_isTeeBranch, _Stream_cancelIterator, Stream2, DOUBLE_NEWLINE_DELIMITER_MAX_OVERLAP_BYTES, SSEDecoder2;
 var init_streaming3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/core/streaming.mjs"() {
+  "openai/core/streaming.mjs"() {
     init_tslib2();
     init_error3();
     init_shims2();
@@ -24314,7 +24314,7 @@ function addRequestID(value, response) {
   });
 }
 var init_parse2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/parse.mjs"() {
+  "openai/internal/parse.mjs"() {
     init_streaming3();
     init_errors2();
     init_log2();
@@ -24323,7 +24323,7 @@ var init_parse2 = __esm({
 
 var VERSION2;
 var init_version2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/version.mjs"() {
+  "openai/version.mjs"() {
     VERSION2 = "7.19.0";
   }
 });
@@ -24365,7 +24365,7 @@ function getBrowserInfo2() {
 }
 var isRunningInBrowser2, getPlatformProperties2, normalizeArch2, normalizePlatform2, _platformHeaders2, getPlatformHeaders2;
 var init_detect_platform2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/detect-platform.mjs"() {
+  "openai/internal/detect-platform.mjs"() {
     init_version2();
     isRunningInBrowser2 = () => {
       return (
@@ -24486,7 +24486,7 @@ function observeJSONRequestBody(body, observer) {
 }
 var jsonRequestBodyObservers, FallbackEncoder2;
 var init_request_options2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/request-options.mjs"() {
+  "openai/internal/request-options.mjs"() {
     jsonRequestBodyObservers = /* @__PURE__ */ new WeakMap();
     FallbackEncoder2 = ({ headers, body }) => {
       const observers = typeof body === "object" && body !== null ? jsonRequestBodyObservers.get(body) : void 0;
@@ -24521,7 +24521,7 @@ var init_request_options2 = __esm({
 
 var default_format2, default_formatter2, formatters2, RFC17382;
 var init_formats2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/qs/formats.mjs"() {
+  "openai/internal/qs/formats.mjs"() {
     default_format2 = "RFC3986";
     default_formatter2 = String;
     formatters2 = {
@@ -24550,7 +24550,7 @@ function maybe_map2(val, fn) {
 }
 var cachedHas, has2, hex_table2, limit2, encode4;
 var init_utils3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/qs/utils.mjs"() {
+  "openai/internal/qs/utils.mjs"() {
     init_formats2();
     init_values2();
     has2 = (obj, key) => {
@@ -24878,7 +24878,7 @@ function stringify2(object2, opts = {}) {
 }
 var array_prefix_generators2, push_to_array2, toISOString2, defaults2, sentinel2;
 var init_stringify2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/qs/stringify.mjs"() {
+  "openai/internal/qs/stringify.mjs"() {
     init_utils3();
     init_formats2();
     init_values2();
@@ -24927,7 +24927,7 @@ function stringifyQuery2(query) {
   return stringify2(query, { arrayFormat: "brackets" });
 }
 var init_query2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/query.mjs"() {
+  "openai/internal/utils/query.mjs"() {
     init_stringify2();
   }
 });
@@ -24947,7 +24947,7 @@ function resolveDataResidency(options) {
 }
 var endpoints;
 var init_data_residency = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/data-residency.mjs"() {
+  "openai/internal/data-residency.mjs"() {
     init_error3();
     init_values2();
     endpoints = /* @__PURE__ */ new Map([
@@ -24961,7 +24961,7 @@ var init_data_residency = __esm({
 
 var _APIPromise_client2, APIPromise2;
 var init_api_promise2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/core/api-promise.mjs"() {
+  "openai/core/api-promise.mjs"() {
     init_tslib2();
     init_parse2();
     APIPromise2 = class _APIPromise extends Promise {
@@ -25029,7 +25029,7 @@ var init_api_promise2 = __esm({
 
 var _AbstractPage_client2, AbstractPage2, PagePromise2, Page2, CursorPage, ConversationCursorPage, NextCursorPage, TokenPage;
 var init_pagination2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/core/pagination.mjs"() {
+  "openai/core/pagination.mjs"() {
     init_tslib2();
     init_error3();
     init_parse2();
@@ -25305,7 +25305,7 @@ function isUnsafeAccessToken(accessToken) {
 }
 var SUBJECT_TOKEN_TYPES, TOKEN_EXCHANGE_GRANT_TYPE, MAX_REFRESH_BUFFER_FRACTION, NATIVE_RESPONSE_PROTOTYPE, READ_NATIVE_RESPONSE_BODY, WorkloadIdentityAuth;
 var init_workload_identity_auth = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/auth/workload-identity-auth.mjs"() {
+  "openai/auth/workload-identity-auth.mjs"() {
     init_shims2();
     init_error3();
     SUBJECT_TOKEN_TYPES = {
@@ -25463,7 +25463,7 @@ function assertX509APIOrigin(value) {
 }
 var X509_API_BASE_URL;
 var init_x509_api_origin = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/auth/x509-api-origin.mjs"() {
+  "openai/internal/auth/x509-api-origin.mjs"() {
     init_error3();
     init_log2();
     X509_API_BASE_URL = "https://mtls.api.openai.com/v1";
@@ -25509,7 +25509,7 @@ function* iterateHeaders2(headers) {
 }
 var brand_privateNullableHeaders2, httpTokenHeaderName, buildHeaders2;
 var init_headers3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/headers.mjs"() {
+  "openai/internal/headers.mjs"() {
     init_values2();
     brand_privateNullableHeaders2 = /* @__PURE__ */ Symbol("brand.privateNullableHeaders");
     httpTokenHeaderName = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
@@ -25558,7 +25558,7 @@ __export(x509_transport_state_browser_exports, {
 });
 var registeredX509Transports, transientX509ConnectionErrors, retryableX509IssuerErrors, approvedX509Clients, approvedX509OAuthErrors, approvedX509Credentials, findRegisteredX509Transport, rememberRegisteredX509Transport, markTransientX509ConnectionError, isTransientX509ConnectionError, markRetryableX509IssuerError, isRetryableX509IssuerError, markApprovedX509Client, isApprovedX509Client, rememberX509OAuthError, findX509OAuthError, rememberX509Credential, findX509Credential;
 var init_x509_transport_state_browser = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/auth/x509-transport-state-browser.mjs"() {
+  "openai/internal/auth/x509-transport-state-browser.mjs"() {
     registeredX509Transports = /* @__PURE__ */ new WeakMap();
     transientX509ConnectionErrors = /* @__PURE__ */ new WeakSet();
     retryableX509IssuerErrors = /* @__PURE__ */ new WeakSet();
@@ -25581,7 +25581,7 @@ var init_x509_transport_state_browser = __esm({
 });
 
 var require_x509_transport_state = __commonJS({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/auth/x509-transport-state.js"(exports, module) {
+  "openai/internal/auth/x509-transport-state.js"(exports, module) {
     "use strict";
     if (typeof module !== "undefined" && module !== globalThis.module && typeof exports !== "undefined" && module.exports === exports) {
       Object.defineProperty(exports, "__esModule", { value: true });
@@ -25610,7 +25610,7 @@ var require_x509_transport_state = __commonJS({
 
 var nodeState, state, findRegisteredX509Transport3, rememberRegisteredX509Transport2, markTransientX509ConnectionError2, isTransientX509ConnectionError2, markRetryableX509IssuerError2, isRetryableX509IssuerError2, markApprovedX509Client2, isApprovedX509Client2, rememberX509OAuthError2, findX509OAuthError2, rememberX509Credential2, findX509Credential2;
 var init_x509_transport_state = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/auth/x509-transport-state.mjs"() {
+  "openai/internal/auth/x509-transport-state.mjs"() {
     init_x509_transport_state_browser();
     nodeState = __toESM(require_x509_transport_state(), 1);
     state = typeof nodeState.findRegisteredX509Transport === "function" ? nodeState : x509_transport_state_browser_exports;
@@ -25642,7 +25642,7 @@ function resolveX509Transport(value) {
   return registered;
 }
 var init_x509_transport_registry = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/auth/x509-transport-registry.mjs"() {
+  "openai/internal/auth/x509-transport-registry.mjs"() {
     init_error3();
     init_x509_transport_state();
   }
@@ -25752,7 +25752,7 @@ function snapshotX509RequestOptions(options) {
 }
 var _X509WorkloadIdentityAuth_instances, _a4, _X509WorkloadIdentityAuth_identityProviderId, _X509WorkloadIdentityAuth_serviceAccountId, _X509WorkloadIdentityAuth_configuredRefreshBufferMs, _X509WorkloadIdentityAuth_configuredRefreshBufferSeconds, _X509WorkloadIdentityAuth_organization, _X509WorkloadIdentityAuth_project, _X509WorkloadIdentityAuth_transport, _X509WorkloadIdentityAuth_refreshBufferMs, _X509WorkloadIdentityAuth_cachedToken, _X509WorkloadIdentityAuth_refresh, _X509WorkloadIdentityAuth_tokenGeneration, _X509WorkloadIdentityAuth_cancelRequestBody, _X509WorkloadIdentityAuth_assignToken, _X509WorkloadIdentityAuth_recoverRefreshFailure, _X509WorkloadIdentityAuth_fallbackToken, _X509WorkloadIdentityAuth_retireRefresh, _X509WorkloadIdentityAuth_beginRefresh, _X509WorkloadIdentityAuth_refreshToken, _X509WorkloadIdentityAuth_preflight, _X509WorkloadIdentityAuth_scope, _X509WorkloadIdentityAuth_assertTenantHeaders, FORBIDDEN_TRANSPORT_OPTIONS, headerValue, DEFAULT_REFRESH_BUFFER_MS, FAILED_REFRESH_COOLDOWN_MS, userAbortError, X509WorkloadIdentityAuth;
 var init_x509_workload_identity_auth = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/auth/x509-workload-identity-auth.mjs"() {
+  "openai/internal/auth/x509-workload-identity-auth.mjs"() {
     init_tslib2();
     init_error3();
     init_headers3();
@@ -26446,7 +26446,7 @@ function prepareX509ClientClone(inherited, overrides, credential, currentlyX509)
   return { credential: nextCredential, provider: prepareProviderClone(inherited, overrides) };
 }
 var init_x509_credential_options = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/auth/x509-credential-options.mjs"() {
+  "openai/internal/auth/x509-credential-options.mjs"() {
     init_error3();
     init_values2();
     init_x509_workload_identity_auth();
@@ -26663,7 +26663,7 @@ function escapeHeaderValue(value) {
 }
 var brand_privateStreamingFile, checkFileSupport2, arrayBufferByteLengthGetter, isAsyncIterable2, maybeMultipartFormRequestOptions, multipartFormRequestOptions2, supportsFormDataMap2, createForm2, isBlob, isReadableStream, isStreamingFile, isUploadable, hasStreamingUploadableValue, hasUploadableValue, snapshotPreservedUploadEntries, createStreamingFormRequestOptions, addFormValue2;
 var init_uploads3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/uploads.mjs"() {
+  "openai/internal/uploads.mjs"() {
     init_headers3();
     init_shims2();
     init_bytes2();
@@ -26862,7 +26862,7 @@ function propsForError2(value) {
 }
 var isBlobLike2, isFileLike2, isResponseLike2, hasFilePropertyOverrides, canReuseNativeFile;
 var init_to_file2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/to-file.mjs"() {
+  "openai/internal/to-file.mjs"() {
     init_uploads3();
     isBlobLike2 = (value) => value != null && typeof value === "object" && typeof value.size === "number" && typeof value.type === "string" && typeof value.text === "function" && typeof value.slice === "function" && typeof value.arrayBuffer === "function";
     isFileLike2 = (value) => value != null && typeof value === "object" && typeof value.name === "string" && typeof value.lastModified === "number" && isBlobLike2(value);
@@ -26873,7 +26873,7 @@ var init_to_file2 = __esm({
 });
 
 var init_uploads4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/core/uploads.mjs"() {
+  "openai/core/uploads.mjs"() {
     init_uploads3();
     init_to_file2();
   }
@@ -26881,7 +26881,7 @@ var init_uploads4 = __esm({
 
 var APIResource2;
 var init_resource2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/core/resource.mjs"() {
+  "openai/core/resource.mjs"() {
     APIResource2 = class {
       constructor(client) {
         this._client = client;
@@ -26895,7 +26895,7 @@ function encodeURIPath2(str) {
 }
 var EMPTY2, createPathTagFunction2, path4;
 var init_path2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/path.mjs"() {
+  "openai/internal/utils/path.mjs"() {
     init_error3();
     EMPTY2 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null));
     createPathTagFunction2 = (pathEncoder = encodeURIPath2) => function path11(statics, ...params) {
@@ -26959,7 +26959,7 @@ ${underline}`);
 
 var Messages3;
 var init_messages3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/chat/completions/messages.mjs"() {
+  "openai/resources/chat/completions/messages.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -26986,7 +26986,7 @@ var init_messages3 = __esm({
 });
 
 var init_error4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/error.mjs"() {
+  "openai/error.mjs"() {
     init_error3();
   }
 });
@@ -27112,14 +27112,14 @@ function validateInputTools(tools) {
   }
 }
 var init_parser3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/parser.mjs"() {
+  "openai/lib/parser.mjs"() {
     init_error4();
   }
 });
 
 var isAssistantMessage, isToolMessage;
 var init_chatCompletionUtils = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/chatCompletionUtils.mjs"() {
+  "openai/lib/chatCompletionUtils.mjs"() {
     isAssistantMessage = (message) => message?.role === "assistant";
     isToolMessage = (message) => message?.role === "tool";
   }
@@ -27884,7 +27884,7 @@ function createBufferedEventLedger() {
 }
 var _EventStream_instances, _EventStream_connectedPromise, _EventStream_resolveConnectedPromise, _EventStream_rejectConnectedPromise, _EventStream_endPromise, _EventStream_resolveEndPromise, _EventStream_rejectEndPromise, _EventStream_listeners, _EventStream_abortListeners, _EventStream_emittedListenerRegistrations, _EventStream_pendingListenerCleanup, _EventStream_pendingBufferedEventChecks, _EventStream_listenerDispatchDepth, _EventStream_ended, _EventStream_errored, _EventStream_aborted, _EventStream_catchingPromiseCreated, _EventStream_terminalFailure, _EventStream_abortFromSignal, _EventStream_removeAbortListeners, _EventStream_onceForEmitted, _EventStream_removeEmittedListener, _EventStream_cleanupEmittedListeners, _EventStream_handleError, _EventStream_settleTerminalEvent, MAX_BUFFERED_ITERATOR_EVENTS, MAX_BUFFERED_ITERATOR_BYTES, MAX_INSPECTABLE_TYPED_ARRAY_ELEMENTS, MAX_BUFFERED_EVENT_DEPTH, bufferedJSONStringify, bufferedJSONParse, sdkOwnedBufferedEventArguments, typedArrayBufferGetter, typedArrayLengthGetter, dataViewBufferGetter, symbolDescriptionGetter, dateTimestampGetter, arrayBufferByteLengthGetter2, sharedArrayBufferByteLengthGetter, errorStackDescriptor, functionToString, objectToString, errorBrandDescriptor, nativeErrorBrand, nativeErrorConstructorSource, nativeDateConstructorSource, nativeFunctionConstructorSource, trustedIntrinsicPrototypes, trustedNativeConstructorSources, canonicalIntrinsicDescriptors, foreignErrorStackDescriptors, nativeProxyDetector, typedArrayConstructorDescriptor, blobInternalHandlePrototype, mapEntries, setValues, headersEntriesDescriptor, headersEntries, retainedStorageBrands, BUFFERED_LEDGER_ENTRY_BYTES, BUFFERED_LEDGER_NODE_BYTES, BUFFERED_LEDGER_EDGE_BYTES, BUFFERED_LEDGER_OWNER_BYTES, MAX_BUFFERED_LEDGER_RECONCILIATION_WORK, EventStream2;
 var init_EventStream = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/EventStream.mjs"() {
+  "openai/lib/EventStream.mjs"() {
     init_tslib2();
     init_error4();
     MAX_BUFFERED_ITERATOR_EVENTS = 4096;
@@ -28592,7 +28592,7 @@ function isRunnableFunctionWithParse(fn) {
   return typeof fn.parse === "function";
 }
 var init_RunnableFunction = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/RunnableFunction.mjs"() {
+  "openai/lib/RunnableFunction.mjs"() {
   }
 });
 
@@ -28651,7 +28651,7 @@ function toRequestMessage(message) {
 }
 var _AbstractChatCompletionRunner_instances, _a5, _AbstractChatCompletionRunner_completionArrivedBeforeAbort, _AbstractChatCompletionRunner_afterCompletionInvoked, _AbstractChatCompletionRunner_getFinalContent, _AbstractChatCompletionRunner_getFinalMessage, _AbstractChatCompletionRunner_getFinalFunctionToolCall, _AbstractChatCompletionRunner_getFinalFunctionToolCallResult, _AbstractChatCompletionRunner_calculateTotalUsage, _AbstractChatCompletionRunner_throwIfAborted, _AbstractChatCompletionRunner_validateParams, _AbstractChatCompletionRunner_stringifyFunctionCallResult, DEFAULT_MAX_CHAT_COMPLETIONS, AbstractChatCompletionRunner;
 var init_AbstractChatCompletionRunner = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/AbstractChatCompletionRunner.mjs"() {
+  "openai/lib/AbstractChatCompletionRunner.mjs"() {
     init_tslib2();
     init_error4();
     init_uuid3();
@@ -29030,7 +29030,7 @@ var init_AbstractChatCompletionRunner = __esm({
 
 var ChatCompletionRunner;
 var init_ChatCompletionRunner = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/ChatCompletionRunner.mjs"() {
+  "openai/lib/ChatCompletionRunner.mjs"() {
     init_AbstractChatCompletionRunner();
     init_chatCompletionUtils();
     ChatCompletionRunner = class _ChatCompletionRunner extends AbstractChatCompletionRunner {
@@ -29069,7 +29069,7 @@ function parseJSON(jsonString, allowPartial = Allow.ALL) {
 }
 var STR, NUM, ARR, OBJ, NULL, BOOL, NAN, INFINITY, MINUS_INFINITY, INF, SPECIAL, ATOM, COLLECTION, ALL, Allow, PartialJSON, MalformedJSON, _parseJSON, partialParse3;
 var init_parser4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/_vendor/partial-json-parser/parser.mjs"() {
+  "openai/_vendor/partial-json-parser/parser.mjs"() {
     STR = 1;
     NUM = 2;
     ARR = 4;
@@ -29288,7 +29288,7 @@ var init_parser4 = __esm({
 });
 
 var init_streaming4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/streaming.mjs"() {
+  "openai/streaming.mjs"() {
     init_streaming3();
   }
 });
@@ -30134,7 +30134,7 @@ function assertNever2(_x) {
 }
 var _ChatCompletionStream_instances, _ChatCompletionStream_params, _ChatCompletionStream_rejectsUnfinishedTurns, _ChatCompletionStream_audioDoneChoiceIndexes, _ChatCompletionStream_choiceEventStates, _ChatCompletionStream_currentChatCompletionSnapshot, _ChatCompletionStream_hasAutoParseableTool, _ChatCompletionStream_partialJSONParseBudget, _ChatCompletionStream_beginRequest, _ChatCompletionStream_getChoiceEventState, _ChatCompletionStream_addChunk, _ChatCompletionStream_emitToolCallDoneEvent, _ChatCompletionStream_emitContentDoneEvents, _ChatCompletionStream_validateStructuredSnapshots, _ChatCompletionStream_endRequest, _ChatCompletionStream_accumulateChatCompletion, CHAT_COMPLETION_READABLE_STREAM_MESSAGE_PREFIX, MAX_STREAM_CHOICES, MAX_STREAM_TOOL_CALLS, MAX_PARTIAL_JSON_BYTES, MAX_PARTIAL_JSON_FRAGMENTS, MAX_PARTIAL_JSON_DEPTH, MAX_PARTIAL_JSON_PARSE_WORK, EAGER_PARTIAL_JSON_BYTES, MAX_SERIALIZED_PARSER_SCHEMA_NODES, stringifyParserSchemaValue, MAX_SERIALIZED_PARSER_SCHEMA_BYTES, MAX_SERIALIZED_PARSER_SCHEMA_DEPTH, OMITTED_SERIALIZED_PARSER_VALUE, UNSAFE_SERIALIZED_PARSER_VALUE, ChatCompletionStream;
 var init_ChatCompletionStream = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/ChatCompletionStream.mjs"() {
+  "openai/lib/ChatCompletionStream.mjs"() {
     init_tslib2();
     init_parser4();
     init_error4();
@@ -30836,7 +30836,7 @@ var init_ChatCompletionStream = __esm({
 
 var ChatCompletionStreamingRunner;
 var init_ChatCompletionStreamingRunner = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/ChatCompletionStreamingRunner.mjs"() {
+  "openai/lib/ChatCompletionStreamingRunner.mjs"() {
     init_ChatCompletionStream();
     init_error4();
     init_streaming4();
@@ -30899,7 +30899,7 @@ var init_ChatCompletionStreamingRunner = __esm({
 
 var Completions2;
 var init_completions2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/chat/completions/completions.mjs"() {
+  "openai/resources/chat/completions/completions.mjs"() {
     init_resource2();
     init_messages3();
     init_messages3();
@@ -31023,7 +31023,7 @@ var init_completions2 = __esm({
 
 var Chat;
 var init_chat = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/chat/chat.mjs"() {
+  "openai/resources/chat/chat.mjs"() {
     init_resource2();
     init_completions2();
     init_completions2();
@@ -31038,7 +31038,7 @@ var init_chat = __esm({
 });
 
 var init_completions3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/chat/completions/index.mjs"() {
+  "openai/resources/chat/completions/index.mjs"() {
     init_completions2();
     init_completions2();
     init_messages3();
@@ -31046,20 +31046,20 @@ var init_completions3 = __esm({
 });
 
 var init_chat2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/chat/index.mjs"() {
+  "openai/resources/chat/index.mjs"() {
     init_chat();
     init_completions3();
   }
 });
 
 var init_shared2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/shared.mjs"() {
+  "openai/resources/shared.mjs"() {
   }
 });
 
 var AdminAPIKeys;
 var init_admin_api_keys = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/admin-api-keys.mjs"() {
+  "openai/resources/admin/organization/admin-api-keys.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -31140,7 +31140,7 @@ var init_admin_api_keys = __esm({
 
 var AuditLogs;
 var init_audit_logs = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/audit-logs.mjs"() {
+  "openai/resources/admin/organization/audit-logs.mjs"() {
     init_resource2();
     init_pagination2();
     AuditLogs = class extends APIResource2 {
@@ -31168,7 +31168,7 @@ var init_audit_logs = __esm({
 
 var Certificates2;
 var init_certificates2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/certificates.mjs"() {
+  "openai/resources/admin/organization/certificates.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -31312,7 +31312,7 @@ var init_certificates2 = __esm({
 
 var DataRetention;
 var init_data_retention = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/data-retention.mjs"() {
+  "openai/resources/admin/organization/data-retention.mjs"() {
     init_resource2();
     DataRetention = class extends APIResource2 {
       /**
@@ -31354,7 +31354,7 @@ var init_data_retention = __esm({
 
 var Invites2;
 var init_invites2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/invites.mjs"() {
+  "openai/resources/admin/organization/invites.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -31437,7 +31437,7 @@ var init_invites2 = __esm({
 
 var Roles;
 var init_roles = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/roles.mjs"() {
+  "openai/resources/admin/organization/roles.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -31533,7 +31533,7 @@ var init_roles = __esm({
 
 var SpendAlerts;
 var init_spend_alerts = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/spend-alerts.mjs"() {
+  "openai/resources/admin/organization/spend-alerts.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -31643,7 +31643,7 @@ var init_spend_alerts = __esm({
 
 var SpendLimit;
 var init_spend_limit = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/spend-limit.mjs"() {
+  "openai/resources/admin/organization/spend-limit.mjs"() {
     init_resource2();
     SpendLimit = class extends APIResource2 {
       /**
@@ -31702,7 +31702,7 @@ var init_spend_limit = __esm({
 
 var Usage;
 var init_usage = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/usage.mjs"() {
+  "openai/resources/admin/organization/usage.mjs"() {
     init_resource2();
     Usage = class extends APIResource2 {
       /**
@@ -31909,7 +31909,7 @@ var init_usage = __esm({
 
 var Roles2;
 var init_roles2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/groups/roles.mjs"() {
+  "openai/resources/admin/organization/groups/roles.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -31993,7 +31993,7 @@ var init_roles2 = __esm({
 
 var Users2;
 var init_users2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/groups/users.mjs"() {
+  "openai/resources/admin/organization/groups/users.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -32077,7 +32077,7 @@ var init_users2 = __esm({
 
 var Groups;
 var init_groups = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/groups/groups.mjs"() {
+  "openai/resources/admin/organization/groups/groups.mjs"() {
     init_resource2();
     init_roles2();
     init_roles2();
@@ -32185,7 +32185,7 @@ var init_groups = __esm({
 
 var APIKeys2;
 var init_api_keys2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/api-keys.mjs"() {
+  "openai/resources/admin/organization/projects/api-keys.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -32253,7 +32253,7 @@ var init_api_keys2 = __esm({
 
 var Certificates3;
 var init_certificates3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/certificates.mjs"() {
+  "openai/resources/admin/organization/projects/certificates.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -32317,7 +32317,7 @@ var init_certificates3 = __esm({
 
 var DataRetention2;
 var init_data_retention2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/data-retention.mjs"() {
+  "openai/resources/admin/organization/projects/data-retention.mjs"() {
     init_resource2();
     init_path2();
     DataRetention2 = class extends APIResource2 {
@@ -32363,7 +32363,7 @@ var init_data_retention2 = __esm({
 
 var HostedToolPermissions;
 var init_hosted_tool_permissions = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/hosted-tool-permissions.mjs"() {
+  "openai/resources/admin/organization/projects/hosted-tool-permissions.mjs"() {
     init_resource2();
     init_path2();
     HostedToolPermissions = class extends APIResource2 {
@@ -32408,7 +32408,7 @@ var init_hosted_tool_permissions = __esm({
 
 var ModelPermissions;
 var init_model_permissions = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/model-permissions.mjs"() {
+  "openai/resources/admin/organization/projects/model-permissions.mjs"() {
     init_resource2();
     init_path2();
     ModelPermissions = class extends APIResource2 {
@@ -32471,7 +32471,7 @@ var init_model_permissions = __esm({
 
 var RateLimits3;
 var init_rate_limits3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/rate-limits.mjs"() {
+  "openai/resources/admin/organization/projects/rate-limits.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -32518,7 +32518,7 @@ var init_rate_limits3 = __esm({
 
 var Roles3;
 var init_roles3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/roles.mjs"() {
+  "openai/resources/admin/organization/projects/roles.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -32626,7 +32626,7 @@ var init_roles3 = __esm({
 
 var SpendAlerts2;
 var init_spend_alerts2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/spend-alerts.mjs"() {
+  "openai/resources/admin/organization/projects/spend-alerts.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -32747,7 +32747,7 @@ var init_spend_alerts2 = __esm({
 
 var SpendLimit2;
 var init_spend_limit2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/spend-limit.mjs"() {
+  "openai/resources/admin/organization/projects/spend-limit.mjs"() {
     init_resource2();
     init_path2();
     SpendLimit2 = class extends APIResource2 {
@@ -32814,7 +32814,7 @@ var init_spend_limit2 = __esm({
 
 var Roles4;
 var init_roles4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/groups/roles.mjs"() {
+  "openai/resources/admin/organization/projects/groups/roles.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -32901,7 +32901,7 @@ var init_roles4 = __esm({
 
 var Groups2;
 var init_groups2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/groups/groups.mjs"() {
+  "openai/resources/admin/organization/projects/groups/groups.mjs"() {
     init_resource2();
     init_roles4();
     init_roles4();
@@ -32993,7 +32993,7 @@ var init_groups2 = __esm({
 
 var APIKeys3;
 var init_api_keys3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/service-accounts/api-keys.mjs"() {
+  "openai/resources/admin/organization/projects/service-accounts/api-keys.mjs"() {
     init_resource2();
     init_path2();
     APIKeys3 = class extends APIResource2 {
@@ -33019,7 +33019,7 @@ var init_api_keys3 = __esm({
 
 var ServiceAccounts3;
 var init_service_accounts3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/service-accounts/service-accounts.mjs"() {
+  "openai/resources/admin/organization/projects/service-accounts/service-accounts.mjs"() {
     init_resource2();
     init_api_keys3();
     init_api_keys3();
@@ -33127,7 +33127,7 @@ var init_service_accounts3 = __esm({
 
 var Roles5;
 var init_roles5 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/users/roles.mjs"() {
+  "openai/resources/admin/organization/projects/users/roles.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -33214,7 +33214,7 @@ var init_roles5 = __esm({
 
 var Users3;
 var init_users3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/users/users.mjs"() {
+  "openai/resources/admin/organization/projects/users/users.mjs"() {
     init_resource2();
     init_roles5();
     init_roles5();
@@ -33329,7 +33329,7 @@ var init_users3 = __esm({
 
 var Projects;
 var init_projects = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/projects/projects.mjs"() {
+  "openai/resources/admin/organization/projects/projects.mjs"() {
     init_resource2();
     init_api_keys2();
     init_api_keys2();
@@ -33481,7 +33481,7 @@ var init_projects = __esm({
 
 var Roles6;
 var init_roles6 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/users/roles.mjs"() {
+  "openai/resources/admin/organization/users/roles.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -33565,7 +33565,7 @@ var init_roles6 = __esm({
 
 var Users4;
 var init_users4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/users/users.mjs"() {
+  "openai/resources/admin/organization/users/users.mjs"() {
     init_resource2();
     init_roles6();
     init_roles6();
@@ -33648,7 +33648,7 @@ var init_users4 = __esm({
 
 var Organization2;
 var init_organization2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/organization/organization.mjs"() {
+  "openai/resources/admin/organization/organization.mjs"() {
     init_resource2();
     init_admin_api_keys();
     init_admin_api_keys();
@@ -33708,7 +33708,7 @@ var init_organization2 = __esm({
 
 var Admin;
 var init_admin = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/admin/admin.mjs"() {
+  "openai/resources/admin/admin.mjs"() {
     init_resource2();
     init_organization2();
     init_organization2();
@@ -33724,7 +33724,7 @@ var init_admin = __esm({
 
 var Speech;
 var init_speech = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/audio/speech.mjs"() {
+  "openai/resources/audio/speech.mjs"() {
     init_resource2();
     init_headers3();
     Speech = class extends APIResource2 {
@@ -33760,7 +33760,7 @@ var init_speech = __esm({
 
 var Transcriptions;
 var init_transcriptions = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/audio/transcriptions.mjs"() {
+  "openai/resources/audio/transcriptions.mjs"() {
     init_resource2();
     init_uploads3();
     Transcriptions = class extends APIResource2 {
@@ -33779,7 +33779,7 @@ var init_transcriptions = __esm({
 
 var Translations;
 var init_translations = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/audio/translations.mjs"() {
+  "openai/resources/audio/translations.mjs"() {
     init_resource2();
     init_uploads3();
     Translations = class extends APIResource2 {
@@ -33792,7 +33792,7 @@ var init_translations = __esm({
 
 var Audio;
 var init_audio = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/audio/audio.mjs"() {
+  "openai/resources/audio/audio.mjs"() {
     init_resource2();
     init_speech();
     init_speech();
@@ -33816,7 +33816,7 @@ var init_audio = __esm({
 
 var Batches3;
 var init_batches3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/batches.mjs"() {
+  "openai/resources/batches.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -33860,7 +33860,7 @@ var init_batches3 = __esm({
 
 var Assistants;
 var init_assistants = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/assistants.mjs"() {
+  "openai/resources/beta/assistants.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -33935,7 +33935,7 @@ var init_assistants = __esm({
 
 var Sessions2;
 var init_sessions2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/realtime/sessions.mjs"() {
+  "openai/resources/beta/realtime/sessions.mjs"() {
     init_resource2();
     init_headers3();
     Sessions2 = class extends APIResource2 {
@@ -33968,7 +33968,7 @@ var init_sessions2 = __esm({
 
 var TranscriptionSessions;
 var init_transcription_sessions = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/realtime/transcription-sessions.mjs"() {
+  "openai/resources/beta/realtime/transcription-sessions.mjs"() {
     init_resource2();
     init_headers3();
     TranscriptionSessions = class extends APIResource2 {
@@ -34001,7 +34001,7 @@ var init_transcription_sessions = __esm({
 
 var Realtime;
 var init_realtime = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/realtime/realtime.mjs"() {
+  "openai/resources/beta/realtime/realtime.mjs"() {
     init_resource2();
     init_sessions2();
     init_sessions2();
@@ -34021,7 +34021,7 @@ var init_realtime = __esm({
 
 var Files3;
 var init_files3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/environments/files.mjs"() {
+  "openai/resources/beta/agents/environments/files.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -34082,7 +34082,7 @@ var init_files3 = __esm({
 
 var Templates;
 var init_templates = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/environments/templates.mjs"() {
+  "openai/resources/beta/agents/environments/templates.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -34194,7 +34194,7 @@ var init_templates = __esm({
 
 var Environments2;
 var init_environments2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/environments/environments.mjs"() {
+  "openai/resources/beta/agents/environments/environments.mjs"() {
     init_resource2();
     init_files3();
     init_files3();
@@ -34236,7 +34236,7 @@ var init_environments2 = __esm({
 
 var _TurnState_turnID, _TurnState_turnEnded, _TurnState_eventIDs, _TurnState_calls, TurnState;
 var init_turn_state = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/agents/turn-state.mjs"() {
+  "openai/lib/agents/turn-state.mjs"() {
     init_tslib2();
     TurnState = class {
       constructor() {
@@ -34333,7 +34333,7 @@ async function cancelBody(response) {
 }
 var _AgentSessionStream_instances, _AgentSessionStream_consumed, _AgentSessionStream_stream, _AgentSessionStream_response, _AgentSessionStream_reading, _AgentSessionStream_sessions, _AgentSessionStream_sessionID, _AgentSessionStream_input, _AgentSessionStream_handlers, _AgentSessionStream_inputKey, _AgentSessionStream_options, _AgentSessionStream_iterate, _AgentSessionStream_result, _AgentSessionStream_checkAbort, _AgentSessionStream_abortError, _AgentSessionStream_wait, _AgentSessionStream_submit, AgentSessionStream;
 var init_agent_session_stream = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/agents/agent-session-stream.mjs"() {
+  "openai/lib/agents/agent-session-stream.mjs"() {
     init_tslib2();
     init_turn_state();
     init_error3();
@@ -34522,7 +34522,7 @@ var init_agent_session_stream = __esm({
 
 var Artifacts;
 var init_artifacts = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/artifacts.mjs"() {
+  "openai/resources/beta/agents/sessions/artifacts.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -34628,7 +34628,7 @@ var init_artifacts = __esm({
 
 var Events3;
 var init_events3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/events.mjs"() {
+  "openai/resources/beta/agents/sessions/events.mjs"() {
     init_resource2();
     init_headers3();
     init_path2();
@@ -34703,7 +34703,7 @@ var init_events3 = __esm({
 
 var Items;
 var init_items = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/items.mjs"() {
+  "openai/resources/beta/agents/sessions/items.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -34738,7 +34738,7 @@ var init_items = __esm({
 
 var Turns;
 var init_turns = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/turns.mjs"() {
+  "openai/resources/beta/agents/sessions/turns.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -34795,7 +34795,7 @@ var init_turns = __esm({
 
 var Items2;
 var init_items2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/subagents/items.mjs"() {
+  "openai/resources/beta/agents/sessions/subagents/items.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -34831,7 +34831,7 @@ var init_items2 = __esm({
 
 var Items3;
 var init_items3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/subagents/turns/items.mjs"() {
+  "openai/resources/beta/agents/sessions/subagents/turns/items.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -34867,7 +34867,7 @@ var init_items3 = __esm({
 
 var Turns2;
 var init_turns2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/subagents/turns/turns.mjs"() {
+  "openai/resources/beta/agents/sessions/subagents/turns/turns.mjs"() {
     init_resource2();
     init_items3();
     init_items3();
@@ -34934,7 +34934,7 @@ var init_turns2 = __esm({
 
 var Subagents;
 var init_subagents = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/subagents/subagents.mjs"() {
+  "openai/resources/beta/agents/sessions/subagents/subagents.mjs"() {
     init_resource2();
     init_items2();
     init_items2();
@@ -35000,7 +35000,7 @@ var init_subagents = __esm({
 
 var Sessions3;
 var init_sessions3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/sessions/sessions.mjs"() {
+  "openai/resources/beta/agents/sessions/sessions.mjs"() {
     init_agent_session_stream();
     init_resource2();
     init_artifacts();
@@ -35126,7 +35126,7 @@ var init_sessions3 = __esm({
 
 var Credentials2;
 var init_credentials3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/vaults/credentials.mjs"() {
+  "openai/resources/beta/agents/vaults/credentials.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -35258,7 +35258,7 @@ var init_credentials3 = __esm({
 
 var Vaults2;
 var init_vaults2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/vaults/vaults.mjs"() {
+  "openai/resources/beta/agents/vaults/vaults.mjs"() {
     init_resource2();
     init_credentials3();
     init_credentials3();
@@ -35350,7 +35350,7 @@ var init_vaults2 = __esm({
 
 var Agents2;
 var init_agents2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/agents/agents.mjs"() {
+  "openai/resources/beta/agents/agents.mjs"() {
     init_resource2();
     init_environments2();
     init_environments2();
@@ -35467,7 +35467,7 @@ var init_agents2 = __esm({
 
 var Sessions4;
 var init_sessions4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/chatkit/sessions.mjs"() {
+  "openai/resources/beta/chatkit/sessions.mjs"() {
     init_resource2();
     init_headers3();
     init_path2();
@@ -35516,7 +35516,7 @@ var init_sessions4 = __esm({
 
 var Threads2;
 var init_threads2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/chatkit/threads.mjs"() {
+  "openai/resources/beta/chatkit/threads.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -35601,7 +35601,7 @@ var init_threads2 = __esm({
 
 var ChatKit;
 var init_chatkit = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/chatkit/chatkit.mjs"() {
+  "openai/resources/beta/chatkit/chatkit.mjs"() {
     init_resource2();
     init_sessions4();
     init_sessions4();
@@ -35621,7 +35621,7 @@ var init_chatkit = __esm({
 
 var InputItems;
 var init_input_items = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/responses/input-items.mjs"() {
+  "openai/resources/beta/responses/input-items.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -35658,7 +35658,7 @@ var init_input_items = __esm({
 
 var InputTokens;
 var init_input_tokens = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/responses/input-tokens.mjs"() {
+  "openai/resources/beta/responses/input-tokens.mjs"() {
     init_resource2();
     init_headers3();
     InputTokens = class extends APIResource2 {
@@ -35692,7 +35692,7 @@ var init_input_tokens = __esm({
 
 var Responses;
 var init_responses = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/responses/responses.mjs"() {
+  "openai/resources/beta/responses/responses.mjs"() {
     init_resource2();
     init_input_items();
     init_input_items();
@@ -35812,7 +35812,7 @@ var init_responses = __esm({
 
 var Messages4;
 var init_messages4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/threads/messages.mjs"() {
+  "openai/resources/beta/threads/messages.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -35890,7 +35890,7 @@ var init_messages4 = __esm({
 
 var Steps;
 var init_steps = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/threads/runs/steps.mjs"() {
+  "openai/resources/beta/threads/runs/steps.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -35930,7 +35930,7 @@ var init_steps = __esm({
 
 var fromBase642, toFloat32Array;
 var init_base642 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/base64.mjs"() {
+  "openai/internal/utils/base64.mjs"() {
     init_error3();
     init_bytes2();
     fromBase642 = (str) => {
@@ -35970,7 +35970,7 @@ var init_base642 = __esm({
 
 var readEnv2;
 var init_env2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils/env.mjs"() {
+  "openai/internal/utils/env.mjs"() {
     readEnv2 = (env2) => {
       try {
         if (typeof globalThis.process !== "undefined") {
@@ -35988,7 +35988,7 @@ var init_env2 = __esm({
 });
 
 var init_utils4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/utils.mjs"() {
+  "openai/internal/utils.mjs"() {
     init_values2();
     init_base642();
     init_env2();
@@ -36278,7 +36278,7 @@ function createAssistantStreamArrayDeltaCommit(accumulator, delta, kind, cacheAr
 }
 var MAX_ASSISTANT_STREAM_ARRAY_GROWTH, MAX_EXTERNALLY_MUTABLE_ASSISTANT_STREAM_ARRAY_LENGTH, assistantStreamArrayStates, externallyMutableAssistantStreamValues;
 var init_assistant_stream_delta = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/assistant-stream-delta.mjs"() {
+  "openai/internal/assistant-stream-delta.mjs"() {
     init_error4();
     init_utils4();
     MAX_ASSISTANT_STREAM_ARRAY_GROWTH = 1024;
@@ -36318,7 +36318,7 @@ function assertNever3(_x) {
 }
 var _AssistantStream_instances, _AssistantStream_runStepSnapshots, _AssistantStream_runStepIDOwners, _AssistantStream_activeRunStepID, _AssistantStream_messageSnapshots, _AssistantStream_messageIDOwners, _AssistantStream_messageSnapshot, _AssistantStream_activeMessageID, _AssistantStream_finalRun, _AssistantStream_currentContentIndex, _AssistantStream_currentContent, _AssistantStream_currentToolCallIndex, _AssistantStream_currentToolCall, _AssistantStream_currentEvent, _AssistantStream_currentRunSnapshot, _AssistantStream_currentRunStepSnapshot, _AssistantStream_addEvent, _AssistantStream_endRequest, _AssistantStream_validateRunStepEvent, _AssistantStream_reserveRunStepAlias, _AssistantStream_validateMessageEvent, _AssistantStream_reserveMessageAlias, _AssistantStream_handleMessage, _AssistantStream_handleRunStep, _AssistantStream_emitExposed, _AssistantStream_handleEvent, _AssistantStream_accumulateRunStep, _AssistantStream_accumulateMessage, _AssistantStream_accumulateContent, _AssistantStream_handleRun, AssistantStream;
 var init_AssistantStream = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/AssistantStream.mjs"() {
+  "openai/lib/AssistantStream.mjs"() {
     init_tslib2();
     init_streaming4();
     init_error4();
@@ -37066,7 +37066,7 @@ async function pollWithResponse(retrieve, intermediateStatuses, terminalStatuses
   }
 }
 var init_polling = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/polling.mjs"() {
+  "openai/lib/polling.mjs"() {
     init_error3();
     init_headers3();
     init_sleep2();
@@ -37080,14 +37080,14 @@ function pollAssistantRun(resource, runID, params, options) {
   }), ["queued", "in_progress", "cancelling"], ["requires_action", "incomplete", "cancelled", "completed", "failed", "expired"], options);
 }
 var init_assistant_run_polling = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/assistant-run-polling.mjs"() {
+  "openai/lib/assistant-run-polling.mjs"() {
     init_polling();
   }
 });
 
 var Runs;
 var init_runs = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/threads/runs/runs.mjs"() {
+  "openai/resources/beta/threads/runs/runs.mjs"() {
     init_resource2();
     init_steps();
     init_steps();
@@ -37232,7 +37232,7 @@ var init_runs = __esm({
 
 var Threads3;
 var init_threads3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/threads/threads.mjs"() {
+  "openai/resources/beta/threads/threads.mjs"() {
     init_resource2();
     init_messages4();
     init_messages4();
@@ -37330,7 +37330,7 @@ var init_threads3 = __esm({
 
 var Beta2;
 var init_beta2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/beta/beta.mjs"() {
+  "openai/resources/beta/beta.mjs"() {
     init_resource2();
     init_assistants();
     init_assistants();
@@ -37366,7 +37366,7 @@ var init_beta2 = __esm({
 
 var Completions3;
 var init_completions4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/completions.mjs"() {
+  "openai/resources/completions.mjs"() {
     init_resource2();
     Completions3 = class extends APIResource2 {
       create(body, options) {
@@ -37383,7 +37383,7 @@ var init_completions4 = __esm({
 
 var Content;
 var init_content = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/containers/files/content.mjs"() {
+  "openai/resources/containers/files/content.mjs"() {
     init_resource2();
     init_headers3();
     init_path2();
@@ -37406,7 +37406,7 @@ var init_content = __esm({
 
 var Files4;
 var init_files4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/containers/files/files.mjs"() {
+  "openai/resources/containers/files/files.mjs"() {
     init_resource2();
     init_content();
     init_content();
@@ -37466,7 +37466,7 @@ var init_files4 = __esm({
 
 var Containers;
 var init_containers = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/containers/containers.mjs"() {
+  "openai/resources/containers/containers.mjs"() {
     init_resource2();
     init_files4();
     init_files4();
@@ -37520,7 +37520,7 @@ var init_containers = __esm({
 
 var ContentProvenanceChecks;
 var init_content_provenance_checks = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/content-provenance-checks.mjs"() {
+  "openai/resources/content-provenance-checks.mjs"() {
     init_resource2();
     init_uploads3();
     ContentProvenanceChecks = class extends APIResource2 {
@@ -37544,7 +37544,7 @@ var init_content_provenance_checks = __esm({
 
 var Items4;
 var init_items4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/conversations/items.mjs"() {
+  "openai/resources/conversations/items.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -37594,7 +37594,7 @@ var init_items4 = __esm({
 
 var Conversations;
 var init_conversations = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/conversations/conversations.mjs"() {
+  "openai/resources/conversations/conversations.mjs"() {
     init_resource2();
     init_items4();
     init_items4();
@@ -37682,14 +37682,14 @@ function createEmbedding(client, body, options) {
   });
 }
 var init_embeddings = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/embeddings.mjs"() {
+  "openai/lib/embeddings.mjs"() {
     init_utils4();
   }
 });
 
 var Embeddings;
 var init_embeddings2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/embeddings.mjs"() {
+  "openai/resources/embeddings.mjs"() {
     init_resource2();
     init_embeddings();
     Embeddings = class extends APIResource2 {
@@ -37702,7 +37702,7 @@ var init_embeddings2 = __esm({
 
 var OutputItems;
 var init_output_items = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/evals/runs/output-items.mjs"() {
+  "openai/resources/evals/runs/output-items.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -37730,7 +37730,7 @@ var init_output_items = __esm({
 
 var Runs2;
 var init_runs2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/evals/runs/runs.mjs"() {
+  "openai/resources/evals/runs/runs.mjs"() {
     init_resource2();
     init_output_items();
     init_output_items();
@@ -37800,7 +37800,7 @@ var init_runs2 = __esm({
 
 var Evals;
 var init_evals = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/evals/evals.mjs"() {
+  "openai/resources/evals/evals.mjs"() {
     init_resource2();
     init_runs2();
     init_runs2();
@@ -37871,7 +37871,7 @@ async function waitForFileProcessing(resource, id, pollInterval, maxWait) {
   return file2;
 }
 var init_file_processing = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/file-processing.mjs"() {
+  "openai/lib/file-processing.mjs"() {
     init_error4();
     init_sleep2();
   }
@@ -37879,7 +37879,7 @@ var init_file_processing = __esm({
 
 var Files5;
 var init_files5 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/files.mjs"() {
+  "openai/resources/files.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -37964,7 +37964,7 @@ var init_files5 = __esm({
 
 var Methods;
 var init_methods = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/fine-tuning/methods.mjs"() {
+  "openai/resources/fine-tuning/methods.mjs"() {
     init_resource2();
     Methods = class extends APIResource2 {
     };
@@ -37973,7 +37973,7 @@ var init_methods = __esm({
 
 var Graders;
 var init_graders = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/fine-tuning/alpha/graders.mjs"() {
+  "openai/resources/fine-tuning/alpha/graders.mjs"() {
     init_resource2();
     Graders = class extends APIResource2 {
       /**
@@ -38030,7 +38030,7 @@ var init_graders = __esm({
 
 var Alpha;
 var init_alpha = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/fine-tuning/alpha/alpha.mjs"() {
+  "openai/resources/fine-tuning/alpha/alpha.mjs"() {
     init_resource2();
     init_graders();
     init_graders();
@@ -38046,7 +38046,7 @@ var init_alpha = __esm({
 
 var Permissions;
 var init_permissions = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/fine-tuning/checkpoints/permissions.mjs"() {
+  "openai/resources/fine-tuning/checkpoints/permissions.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -38137,7 +38137,7 @@ var init_permissions = __esm({
 
 var Checkpoints;
 var init_checkpoints = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/fine-tuning/checkpoints/checkpoints.mjs"() {
+  "openai/resources/fine-tuning/checkpoints/checkpoints.mjs"() {
     init_resource2();
     init_permissions();
     init_permissions();
@@ -38153,7 +38153,7 @@ var init_checkpoints = __esm({
 
 var Checkpoints2;
 var init_checkpoints2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/fine-tuning/jobs/checkpoints.mjs"() {
+  "openai/resources/fine-tuning/jobs/checkpoints.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -38180,7 +38180,7 @@ var init_checkpoints2 = __esm({
 
 var Jobs;
 var init_jobs = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/fine-tuning/jobs/jobs.mjs"() {
+  "openai/resources/fine-tuning/jobs/jobs.mjs"() {
     init_resource2();
     init_checkpoints2();
     init_checkpoints2();
@@ -38318,7 +38318,7 @@ var init_jobs = __esm({
 
 var FineTuning;
 var init_fine_tuning = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/fine-tuning/fine-tuning.mjs"() {
+  "openai/resources/fine-tuning/fine-tuning.mjs"() {
     init_resource2();
     init_methods();
     init_methods();
@@ -38346,7 +38346,7 @@ var init_fine_tuning = __esm({
 
 var GraderModels;
 var init_grader_models = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/graders/grader-models.mjs"() {
+  "openai/resources/graders/grader-models.mjs"() {
     init_resource2();
     GraderModels = class extends APIResource2 {
     };
@@ -38355,7 +38355,7 @@ var init_grader_models = __esm({
 
 var Graders2;
 var init_graders2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/graders/graders.mjs"() {
+  "openai/resources/graders/graders.mjs"() {
     init_resource2();
     init_grader_models();
     init_grader_models();
@@ -38371,7 +38371,7 @@ var init_graders2 = __esm({
 
 var Images;
 var init_images = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/images.mjs"() {
+  "openai/resources/images.mjs"() {
     init_resource2();
     init_uploads3();
     Images = class extends APIResource2 {
@@ -38411,7 +38411,7 @@ var init_images = __esm({
 
 var Sessions5;
 var init_sessions5 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/live/sessions.mjs"() {
+  "openai/resources/live/sessions.mjs"() {
     init_resource2();
     init_headers3();
     init_path2();
@@ -38535,7 +38535,7 @@ var init_sessions5 = __esm({
 
 var Forks;
 var init_forks = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/live/forks/forks.mjs"() {
+  "openai/resources/live/forks/forks.mjs"() {
     init_resource2();
     Forks = class extends APIResource2 {
     };
@@ -38544,7 +38544,7 @@ var init_forks = __esm({
 
 var Sideband;
 var init_sideband = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/live/sideband/sideband.mjs"() {
+  "openai/resources/live/sideband/sideband.mjs"() {
     init_resource2();
     Sideband = class extends APIResource2 {
     };
@@ -38553,7 +38553,7 @@ var init_sideband = __esm({
 
 var Live;
 var init_live = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/live/live.mjs"() {
+  "openai/resources/live/live.mjs"() {
     init_resource2();
     init_sessions5();
     init_sessions5();
@@ -38592,7 +38592,7 @@ var init_live = __esm({
 
 var Models3;
 var init_models4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/models.mjs"() {
+  "openai/resources/models.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -38624,7 +38624,7 @@ var init_models4 = __esm({
 
 var Moderations;
 var init_moderations = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/moderations.mjs"() {
+  "openai/resources/moderations.mjs"() {
     init_resource2();
     Moderations = class extends APIResource2 {
       /**
@@ -38680,7 +38680,7 @@ async function encodedMultipartFormRequestOptions(options, client, encodings, ra
   };
 }
 var init_multipart_encoding = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/multipart-encoding.mjs"() {
+  "openai/internal/multipart-encoding.mjs"() {
     init_uploads3();
     init_headers3();
   }
@@ -38688,7 +38688,7 @@ var init_multipart_encoding = __esm({
 
 var Calls;
 var init_calls = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/realtime/calls.mjs"() {
+  "openai/resources/realtime/calls.mjs"() {
     init_resource2();
     init_headers3();
     init_path2();
@@ -38791,7 +38791,7 @@ var init_calls = __esm({
 
 var ClientSecrets;
 var init_client_secrets = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/realtime/client-secrets.mjs"() {
+  "openai/resources/realtime/client-secrets.mjs"() {
     init_resource2();
     ClientSecrets = class extends APIResource2 {
       /**
@@ -38830,7 +38830,7 @@ var init_client_secrets = __esm({
 
 var Realtime2;
 var init_realtime2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/realtime/realtime.mjs"() {
+  "openai/resources/realtime/realtime.mjs"() {
     init_resource2();
     init_calls();
     init_calls();
@@ -38979,7 +38979,7 @@ function addOutputText(rsp) {
   rsp.output_text = texts.join("");
 }
 var init_ResponsesParser = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/ResponsesParser.mjs"() {
+  "openai/lib/ResponsesParser.mjs"() {
     init_error4();
     init_parser3();
   }
@@ -38987,7 +38987,7 @@ var init_ResponsesParser = __esm({
 
 var OutputTextIndex;
 var init_output_text_index = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/responses/output-text-index.mjs"() {
+  "openai/internal/responses/output-text-index.mjs"() {
     OutputTextIndex = class {
       constructor() {
         this.capacity = 1;
@@ -39160,7 +39160,7 @@ function updateOutputText(context, snapshot, outputIndex, previousText, nextText
   snapshot.output_text = snapshot.output_text.slice(0, offset) + nextText + snapshot.output_text.slice(offset + previousText.length);
 }
 var init_canonical_output_text = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/responses/canonical-output-text.mjs"() {
+  "openai/internal/responses/canonical-output-text.mjs"() {
     init_output_text_index();
   }
 });
@@ -39943,7 +39943,7 @@ function accumulateResponseWithContext(event, snapshot, context, rejectInvalidSh
 }
 var responseOutputIdentityIndexes, expectedOutputItemTypes, supportedResponseEventTypes, responseEventRoutingFields;
 var init_response_accumulator = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/responses/response-accumulator.mjs"() {
+  "openai/internal/responses/response-accumulator.mjs"() {
     init_error4();
     init_utils4();
     init_canonical_output_text();
@@ -40069,7 +40069,7 @@ function finalizeResponse(snapshot, params) {
 }
 var _ResponseStream_instances, _ResponseStream_params, _ResponseStream_currentResponseSnapshot, _ResponseStream_finalResponse, _ResponseStream_accumulatorContext, _ResponseStream_beginRequest, _ResponseStream_addEvent, _ResponseStream_endRequest, ResponseStream;
 var init_ResponseStream = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/responses/ResponseStream.mjs"() {
+  "openai/lib/responses/ResponseStream.mjs"() {
     init_tslib2();
     init_error4();
     init_EventStream();
@@ -40250,7 +40250,7 @@ var init_ResponseStream = __esm({
 
 var InputItems2;
 var init_input_items2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/responses/input-items.mjs"() {
+  "openai/resources/responses/input-items.mjs"() {
     init_resource2();
     init_pagination2();
     init_path2();
@@ -40277,7 +40277,7 @@ var init_input_items2 = __esm({
 
 var InputTokens2;
 var init_input_tokens2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/responses/input-tokens.mjs"() {
+  "openai/resources/responses/input-tokens.mjs"() {
     init_resource2();
     InputTokens2 = class extends APIResource2 {
       /**
@@ -40304,7 +40304,7 @@ var init_input_tokens2 = __esm({
 
 var Responses2;
 var init_responses2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/responses/responses.mjs"() {
+  "openai/resources/responses/responses.mjs"() {
     init_ResponsesParser();
     init_ResponseStream();
     init_resource2();
@@ -40416,7 +40416,7 @@ var init_responses2 = __esm({
 
 var Alerts;
 var init_alerts = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/safety/alerts.mjs"() {
+  "openai/resources/safety/alerts.mjs"() {
     init_resource2();
     init_path2();
     Alerts = class extends APIResource2 {
@@ -40432,7 +40432,7 @@ var init_alerts = __esm({
 
 var Safety;
 var init_safety = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/safety/safety.mjs"() {
+  "openai/resources/safety/safety.mjs"() {
     init_resource2();
     init_alerts();
     init_alerts();
@@ -40448,7 +40448,7 @@ var init_safety = __esm({
 
 var Content2;
 var init_content2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/skills/content.mjs"() {
+  "openai/resources/skills/content.mjs"() {
     init_resource2();
     init_headers3();
     init_path2();
@@ -40470,7 +40470,7 @@ var init_content2 = __esm({
 
 var Content3;
 var init_content3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/skills/versions/content.mjs"() {
+  "openai/resources/skills/versions/content.mjs"() {
     init_resource2();
     init_headers3();
     init_path2();
@@ -40493,7 +40493,7 @@ var init_content3 = __esm({
 
 var Versions4;
 var init_versions4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/skills/versions/versions.mjs"() {
+  "openai/resources/skills/versions/versions.mjs"() {
     init_resource2();
     init_content3();
     init_content3();
@@ -40550,7 +40550,7 @@ var init_versions4 = __esm({
 
 var Skills3;
 var init_skills4 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/skills/skills.mjs"() {
+  "openai/resources/skills/skills.mjs"() {
     init_resource2();
     init_content2();
     init_content2();
@@ -40613,7 +40613,7 @@ var init_skills4 = __esm({
 
 var Parts;
 var init_parts = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/uploads/parts.mjs"() {
+  "openai/resources/uploads/parts.mjs"() {
     init_resource2();
     init_uploads3();
     init_path2();
@@ -40641,7 +40641,7 @@ var init_parts = __esm({
 
 var Uploads;
 var init_uploads5 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/uploads/uploads.mjs"() {
+  "openai/resources/uploads/uploads.mjs"() {
     init_resource2();
     init_parts();
     init_parts();
@@ -40724,14 +40724,14 @@ function pollVectorStoreFileBatch(resource, vectorStoreID, batchID, options) {
   return pollWithResponse((headers) => resource.retrieve(batchID, { vector_store_id: vectorStoreID }, { ...options, headers }), ["in_progress"], ["failed", "cancelled", "completed"], options);
 }
 var init_vector_store_polling = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/vector-store-polling.mjs"() {
+  "openai/lib/vector-store-polling.mjs"() {
     init_polling();
   }
 });
 
 var allSettledWithThrow;
 var init_Util = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/Util.mjs"() {
+  "openai/lib/Util.mjs"() {
     allSettledWithThrow = async (promises) => {
       const results = await Promise.allSettled(promises);
       const rejected = results.filter((result) => result.status === "rejected");
@@ -40779,14 +40779,14 @@ async function uploadAndPollVectorStoreFileBatch(resource, client, vectorStoreId
   return await resource.createAndPoll(vectorStoreId, { file_ids: allFileIds }, options);
 }
 var init_vector_store_upload = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/vector-store-upload.mjs"() {
+  "openai/lib/vector-store-upload.mjs"() {
     init_Util();
   }
 });
 
 var FileBatches;
 var init_file_batches = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/vector-stores/file-batches.mjs"() {
+  "openai/resources/vector-stores/file-batches.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -40870,7 +40870,7 @@ var init_file_batches = __esm({
 
 var Files6;
 var init_files6 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/vector-stores/files.mjs"() {
+  "openai/resources/vector-stores/files.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -40988,7 +40988,7 @@ var init_files6 = __esm({
 
 var VectorStores;
 var init_vector_stores = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/vector-stores/vector-stores.mjs"() {
+  "openai/resources/vector-stores/vector-stores.mjs"() {
     init_resource2();
     init_file_batches();
     init_file_batches();
@@ -41077,7 +41077,7 @@ var init_vector_stores = __esm({
 
 var Videos;
 var init_videos = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/videos.mjs"() {
+  "openai/resources/videos.mjs"() {
     init_resource2();
     init_pagination2();
     init_headers3();
@@ -41279,7 +41279,7 @@ async function verifyWebhookSignature(payload, signatureHeader, timestamp, webho
 }
 var MAX_DIRECT_WEBHOOK_VERIFICATIONS, SHA256_SIGNATURE_LENGTH;
 var init_webhook_signature = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/lib/webhook-signature.mjs"() {
+  "openai/lib/webhook-signature.mjs"() {
     init_error4();
     init_base642();
     init_bytes2();
@@ -41290,7 +41290,7 @@ var init_webhook_signature = __esm({
 
 var EventTypes;
 var init_event_types = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/webhooks/event-types.mjs"() {
+  "openai/resources/webhooks/event-types.mjs"() {
     init_resource2();
     EventTypes = class extends APIResource2 {
       /**
@@ -41311,7 +41311,7 @@ var init_event_types = __esm({
 
 var _Webhooks_instances, _Webhooks_validateSecret, _Webhooks_getRequiredHeader, Webhooks2;
 var init_webhooks2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/webhooks/webhooks.mjs"() {
+  "openai/resources/webhooks/webhooks.mjs"() {
     init_tslib2();
     init_resource2();
     init_headers3();
@@ -41492,7 +41492,7 @@ var init_webhooks2 = __esm({
 });
 
 var init_resources3 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/resources/index.mjs"() {
+  "openai/resources/index.mjs"() {
     init_chat2();
     init_shared2();
     init_admin();
@@ -41531,7 +41531,7 @@ async function resolveRealtimeAPIKey(client) {
   return { apiKey: apiKey === void 0 ? client.apiKey : apiKey, isProvider };
 }
 var init_realtime_credentials = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/realtime-credentials.mjs"() {
+  "openai/internal/realtime-credentials.mjs"() {
   }
 });
 
@@ -41544,7 +41544,7 @@ function configureProvider(provider) {
 }
 var providerDefinitionsKey, providerGlobal, existingProviderDefinitions, providerDefinitions;
 var init_provider = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/provider.mjs"() {
+  "openai/internal/provider.mjs"() {
     providerDefinitionsKey = /* @__PURE__ */ Symbol.for("openai.node.providerDefinitions.v1");
     providerGlobal = globalThis;
     existingProviderDefinitions = providerGlobal[providerDefinitionsKey];
@@ -41600,7 +41600,7 @@ function isUndiciDispatcherVersionMismatchError(error62) {
 }
 var _OpenAI_instances, _a6, _OpenAI_encoder, _OpenAI_x509Authentication, _OpenAI_x509Credential, _OpenAI_x509Fetch, _OpenAI_explicitDataResidency, _OpenAI_responseAttempts, _OpenAI_baseURLOverridden, WORKLOAD_IDENTITY_API_KEY_PLACEHOLDER, inheritedDataResidencySelection, OpenAI, composedCallerSignals;
 var init_client2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/client.mjs"() {
+  "openai/client.mjs"() {
     init_tslib2();
     init_uuid3();
     init_values2();
@@ -42729,7 +42729,7 @@ var init_client2 = __esm({
 });
 
 var init_azure = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/azure.mjs"() {
+  "openai/azure.mjs"() {
     init_headers3();
     init_error4();
     init_utils4();
@@ -42741,7 +42741,7 @@ var init_azure = __esm({
 
 var brand_privateBedrockClient;
 var init_bedrock = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/internal/bedrock.mjs"() {
+  "openai/internal/bedrock.mjs"() {
     init_error4();
     init_utils4();
     brand_privateBedrockClient = /* @__PURE__ */ Symbol.for("openai.privateBedrockClient");
@@ -42750,7 +42750,7 @@ var init_bedrock = __esm({
 
 var _a7;
 var init_bedrock2 = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/bedrock.mjs"() {
+  "openai/bedrock.mjs"() {
     init_error4();
     init_client2();
     init_realtime_credentials();
@@ -42765,7 +42765,7 @@ var init_bedrock2 = __esm({
 });
 
 var init_openai = __esm({
-  "../../node_modules/.pnpm/openai@7.19.0_@aws-sdk+cred_d5f69a06d390ddcc7ed01eb62d3a850e/node_modules/openai/index.mjs"() {
+  "openai/index.mjs"() {
     init_client2();
     init_uploads4();
     init_api_promise2();
@@ -42959,7 +42959,7 @@ function applyServiceTierPricing2(usage, serviceTier, model) {
 }
 var OPENAI_TOOL_CALL_PROVIDERS, OPENAI_RESPONSES_MIN_OUTPUT_TOKENS, CHATGPT_USAGE_URL, stream4, streamSimple3;
 var init_openai_responses = __esm({
-  "../../node_modules/.pnpm/@earendil-works+pi-ai@1.1.0_70089188117be1339038ceef44569874/node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js"() {
+  "@earendil-works/pi-ai/dist/api/openai-responses.js"() {
     init_openai();
     init_models3();
     init_error_body();
@@ -43072,7 +43072,7 @@ Check your ChatGPT usage: ${CHATGPT_USAGE_URL}` : errorMessage;
 });
 
 var require_identity = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/identity.js"(exports) {
+  "yaml/dist/nodes/identity.js"(exports) {
     "use strict";
     var ALIAS = /* @__PURE__ */ Symbol.for("yaml.alias");
     var DOC = /* @__PURE__ */ Symbol.for("yaml.document");
@@ -43128,7 +43128,7 @@ var require_identity = __commonJS({
 });
 
 var require_visit = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/visit.js"(exports) {
+  "yaml/dist/visit.js"(exports) {
     "use strict";
     var identity = require_identity();
     var BREAK = /* @__PURE__ */ Symbol("break visit");
@@ -43285,7 +43285,7 @@ var require_visit = __commonJS({
 });
 
 var require_directives = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/directives.js"(exports) {
+  "yaml/dist/doc/directives.js"(exports) {
     "use strict";
     var identity = require_identity();
     var visit2 = require_visit();
@@ -43455,7 +43455,7 @@ var require_directives = __commonJS({
 });
 
 var require_anchors = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/anchors.js"(exports) {
+  "yaml/dist/doc/anchors.js"(exports) {
     "use strict";
     var identity = require_identity();
     var visit2 = require_visit();
@@ -43524,7 +43524,7 @@ var require_anchors = __commonJS({
 });
 
 var require_applyReviver = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/applyReviver.js"(exports) {
+  "yaml/dist/doc/applyReviver.js"(exports) {
     "use strict";
     function applyReviver(reviver, obj, key, val) {
       if (val && typeof val === "object") {
@@ -43573,7 +43573,7 @@ var require_applyReviver = __commonJS({
 });
 
 var require_toJS = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/toJS.js"(exports) {
+  "yaml/dist/nodes/toJS.js"(exports) {
     "use strict";
     var identity = require_identity();
     function toJS(value, arg, ctx) {
@@ -43602,7 +43602,7 @@ var require_toJS = __commonJS({
 });
 
 var require_Node = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Node.js"(exports) {
+  "yaml/dist/nodes/Node.js"(exports) {
     "use strict";
     var applyReviver = require_applyReviver();
     var identity = require_identity();
@@ -43642,7 +43642,7 @@ var require_Node = __commonJS({
 });
 
 var require_Alias = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Alias.js"(exports) {
+  "yaml/dist/nodes/Alias.js"(exports) {
     "use strict";
     var anchors = require_anchors();
     var visit2 = require_visit();
@@ -43759,7 +43759,7 @@ var require_Alias = __commonJS({
 });
 
 var require_Scalar = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Scalar.js"(exports) {
+  "yaml/dist/nodes/Scalar.js"(exports) {
     "use strict";
     var identity = require_identity();
     var Node = require_Node();
@@ -43788,7 +43788,7 @@ var require_Scalar = __commonJS({
 });
 
 var require_createNode = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/createNode.js"(exports) {
+  "yaml/dist/doc/createNode.js"(exports) {
     "use strict";
     var Alias = require_Alias();
     var identity = require_identity();
@@ -43862,7 +43862,7 @@ var require_createNode = __commonJS({
 });
 
 var require_Collection = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Collection.js"(exports) {
+  "yaml/dist/nodes/Collection.js"(exports) {
     "use strict";
     var createNode = require_createNode();
     var identity = require_identity();
@@ -44004,7 +44004,7 @@ var require_Collection = __commonJS({
 });
 
 var require_stringifyComment = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyComment.js"(exports) {
+  "yaml/dist/stringify/stringifyComment.js"(exports) {
     "use strict";
     var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
     function indentComment(comment, indent) {
@@ -44020,7 +44020,7 @@ var require_stringifyComment = __commonJS({
 });
 
 var require_foldFlowLines = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/foldFlowLines.js"(exports) {
+  "yaml/dist/stringify/foldFlowLines.js"(exports) {
     "use strict";
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
@@ -44155,7 +44155,7 @@ ${indent}${text.slice(fold + 1, end2)}`;
 });
 
 var require_stringifyString = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyString.js"(exports) {
+  "yaml/dist/stringify/stringifyString.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     var foldFlowLines = require_foldFlowLines();
@@ -44437,7 +44437,7 @@ ${indent}`);
 });
 
 var require_stringify = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringify.js"(exports) {
+  "yaml/dist/stringify/stringify.js"(exports) {
     "use strict";
     var anchors = require_anchors();
     var identity = require_identity();
@@ -44560,7 +44560,7 @@ ${ctx.indent}${str}`;
 });
 
 var require_stringifyPair = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyPair.js"(exports) {
+  "yaml/dist/stringify/stringifyPair.js"(exports) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -44692,7 +44692,7 @@ ${ctx.indent}`;
 });
 
 var require_log = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/log.js"(exports) {
+  "yaml/dist/log.js"(exports) {
     "use strict";
     var node_process = __require("process");
     function debug(logLevel, ...messages) {
@@ -44713,7 +44713,7 @@ var require_log = __commonJS({
 });
 
 var require_merge = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/merge.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/merge.js"(exports) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -44772,7 +44772,7 @@ var require_merge = __commonJS({
 });
 
 var require_addPairToJSMap = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports) {
+  "yaml/dist/nodes/addPairToJSMap.js"(exports) {
     "use strict";
     var log = require_log();
     var merge3 = require_merge();
@@ -44835,7 +44835,7 @@ var require_addPairToJSMap = __commonJS({
 });
 
 var require_Pair = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/Pair.js"(exports) {
+  "yaml/dist/nodes/Pair.js"(exports) {
     "use strict";
     var createNode = require_createNode();
     var stringifyPair = require_stringifyPair();
@@ -44874,7 +44874,7 @@ var require_Pair = __commonJS({
 });
 
 var require_stringifyCollection = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyCollection.js"(exports) {
+  "yaml/dist/stringify/stringifyCollection.js"(exports) {
     "use strict";
     var identity = require_identity();
     var stringify5 = require_stringify();
@@ -45024,7 +45024,7 @@ ${indent}${end}`;
 });
 
 var require_YAMLMap = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/YAMLMap.js"(exports) {
+  "yaml/dist/nodes/YAMLMap.js"(exports) {
     "use strict";
     var stringifyCollection = require_stringifyCollection();
     var addPairToJSMap = require_addPairToJSMap();
@@ -45167,7 +45167,7 @@ var require_YAMLMap = __commonJS({
 });
 
 var require_map = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/common/map.js"(exports) {
+  "yaml/dist/schema/common/map.js"(exports) {
     "use strict";
     var identity = require_identity();
     var YAMLMap = require_YAMLMap();
@@ -45188,7 +45188,7 @@ var require_map = __commonJS({
 });
 
 var require_YAMLSeq = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/YAMLSeq.js"(exports) {
+  "yaml/dist/nodes/YAMLSeq.js"(exports) {
     "use strict";
     var createNode = require_createNode();
     var stringifyCollection = require_stringifyCollection();
@@ -45303,7 +45303,7 @@ var require_YAMLSeq = __commonJS({
 });
 
 var require_seq = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/common/seq.js"(exports) {
+  "yaml/dist/schema/common/seq.js"(exports) {
     "use strict";
     var identity = require_identity();
     var YAMLSeq = require_YAMLSeq();
@@ -45324,7 +45324,7 @@ var require_seq = __commonJS({
 });
 
 var require_string = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/common/string.js"(exports) {
+  "yaml/dist/schema/common/string.js"(exports) {
     "use strict";
     var stringifyString = require_stringifyString();
     var string4 = {
@@ -45342,7 +45342,7 @@ var require_string = __commonJS({
 });
 
 var require_null = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/common/null.js"(exports) {
+  "yaml/dist/schema/common/null.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     var nullTag = {
@@ -45359,7 +45359,7 @@ var require_null = __commonJS({
 });
 
 var require_bool = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/core/bool.js"(exports) {
+  "yaml/dist/schema/core/bool.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     var boolTag = {
@@ -45382,7 +45382,7 @@ var require_bool = __commonJS({
 });
 
 var require_stringifyNumber = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyNumber.js"(exports) {
+  "yaml/dist/stringify/stringifyNumber.js"(exports) {
     "use strict";
     function stringifyNumber({ format, minFractionDigits, tag, value }) {
       if (typeof value === "bigint")
@@ -45408,7 +45408,7 @@ var require_stringifyNumber = __commonJS({
 });
 
 var require_float = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/core/float.js"(exports) {
+  "yaml/dist/schema/core/float.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     var stringifyNumber = require_stringifyNumber();
@@ -45453,7 +45453,7 @@ var require_float = __commonJS({
 });
 
 var require_int = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/core/int.js"(exports) {
+  "yaml/dist/schema/core/int.js"(exports) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -45497,7 +45497,7 @@ var require_int = __commonJS({
 });
 
 var require_schema = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/core/schema.js"(exports) {
+  "yaml/dist/schema/core/schema.js"(exports) {
     "use strict";
     var map2 = require_map();
     var _null4 = require_null();
@@ -45524,7 +45524,7 @@ var require_schema = __commonJS({
 });
 
 var require_schema2 = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/json/schema.js"(exports) {
+  "yaml/dist/schema/json/schema.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     var map2 = require_map();
@@ -45590,7 +45590,7 @@ var require_schema2 = __commonJS({
 });
 
 var require_binary = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/binary.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/binary.js"(exports) {
     "use strict";
     var node_buffer = __require("buffer");
     var Scalar = require_Scalar();
@@ -45655,7 +45655,7 @@ var require_binary = __commonJS({
 });
 
 var require_pairs = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/pairs.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/pairs.js"(exports) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -45732,7 +45732,7 @@ ${cn.comment}` : item.comment;
 });
 
 var require_omap = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/omap.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/omap.js"(exports) {
     "use strict";
     var identity = require_identity();
     var toJS = require_toJS();
@@ -45809,7 +45809,7 @@ var require_omap = __commonJS({
 });
 
 var require_bool2 = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/bool.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/bool.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     function boolStringify({ value, source }, ctx) {
@@ -45840,7 +45840,7 @@ var require_bool2 = __commonJS({
 });
 
 var require_float2 = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/float.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/float.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     var stringifyNumber = require_stringifyNumber();
@@ -45888,7 +45888,7 @@ var require_float2 = __commonJS({
 });
 
 var require_int2 = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/int.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/int.js"(exports) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -45966,7 +45966,7 @@ var require_int2 = __commonJS({
 });
 
 var require_set = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/set.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/set.js"(exports) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -46054,7 +46054,7 @@ var require_set = __commonJS({
 });
 
 var require_timestamp = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/timestamp.js"(exports) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     function parseSexagesimal(str, asBigInt) {
@@ -46141,7 +46141,7 @@ var require_timestamp = __commonJS({
 });
 
 var require_schema3 = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/yaml-1.1/schema.js"(exports) {
+  "yaml/dist/schema/yaml-1.1/schema.js"(exports) {
     "use strict";
     var map2 = require_map();
     var _null4 = require_null();
@@ -46184,7 +46184,7 @@ var require_schema3 = __commonJS({
 });
 
 var require_tags = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/tags.js"(exports) {
+  "yaml/dist/schema/tags.js"(exports) {
     "use strict";
     var map2 = require_map();
     var _null4 = require_null();
@@ -46277,7 +46277,7 @@ var require_tags = __commonJS({
 });
 
 var require_Schema = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/schema/Schema.js"(exports) {
+  "yaml/dist/schema/Schema.js"(exports) {
     "use strict";
     var identity = require_identity();
     var map2 = require_map();
@@ -46308,7 +46308,7 @@ var require_Schema = __commonJS({
 });
 
 var require_stringifyDocument = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/stringify/stringifyDocument.js"(exports) {
+  "yaml/dist/stringify/stringifyDocument.js"(exports) {
     "use strict";
     var identity = require_identity();
     var stringify5 = require_stringify();
@@ -46387,7 +46387,7 @@ var require_stringifyDocument = __commonJS({
 });
 
 var require_Document = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/doc/Document.js"(exports) {
+  "yaml/dist/doc/Document.js"(exports) {
     "use strict";
     var Alias = require_Alias();
     var Collection2 = require_Collection();
@@ -46695,7 +46695,7 @@ var require_Document = __commonJS({
 });
 
 var require_errors = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/errors.js"(exports) {
+  "yaml/dist/errors.js"(exports) {
     "use strict";
     var YAMLError = class extends Error {
       constructor(name, pos, code, message) {
@@ -46759,7 +46759,7 @@ ${pointer}
 });
 
 var require_resolve_props = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-props.js"(exports) {
+  "yaml/dist/compose/resolve-props.js"(exports) {
     "use strict";
     function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
       let spaceBefore = false;
@@ -46892,7 +46892,7 @@ var require_resolve_props = __commonJS({
 });
 
 var require_util_contains_newline = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/util-contains-newline.js"(exports) {
+  "yaml/dist/compose/util-contains-newline.js"(exports) {
     "use strict";
     function containsNewline(key) {
       if (!key)
@@ -46933,7 +46933,7 @@ var require_util_contains_newline = __commonJS({
 });
 
 var require_util_flow_indent_check = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/util-flow-indent-check.js"(exports) {
+  "yaml/dist/compose/util-flow-indent-check.js"(exports) {
     "use strict";
     var utilContainsNewline = require_util_contains_newline();
     function flowIndentCheck(indent, fc, onError) {
@@ -46950,7 +46950,7 @@ var require_util_flow_indent_check = __commonJS({
 });
 
 var require_util_map_includes = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/util-map-includes.js"(exports) {
+  "yaml/dist/compose/util-map-includes.js"(exports) {
     "use strict";
     var identity = require_identity();
     function mapIncludes(ctx, items, search) {
@@ -46965,7 +46965,7 @@ var require_util_map_includes = __commonJS({
 });
 
 var require_resolve_block_map = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-block-map.js"(exports) {
+  "yaml/dist/compose/resolve-block-map.js"(exports) {
     "use strict";
     var Pair = require_Pair();
     var YAMLMap = require_YAMLMap();
@@ -47072,7 +47072,7 @@ var require_resolve_block_map = __commonJS({
 });
 
 var require_resolve_block_seq = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-block-seq.js"(exports) {
+  "yaml/dist/compose/resolve-block-seq.js"(exports) {
     "use strict";
     var YAMLSeq = require_YAMLSeq();
     var resolveProps = require_resolve_props();
@@ -47122,7 +47122,7 @@ var require_resolve_block_seq = __commonJS({
 });
 
 var require_resolve_end = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-end.js"(exports) {
+  "yaml/dist/compose/resolve-end.js"(exports) {
     "use strict";
     function resolveEnd(end, offset, reqSpace, onError) {
       let comment = "";
@@ -47164,7 +47164,7 @@ var require_resolve_end = __commonJS({
 });
 
 var require_resolve_flow_collection = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-flow-collection.js"(exports) {
+  "yaml/dist/compose/resolve-flow-collection.js"(exports) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -47357,7 +47357,7 @@ var require_resolve_flow_collection = __commonJS({
 });
 
 var require_compose_collection = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/compose-collection.js"(exports) {
+  "yaml/dist/compose/compose-collection.js"(exports) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -47421,7 +47421,7 @@ var require_compose_collection = __commonJS({
 });
 
 var require_resolve_block_scalar = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-block-scalar.js"(exports) {
+  "yaml/dist/compose/resolve-block-scalar.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     function resolveBlockScalar(ctx, scalar, onError) {
@@ -47603,7 +47603,7 @@ var require_resolve_block_scalar = __commonJS({
 });
 
 var require_resolve_flow_scalar = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/resolve-flow-scalar.js"(exports) {
+  "yaml/dist/compose/resolve-flow-scalar.js"(exports) {
     "use strict";
     var Scalar = require_Scalar();
     var resolveEnd = require_resolve_end();
@@ -47823,7 +47823,7 @@ var require_resolve_flow_scalar = __commonJS({
 });
 
 var require_compose_scalar = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/compose-scalar.js"(exports) {
+  "yaml/dist/compose/compose-scalar.js"(exports) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -47903,7 +47903,7 @@ var require_compose_scalar = __commonJS({
 });
 
 var require_util_empty_scalar_position = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/util-empty-scalar-position.js"(exports) {
+  "yaml/dist/compose/util-empty-scalar-position.js"(exports) {
     "use strict";
     function emptyScalarPosition(offset, before, pos) {
       if (before) {
@@ -47932,7 +47932,7 @@ var require_util_empty_scalar_position = __commonJS({
 });
 
 var require_compose_node = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/compose-node.js"(exports) {
+  "yaml/dist/compose/compose-node.js"(exports) {
     "use strict";
     var Alias = require_Alias();
     var identity = require_identity();
@@ -48037,7 +48037,7 @@ var require_compose_node = __commonJS({
 });
 
 var require_compose_doc = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/compose-doc.js"(exports) {
+  "yaml/dist/compose/compose-doc.js"(exports) {
     "use strict";
     var Document = require_Document();
     var composeNode = require_compose_node();
@@ -48079,7 +48079,7 @@ var require_compose_doc = __commonJS({
 });
 
 var require_composer = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/compose/composer.js"(exports) {
+  "yaml/dist/compose/composer.js"(exports) {
     "use strict";
     var node_process = __require("process");
     var directives = require_directives();
@@ -48286,7 +48286,7 @@ ${end.comment}` : end.comment;
 });
 
 var require_cst_scalar = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/cst-scalar.js"(exports) {
+  "yaml/dist/parse/cst-scalar.js"(exports) {
     "use strict";
     var resolveBlockScalar = require_resolve_block_scalar();
     var resolveFlowScalar = require_resolve_flow_scalar();
@@ -48470,7 +48470,7 @@ var require_cst_scalar = __commonJS({
 });
 
 var require_cst_stringify = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/cst-stringify.js"(exports) {
+  "yaml/dist/parse/cst-stringify.js"(exports) {
     "use strict";
     var stringify5 = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
     function stringifyToken(token) {
@@ -48530,7 +48530,7 @@ var require_cst_stringify = __commonJS({
 });
 
 var require_cst_visit = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/cst-visit.js"(exports) {
+  "yaml/dist/parse/cst-visit.js"(exports) {
     "use strict";
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
@@ -48591,7 +48591,7 @@ var require_cst_visit = __commonJS({
 });
 
 var require_cst = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/cst.js"(exports) {
+  "yaml/dist/parse/cst.js"(exports) {
     "use strict";
     var cstScalar = require_cst_scalar();
     var cstStringify = require_cst_stringify();
@@ -48692,7 +48692,7 @@ var require_cst = __commonJS({
 });
 
 var require_lexer = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/lexer.js"(exports) {
+  "yaml/dist/parse/lexer.js"(exports) {
     "use strict";
     var cst = require_cst();
     function isEmpty(ch) {
@@ -49280,7 +49280,7 @@ var require_lexer = __commonJS({
 });
 
 var require_line_counter = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/line-counter.js"(exports) {
+  "yaml/dist/parse/line-counter.js"(exports) {
     "use strict";
     var LineCounter = class {
       constructor() {
@@ -49310,7 +49310,7 @@ var require_line_counter = __commonJS({
 });
 
 var require_parser = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/parse/parser.js"(exports) {
+  "yaml/dist/parse/parser.js"(exports) {
     "use strict";
     var node_process = __require("process");
     var cst = require_cst();
@@ -50183,7 +50183,7 @@ var require_parser = __commonJS({
 });
 
 var require_public_api = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/public-api.js"(exports) {
+  "yaml/dist/public-api.js"(exports) {
     "use strict";
     var composer = require_composer();
     var Document = require_Document();
@@ -50279,7 +50279,7 @@ var require_public_api = __commonJS({
 });
 
 var require_dist3 = __commonJS({
-  "../../node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/index.js"(exports) {
+  "yaml/dist/index.js"(exports) {
     "use strict";
     var composer = require_composer();
     var Document = require_Document();
@@ -50330,7 +50330,7 @@ var require_dist3 = __commonJS({
 });
 
 var require_x509_transport_state2 = __commonJS({
-  "../../node_modules/.pnpm/openai@7.32.0_@aws-sdk+cred_04c73b776f21fd4309901e185a8cc509/node_modules/openai/internal/auth/x509-transport-state.js"(exports, module) {
+  "openai/internal/auth/x509-transport-state.js"(exports, module) {
     "use strict";
     if (typeof module !== "undefined" && module !== globalThis.module && typeof exports !== "undefined" && module.exports === exports) {
       Object.defineProperty(exports, "__esModule", { value: true });
@@ -50374,7 +50374,7 @@ function __classPrivateFieldGet4(receiver, state3, kind, f3) {
   return kind === "m" ? f3 : kind === "a" ? f3.call(receiver) : f3 ? f3.value : state3.get(receiver);
 }
 var init_tslib3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/tslib.mjs"() {
+  "@anthropic-ai/sdk/internal/tslib.mjs"() {
   }
 });
 
@@ -50385,7 +50385,7 @@ function isAbortError4(err) {
 }
 var castToError4;
 var init_errors3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/errors.mjs"() {
+  "@anthropic-ai/sdk/internal/errors.mjs"() {
     castToError4 = (err) => {
       if (err instanceof Error)
         return err;
@@ -50416,7 +50416,7 @@ var init_errors3 = __esm({
 
 var AnthropicError2, APIError4, APIUserAbortError4, APIConnectionError4, APIConnectionTimeoutError4, RetryableError2, BadRequestError4, AuthenticationError4, PermissionDeniedError4, NotFoundError4, ConflictError4, UnprocessableEntityError4, RateLimitError4, InternalServerError4;
 var init_error5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/error.mjs"() {
+  "@anthropic-ai/sdk/core/error.mjs"() {
     init_errors3();
     AnthropicError2 = /* @__PURE__ */ (() => {
       class AnthropicError3 extends Error {
@@ -50545,7 +50545,7 @@ function checkNever2(_value) {
 }
 var startsWithSchemeRegexp4, isAbsoluteURL4, isArray4, isReadonlyArray4, validatePositiveInteger4, safeJSON4;
 var init_values3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/values.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/values.mjs"() {
     init_error5();
     startsWithSchemeRegexp4 = /^[a-z][a-z0-9+.-]*:/i;
     isAbsoluteURL4 = (url2) => {
@@ -50574,7 +50574,7 @@ var init_values3 = __esm({
 
 var sleep5;
 var init_sleep3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/sleep.mjs"() {
     sleep5 = (ms, signal) => new Promise((resolve3) => {
       if (signal?.aborted)
         return resolve3();
@@ -50593,7 +50593,7 @@ var init_sleep3 = __esm({
 
 var VERSION4;
 var init_version3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/version.mjs"() {
+  "@anthropic-ai/sdk/version.mjs"() {
     VERSION4 = "0.133.0";
   }
 });
@@ -50635,7 +50635,7 @@ function getBrowserInfo4() {
 }
 var isRunningInBrowser4, getPlatformProperties4, normalizeArch4, normalizePlatform4, _platformHeaders4, getPlatformHeaders4;
 var init_detect_platform3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/detect-platform.mjs"() {
+  "@anthropic-ai/sdk/internal/detect-platform.mjs"() {
     init_version3();
     isRunningInBrowser4 = () => {
       return (
@@ -50756,7 +50756,7 @@ function releaseRequestSignal2(controller) {
 }
 var cleanups2, registry3;
 var init_request_signal2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/request-signal.mjs"() {
+  "@anthropic-ai/sdk/internal/request-signal.mjs"() {
     cleanups2 = /* @__PURE__ */ new WeakMap();
     registry3 = typeof globalThis.FinalizationRegistry === "function" ? new globalThis.FinalizationRegistry((controller) => releaseRequestSignal2(controller)) : null;
   }
@@ -50833,13 +50833,13 @@ async function CancelReadableStream4(stream6) {
   await cancelPromise;
 }
 var init_shims3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/shims.mjs"() {
+  "@anthropic-ai/sdk/internal/shims.mjs"() {
   }
 });
 
 var FallbackEncoder4;
 var init_request_options3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/request-options.mjs"() {
+  "@anthropic-ai/sdk/internal/request-options.mjs"() {
     FallbackEncoder4 = ({ headers, body }) => {
       return {
         bodyHeaders: {
@@ -50853,7 +50853,7 @@ var init_request_options3 = __esm({
 
 var default_format4, default_formatter4, formatters4, RFC17384;
 var init_formats3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/qs/formats.mjs"() {
+  "@anthropic-ai/sdk/internal/qs/formats.mjs"() {
     default_format4 = "RFC3986";
     default_formatter4 = (v) => String(v);
     formatters4 = {
@@ -50882,7 +50882,7 @@ function maybe_map4(val, fn) {
 }
 var has4, hex_table4, limit4, encode6;
 var init_utils5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/qs/utils.mjs"() {
+  "@anthropic-ai/sdk/internal/qs/utils.mjs"() {
     init_formats3();
     init_values3();
     has4 = (obj, key) => (has4 = Object.hasOwn ?? Function.prototype.call.bind(Object.prototype.hasOwnProperty), has4(obj, key));
@@ -51188,7 +51188,7 @@ function stringify4(object2, opts = {}) {
 }
 var array_prefix_generators4, push_to_array6, toISOString4, defaults4, sentinel4;
 var init_stringify3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/qs/stringify.mjs"() {
+  "@anthropic-ai/sdk/internal/qs/stringify.mjs"() {
     init_utils5();
     init_formats3();
     init_values3();
@@ -51237,7 +51237,7 @@ function stringifyQuery4(query) {
   return stringify4(query, { arrayFormat: "brackets" });
 }
 var init_query3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/query.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/query.mjs"() {
     init_stringify3();
   }
 });
@@ -51260,7 +51260,7 @@ import * as path7 from "node:path";
 import * as stream5 from "node:stream";
 import * as util2 from "node:util";
 var init_node3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/node.mjs"() {
+  "@anthropic-ai/sdk/internal/node.mjs"() {
   }
 });
 
@@ -51409,7 +51409,7 @@ async function readLimitedText2(resp) {
 }
 var GRANT_TYPE_JWT_BEARER2, GRANT_TYPE_REFRESH_TOKEN2, TOKEN_ENDPOINT2, OAUTH_API_BETA_HEADER2, FEDERATION_BETA_HEADER2, ADVISORY_REFRESH_THRESHOLD_IN_SECONDS2, MANDATORY_REFRESH_THRESHOLD_IN_SECONDS2, ADVISORY_REFRESH_BACKOFF_IN_SECONDS2, MAX_TOKEN_RESPONSE_BYTES2, MAX_ERROR_BODY_CHARS2, SAFE_ERROR_KEYS2, WorkloadIdentityError2;
 var init_types2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/types.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/types.mjs"() {
     init_error5();
     GRANT_TYPE_JWT_BEARER2 = "urn:ietf:params:oauth:grant-type:jwt-bearer";
     GRANT_TYPE_REFRESH_TOKEN2 = "refresh_token";
@@ -51437,13 +51437,13 @@ function nowAsSeconds2() {
   return Math.floor(Date.now() / 1e3);
 }
 var init_time2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/time.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/time.mjs"() {
   }
 });
 
 var TokenCache2;
 var init_token_cache2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/token-cache.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/token-cache.mjs"() {
     init_types2();
     init_time2();
     TokenCache2 = class {
@@ -51538,7 +51538,7 @@ var init_token_cache2 = __esm({
 
 var readEnv4;
 var init_env3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/env.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/env.mjs"() {
     readEnv4 = (env2) => {
       if (typeof globalThis.process !== "undefined") {
         return globalThis.process.env?.[env2]?.trim() || void 0;
@@ -51574,13 +51574,13 @@ function decodeUTF84(bytes) {
 }
 var encodeUTF8_4, decodeUTF8_4;
 var init_bytes3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/bytes.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/bytes.mjs"() {
   }
 });
 
 var fromBase644;
 var init_base643 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/base64.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/base64.mjs"() {
     init_error5();
     fromBase644 = (str) => {
       if (typeof globalThis.Buffer !== "undefined") {
@@ -51647,7 +51647,7 @@ function debugLogRequestDetails2(logger, message, details) {
 }
 var defaultLogLevel2, levelNumbers4, parseLogLevel4, noopLogger4, cachedLoggers4, lastEnvLevel2, cachedDefaultLogger2, formatRequestDetails4;
 var init_log3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/log.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/log.mjs"() {
     init_values3();
     init_env3();
     defaultLogLevel2 = "warn";
@@ -51699,7 +51699,7 @@ var init_log3 = __esm({
 
 var uuid45;
 var init_uuid4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/uuid.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/uuid.mjs"() {
     uuid45 = function() {
       const { crypto: crypto6 } = globalThis;
       if (crypto6?.randomUUID) {
@@ -51714,7 +51714,7 @@ var init_uuid4 = __esm({
 });
 
 var init_utils6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils.mjs"() {
+  "@anthropic-ai/sdk/internal/utils.mjs"() {
     init_values3();
     init_base643();
     init_env3();
@@ -51741,7 +51741,7 @@ function validateProfileName2(name) {
 }
 var CREDENTIALS_FILE_VERSION2, PROFILE_NAME_PATTERN2, loadConfigWithSource2, getCredentialsPath2, getRootConfigPath2, supportsLocalConfigFiles2, getActiveProfileName2;
 var init_credentials4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/credentials.mjs"() {
+  "@anthropic-ai/sdk/core/credentials.mjs"() {
     init_detect_platform3();
     init_utils6();
     CREDENTIALS_FILE_VERSION2 = "1.0";
@@ -51929,7 +51929,7 @@ function identityTokenFromValue2(token) {
   return () => token;
 }
 var init_identity_token2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/identity-token.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/identity-token.mjs"() {
     init_error5();
   }
 });
@@ -51991,7 +51991,7 @@ function oidcFederationProvider2(config2) {
   };
 }
 var init_oidc_federation2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/oidc-federation.mjs"() {
     init_types2();
     init_time2();
     init_version3();
@@ -52071,7 +52071,7 @@ function userOAuthProvider2(config2) {
   };
 }
 var init_user_oauth2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/user-oauth.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/user-oauth.mjs"() {
     init_credentials4();
     init_types2();
     init_time2();
@@ -52210,7 +52210,7 @@ function cachedExchangeProvider2(exchange, credentialsPath, onCacheWriteError, o
   };
 }
 var init_credential_chain2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/credentials/credential-chain.mjs"() {
+  "@anthropic-ai/sdk/lib/credentials/credential-chain.mjs"() {
     init_env3();
     init_credentials4();
     init_types2();
@@ -52236,7 +52236,7 @@ function findNewlineIndex4(buffer, startIndex) {
 }
 var _LineDecoder_buffer4, _LineDecoder_carriageReturnIndex2, LineDecoder4;
 var init_line3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/decoders/line.mjs"() {
+  "@anthropic-ai/sdk/internal/decoders/line.mjs"() {
     init_tslib3();
     init_bytes3();
     LineDecoder4 = /* @__PURE__ */ (() => {
@@ -52322,7 +52322,7 @@ function partition4(str, delimiter3) {
 }
 var _Stream_client4, Stream4, SSEDecoder4;
 var init_streaming5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/streaming.mjs"() {
+  "@anthropic-ai/sdk/core/streaming.mjs"() {
     init_tslib3();
     init_error5();
     init_shims3();
@@ -52599,7 +52599,7 @@ function addResponseIDs2(value, response) {
   });
 }
 var init_parse3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/parse.mjs"() {
+  "@anthropic-ai/sdk/internal/parse.mjs"() {
     init_streaming5();
     init_log3();
     init_request_signal2();
@@ -52701,7 +52701,7 @@ function applyMiddleware2(fetchFn, middleware, options, client) {
 }
 var fetchOriginErrors2;
 var init_middleware2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/middleware.mjs"() {
+  "@anthropic-ai/sdk/core/middleware.mjs"() {
     init_errors3();
     init_parse3();
     init_log3();
@@ -52713,7 +52713,7 @@ var init_middleware2 = __esm({
 
 var _APIPromise_client4, APIPromise4;
 var init_api_promise3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/api-promise.mjs"() {
+  "@anthropic-ai/sdk/core/api-promise.mjs"() {
     init_tslib3();
     init_parse3();
     APIPromise4 = /* @__PURE__ */ (() => {
@@ -52789,7 +52789,7 @@ var init_api_promise3 = __esm({
 
 var _AbstractPage_client4, AbstractPage4, PagePromise4, Page4, PageCursor2, BidirectionalPageCursor2;
 var init_pagination3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/pagination.mjs"() {
+  "@anthropic-ai/sdk/core/pagination.mjs"() {
     init_tslib3();
     init_error5();
     init_parse3();
@@ -52986,7 +52986,7 @@ function supportsFormData4(fetchObject) {
 }
 var checkFileSupport4, isAsyncIterable4, multipartFormRequestOptions4, supportsFormDataMap4, createForm4, addFormValue4;
 var init_uploads6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/uploads.mjs"() {
+  "@anthropic-ai/sdk/internal/uploads.mjs"() {
     init_shims3();
     checkFileSupport4 = () => {
       if (typeof File === "undefined") {
@@ -53097,7 +53097,7 @@ function propsForError4(value) {
 }
 var isBlobLike4, isFileLike4, isResponseLike4;
 var init_to_file3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/to-file.mjs"() {
+  "@anthropic-ai/sdk/internal/to-file.mjs"() {
     init_uploads6();
     init_uploads6();
     isBlobLike4 = (value) => value != null && typeof value === "object" && typeof value.size === "number" && typeof value.type === "string" && typeof value.text === "function" && typeof value.slice === "function" && typeof value.arrayBuffer === "function";
@@ -53107,19 +53107,19 @@ var init_to_file3 = __esm({
 });
 
 var init_uploads7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/uploads.mjs"() {
+  "@anthropic-ai/sdk/core/uploads.mjs"() {
     init_to_file3();
   }
 });
 
 var init_shared3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/shared.mjs"() {
+  "@anthropic-ai/sdk/resources/shared.mjs"() {
   }
 });
 
 var APIResource4;
 var init_resource3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/core/resource.mjs"() {
+  "@anthropic-ai/sdk/core/resource.mjs"() {
     APIResource4 = class {
       constructor(client) {
         this._client = client;
@@ -53168,7 +53168,7 @@ function* iterateHeaders4(headers) {
 }
 var brand_privateNullableHeaders4, clearSentinel2, APPEND_HEADERS2, appendHeaderValue2, buildHeaders4;
 var init_headers4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/headers.mjs"() {
+  "@anthropic-ai/sdk/internal/headers.mjs"() {
     init_values3();
     brand_privateNullableHeaders4 = /* @__PURE__ */ Symbol.for("brand.privateNullableHeaders");
     clearSentinel2 = /* @__PURE__ */ Symbol("clear");
@@ -53270,7 +53270,7 @@ function stainlessHelperHeaderFromFile2(file2) {
 }
 var STAINLESS_HELPER_HEADER2, STAINLESS_HELPER_METHOD_HEADER2, SDK_HELPER_SYMBOL2;
 var init_stainless_helper_header2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/stainless-helper-header.mjs"() {
+  "@anthropic-ai/sdk/internal/stainless-helper-header.mjs"() {
     STAINLESS_HELPER_HEADER2 = "x-stainless-helper";
     STAINLESS_HELPER_METHOD_HEADER2 = "x-stainless-helper-method";
     SDK_HELPER_SYMBOL2 = /* @__PURE__ */ Symbol("anthropic.sdk.stainlessHelper");
@@ -53278,13 +53278,13 @@ var init_stainless_helper_header2 = __esm({
 });
 
 var init_error6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/error.mjs"() {
+  "@anthropic-ai/sdk/error.mjs"() {
     init_error5();
   }
 });
 
 var init_streaming6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/streaming.mjs"() {
+  "@anthropic-ai/sdk/streaming.mjs"() {
     init_streaming5();
   }
 });
@@ -53349,14 +53349,14 @@ function parseOutputFormat2(params, content) {
   }
 }
 var init_parser5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/parser.mjs"() {
+  "@anthropic-ai/sdk/lib/parser.mjs"() {
     init_error5();
   }
 });
 
 var tokenize2, strip2, unstrip2, generate2, partialParse5;
 var init_parser6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs"() {
+  "@anthropic-ai/sdk/_vendor/partial-json-parser/parser.mjs"() {
     tokenize2 = (input2) => {
       let current = 0;
       let tokens = [];
@@ -53613,7 +53613,7 @@ function withLazyInput2(prev, jsonBuf) {
 }
 var JSON_BUF_PROPERTY2;
 var init_message_stream_utils2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs"() {
+  "@anthropic-ai/sdk/internal/message-stream-utils.mjs"() {
     init_parser6();
     JSON_BUF_PROPERTY2 = "__json_buf";
   }
@@ -53624,7 +53624,7 @@ function tracksToolInput3(content) {
 }
 var _MessageStream_instances2, _MessageStream_currentMessageSnapshot2, _MessageStream_params2, _MessageStream_connectedPromise2, _MessageStream_resolveConnectedPromise2, _MessageStream_rejectConnectedPromise2, _MessageStream_endPromise2, _MessageStream_resolveEndPromise2, _MessageStream_rejectEndPromise2, _MessageStream_listeners2, _MessageStream_ended2, _MessageStream_errored2, _MessageStream_aborted2, _MessageStream_catchingPromiseCreated2, _MessageStream_response2, _MessageStream_request_id2, _MessageStream_workspace_id2, _MessageStream_logger2, _MessageStream_getFinalMessage2, _MessageStream_getFinalText2, _MessageStream_handleError2, _MessageStream_beginRequest2, _MessageStream_addStreamEvent2, _MessageStream_endRequest2, _MessageStream_accumulateMessage2, MessageStream2;
 var init_MessageStream2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/MessageStream.mjs"() {
+  "@anthropic-ai/sdk/lib/MessageStream.mjs"() {
     init_tslib3();
     init_stainless_helper_header2();
     init_errors3();
@@ -54212,7 +54212,7 @@ var init_MessageStream2 = __esm({
 
 var _JSONLDecoder_consumed, JSONLDecoder2;
 var init_jsonl2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/decoders/jsonl.mjs"() {
+  "@anthropic-ai/sdk/internal/decoders/jsonl.mjs"() {
     init_tslib3();
     init_error5();
     init_shims3();
@@ -54263,7 +54263,7 @@ function encodeURIPath4(str) {
 }
 var EMPTY4, createPathTagFunction4, path8;
 var init_path3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/path.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/path.mjs"() {
     init_error5();
     EMPTY4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null));
     createPathTagFunction4 = (pathEncoder = encodeURIPath4) => function path11(statics, ...params) {
@@ -54327,7 +54327,7 @@ ${underline}`);
 
 var Batches5;
 var init_batches4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/messages/batches.mjs"() {
+  "@anthropic-ai/sdk/resources/messages/batches.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -54525,7 +54525,7 @@ var init_batches4 = __esm({
 
 var MODEL_NONSTREAMING_TOKENS2;
 var init_constants2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/constants.mjs"() {
+  "@anthropic-ai/sdk/internal/constants.mjs"() {
     MODEL_NONSTREAMING_TOKENS2 = {
       "claude-opus-4@20250514": 8192,
       "anthropic.claude-opus-4-1-20250805-v1:0": 8192,
@@ -54536,7 +54536,7 @@ var init_constants2 = __esm({
 
 var Messages7, DEPRECATED_MODELS3, MODELS_TO_WARN_WITH_THINKING_ENABLED3;
 var init_messages5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/messages/messages.mjs"() {
+  "@anthropic-ai/sdk/resources/messages/messages.mjs"() {
     init_resource3();
     init_headers4();
     init_stainless_helper_header2();
@@ -54672,7 +54672,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
 
 var DeploymentRuns2;
 var init_deployment_runs2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/deployment-runs.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/deployment-runs.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -54733,7 +54733,7 @@ var init_deployment_runs2 = __esm({
 
 var Deployments2;
 var init_deployments2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/deployments.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/deployments.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -54953,7 +54953,7 @@ var init_deployments2 = __esm({
 
 var Dreams2;
 var init_dreams2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/dreams.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/dreams.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -55124,7 +55124,7 @@ var init_dreams2 = __esm({
 
 var Files11;
 var init_files7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/files.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/files.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -55261,7 +55261,7 @@ var init_files7 = __esm({
 
 var Models5;
 var init_models5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/models.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/models.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -55327,7 +55327,7 @@ var init_models5 = __esm({
 
 var UserProfiles2;
 var init_user_profiles2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/user-profiles.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/user-profiles.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -55460,7 +55460,7 @@ var init_user_profiles2 = __esm({
 
 var import_standardwebhooks2, Webhooks4;
 var init_webhooks3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/webhooks.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/webhooks.mjs"() {
     init_resource3();
     import_standardwebhooks2 = __toESM(require_dist(), 1);
     Webhooks4 = class extends APIResource4 {
@@ -55493,7 +55493,7 @@ var init_webhooks3 = __esm({
 
 var Versions6;
 var init_versions5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/agents/versions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/agents/versions.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -55532,7 +55532,7 @@ var init_versions5 = __esm({
 
 var Agents4;
 var init_agents3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/agents/agents.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/agents/agents.mjs"() {
     init_resource3();
     init_versions5();
     init_versions5();
@@ -55692,7 +55692,7 @@ function linkAbort2(external, controller) {
   return () => external.removeEventListener("abort", onAbort);
 }
 var init_abort4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/abort.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/abort.mjs"() {
   }
 });
 
@@ -55715,7 +55715,7 @@ function applyJitter2(ms) {
   return ms * (1 - Math.random() * 0.25);
 }
 var init_backoff2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/backoff.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/backoff.mjs"() {
     init_error5();
   }
 });
@@ -55745,7 +55745,7 @@ function copyClientForHelper2(client, { authToken, helper }) {
   });
 }
 var init_helper_client2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/helper-client.mjs"() {
+  "@anthropic-ai/sdk/lib/helper-client.mjs"() {
     init_error5();
     init_headers4();
     init_stainless_helper_header2();
@@ -55762,7 +55762,7 @@ function defaultWorkerId2() {
 }
 var _WorkPoller_runnerClient2, _WorkPoller_consumed2, _WorkPoller_controller2, _WorkPoller_detachExternal2, _WorkPoller_autoStop2, _WorkPoller_drain2, _WorkPoller_blockMs2, _WorkPoller_reclaimOlderThanMs2, _WorkPoller_requestOpts2, _IdleLog_log2, _IdleLog_environmentId2, _IdleLog_idleSince2, _IdleLog_lastReport2, POLL_BLOCK_MS2, POLL_BACKOFF_BASE_MS2, POLL_BACKOFF_CAP_MS2, IDLE_REPORT_INTERVAL_MS2, WorkPoller2, IdleLog2;
 var init_poller2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/environments/poller.mjs"() {
+  "@anthropic-ai/sdk/lib/environments/poller.mjs"() {
     init_tslib3();
     init_error5();
     init_log3();
@@ -55922,7 +55922,7 @@ var init_poller2 = __esm({
 
 var _AsyncQueue_items2, _AsyncQueue_waiters2, _AsyncQueue_closed2, AsyncQueue2;
 var init_async_queue2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/async-queue.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/async-queue.mjs"() {
     init_tslib3();
     AsyncQueue2 = /* @__PURE__ */ (() => {
       class AsyncQueue3 {
@@ -55993,7 +55993,7 @@ var init_async_queue2 = __esm({
 
 var ToolError2;
 var init_ToolError2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/tools/ToolError.mjs"() {
+  "@anthropic-ai/sdk/lib/tools/ToolError.mjs"() {
     ToolError2 = /* @__PURE__ */ (() => {
       class ToolError3 extends Error {
         constructor(content) {
@@ -56050,7 +56050,7 @@ function errorTextContent(content) {
 }
 var LINE_UNSAFE, CONTROL_RE, LONE_SURROGATE_RE, FIELD_MAX, LOG_MAX;
 var init_sanitize = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/internal/toolsets/sanitize.mjs"() {
+  "@anthropic-ai/sdk/lib/internal/toolsets/sanitize.mjs"() {
     LINE_UNSAFE = "\\x00-\\x1f\\x7f-\\x9f\\u061c\\u200e\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069";
     CONTROL_RE = /* @__PURE__ */ (() => new RegExp(`[${LINE_UNSAFE}]+`, "g"))();
     LONE_SURROGATE_RE = /[\uD800-\uDFFF]/gu;
@@ -56075,7 +56075,7 @@ async function runRunnableTool2(tool, rawInput, context) {
   }
 }
 var init_BetaRunnableTool2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs"() {
+  "@anthropic-ai/sdk/lib/tools/BetaRunnableTool.mjs"() {
     init_ToolError2();
     init_sanitize();
   }
@@ -56115,7 +56115,7 @@ function toSessionContent2(content) {
 }
 var _IdleClock_maxIdleMs2, _IdleClock_onExpire2, _IdleClock_blockers2, _IdleClock_armPending2, _IdleClock_timer2, _SessionToolRunner_instances2, _SessionToolRunner_consumed2, _SessionToolRunner_controller2, _SessionToolRunner_detachExternal2, _SessionToolRunner_requestOpts2, _SessionToolRunner_toolByName2, _SessionToolRunner_logger2, _SessionToolRunner_seen2, _SessionToolRunner_answered2, _SessionToolRunner_confirmationVerdicts2, _SessionToolRunner_awaitingConfirmation2, _SessionToolRunner_results2, _SessionToolRunner_inFlightCount2, _SessionToolRunner_sendRetryWindowMs2, _SessionToolRunner_onIdle2, _SessionToolRunner_idleClock2, _SessionToolRunner_requestOptions2, _SessionToolRunner_streamLoop2, _SessionToolRunner_reconcile2, _SessionToolRunner_ingestHistory2, _SessionToolRunner_handleStreamEvent2, _SessionToolRunner_routeToolEvent2, _SessionToolRunner_noteConfirmation2, _SessionToolRunner_applyVerdict2, _SessionToolRunner_surfaceCall2, _SessionToolRunner_execute2, _SessionToolRunner_sendResult2, _SessionToolRunner_drain2, STREAM_BACKOFF_START_MS2, STREAM_BACKOFF_CAP_MS2, TOOL_TIMEOUT_MS2, DRAIN_TIMEOUT_MS2, SEND_BACKOFF_START_MS2, SEND_BACKOFF_CAP_MS2, SEND_RETRY_WINDOW_MS2, DEFAULT_MAX_IDLE_MS2, IdleClock2, SessionToolRunner2;
 var init_SessionToolRunner2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs"() {
+  "@anthropic-ai/sdk/lib/tools/SessionToolRunner.mjs"() {
     init_tslib3();
     init_error5();
     init_log3();
@@ -56630,7 +56630,7 @@ function checkMemorySyncInterval2(ms, option) {
 }
 var DEFAULT_MEMORY_SYNC_INTERVAL_MS2, MIN_MEMORY_SYNC_INTERVAL_MS2;
 var init_sync_interval2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/sync-interval.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/sync-interval.mjs"() {
     init_error5();
     DEFAULT_MEMORY_SYNC_INTERVAL_MS2 = 15e3;
     MIN_MEMORY_SYNC_INTERVAL_MS2 = 5e3;
@@ -56652,7 +56652,7 @@ function betaTool2(options) {
   };
 }
 var init_json_schema2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/helpers/beta/json-schema.mjs"() {
+  "@anthropic-ai/sdk/helpers/beta/json-schema.mjs"() {
   }
 });
 
@@ -56666,7 +56666,7 @@ function promiseWithResolvers2() {
   return { promise: promise2, resolve: resolve3, reject };
 }
 var init_promise2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/utils/promise.mjs"() {
+  "@anthropic-ai/sdk/internal/utils/promise.mjs"() {
   }
 });
 
@@ -56784,7 +56784,7 @@ function fsErrorMessage2(err, file2) {
 }
 var fs6, DIR_CREATE_MODE2, FILE_CREATE_MODE2, MAX_SYMLINK_HOPS2;
 var init_fs_util2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/fs-util.mjs"() {
     init_node3();
     init_ToolError2();
     fs6 = fs5.promises;
@@ -56982,7 +56982,7 @@ async function readHead2(file2, n) {
 }
 var fs7, execFileAsync2, INCONSISTENT_LISTING2, PLAIN_TYPE_CHARS2;
 var init_skills5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/skills.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/skills.mjs"() {
     init_node3();
     init_error5();
     init_log3();
@@ -57175,7 +57175,7 @@ function oldEnoughToCache2(st, walkStartNs) {
 }
 var fsp2, C2, OWNER_ONLY_DIR_MODE2, OWNER_ONLY_FILE_MODE2, OWNER_ONLY_EXEC_MODE2, O_NOFOLLOW2, O_NONBLOCK2, FileStoreError2, FileStore2, TIMESTAMP_TRUST_MARGIN_NS2, _internals2, LocalFileStore2, asyncDispose2;
 var init_file_store2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/internal/file-store.mjs"() {
+  "@anthropic-ai/sdk/internal/file-store.mjs"() {
     init_node3();
     init_bytes3();
     fsp2 = fs5.promises;
@@ -57468,7 +57468,7 @@ async function settledOrAborted2(p, signal) {
 }
 var _SessionMemoryStores_instances2, _SessionMemoryStores_client2, _SessionMemoryStores_workdir2, _SessionMemoryStores_syncIntervalMs2, _SessionMemoryStores_syncDeletions2, _SessionMemoryStores_log2, _SessionMemoryStores_lastSyncAt2, _SessionMemoryStores_finished2, _SessionMemoryStores_stores2, _SessionMemoryStores_storeRoot2, _SessionMemoryStores_scanMarker2, _SessionMemoryStores_syncStore2, _SessionMemoryStores_flushStore2, _SessionMemoryStores_recover2, _SessionMemoryStores_settleSent, _SessionMemoryStores_stampAndPull2, _SessionMemoryStores_syncPath2, _SessionMemoryStores_removeLocal2, _SessionMemoryStores_write2, _SessionMemoryStores_pullAll2, _SessionMemoryStores_uploadAll2, _SessionMemoryStores_listMemories2, _SessionMemoryStores_upload2, _SessionMemoryStores_corroboratedDelete2, _SessionMemoryStores_deleteRemote2, MEMORY_FLUSH_TIMEOUT_MS2, MARKER_PATH2, MARKER_VERSION2, DELETE_CORROBORATION_MS2, LIST_PAGE_SIZE2, FULL_LIST_PAGE_SIZE2, FETCH_CONCURRENCY2, UPLOAD_CONCURRENCY2, DELETE_CAP_FLOOR2, DELETE_CAP_CEILING2, SessionMemoryError2, DeletePass2, SessionMemoryStores2;
 var init_memories3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/memories.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/memories.mjs"() {
     init_tslib3();
     init_node3();
     init_error5();
@@ -58672,7 +58672,7 @@ async function findRg2() {
 }
 var _BashSession_instances2, _BashSession_proc2, _BashSession_buf2, _BashSession_truncated2, _BashSession_closed2, _BashSession_waiting2, _BashSession_append2, _LineRangeCollector_instances2, _LineRangeCollector_filePath2, _LineRangeCollector_startLine2, _LineRangeCollector_endLine2, _LineRangeCollector_start2, _LineRangeCollector_end2, _LineRangeCollector_limit2, _LineRangeCollector_line2, _LineRangeCollector_collected2, _LineRangeCollector_collectedBytes2, _LineRangeCollector_collect2, _LineRangeCollector_overLimitError2, BASH_OUTPUT_LIMIT2, BASH_DEFAULT_TIMEOUT_MS2, DEFAULT_MAX_FILE_BYTES2, READ_STREAM_CHUNK_BYTES2, NEWLINE2, GREP_OUTPUT_LIMIT2, GREP_MAX_LINE_LENGTH2, GLOB_RESULT_LIMIT2, BashTimeoutError2, ANSI_RE2, fsGlob2, BashSession2, LineRangeCollector2, WALK_MAX_DEPTH2, WALK_MAX_ENTRIES2;
 var init_node4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/tools/agent-toolset/node.mjs"() {
+  "@anthropic-ai/sdk/tools/agent-toolset/node.mjs"() {
     init_tslib3();
     init_error5();
     init_ToolError2();
@@ -59013,7 +59013,7 @@ async function heartbeatLoop2(client, work, lease, logger, requestOptions, onLea
 }
 var _EnvironmentWorker_instances2, _EnvironmentWorker_signal2, _EnvironmentWorker_handleItem2, _Lease_ctrl2, _Lease_endReason2, HEARTBEAT_DEFAULT_MS2, HEARTBEAT_TTL_DEFAULT_MS2, NO_HEARTBEAT_SENTINEL2, EnvironmentWorker2, Lease2;
 var init_worker2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/environments/worker.mjs"() {
+  "@anthropic-ai/sdk/lib/environments/worker.mjs"() {
     init_tslib3();
     init_error5();
     init_log3();
@@ -59312,7 +59312,7 @@ var init_worker2 = __esm({
 
 var Work2;
 var init_work2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/environments/work.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/environments/work.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -59580,7 +59580,7 @@ var init_work2 = __esm({
 
 var Environments4;
 var init_environments3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/environments/environments.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/environments/environments.mjs"() {
     init_resource3();
     init_work2();
     init_work2();
@@ -59750,7 +59750,7 @@ var init_environments3 = __esm({
 
 var Memories2;
 var init_memories4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/memory-stores/memories.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -59895,7 +59895,7 @@ var init_memories4 = __esm({
 
 var MemoryVersions2;
 var init_memory_versions2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/memory-stores/memory-versions.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -59985,7 +59985,7 @@ var init_memory_versions2 = __esm({
 
 var MemoryStores2;
 var init_memory_stores2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/memory-stores/memory-stores.mjs"() {
     init_resource3();
     init_memories4();
     init_memories4();
@@ -60150,7 +60150,7 @@ var init_memory_stores2 = __esm({
 
 var Batches6;
 var init_batches5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/messages/batches.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/messages/batches.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -60439,7 +60439,7 @@ function parseBetaOutputFormat2(params, content) {
   }
 }
 var init_beta_parser2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/beta-parser.mjs"() {
+  "@anthropic-ai/sdk/lib/beta-parser.mjs"() {
     init_error5();
   }
 });
@@ -60449,7 +60449,7 @@ function tracksToolInput4(content) {
 }
 var _BetaMessageStream_instances2, _BetaMessageStream_currentMessageSnapshot2, _BetaMessageStream_params2, _BetaMessageStream_connectedPromise2, _BetaMessageStream_resolveConnectedPromise2, _BetaMessageStream_rejectConnectedPromise2, _BetaMessageStream_endPromise2, _BetaMessageStream_resolveEndPromise2, _BetaMessageStream_rejectEndPromise2, _BetaMessageStream_listeners2, _BetaMessageStream_ended2, _BetaMessageStream_errored2, _BetaMessageStream_aborted2, _BetaMessageStream_catchingPromiseCreated2, _BetaMessageStream_response2, _BetaMessageStream_request_id2, _BetaMessageStream_workspace_id2, _BetaMessageStream_logger2, _BetaMessageStream_getFinalMessage2, _BetaMessageStream_getFinalText2, _BetaMessageStream_handleError2, _BetaMessageStream_beginRequest2, _BetaMessageStream_addStreamEvent2, _BetaMessageStream_endRequest2, _BetaMessageStream_accumulateMessage2, _BetaMessageStream_toolInputParseError2, BetaMessageStream2;
 var init_BetaMessageStream2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/BetaMessageStream.mjs"() {
+  "@anthropic-ai/sdk/lib/BetaMessageStream.mjs"() {
     init_tslib3();
     init_stainless_helper_header2();
     init_error6();
@@ -61091,7 +61091,7 @@ function isRunnableToolset(t2) {
 }
 var TOOLSET_TYPE_TO_FAMILY;
 var init_family = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/internal/toolsets/family.mjs"() {
+  "@anthropic-ai/sdk/lib/internal/toolsets/family.mjs"() {
     TOOLSET_TYPE_TO_FAMILY = {
       browser_toolset_20260801: "browser",
       computer_toolset_20260801: "computer"
@@ -61101,7 +61101,7 @@ var init_family = __esm({
 
 var ToolsetUsageError, ToolsetContractError;
 var init_errors4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/internal/toolsets/errors.mjs"() {
+  "@anthropic-ai/sdk/lib/internal/toolsets/errors.mjs"() {
     init_error5();
     ToolsetUsageError = class extends AnthropicError2 {
       constructor(message, options) {
@@ -61159,7 +61159,7 @@ async function runToolsetMember(toolset, toolUse, options = {}) {
 }
 var NOT_EXECUTED, NOT_EXECUTED_BY_FAMILY;
 var init_run = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/internal/toolsets/run.mjs"() {
+  "@anthropic-ai/sdk/lib/internal/toolsets/run.mjs"() {
     init_error5();
     init_ToolError2();
     init_errors4();
@@ -61174,14 +61174,14 @@ var init_run = __esm({
 });
 
 var init_messages6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/messages/index.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/messages/index.mjs"() {
     init_messages7();
   }
 });
 
 var APIKeys6;
 var init_api_keys4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/api-keys.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/api-keys.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -61237,7 +61237,7 @@ var init_api_keys4 = __esm({
 
 var Artifacts3;
 var init_artifacts2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/artifacts.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/artifacts.mjs"() {
     init_resource3();
     init_pagination3();
     Artifacts3 = class extends APIResource4 {
@@ -61268,7 +61268,7 @@ var init_artifacts2 = __esm({
 
 var Connectors;
 var init_connectors = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/connectors.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/connectors.mjs"() {
     init_resource3();
     init_pagination3();
     Connectors = class extends APIResource4 {
@@ -61300,7 +61300,7 @@ var init_connectors = __esm({
 
 var CostReport;
 var init_cost_report = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/cost-report.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/cost-report.mjs"() {
     init_resource3();
     init_pagination3();
     CostReport = class extends APIResource4 {
@@ -61331,7 +61331,7 @@ var init_cost_report = __esm({
 
 var Plugins;
 var init_plugins = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/plugins.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/plugins.mjs"() {
     init_resource3();
     init_pagination3();
     Plugins = class extends APIResource4 {
@@ -61366,7 +61366,7 @@ var init_plugins = __esm({
 
 var Skills5;
 var init_skills6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/skills.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/skills.mjs"() {
     init_resource3();
     init_pagination3();
     Skills5 = class extends APIResource4 {
@@ -61396,7 +61396,7 @@ var init_skills6 = __esm({
 
 var Summaries;
 var init_summaries = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/summaries.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/summaries.mjs"() {
     init_resource3();
     init_pagination3();
     Summaries = class extends APIResource4 {
@@ -61432,7 +61432,7 @@ var init_summaries = __esm({
 
 var UsageReport;
 var init_usage_report = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/usage-report.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/usage-report.mjs"() {
     init_resource3();
     init_pagination3();
     UsageReport = class extends APIResource4 {
@@ -61463,7 +61463,7 @@ var init_usage_report = __esm({
 
 var UserCostReport;
 var init_user_cost_report = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/user-cost-report.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/user-cost-report.mjs"() {
     init_resource3();
     init_pagination3();
     UserCostReport = class extends APIResource4 {
@@ -61496,7 +61496,7 @@ var init_user_cost_report = __esm({
 
 var UserUsageReport;
 var init_user_usage_report = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/user-usage-report.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/user-usage-report.mjs"() {
     init_resource3();
     init_pagination3();
     UserUsageReport = class extends APIResource4 {
@@ -61529,7 +61529,7 @@ var init_user_usage_report = __esm({
 
 var Users8;
 var init_users5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/users.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/users.mjs"() {
     init_resource3();
     init_pagination3();
     Users8 = class extends APIResource4 {
@@ -61559,7 +61559,7 @@ var init_users5 = __esm({
 
 var Projects3;
 var init_projects2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/apps/chat/projects.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/apps/chat/projects.mjs"() {
     init_resource3();
     init_pagination3();
     Projects3 = class extends APIResource4 {
@@ -61589,7 +61589,7 @@ var init_projects2 = __esm({
 
 var Chat3;
 var init_chat3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/apps/chat/chat.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/apps/chat/chat.mjs"() {
     init_resource3();
     init_projects2();
     init_projects2();
@@ -61608,7 +61608,7 @@ var init_chat3 = __esm({
 
 var Apps;
 var init_apps = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/apps/apps.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/apps/apps.mjs"() {
     init_resource3();
     init_chat3();
     init_chat3();
@@ -61627,7 +61627,7 @@ var init_apps = __esm({
 
 var Analytics;
 var init_analytics = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/analytics/analytics.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/analytics/analytics.mjs"() {
     init_resource3();
     init_artifacts2();
     init_artifacts2();
@@ -61686,7 +61686,7 @@ var init_analytics = __esm({
 
 var ComplianceSettings2;
 var init_compliance_settings2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/compliance-settings.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/compliance-settings.mjs"() {
     init_resource3();
     ComplianceSettings2 = class extends APIResource4 {
       /**
@@ -61738,7 +61738,7 @@ var init_compliance_settings2 = __esm({
 
 var ExternalKeys2;
 var init_external_keys2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/external-keys.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/external-keys.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -61857,7 +61857,7 @@ var init_external_keys2 = __esm({
 
 var Issuers2;
 var init_issuers2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/federation/issuers.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/federation/issuers.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -62026,7 +62026,7 @@ var init_issuers2 = __esm({
 
 var Workspaces4;
 var init_workspaces4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/federation/rules/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/federation/rules/workspaces.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -62140,7 +62140,7 @@ var init_workspaces4 = __esm({
 
 var Rules2;
 var init_rules2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/federation/rules/rules.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/federation/rules/rules.mjs"() {
     init_resource3();
     init_workspaces4();
     init_workspaces4();
@@ -62340,7 +62340,7 @@ var init_rules2 = __esm({
 
 var Federation2;
 var init_federation2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/federation/federation.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/federation/federation.mjs"() {
     init_resource3();
     init_issuers2();
     init_issuers2();
@@ -62363,7 +62363,7 @@ var init_federation2 = __esm({
 
 var Invites4;
 var init_invites3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/invites.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/invites.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -62439,7 +62439,7 @@ var init_invites3 = __esm({
 
 var PluginMarketplaces;
 var init_plugin_marketplaces = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/plugin-marketplaces.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/plugin-marketplaces.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -62669,7 +62669,7 @@ var init_plugin_marketplaces = __esm({
 
 var RateLimits5;
 var init_rate_limits4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/rate-limits.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/rate-limits.mjs"() {
     init_resource3();
     init_pagination3();
     RateLimits5 = class extends APIResource4 {
@@ -62700,7 +62700,7 @@ var init_rate_limits4 = __esm({
 
 var Users9;
 var init_users6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/users.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/users.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -62767,7 +62767,7 @@ var init_users6 = __esm({
 
 var InstallationSettings;
 var init_installation_settings = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/plugins/installation-settings.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/plugins/installation-settings.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -62914,7 +62914,7 @@ var init_installation_settings = __esm({
 
 var Shares;
 var init_shares = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/plugins/shares.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/plugins/shares.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -62968,7 +62968,7 @@ var init_shares = __esm({
 
 var Versions7;
 var init_versions6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/plugins/versions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/plugins/versions.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -63162,7 +63162,7 @@ var init_versions6 = __esm({
 
 var Plugins2;
 var init_plugins2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/plugins/plugins.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/plugins/plugins.mjs"() {
     init_resource3();
     init_installation_settings();
     init_installation_settings();
@@ -63420,7 +63420,7 @@ var init_plugins2 = __esm({
 
 var Members2;
 var init_members2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/rbac-groups/members.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/rbac-groups/members.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -63491,7 +63491,7 @@ var init_members2 = __esm({
 
 var RBACGroups;
 var init_rbac_groups = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/rbac-groups/rbac-groups.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/rbac-groups/rbac-groups.mjs"() {
     init_resource3();
     init_members2();
     init_members2();
@@ -63603,7 +63603,7 @@ var init_rbac_groups = __esm({
 
 var Permissions3;
 var init_permissions2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/rbac-roles/permissions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/rbac-roles/permissions.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -63632,7 +63632,7 @@ var init_permissions2 = __esm({
 
 var RBACRoles;
 var init_rbac_roles = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/rbac-roles/rbac-roles.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/rbac-roles/rbac-roles.mjs"() {
     init_resource3();
     init_permissions2();
     init_permissions2();
@@ -63688,7 +63688,7 @@ var init_rbac_roles = __esm({
 
 var Workspaces5;
 var init_workspaces5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/service-accounts/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/service-accounts/workspaces.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -63813,7 +63813,7 @@ var init_workspaces5 = __esm({
 
 var ServiceAccounts5;
 var init_service_accounts4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/service-accounts/service-accounts.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/service-accounts/service-accounts.mjs"() {
     init_resource3();
     init_workspaces5();
     init_workspaces5();
@@ -63989,7 +63989,7 @@ var init_service_accounts4 = __esm({
 
 var Effective;
 var init_effective = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/spend-limits/effective.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/spend-limits/effective.mjs"() {
     init_resource3();
     init_pagination3();
     Effective = class extends APIResource4 {
@@ -64018,7 +64018,7 @@ var init_effective = __esm({
 
 var IncreaseRequests;
 var init_increase_requests = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/spend-limits/increase-requests.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/spend-limits/increase-requests.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -64099,7 +64099,7 @@ var init_increase_requests = __esm({
 
 var SpendLimits;
 var init_spend_limits = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/spend-limits/spend-limits.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/spend-limits/spend-limits.mjs"() {
     init_resource3();
     init_effective();
     init_effective();
@@ -64221,7 +64221,7 @@ var init_spend_limits = __esm({
 
 var Members3;
 var init_members3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/workspaces/members.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/workspaces/members.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -64323,7 +64323,7 @@ var init_members3 = __esm({
 
 var RateLimits6;
 var init_rate_limits5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/workspaces/rate-limits.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/workspaces/rate-limits.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -64359,7 +64359,7 @@ var init_rate_limits5 = __esm({
 
 var ServiceAccounts6;
 var init_service_accounts5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/workspaces/service-accounts.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/workspaces/service-accounts.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -64548,7 +64548,7 @@ var init_service_accounts5 = __esm({
 
 var Workspaces6;
 var init_workspaces6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/workspaces/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/workspaces/workspaces.mjs"() {
     init_resource3();
     init_members3();
     init_members3();
@@ -64662,7 +64662,7 @@ var init_workspaces6 = __esm({
 
 var Organization4;
 var init_organization3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/organization/organization.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/organization/organization.mjs"() {
     init_resource3();
     init_api_keys4();
     init_api_keys4();
@@ -64750,7 +64750,7 @@ var init_organization3 = __esm({
 
 var Events5;
 var init_events4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/events.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/events.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -64880,7 +64880,7 @@ var init_events4 = __esm({
 
 var Resources2;
 var init_resources4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/resources.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/resources.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -65027,7 +65027,7 @@ var init_resources4 = __esm({
 
 var Events6;
 var init_events5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/threads/events.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -65094,7 +65094,7 @@ var init_events5 = __esm({
 
 var Threads6;
 var init_threads4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/threads/threads.mjs"() {
     init_resource3();
     init_events5();
     init_events5();
@@ -65193,7 +65193,7 @@ var init_threads4 = __esm({
 
 var Sessions10;
 var init_sessions6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/sessions/sessions.mjs"() {
     init_resource3();
     init_events4();
     init_events4();
@@ -65382,7 +65382,7 @@ var init_sessions6 = __esm({
 
 var Versions8;
 var init_versions7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/skills/versions.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/skills/versions.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -65524,7 +65524,7 @@ var init_versions7 = __esm({
 
 var Skills6;
 var init_skills7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/skills/skills.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/skills/skills.mjs"() {
     init_resource3();
     init_versions7();
     init_versions7();
@@ -65642,7 +65642,7 @@ var init_skills7 = __esm({
 
 var Certificates6;
 var init_certificates4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/tunnels/certificates.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -65783,7 +65783,7 @@ var init_certificates4 = __esm({
 
 var Tunnels2;
 var init_tunnels2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/tunnels/tunnels.mjs"() {
     init_resource3();
     init_certificates4();
     init_certificates4();
@@ -65984,7 +65984,7 @@ var init_tunnels2 = __esm({
 
 var Credentials4;
 var init_credentials5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/vaults/credentials.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -66182,7 +66182,7 @@ var init_credentials5 = __esm({
 
 var Vaults4;
 var init_vaults3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/vaults/vaults.mjs"() {
     init_resource3();
     init_credentials5();
     init_credentials5();
@@ -66350,20 +66350,20 @@ var init_vaults3 = __esm({
 });
 
 var init_beta3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/index.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/index.mjs"() {
     init_messages6();
   }
 });
 
 var init_beta4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta.mjs"() {
+  "@anthropic-ai/sdk/resources/beta.mjs"() {
     init_beta3();
   }
 });
 
 var _BetaToolRunnerStream_instances2, _BetaToolRunnerStream_onToolCall2, _BetaToolRunnerStream_emitted2, _BetaToolRunnerStream_readers2, _BetaToolRunnerStream_toolCalls2, _BetaToolRunnerStream_closed2, _BetaToolRunnerStream_ready2, _BetaToolRunnerStream_fallback2, _BetaToolRunnerStream_track2, _BetaToolRunnerStream_release2, _BetaToolRunnerStream_removeReader2, BetaToolRunnerStream2;
 var init_BetaToolRunnerStream2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/internal/BetaToolRunnerStream.mjs"() {
+  "@anthropic-ai/sdk/lib/internal/BetaToolRunnerStream.mjs"() {
     init_tslib3();
     init_stainless_helper_header2();
     init_BetaMessageStream2();
@@ -66712,7 +66712,7 @@ function determineNextStepFromStopReason2(stopReason) {
 }
 var _BetaToolRunner_instances2, _BetaToolRunner_consumed2, _BetaToolRunner_mutated2, _BetaToolRunner_state2, _BetaToolRunner_options2, _BetaToolRunner_message2, _BetaToolRunner_stream2, _BetaToolRunner_toolResponse2, _BetaToolRunner_completion2, _BetaToolRunner_iterationCount2, _BetaToolRunner_compaction2, _BetaToolRunner_calls2, _BetaToolRunner_lastStopReason2, _BetaToolRunner_toolOverrides2, _BetaToolRunner_pendingToolChanges2, _BetaToolRunner_send2, _BetaToolRunner_streamThatStartsTools2, _BetaToolRunner_startedCallsSettled2, _BetaToolRunner_compact2, _BetaToolRunner_runnableTools2, _BetaToolRunner_availableToolNames2, _BetaToolRunner_recordRemovalsFromHistory2, _BetaToolRunner_compactAfterFinalTurn2, _BetaToolRunner_generateToolResponse2, _BetaToolRunner_toolsetFamilies, _BetaToolRunner_flushPendingToolChanges2, _BetaToolRunner_pendingToolChangesMessage2, USE_A_NEW_RUNNER, REMOVE_WITH_A_NEW_RUNNER, BetaToolRunner2;
 var init_BetaToolRunner2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs"() {
+  "@anthropic-ai/sdk/lib/tools/BetaToolRunner.mjs"() {
     init_tslib3();
     init_BetaRunnableTool2();
     init_family();
@@ -67297,7 +67297,7 @@ function transformOutputFormat2(params) {
 }
 var DEPRECATED_MODELS4, MODELS_TO_WARN_WITH_THINKING_ENABLED4, Messages8, BETA_CLIENT_TOOL_UNION_KEYS;
 var init_messages7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/messages/messages.mjs"() {
     init_error6();
     init_batches5();
     init_resource3();
@@ -67450,7 +67450,7 @@ Please migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resour
 
 var Beta4;
 var init_beta5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/beta/beta.mjs"() {
+  "@anthropic-ai/sdk/resources/beta/beta.mjs"() {
     init_resource3();
     init_deployment_runs2();
     init_deployment_runs2();
@@ -67529,7 +67529,7 @@ var init_beta5 = __esm({
 
 var Completions6;
 var init_completions5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/completions.mjs"() {
+  "@anthropic-ai/sdk/resources/completions.mjs"() {
     init_resource3();
     init_headers4();
     Completions6 = class extends APIResource4 {
@@ -67555,7 +67555,7 @@ var init_completions5 = __esm({
 
 var Files12;
 var init_files8 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/files.mjs"() {
+  "@anthropic-ai/sdk/resources/files.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -67676,7 +67676,7 @@ var init_files8 = __esm({
 
 var Models6;
 var init_models6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/models.mjs"() {
+  "@anthropic-ai/sdk/resources/models.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -67740,7 +67740,7 @@ var init_models6 = __esm({
 
 var APIKeys7;
 var init_api_keys5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/api-keys.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/api-keys.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -67791,7 +67791,7 @@ var init_api_keys5 = __esm({
 
 var ComplianceSettings3;
 var init_compliance_settings3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/compliance-settings.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/compliance-settings.mjs"() {
     init_resource3();
     ComplianceSettings3 = class extends APIResource4 {
       /**
@@ -67843,7 +67843,7 @@ var init_compliance_settings3 = __esm({
 
 var ExternalKeys3;
 var init_external_keys3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/external-keys.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/external-keys.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -67959,7 +67959,7 @@ var init_external_keys3 = __esm({
 
 var Invites5;
 var init_invites4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/invites.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/invites.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -68032,7 +68032,7 @@ var init_invites4 = __esm({
 
 var RateLimits7;
 var init_rate_limits6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/rate-limits.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/rate-limits.mjs"() {
     init_resource3();
     init_pagination3();
     RateLimits7 = class extends APIResource4 {
@@ -68066,7 +68066,7 @@ var init_rate_limits6 = __esm({
 
 var Users10;
 var init_users7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/users.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/users.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -68130,7 +68130,7 @@ var init_users7 = __esm({
 
 var Issuers3;
 var init_issuers3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/federation/issuers.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/federation/issuers.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -68266,7 +68266,7 @@ var init_issuers3 = __esm({
 
 var Workspaces7;
 var init_workspaces7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/federation/rules/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/federation/rules/workspaces.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -68360,7 +68360,7 @@ var init_workspaces7 = __esm({
 
 var Rules3;
 var init_rules3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/federation/rules/rules.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/federation/rules/rules.mjs"() {
     init_resource3();
     init_workspaces7();
     init_workspaces7();
@@ -68527,7 +68527,7 @@ var init_rules3 = __esm({
 
 var Federation3;
 var init_federation3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/federation/federation.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/federation/federation.mjs"() {
     init_resource3();
     init_issuers3();
     init_issuers3();
@@ -68550,7 +68550,7 @@ var init_federation3 = __esm({
 
 var Workspaces8;
 var init_workspaces8 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/service-accounts/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/service-accounts/workspaces.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -68655,7 +68655,7 @@ var init_workspaces8 = __esm({
 
 var ServiceAccounts7;
 var init_service_accounts6 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/service-accounts/service-accounts.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/service-accounts/service-accounts.mjs"() {
     init_resource3();
     init_workspaces8();
     init_workspaces8();
@@ -68798,7 +68798,7 @@ var init_service_accounts6 = __esm({
 
 var Members4;
 var init_members4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/workspaces/members.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/workspaces/members.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -68897,7 +68897,7 @@ var init_members4 = __esm({
 
 var RateLimits8;
 var init_rate_limits7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/workspaces/rate-limits.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/workspaces/rate-limits.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -68933,7 +68933,7 @@ var init_rate_limits7 = __esm({
 
 var ServiceAccounts8;
 var init_service_accounts7 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/workspaces/service-accounts.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/workspaces/service-accounts.mjs"() {
     init_resource3();
     init_pagination3();
     init_path3();
@@ -69089,7 +69089,7 @@ var init_service_accounts7 = __esm({
 
 var Workspaces9;
 var init_workspaces9 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/workspaces/workspaces.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/workspaces/workspaces.mjs"() {
     init_resource3();
     init_members4();
     init_members4();
@@ -69188,7 +69188,7 @@ var init_workspaces9 = __esm({
 
 var Organization5;
 var init_organization4 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/organization/organization.mjs"() {
+  "@anthropic-ai/sdk/resources/organization/organization.mjs"() {
     init_resource3();
     init_api_keys5();
     init_api_keys5();
@@ -69252,7 +69252,7 @@ var init_organization4 = __esm({
 
 var Versions9;
 var init_versions8 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/skills/versions.mjs"() {
+  "@anthropic-ai/sdk/resources/skills/versions.mjs"() {
     init_resource3();
     init_pagination3();
     init_headers4();
@@ -69353,7 +69353,7 @@ var init_versions8 = __esm({
 
 var Skills7;
 var init_skills8 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/skills/skills.mjs"() {
+  "@anthropic-ai/sdk/resources/skills/skills.mjs"() {
     init_resource3();
     init_versions8();
     init_versions8();
@@ -69454,7 +69454,7 @@ var init_skills8 = __esm({
 });
 
 var init_resources5 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/resources/index.mjs"() {
+  "@anthropic-ai/sdk/resources/index.mjs"() {
     init_shared3();
     init_messages5();
     init_beta5();
@@ -69468,7 +69468,7 @@ var init_resources5 = __esm({
 
 var _BaseAnthropic_instances2, _a12, _BaseAnthropic_encoder2, _BaseAnthropic_baseURLOverridden2, HUMAN_PROMPT2, AI_PROMPT2, BaseAnthropic2, Anthropic2;
 var init_client3 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/client.mjs"() {
+  "@anthropic-ai/sdk/client.mjs"() {
     init_tslib3();
     init_values3();
     init_sleep3();
@@ -70282,13 +70282,13 @@ var init_client3 = __esm({
 });
 
 var init_sdk2 = __esm({
-  "../../node_modules/.pnpm/@anthropic-ai+sdk@0.133.0_zod@4.6.5/node_modules/@anthropic-ai/sdk/index.mjs"() {
+  "@anthropic-ai/sdk/index.mjs"() {
     init_client3();
   }
 });
 
 var require_retry_operation = __commonJS({
-  "../../node_modules/.pnpm/retry@0.13.1/node_modules/retry/lib/retry_operation.js"(exports, module) {
+  "retry/lib/retry_operation.js"(exports, module) {
     function RetryOperation(timeouts, options) {
       if (typeof options === "boolean") {
         options = { forever: options };
@@ -70422,7 +70422,7 @@ var require_retry_operation = __commonJS({
 });
 
 var require_retry = __commonJS({
-  "../../node_modules/.pnpm/retry@0.13.1/node_modules/retry/lib/retry.js"(exports) {
+  "retry/lib/retry.js"(exports) {
     var RetryOperation = require_retry_operation();
     exports.operation = function(options) {
       var timeouts = exports.timeouts(options);
@@ -70507,13 +70507,13 @@ var require_retry = __commonJS({
 });
 
 var require_retry2 = __commonJS({
-  "../../node_modules/.pnpm/retry@0.13.1/node_modules/retry/index.js"(exports, module) {
+  "retry/index.js"(exports, module) {
     module.exports = require_retry();
   }
 });
 
 var require_p_retry = __commonJS({
-  "../../node_modules/.pnpm/p-retry@4.6.2/node_modules/p-retry/index.js"(exports, module) {
+  "p-retry/index.js"(exports, module) {
     "use strict";
     var retry2 = require_retry2();
     var networkErrorMsgs = [
@@ -70591,7 +70591,7 @@ var require_p_retry = __commonJS({
 });
 
 var require_extend = __commonJS({
-  "../../node_modules/.pnpm/extend@3.0.2/node_modules/extend/index.js"(exports, module) {
+  "extend/index.js"(exports, module) {
     "use strict";
     var hasOwn6 = Object.prototype.hasOwnProperty;
     var toStr = Object.prototype.toString;
@@ -70681,7 +70681,7 @@ var require_extend = __commonJS({
 });
 
 var require_package = __commonJS({
-  "../../node_modules/.pnpm/gaxios@7.3.1/node_modules/gaxios/package.json"(exports, module) {
+  "gaxios/package.json"(exports, module) {
     module.exports = {
       name: "gaxios",
       version: "7.3.1",
@@ -70791,7 +70791,7 @@ var require_package = __commonJS({
 });
 
 var require_util = __commonJS({
-  "../../node_modules/.pnpm/gaxios@7.3.1/node_modules/gaxios/build/cjs/src/util.cjs"(exports, module) {
+  "gaxios/build/cjs/src/util.cjs"(exports, module) {
     "use strict";
     var pkg = require_package();
     module.exports = { pkg };
@@ -70799,7 +70799,7 @@ var require_util = __commonJS({
 });
 
 var require_common = __commonJS({
-  "../../node_modules/.pnpm/gaxios@7.3.1/node_modules/gaxios/build/cjs/src/common.js"(exports) {
+  "gaxios/build/cjs/src/common.js"(exports) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -71040,7 +71040,7 @@ var require_common = __commonJS({
 });
 
 var require_retry3 = __commonJS({
-  "../../node_modules/.pnpm/gaxios@7.3.1/node_modules/gaxios/build/cjs/src/retry.js"(exports) {
+  "gaxios/build/cjs/src/retry.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getRetryConfig = getRetryConfig;
@@ -71144,7 +71144,7 @@ var require_retry3 = __commonJS({
 });
 
 var require_interceptor = __commonJS({
-  "../../node_modules/.pnpm/gaxios@7.3.1/node_modules/gaxios/build/cjs/src/interceptor.js"(exports) {
+  "gaxios/build/cjs/src/interceptor.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GaxiosInterceptorManager = void 0;
@@ -71155,7 +71155,7 @@ var require_interceptor = __commonJS({
 });
 
 var require_ms = __commonJS({
-  "../../node_modules/.pnpm/ms@2.1.3/node_modules/ms/index.js"(exports, module) {
+  "ms/index.js"(exports, module) {
     var s2 = 1e3;
     var m2 = s2 * 60;
     var h2 = m2 * 60;
@@ -71270,7 +71270,7 @@ var require_ms = __commonJS({
 });
 
 var require_common2 = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/common.js"(exports, module) {
+  "debug/src/common.js"(exports, module) {
     function setup(env2) {
       createDebug.debug = createDebug;
       createDebug.default = createDebug;
@@ -71446,7 +71446,7 @@ var require_common2 = __commonJS({
 });
 
 var require_browser = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/browser.js"(exports, module) {
+  "debug/src/browser.js"(exports, module) {
     exports.formatArgs = formatArgs;
     exports.save = save;
     exports.load = load;
@@ -71615,7 +71615,7 @@ var require_browser = __commonJS({
 });
 
 var require_node = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/node.js"(exports, module) {
+  "debug/src/node.js"(exports, module) {
     var tty = __require("tty");
     var util3 = __require("util");
     exports.init = init;
@@ -71788,7 +71788,7 @@ var require_node = __commonJS({
 });
 
 var require_src = __commonJS({
-  "../../node_modules/.pnpm/debug@4.4.3/node_modules/debug/src/index.js"(exports, module) {
+  "debug/src/index.js"(exports, module) {
     if (typeof process === "undefined" || process.type === "renderer" || process.browser === true || process.__nwjs) {
       module.exports = require_browser();
     } else {
@@ -71798,7 +71798,7 @@ var require_src = __commonJS({
 });
 
 var require_helpers = __commonJS({
-  "../../node_modules/.pnpm/agent-base@7.1.4/node_modules/agent-base/dist/helpers.js"(exports) {
+  "agent-base/dist/helpers.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -71867,7 +71867,7 @@ var require_helpers = __commonJS({
 });
 
 var require_dist4 = __commonJS({
-  "../../node_modules/.pnpm/agent-base@7.1.4/node_modules/agent-base/dist/index.js"(exports) {
+  "agent-base/dist/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -72022,7 +72022,7 @@ var require_dist4 = __commonJS({
 });
 
 var require_parse_proxy_response = __commonJS({
-  "../../node_modules/.pnpm/https-proxy-agent@7.0.6/node_modules/https-proxy-agent/dist/parse-proxy-response.js"(exports) {
+  "https-proxy-agent/dist/parse-proxy-response.js"(exports) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -72117,7 +72117,7 @@ var require_parse_proxy_response = __commonJS({
 });
 
 var require_dist5 = __commonJS({
-  "../../node_modules/.pnpm/https-proxy-agent@7.0.6/node_modules/https-proxy-agent/dist/index.js"(exports) {
+  "https-proxy-agent/dist/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -72303,13 +72303,13 @@ function dataUriToBuffer(uri) {
 }
 var dist_default;
 var init_dist = __esm({
-  "../../node_modules/.pnpm/data-uri-to-buffer@4.0.1/node_modules/data-uri-to-buffer/dist/index.js"() {
+  "data-uri-to-buffer/dist/index.js"() {
     dist_default = dataUriToBuffer;
   }
 });
 
 var require_ponyfill_es2018 = __commonJS({
-  "../../node_modules/.pnpm/web-streams-polyfill@3.3.3/node_modules/web-streams-polyfill/dist/ponyfill.es2018.js"(exports, module) {
+  "web-streams-polyfill/dist/ponyfill.es2018.js"(exports, module) {
     (function(global2, factory) {
       typeof exports === "object" && typeof module !== "undefined" ? factory(exports) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global2 = typeof globalThis !== "undefined" ? globalThis : global2 || self, factory(global2.WebStreamsPolyfill = {}));
     })(exports, (function(exports2) {
@@ -76583,7 +76583,7 @@ var require_ponyfill_es2018 = __commonJS({
 });
 
 var require_streams = __commonJS({
-  "../../node_modules/.pnpm/fetch-blob@3.2.0/node_modules/fetch-blob/streams.cjs"() {
+  "fetch-blob/streams.cjs"() {
     var POOL_SIZE2 = 65536;
     if (!globalThis.ReadableStream) {
       try {
@@ -76663,7 +76663,7 @@ async function* toIterator(parts, clone3 = true) {
 }
 var import_streams, POOL_SIZE, _Blob, Blob3, fetch_blob_default;
 var init_fetch_blob = __esm({
-  "../../node_modules/.pnpm/fetch-blob@3.2.0/node_modules/fetch-blob/index.js"() {
+  "fetch-blob/index.js"() {
     import_streams = __toESM(require_streams(), 1);
     POOL_SIZE = 65536;
     _Blob = class Blob2 {
@@ -76832,7 +76832,7 @@ var init_fetch_blob = __esm({
 
 var _File, File3, file_default;
 var init_file = __esm({
-  "../../node_modules/.pnpm/fetch-blob@3.2.0/node_modules/fetch-blob/file.js"() {
+  "fetch-blob/file.js"() {
     init_fetch_blob();
     _File = class File2 extends fetch_blob_default {
       #lastModified = 0;
@@ -76888,7 +76888,7 @@ Content-Type: ${v.type || "application/octet-stream"}\r
 }
 var t, i, h, r, m, f, e, x, FormData2;
 var init_esm_min = __esm({
-  "../../node_modules/.pnpm/formdata-polyfill@4.0.10/node_modules/formdata-polyfill/esm.min.js"() {
+  "formdata-polyfill/esm.min.js"() {
     init_fetch_blob();
     init_file();
     ({ toStringTag: t, iterator: i, hasInstance: h } = Symbol);
@@ -76971,7 +76971,7 @@ var init_esm_min = __esm({
 
 var FetchBaseError;
 var init_base = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/errors/base.js"() {
+  "node-fetch/src/errors/base.js"() {
     FetchBaseError = class extends Error {
       constructor(message, type) {
         super(message);
@@ -76990,7 +76990,7 @@ var init_base = __esm({
 
 var FetchError;
 var init_fetch_error = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/errors/fetch-error.js"() {
+  "node-fetch/src/errors/fetch-error.js"() {
     init_base();
     FetchError = class extends FetchBaseError {
       /**
@@ -77011,7 +77011,7 @@ var init_fetch_error = __esm({
 
 var NAME, isURLSearchParameters, isBlob3, isAbortSignal, isDomainOrSubdomain, isSameProtocol;
 var init_is = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/utils/is.js"() {
+  "node-fetch/src/utils/is.js"() {
     NAME = Symbol.toStringTag;
     isURLSearchParameters = (object2) => {
       return typeof object2 === "object" && typeof object2.append === "function" && typeof object2.delete === "function" && typeof object2.get === "function" && typeof object2.getAll === "function" && typeof object2.has === "function" && typeof object2.set === "function" && typeof object2.sort === "function" && object2[NAME] === "URLSearchParams";
@@ -77036,7 +77036,7 @@ var init_is = __esm({
 });
 
 var require_node_domexception = __commonJS({
-  "../../node_modules/.pnpm/node-domexception@1.0.0/node_modules/node-domexception/index.js"(exports, module) {
+  "node-domexception/index.js"(exports, module) {
     if (!globalThis.DOMException) {
       try {
         const { MessageChannel } = __require("worker_threads"), port = new MessageChannel().port1, ab = new ArrayBuffer();
@@ -77053,7 +77053,7 @@ import { statSync, createReadStream as createReadStream3, promises as fs9 } from
 import { basename as basename3 } from "node:path";
 var import_node_domexception, stat3, blobFromSync, blobFrom, fileFrom, fileFromSync, fromBlob, fromFile, BlobDataItem;
 var init_from = __esm({
-  "../../node_modules/.pnpm/fetch-blob@3.2.0/node_modules/fetch-blob/from.js"() {
+  "fetch-blob/from.js"() {
     import_node_domexception = __toESM(require_node_domexception(), 1);
     init_file();
     init_fetch_blob();
@@ -77205,7 +77205,7 @@ async function toFormData(Body2, ct) {
 }
 var s, S, f2, F, LF, CR, SPACE, HYPHEN, COLON, A, Z, lower, noop5, MultipartParser;
 var init_multipart_parser = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/utils/multipart-parser.js"() {
+  "node-fetch/src/utils/multipart-parser.js"() {
     init_from();
     init_esm_min();
     s = 0;
@@ -77522,7 +77522,7 @@ async function consumeBody(data) {
 }
 var pipeline, INTERNALS, Body, clone2, getNonSpecFormDataBoundary, extractContentType, getTotalBytes, writeToStream;
 var init_body = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/body.js"() {
+  "node-fetch/src/body.js"() {
     init_fetch_blob();
     init_esm_min();
     init_fetch_error();
@@ -77752,7 +77752,7 @@ function fromRawHeaders(headers = []) {
 }
 var validateHeaderName, validateHeaderValue, Headers2;
 var init_headers5 = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/headers.js"() {
+  "node-fetch/src/headers.js"() {
     validateHeaderName = typeof http.validateHeaderName === "function" ? http.validateHeaderName : (name) => {
       if (!/^[\^`\-\w!#$%&'*+.|~]+$/.test(name)) {
         const error62 = new TypeError(`Header name must be a valid HTTP token [${name}]`);
@@ -77922,7 +77922,7 @@ var init_headers5 = __esm({
 
 var redirectStatus, isRedirect;
 var init_is_redirect = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/utils/is-redirect.js"() {
+  "node-fetch/src/utils/is-redirect.js"() {
     redirectStatus = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
     isRedirect = (code) => {
       return redirectStatus.has(code);
@@ -77932,7 +77932,7 @@ var init_is_redirect = __esm({
 
 var INTERNALS2, Response2;
 var init_response = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/response.js"() {
+  "node-fetch/src/response.js"() {
     init_headers5();
     init_body();
     init_is_redirect();
@@ -78057,7 +78057,7 @@ var init_response = __esm({
 
 var getSearch;
 var init_get_search = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/utils/get-search.js"() {
+  "node-fetch/src/utils/get-search.js"() {
     getSearch = (parsedURL) => {
       if (parsedURL.search) {
         return parsedURL.search;
@@ -78197,7 +78197,7 @@ function parseReferrerPolicyFromHeader(headers) {
 }
 var ReferrerPolicy, DEFAULT_REFERRER_POLICY;
 var init_referrer = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/utils/referrer.js"() {
+  "node-fetch/src/utils/referrer.js"() {
     ReferrerPolicy = /* @__PURE__ */ new Set([
       "",
       "no-referrer",
@@ -78217,7 +78217,7 @@ import { format as formatUrl } from "node:url";
 import { deprecate as deprecate2 } from "node:util";
 var INTERNALS3, isRequest, doBadDataWarn, Request2, getNodeRequestOptions;
 var init_request = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/request.js"() {
+  "node-fetch/src/request.js"() {
     init_headers5();
     init_body();
     init_is();
@@ -78419,7 +78419,7 @@ var init_request = __esm({
 
 var AbortError;
 var init_abort_error = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/errors/abort-error.js"() {
+  "node-fetch/src/errors/abort-error.js"() {
     init_base();
     AbortError = class extends FetchBaseError {
       constructor(message, type = "aborted") {
@@ -78714,7 +78714,7 @@ function fixResponseChunkedTransferBadEnding(request2, errorCallback) {
 }
 var supportedSchemas;
 var init_src = __esm({
-  "../../node_modules/.pnpm/node-fetch@3.3.2/node_modules/node-fetch/src/index.js"() {
+  "node-fetch/src/index.js"() {
     init_dist();
     init_body();
     init_response();
@@ -78732,7 +78732,7 @@ var init_src = __esm({
 });
 
 var require_gaxios = __commonJS({
-  "../../node_modules/.pnpm/gaxios@7.3.1/node_modules/gaxios/build/cjs/src/gaxios.js"(exports) {
+  "gaxios/build/cjs/src/gaxios.js"(exports) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -79205,7 +79205,7 @@ Content-Type: ${partContentType}\r
 });
 
 var require_src2 = __commonJS({
-  "../../node_modules/.pnpm/gaxios@7.3.1/node_modules/gaxios/build/cjs/src/index.js"(exports) {
+  "gaxios/build/cjs/src/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -79243,7 +79243,7 @@ var require_src2 = __commonJS({
 });
 
 var require_bignumber = __commonJS({
-  "../../node_modules/.pnpm/bignumber.js@9.3.1/node_modules/bignumber.js/bignumber.js"(exports, module) {
+  "bignumber.js/bignumber.js"(exports, module) {
     (function(globalObject) {
       "use strict";
       var BigNumber, isNumeric = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i, mathceil = Math.ceil, mathfloor = Math.floor, bignumberError = "[BigNumber Error] ", tooManyDigits = bignumberError + "Number primitive has more than 15 significant digits: ", BASE = 1e14, LOG_BASE = 14, MAX_SAFE_INTEGER = 9007199254740991, POWS_TEN = [1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13], SQRT_BASE = 1e7, MAX = 1e9;
@@ -80593,7 +80593,7 @@ var require_bignumber = __commonJS({
 });
 
 var require_stringify2 = __commonJS({
-  "../../node_modules/.pnpm/json-bigint@1.0.0/node_modules/json-bigint/lib/stringify.js"(exports, module) {
+  "json-bigint/lib/stringify.js"(exports, module) {
     var BigNumber = require_bignumber();
     var JSON2 = module.exports;
     (function() {
@@ -80704,7 +80704,7 @@ var require_stringify2 = __commonJS({
 });
 
 var require_parse = __commonJS({
-  "../../node_modules/.pnpm/json-bigint@1.0.0/node_modules/json-bigint/lib/parse.js"(exports, module) {
+  "json-bigint/lib/parse.js"(exports, module) {
     var BigNumber = null;
     var suspectProtoRx = /(?:_|\\u005[Ff])(?:_|\\u005[Ff])(?:p|\\u0070)(?:r|\\u0072)(?:o|\\u006[Ff])(?:t|\\u0074)(?:o|\\u006[Ff])(?:_|\\u005[Ff])(?:_|\\u005[Ff])/;
     var suspectConstructorRx = /(?:c|\\u0063)(?:o|\\u006[Ff])(?:n|\\u006[Ee])(?:s|\\u0073)(?:t|\\u0074)(?:r|\\u0072)(?:u|\\u0075)(?:c|\\u0063)(?:t|\\u0074)(?:o|\\u006[Ff])(?:r|\\u0072)/;
@@ -80984,7 +80984,7 @@ var require_parse = __commonJS({
 });
 
 var require_json_bigint = __commonJS({
-  "../../node_modules/.pnpm/json-bigint@1.0.0/node_modules/json-bigint/index.js"(exports, module) {
+  "json-bigint/index.js"(exports, module) {
     var json_stringify = require_stringify2().stringify;
     var json_parse = require_parse();
     module.exports = function(options) {
@@ -80999,7 +80999,7 @@ var require_json_bigint = __commonJS({
 });
 
 var require_gcp_residency = __commonJS({
-  "../../node_modules/.pnpm/gcp-metadata@8.1.2/node_modules/gcp-metadata/build/src/gcp-residency.js"(exports) {
+  "gcp-metadata/build/src/gcp-residency.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GCE_LINUX_BIOS_PATHS = void 0;
@@ -81053,7 +81053,7 @@ var require_gcp_residency = __commonJS({
 });
 
 var require_colours = __commonJS({
-  "../../node_modules/.pnpm/google-logging-utils@1.1.3/node_modules/google-logging-utils/build/src/colours.js"(exports) {
+  "google-logging-utils/build/src/colours.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Colours = void 0;
@@ -81113,7 +81113,7 @@ var require_colours = __commonJS({
 });
 
 var require_logging_utils = __commonJS({
-  "../../node_modules/.pnpm/google-logging-utils@1.1.3/node_modules/google-logging-utils/build/src/logging-utils.js"(exports) {
+  "google-logging-utils/build/src/logging-utils.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -81401,7 +81401,7 @@ var require_logging_utils = __commonJS({
 });
 
 var require_src3 = __commonJS({
-  "../../node_modules/.pnpm/google-logging-utils@1.1.3/node_modules/google-logging-utils/build/src/index.js"(exports) {
+  "google-logging-utils/build/src/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -81425,7 +81425,7 @@ var require_src3 = __commonJS({
 });
 
 var require_src4 = __commonJS({
-  "../../node_modules/.pnpm/gcp-metadata@8.1.2/node_modules/gcp-metadata/build/src/index.js"(exports) {
+  "gcp-metadata/build/src/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -81680,7 +81680,7 @@ var require_src4 = __commonJS({
 });
 
 var require_base64_js = __commonJS({
-  "../../node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.js"(exports) {
+  "base64-js/index.js"(exports) {
     "use strict";
     exports.byteLength = byteLength;
     exports.toByteArray = toByteArray;
@@ -81780,7 +81780,7 @@ var require_base64_js = __commonJS({
 });
 
 var require_shared = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/crypto/shared.js"(exports) {
+  "google-auth-library/build/src/crypto/shared.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.fromArrayBufferToHex = fromArrayBufferToHex;
@@ -81794,7 +81794,7 @@ var require_shared = __commonJS({
 });
 
 var require_crypto = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/crypto/browser/crypto.js"(exports) {
+  "google-auth-library/build/src/crypto/browser/crypto.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.BrowserCrypto = void 0;
@@ -81889,7 +81889,7 @@ var require_crypto = __commonJS({
 });
 
 var require_crypto2 = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/crypto/node/crypto.js"(exports) {
+  "google-auth-library/build/src/crypto/node/crypto.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.NodeCrypto = void 0;
@@ -81957,7 +81957,7 @@ var require_crypto2 = __commonJS({
 });
 
 var require_crypto3 = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/crypto/crypto.js"(exports) {
+  "google-auth-library/build/src/crypto/crypto.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -81994,7 +81994,7 @@ var require_crypto3 = __commonJS({
 });
 
 var require_safe_buffer = __commonJS({
-  "../../node_modules/.pnpm/safe-buffer@5.2.1/node_modules/safe-buffer/index.js"(exports, module) {
+  "safe-buffer/index.js"(exports, module) {
     var buffer = __require("buffer");
     var Buffer4 = buffer.Buffer;
     function copyProps(src, dst) {
@@ -82051,7 +82051,7 @@ var require_safe_buffer = __commonJS({
 });
 
 var require_param_bytes_for_alg = __commonJS({
-  "../../node_modules/.pnpm/ecdsa-sig-formatter@1.0.11/node_modules/ecdsa-sig-formatter/src/param-bytes-for-alg.js"(exports, module) {
+  "ecdsa-sig-formatter/src/param-bytes-for-alg.js"(exports, module) {
     "use strict";
     function getParamSize(keySize) {
       var result = (keySize / 8 | 0) + (keySize % 8 === 0 ? 0 : 1);
@@ -82074,7 +82074,7 @@ var require_param_bytes_for_alg = __commonJS({
 });
 
 var require_ecdsa_sig_formatter = __commonJS({
-  "../../node_modules/.pnpm/ecdsa-sig-formatter@1.0.11/node_modules/ecdsa-sig-formatter/src/ecdsa-sig-formatter.js"(exports, module) {
+  "ecdsa-sig-formatter/src/ecdsa-sig-formatter.js"(exports, module) {
     "use strict";
     var Buffer4 = require_safe_buffer().Buffer;
     var getParamBytesForAlg = require_param_bytes_for_alg();
@@ -82213,7 +82213,7 @@ var require_ecdsa_sig_formatter = __commonJS({
 });
 
 var require_util2 = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/util.js"(exports) {
+  "google-auth-library/build/src/util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.LRUCache = void 0;
@@ -82327,7 +82327,7 @@ var require_util2 = __commonJS({
 });
 
 var require_package2 = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/package.json"(exports, module) {
+  "google-auth-library/package.json"(exports, module) {
     module.exports = {
       name: "google-auth-library",
       version: "10.9.1",
@@ -82422,7 +82422,7 @@ var require_package2 = __commonJS({
 });
 
 var require_shared2 = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/shared.cjs"(exports) {
+  "google-auth-library/build/src/shared.cjs"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.USER_AGENT = exports.PRODUCT_NAME = exports.pkg = void 0;
@@ -82436,7 +82436,7 @@ var require_shared2 = __commonJS({
 });
 
 var require_authclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/authclient.js"(exports) {
+  "google-auth-library/build/src/auth/authclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.AuthClient = exports.DEFAULT_EAGER_REFRESH_THRESHOLD_MILLIS = exports.DEFAULT_UNIVERSE = void 0;
@@ -82670,7 +82670,7 @@ var require_authclient = __commonJS({
 });
 
 var require_loginticket = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/loginticket.js"(exports) {
+  "google-auth-library/build/src/auth/loginticket.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.LoginTicket = void 0;
@@ -82721,7 +82721,7 @@ var require_loginticket = __commonJS({
 });
 
 var require_oauth2client = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/oauth2client.js"(exports) {
+  "google-auth-library/build/src/auth/oauth2client.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.OAuth2Client = exports.ClientAuthentication = exports.CertificateFormat = exports.CodeChallengeMethod = void 0;
@@ -83401,7 +83401,7 @@ var require_oauth2client = __commonJS({
 });
 
 var require_computeclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/computeclient.js"(exports) {
+  "google-auth-library/build/src/auth/computeclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Compute = void 0;
@@ -83492,7 +83492,7 @@ var require_computeclient = __commonJS({
 });
 
 var require_idtokenclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/idtokenclient.js"(exports) {
+  "google-auth-library/build/src/auth/idtokenclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IdTokenClient = void 0;
@@ -83537,7 +83537,7 @@ var require_idtokenclient = __commonJS({
 });
 
 var require_envDetect = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/envDetect.js"(exports) {
+  "google-auth-library/build/src/auth/envDetect.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GCPEnv = void 0;
@@ -83613,7 +83613,7 @@ var require_envDetect = __commonJS({
 });
 
 var require_data_stream = __commonJS({
-  "../../node_modules/.pnpm/jws@4.0.1/node_modules/jws/lib/data-stream.js"(exports, module) {
+  "jws/lib/data-stream.js"(exports, module) {
     var Buffer4 = require_safe_buffer().Buffer;
     var Stream8 = __require("stream");
     var util3 = __require("util");
@@ -83660,7 +83660,7 @@ var require_data_stream = __commonJS({
 });
 
 var require_buffer_equal_constant_time = __commonJS({
-  "../../node_modules/.pnpm/buffer-equal-constant-time@1.0.1/node_modules/buffer-equal-constant-time/index.js"(exports, module) {
+  "buffer-equal-constant-time/index.js"(exports, module) {
     "use strict";
     var Buffer4 = __require("buffer").Buffer;
     var SlowBuffer = __require("buffer").SlowBuffer;
@@ -83693,7 +83693,7 @@ var require_buffer_equal_constant_time = __commonJS({
 });
 
 var require_jwa = __commonJS({
-  "../../node_modules/.pnpm/jwa@2.0.1/node_modules/jwa/index.js"(exports, module) {
+  "jwa/index.js"(exports, module) {
     var Buffer4 = require_safe_buffer().Buffer;
     var crypto6 = __require("crypto");
     var formatEcdsa = require_ecdsa_sig_formatter();
@@ -83916,7 +83916,7 @@ var require_jwa = __commonJS({
 });
 
 var require_tostring = __commonJS({
-  "../../node_modules/.pnpm/jws@4.0.1/node_modules/jws/lib/tostring.js"(exports, module) {
+  "jws/lib/tostring.js"(exports, module) {
     var Buffer4 = __require("buffer").Buffer;
     module.exports = function toString(obj) {
       if (typeof obj === "string")
@@ -83929,7 +83929,7 @@ var require_tostring = __commonJS({
 });
 
 var require_sign_stream = __commonJS({
-  "../../node_modules/.pnpm/jws@4.0.1/node_modules/jws/lib/sign-stream.js"(exports, module) {
+  "jws/lib/sign-stream.js"(exports, module) {
     var Buffer4 = require_safe_buffer().Buffer;
     var DataStream = require_data_stream();
     var jwa = require_jwa();
@@ -84003,7 +84003,7 @@ var require_sign_stream = __commonJS({
 });
 
 var require_verify_stream = __commonJS({
-  "../../node_modules/.pnpm/jws@4.0.1/node_modules/jws/lib/verify-stream.js"(exports, module) {
+  "jws/lib/verify-stream.js"(exports, module) {
     var Buffer4 = require_safe_buffer().Buffer;
     var DataStream = require_data_stream();
     var jwa = require_jwa();
@@ -84117,7 +84117,7 @@ var require_verify_stream = __commonJS({
 });
 
 var require_jws = __commonJS({
-  "../../node_modules/.pnpm/jws@4.0.1/node_modules/jws/index.js"(exports) {
+  "jws/index.js"(exports) {
     var SignStream = require_sign_stream();
     var VerifyStream = require_verify_stream();
     var ALGORITHMS = [
@@ -84149,7 +84149,7 @@ var require_jws = __commonJS({
 });
 
 var require_jwsSign = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/gtoken/jwsSign.js"(exports) {
+  "google-auth-library/build/src/gtoken/jwsSign.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.buildPayloadForJwsSign = buildPayloadForJwsSign;
@@ -84182,7 +84182,7 @@ var require_jwsSign = __commonJS({
 });
 
 var require_getToken = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/gtoken/getToken.js"(exports) {
+  "google-auth-library/build/src/gtoken/getToken.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getToken = getToken;
@@ -84225,7 +84225,7 @@ var require_getToken = __commonJS({
 });
 
 var require_errorWithCode = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/gtoken/errorWithCode.js"(exports) {
+  "google-auth-library/build/src/gtoken/errorWithCode.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ErrorWithCode = void 0;
@@ -84241,7 +84241,7 @@ var require_errorWithCode = __commonJS({
 });
 
 var require_getCredentials = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/gtoken/getCredentials.js"(exports) {
+  "google-auth-library/build/src/gtoken/getCredentials.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getCredentials = getCredentials;
@@ -84341,7 +84341,7 @@ var require_getCredentials = __commonJS({
 });
 
 var require_tokenHandler = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/gtoken/tokenHandler.js"(exports) {
+  "google-auth-library/build/src/gtoken/tokenHandler.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TokenHandler = void 0;
@@ -84431,7 +84431,7 @@ var require_tokenHandler = __commonJS({
 });
 
 var require_revokeToken = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/gtoken/revokeToken.js"(exports) {
+  "google-auth-library/build/src/gtoken/revokeToken.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.revokeToken = revokeToken;
@@ -84448,7 +84448,7 @@ var require_revokeToken = __commonJS({
 });
 
 var require_googleToken = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/gtoken/googleToken.js"(exports) {
+  "google-auth-library/build/src/gtoken/googleToken.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GoogleToken = void 0;
@@ -84553,7 +84553,7 @@ var require_googleToken = __commonJS({
 });
 
 var require_jwtaccess = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/jwtaccess.js"(exports) {
+  "google-auth-library/build/src/auth/jwtaccess.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.JWTAccess = void 0;
@@ -84722,7 +84722,7 @@ var require_jwtaccess = __commonJS({
 });
 
 var require_jwtclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/jwtclient.js"(exports) {
+  "google-auth-library/build/src/auth/jwtclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.JWT = void 0;
@@ -84993,7 +84993,7 @@ var require_jwtclient = __commonJS({
 });
 
 var require_refreshclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/refreshclient.js"(exports) {
+  "google-auth-library/build/src/auth/refreshclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.UserRefreshClient = exports.USER_REFRESH_ACCOUNT_TYPE = void 0;
@@ -85120,7 +85120,7 @@ var require_refreshclient = __commonJS({
 });
 
 var require_impersonated = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/impersonated.js"(exports) {
+  "google-auth-library/build/src/auth/impersonated.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Impersonated = exports.IMPERSONATED_ACCOUNT_TYPE = void 0;
@@ -85298,7 +85298,7 @@ var require_impersonated = __commonJS({
 });
 
 var require_oauth2common = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/oauth2common.js"(exports) {
+  "google-auth-library/build/src/auth/oauth2common.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.OAuthClientAuthHandler = void 0;
@@ -85445,7 +85445,7 @@ var require_oauth2common = __commonJS({
 });
 
 var require_stscredentials = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/stscredentials.js"(exports) {
+  "google-auth-library/build/src/auth/stscredentials.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.StsCredentials = void 0;
@@ -85532,7 +85532,7 @@ var require_stscredentials = __commonJS({
 });
 
 var require_baseexternalclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/baseexternalclient.js"(exports) {
+  "google-auth-library/build/src/auth/baseexternalclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.BaseExternalAccountClient = exports.CLOUD_RESOURCE_MANAGER = exports.EXTERNAL_ACCOUNT_TYPE = exports.EXPIRATION_TIME_OFFSET = void 0;
@@ -85910,7 +85910,7 @@ var require_baseexternalclient = __commonJS({
 });
 
 var require_filesubjecttokensupplier = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/filesubjecttokensupplier.js"(exports) {
+  "google-auth-library/build/src/auth/filesubjecttokensupplier.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.FileSubjectTokenSupplier = void 0;
@@ -85974,7 +85974,7 @@ var require_filesubjecttokensupplier = __commonJS({
 });
 
 var require_urlsubjecttokensupplier = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/urlsubjecttokensupplier.js"(exports) {
+  "google-auth-library/build/src/auth/urlsubjecttokensupplier.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.UrlSubjectTokenSupplier = void 0;
@@ -86031,7 +86031,7 @@ var require_urlsubjecttokensupplier = __commonJS({
 });
 
 var require_certificatesubjecttokensupplier = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/certificatesubjecttokensupplier.js"(exports) {
+  "google-auth-library/build/src/auth/certificatesubjecttokensupplier.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CertificateSubjectTokenSupplier = exports.InvalidConfigurationError = exports.CertificateSourceUnavailableError = exports.CERTIFICATE_CONFIGURATION_ENV_VARIABLE = void 0;
@@ -86214,7 +86214,7 @@ var require_certificatesubjecttokensupplier = __commonJS({
 });
 
 var require_identitypoolclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/identitypoolclient.js"(exports) {
+  "google-auth-library/build/src/auth/identitypoolclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IdentityPoolClient = void 0;
@@ -86325,7 +86325,7 @@ var require_identitypoolclient = __commonJS({
 });
 
 var require_awsrequestsigner = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/awsrequestsigner.js"(exports) {
+  "google-auth-library/build/src/auth/awsrequestsigner.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.AwsRequestSigner = void 0;
@@ -86474,7 +86474,7 @@ ${credentialScope}
 });
 
 var require_defaultawssecuritycredentialssupplier = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/defaultawssecuritycredentialssupplier.js"(exports) {
+  "google-auth-library/build/src/auth/defaultawssecuritycredentialssupplier.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.DefaultAwsSecurityCredentialsSupplier = void 0;
@@ -86628,7 +86628,7 @@ var require_defaultawssecuritycredentialssupplier = __commonJS({
 });
 
 var require_awsclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/awsclient.js"(exports) {
+  "google-auth-library/build/src/auth/awsclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.AwsClient = void 0;
@@ -86741,7 +86741,7 @@ var require_awsclient = __commonJS({
 });
 
 var require_executable_response = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/executable-response.js"(exports) {
+  "google-auth-library/build/src/auth/executable-response.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.InvalidSubjectTokenError = exports.InvalidMessageFieldError = exports.InvalidCodeFieldError = exports.InvalidTokenTypeFieldError = exports.InvalidExpirationTimeFieldError = exports.InvalidSuccessFieldError = exports.InvalidVersionFieldError = exports.ExecutableResponseError = exports.ExecutableResponse = void 0;
@@ -86871,7 +86871,7 @@ var require_executable_response = __commonJS({
 });
 
 var require_pluggable_auth_handler = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/pluggable-auth-handler.js"(exports) {
+  "google-auth-library/build/src/auth/pluggable-auth-handler.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PluggableAuthHandler = exports.ExecutableError = void 0;
@@ -87011,7 +87011,7 @@ var require_pluggable_auth_handler = __commonJS({
 });
 
 var require_pluggable_auth_client = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/pluggable-auth-client.js"(exports) {
+  "google-auth-library/build/src/auth/pluggable-auth-client.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PluggableAuthClient = exports.ExecutableError = void 0;
@@ -87137,7 +87137,7 @@ var require_pluggable_auth_client = __commonJS({
 });
 
 var require_externalclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/externalclient.js"(exports) {
+  "google-auth-library/build/src/auth/externalclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ExternalAccountClient = void 0;
@@ -87185,7 +87185,7 @@ var require_externalclient = __commonJS({
 });
 
 var require_externalAccountAuthorizedUserClient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/externalAccountAuthorizedUserClient.js"(exports) {
+  "google-auth-library/build/src/auth/externalAccountAuthorizedUserClient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ExternalAccountAuthorizedUserClient = exports.EXTERNAL_ACCOUNT_AUTHORIZED_USER_TYPE = void 0;
@@ -87371,7 +87371,7 @@ var require_externalAccountAuthorizedUserClient = __commonJS({
 });
 
 var require_gdchclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/gdchclient.js"(exports) {
+  "google-auth-library/build/src/auth/gdchclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GdchClient = exports.GDCH_SERVICE_ACCOUNT_TYPE = void 0;
@@ -87653,7 +87653,7 @@ var require_gdchclient = __commonJS({
 });
 
 var require_googleauth = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/googleauth.js"(exports) {
+  "google-auth-library/build/src/auth/googleauth.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.GoogleAuth = exports.GoogleAuthExceptionMessages = void 0;
@@ -88460,7 +88460,7 @@ var require_googleauth = __commonJS({
 });
 
 var require_iam = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/iam.js"(exports) {
+  "google-auth-library/build/src/auth/iam.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IAMAuth = void 0;
@@ -88495,7 +88495,7 @@ var require_iam = __commonJS({
 });
 
 var require_downscopedclient = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/downscopedclient.js"(exports) {
+  "google-auth-library/build/src/auth/downscopedclient.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.DownscopedClient = exports.EXPIRATION_TIME_OFFSET = exports.MAX_ACCESS_BOUNDARY_RULES_COUNT = void 0;
@@ -88679,7 +88679,7 @@ var require_downscopedclient = __commonJS({
 });
 
 var require_passthrough = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/auth/passthrough.js"(exports) {
+  "google-auth-library/build/src/auth/passthrough.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PassThroughClient = void 0;
@@ -88723,7 +88723,7 @@ var require_passthrough = __commonJS({
 });
 
 var require_src5 = __commonJS({
-  "../../node_modules/.pnpm/google-auth-library@10.9.1/node_modules/google-auth-library/build/src/index.js"(exports) {
+  "google-auth-library/build/src/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m2, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -88858,7 +88858,7 @@ var require_src5 = __commonJS({
 });
 
 var require_constants = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/constants.js"(exports, module) {
+  "ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -88880,7 +88880,7 @@ var require_constants = __commonJS({
 });
 
 var require_buffer_util = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -88954,7 +88954,7 @@ var require_buffer_util = __commonJS({
 });
 
 var require_limiter = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/limiter.js"(exports, module) {
+  "ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -89003,7 +89003,7 @@ var require_limiter = __commonJS({
 });
 
 var require_permessage_deflate = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib2 = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -89385,7 +89385,7 @@ var require_permessage_deflate = __commonJS({
 });
 
 var require_validation = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/validation.js"(exports, module) {
+  "ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -89585,7 +89585,7 @@ var require_validation = __commonJS({
 });
 
 var require_receiver = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/receiver.js"(exports, module) {
+  "ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -90207,7 +90207,7 @@ var require_receiver = __commonJS({
 });
 
 var require_sender = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/sender.js"(exports, module) {
+  "ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -90699,7 +90699,7 @@ var require_sender = __commonJS({
 });
 
 var require_event_target = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/event-target.js"(exports, module) {
+  "ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -90927,7 +90927,7 @@ var require_event_target = __commonJS({
 });
 
 var require_extension = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/extension.js"(exports, module) {
+  "ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -91079,7 +91079,7 @@ var require_extension = __commonJS({
 });
 
 var require_websocket = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/websocket.js"(exports, module) {
+  "ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var https2 = __require("https");
@@ -91987,7 +91987,7 @@ var require_websocket = __commonJS({
 });
 
 var require_stream = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/stream.js"(exports, module) {
+  "ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket3 = require_websocket();
     var { Duplex } = __require("stream");
@@ -92084,7 +92084,7 @@ var require_stream = __commonJS({
 });
 
 var require_subprotocol = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse5(header2) {
@@ -92128,7 +92128,7 @@ var require_subprotocol = __commonJS({
 });
 
 var require_websocket_server = __commonJS({
-  "../../node_modules/.pnpm/ws@8.22.0/node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var http3 = __require("http");
@@ -112390,8 +112390,12 @@ function decodeSubscription(value, provider) {
   }
 }
 function credentialSecretValues(value) {
-  const subscription = decodeSubscription(value);
-  return subscription ? [value, subscription.credential.access, subscription.credential.refresh] : [value];
+  try {
+    const subscription = decodeSubscription(value);
+    return subscription ? [value, subscription.credential.access, subscription.credential.refresh] : [value];
+  } catch {
+    return [value];
+  }
 }
 
 init_lazy();
@@ -114325,6 +114329,7 @@ var FallbackChain = class {
   #models;
   #index = 0;
   #from;
+  #onlySubscriptionCalls = true;
   constructor(primary, fallbacks = []) {
     this.#models = [primary, ...fallbacks];
   }
@@ -114338,6 +114343,13 @@ var FallbackChain = class {
   get label() {
     return this.#current().label;
   }
+  get includedInSubscription() {
+    return this.#current().includedInSubscription === true;
+  }
+  /** True only when every attempted model call, including failures, was subscription-backed. */
+  get onlySubscriptionCalls() {
+    return this.#onlySubscriptionCalls;
+  }
   #current() {
     const model = this.#models[this.#index];
     if (!model)
@@ -114347,6 +114359,7 @@ var FallbackChain = class {
   async generate(request2) {
     for (; ; ) {
       const model = this.#current();
+      this.#onlySubscriptionCalls &&= model.includedInSubscription === true;
       try {
         return await model.generate(request2);
       } catch (error62) {
@@ -114560,6 +114573,9 @@ var SpendTracker = class {
     this.pricing = pricing;
     this.limitUsd = limitUsd;
   }
+  currentPricing() {
+    return typeof this.pricing === "function" ? this.pricing() : this.pricing;
+  }
   /** USD charged so far: real usage where reported, the estimate otherwise. 0 without pricing. */
   get spentUsd() {
     return this.#spentUsd;
@@ -114569,17 +114585,18 @@ var SpendTracker = class {
     return Math.max(0, this.limitUsd - this.#spentUsd);
   }
   get priced() {
-    return this.pricing !== void 0;
+    return this.currentPricing() !== void 0;
   }
   /** Worst-case cost of one call; 0 without pricing. */
   estimate(promptTokens, outputTokens) {
-    if (!this.pricing)
+    const pricing = this.currentPricing();
+    if (!pricing)
       return 0;
-    return estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: outputTokens }, this.pricing);
+    return estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: outputTokens }, pricing);
   }
   /** Whether one more call of this size still fits the per-review budget. Always true without pricing. */
   canAfford(promptTokens, outputTokens) {
-    if (!this.pricing)
+    if (!this.currentPricing())
       return true;
     return this.#spentUsd + this.estimate(promptTokens, outputTokens) <= this.limitUsd;
   }
@@ -114588,9 +114605,10 @@ var SpendTracker = class {
    * estimated cost, so calls on usage-less providers still count against the budget.
    */
   record(promptTokens, outputTokens, usage) {
-    if (!this.pricing)
+    const pricing = this.currentPricing();
+    if (!pricing)
       return;
-    this.#spentUsd += hasRealUsage(usage) ? costUsd(usage, this.pricing) : this.estimate(promptTokens, outputTokens);
+    this.#spentUsd += hasRealUsage(usage) ? costUsd(usage, pricing) : this.estimate(promptTokens, outputTokens);
   }
 };
 function describeCallError(err, knownSecrets = []) {
@@ -114638,6 +114656,7 @@ function withCallTimeout(model, timeoutMs) {
     get label() {
       return model.label;
     },
+    ...model.includedInSubscription ? { includedInSubscription: true } : {},
     ...model.fallbacks ? { fallbacks: model.fallbacks } : {},
     ...model.secrets ? { secrets: model.secrets } : {},
     ...model.skippedFallbacks ? { skippedFallbacks: model.skippedFallbacks } : {},
@@ -115548,11 +115567,13 @@ async function runVerifyPass(input2) {
 async function runReview(input2) {
   const { config: config2, pr, files, rulesFiles, signal } = input2;
   const reviewCfg = config2.review;
-  const budgetCfg = input2.model.includedInSubscription ? { ...config2.budget, pricing: { inputPerMTok: 0, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 } } : config2.budget;
+  const budgetCfg = config2.budget;
   const limits = reviewLimits(reviewCfg);
   const deadline = new ReviewDeadline(limits.totalTimeoutMs);
   const fallbackModels = input2.fallbackModels ?? input2.model.fallbacks ?? [];
   const model = new FallbackChain(withCallTimeout(input2.model, limits.callTimeoutMs), fallbackModels.map((m2) => withCallTimeout(m2, limits.callTimeoutMs)));
+  const subscriptionPricing = { inputPerMTok: 0, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 };
+  const currentPricing = () => model.includedInSubscription ? subscriptionPricing : budgetCfg.pricing;
   const knownSecrets = secretsToRedact(input2.knownSecrets, input2.model, fallbackModels);
   const incompleteReasons = [];
   const reviewableFiles = [];
@@ -115626,11 +115647,12 @@ async function runReview(input2) {
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
   const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
   let estimatedCostUsd;
-  if (budgetCfg.pricing) {
-    const pricing = budgetCfg.pricing;
+  const initialPricing = currentPricing();
+  if (initialPricing) {
+    const pricing = initialPricing;
     estimatedCostUsd = callPromptTokens.reduce((sum, tokens) => sum + estimateCostUsd({ inputTokens: tokens, maxOutputTokens: reviewOutputTokens }, pricing), 0);
     if (reviewCfg.verify) {
-      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens }, budgetCfg.pricing);
+      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens }, pricing);
     }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return {
@@ -115639,7 +115661,7 @@ async function runReview(input2) {
       };
     }
   }
-  const spend = new SpendTracker(budgetCfg.pricing, budgetCfg.perReviewUsd);
+  const spend = new SpendTracker(currentPricing, budgetCfg.perReviewUsd);
   const passContext = {
     config: config2,
     model,
@@ -115725,7 +115747,9 @@ async function runReview(input2) {
   };
   const disclosure = model.disclosure();
   let reviewCostUsd;
-  if (budgetCfg.pricing && !disclosure.fallbackFrom) {
+  if (model.onlySubscriptionCalls) {
+    reviewCostUsd = 0;
+  } else if (budgetCfg.pricing && !disclosure.fallbackFrom) {
     reviewCostUsd = spend.spentUsd;
   }
   return {

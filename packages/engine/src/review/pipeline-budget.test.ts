@@ -7,8 +7,40 @@ import {
   SIMPLE_PATCH,
 } from './pipeline.fixtures.js';
 import { runReview } from './pipeline.js';
+import { LlmFailure } from '../llm/failure.js';
 
 describe('runReview - USD budget and pricing', () => {
+  it('reports zero cost when one subscription falls back to another subscription', async () => {
+    const primary: ReviewModel = { label: 'openai:subscription', includedInSubscription: true,
+      generate: async () => { throw new LlmFailure({ code: 'QUOTA', provider: 'openai', message: 'Quota reached' }); } };
+    const fallback = { ...makeModel(makeAnswerJson()), label: 'xai:subscription', includedInSubscription: true };
+    const result = await runReview({ config: makeConfig(), pr: { title: 'T', body: 'B' },
+      files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }], rulesFiles: [],
+      model: primary, fallbackModels: [fallback], knownSecrets: [] });
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.costUsd).toBe(0);
+      expect(result.fallbackFrom).toBe(primary.label);
+      expect(result.modelUsed).toBe(fallback.label);
+    }
+  });
+
+  it('keeps paid API fallback cost unknown and charges its calls against the spend limit', async () => {
+    const primary: ReviewModel = { label: 'openai:subscription', includedInSubscription: true,
+      generate: async () => { throw new LlmFailure({ code: 'QUOTA', provider: 'openai', message: 'Quota reached' }); } };
+    // A truncated paid fallback spends more than the cap: no free truncation retry is allowed.
+    const generate = vi.fn(async () => ({ text: '{"summary":"truncated', finishReason: 'max-tokens' as const,
+      usage: { inputTokens: 100000, outputTokens: 4096, cacheReadTokens: 0, cacheWriteTokens: 0 } }));
+    const config = makeConfig({ budget: { perReviewUsd: 0.01, maxInputTokens: 200000,
+      pricing: { inputPerMTok: 5, outputPerMTok: 15, cacheReadPerMTok: 5, cacheWritePerMTok: 5 } } });
+    config.review.verify = false;
+    const result = await runReview({ config,
+      pr: { title: 'T', body: 'B' }, files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }],
+      rulesFiles: [], model: primary, fallbackModels: [{ label: 'anthropic:api', generate }], knownSecrets: [] });
+    expect(generate).toHaveBeenCalledTimes(1);
+    if (result.status === 'completed') expect(result.costUsd).toBeUndefined();
+    else expect(result.status).toBe('failed');
+  });
   it('records zero incremental cost for a subscription even when API prices would exceed the budget', async () => {
     const model = { ...makeModel(makeAnswerJson(), { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 }), includedInSubscription: true };
     const result = await runReview({

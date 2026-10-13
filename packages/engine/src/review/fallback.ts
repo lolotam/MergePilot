@@ -46,6 +46,7 @@ export class FallbackChain implements ReviewModel {
   readonly #models: readonly ReviewModel[];
   #index = 0;
   #from: { label: string; code: FailureKind } | undefined;
+  #onlySubscriptionCalls = true;
 
   constructor(primary: ReviewModel, fallbacks: readonly ReviewModel[] = []) {
     this.#models = [primary, ...fallbacks];
@@ -63,6 +64,15 @@ export class FallbackChain implements ReviewModel {
     return this.#current().label;
   }
 
+  get includedInSubscription(): boolean {
+    return this.#current().includedInSubscription === true;
+  }
+
+  /** True only when every attempted model call, including failures, was subscription-backed. */
+  get onlySubscriptionCalls(): boolean {
+    return this.#onlySubscriptionCalls;
+  }
+
   #current(): ReviewModel {
     const model = this.#models[this.#index];
     if (!model) throw new Error('fallback chain is empty');
@@ -72,6 +82,7 @@ export class FallbackChain implements ReviewModel {
   async generate(request: ReviewModelRequest): Promise<ReviewModelResponse> {
     for (;;) {
       const model = this.#current();
+      this.#onlySubscriptionCalls &&= model.includedInSubscription === true;
       try {
         return await model.generate(request);
       } catch (error) {
