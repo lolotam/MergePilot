@@ -70468,7 +70468,10 @@ var JUDGE_PROVIDERS = {
     id: "openrouter",
     label: "OpenRouter",
     baseUrl: "https://openrouter.ai/api",
-    models: [{ id: "~typesafe/jev-latest" }, { id: "typesafe/jev-1.13" }],
+    models: [
+      { id: "~typesafe/jev-latest", inputPerMTok: 0.042 },
+      { id: "typesafe/jev-1.13", inputPerMTok: 0.042 }
+    ],
     envName: "OPENROUTER_API_KEY"
   },
   "vercel-gateway": {
@@ -70656,6 +70659,7 @@ async function callSystemOne(call) {
   }
 }
 
+var JUDGE_OUTPUT_TOKENS_PER_QUESTION = 64;
 function dedupeBefore(failed) {
   const seen = /* @__PURE__ */ new Set();
   const out = [];
@@ -70740,6 +70744,13 @@ function createJudge(options) {
   let answeredBy;
   let unavailable;
   let startAt = 0;
+  const priceOf = (provider, model) => {
+    const looked = options.priceLookup?.(provider, model);
+    if (looked)
+      return looked;
+    const input2 = jevModelPrice(provider, model);
+    return input2 !== void 0 ? { inputPerMTok: input2 } : void 0;
+  };
   const record3 = (attempt, questions, fallbackIndex) => {
     allAttempts.push(attempt);
     options.onCall?.({ ...attempt, questions, fallbackIndex });
@@ -70749,6 +70760,7 @@ function createJudge(options) {
     const deadline = now() + totalTimeoutMs;
     const attempts = [];
     const estimate = estimateTokens(JSON.stringify({ state: request2.state, questions: request2.questions }));
+    const outputEstimate = questions * JUDGE_OUTPUT_TOKENS_PER_QUESTION;
     let lastCode = "no-key";
     for (let index = startAt; index < entries.length; index++) {
       const entry = entries[index];
@@ -70770,8 +70782,9 @@ function createJudge(options) {
         skip("no-key");
         continue;
       }
-      const price = jevModelPrice(entry.provider, entry.model);
-      if (price !== void 0 && request2.maxUsd !== void 0 && estimate * price / 1e6 > request2.maxUsd) {
+      const price = priceOf(entry.provider, entry.model);
+      const worstCaseUsd = price === void 0 ? void 0 : (estimate * price.inputPerMTok + outputEstimate * (price.outputPerMTok ?? 0)) / 1e6;
+      if (worstCaseUsd !== void 0 && request2.maxUsd !== void 0 && worstCaseUsd > request2.maxUsd) {
         skip("budget");
         continue;
       }
@@ -70789,7 +70802,7 @@ function createJudge(options) {
           sleep: options.sleep
         });
         const ms = now() - started;
-        const cost = result.costUsd ?? (price !== void 0 ? result.usage.inputTokens * price / 1e6 : void 0);
+        const cost = result.costUsd ?? (price !== void 0 ? (result.usage.inputTokens * price.inputPerMTok + result.usage.outputTokens * (price.outputPerMTok ?? 0)) / 1e6 : void 0);
         const attempt = {
           ...base,
           ok: true,
@@ -120625,6 +120638,8 @@ async function judgeSameIssue(input2) {
   }
 }
 
+var PRICE_MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
+
 function getUserAgent() {
   if (typeof navigator === "object" && "userAgent" in navigator) {
     return navigator.userAgent;
@@ -125851,7 +125866,8 @@ function withJudgeUsage(costUsd2, usage, report) {
   const judgeIn = report?.inputTokens ?? 0;
   const judgeOut = report?.outputTokens ?? 0;
   const hasTokens = usage !== void 0 || judgeIn + judgeOut > 0;
-  const cost = costUsd2 === void 0 && report?.costUsd === void 0 ? void 0 : (costUsd2 ?? 0) + (report?.costUsd ?? 0);
+  const judgeCostUnknown = judgeIn + judgeOut > 0 && report?.costUsd === void 0;
+  const cost = costUsd2 === void 0 || judgeCostUnknown ? void 0 : costUsd2 + (report?.costUsd ?? 0);
   return {
     ...cost !== void 0 ? { costUsd: cost } : {},
     ...hasTokens ? { inputTokens: (usage?.inputTokens ?? 0) + judgeIn, outputTokens: (usage?.outputTokens ?? 0) + judgeOut } : {}

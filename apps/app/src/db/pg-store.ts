@@ -4,41 +4,21 @@ import { deleteWorkspaceInTx, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
-  KeyProvider,
-  AppStore,
-  DeleteRunsTarget,
-  FinishReviewRunOptions,
-  Installation,
-  LatestFailedRunsOptions,
-  ListReviewRunGroupsResult,
-  ListReviewRunsOptions,
-  ListReviewRunsResult,
-  MaintenanceKind,
-  MaintenanceRun,
-  MonthlyUsage,
-  NewReviewRun,
-  RetentionPolicy,
-  ReviewRun,
-  ReviewerBot,
-  StoredCredential,
-  WorkspaceSettings,
+  KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
+  ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
+  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, ReviewerBot, StoredCredential, WorkspaceSettings, ModelKey,
+  StoredModelPrice,
 } from '../core/types.js';
+import type { PriceEntry, PriceSource } from '@mergepilot/engine';
+import { getPgModelPrice, listPgModelPrices, pgPricesFetchedAt, replacePgModelPrices } from './pg-prices.js';
 import {
-  deletePgReviewRuns,
-  finishPgMaintenanceRun,
-  getLatestPgMaintenanceRun,
-  listPgRetentionPolicies,
-  prunePgReviewRuns,
+  deletePgReviewRuns, finishPgMaintenanceRun, getLatestPgMaintenanceRun, listPgRetentionPolicies, prunePgReviewRuns,
   startPgMaintenanceRun,
 } from './pg-maintenance.js';
 import { deletePgReviewerBot, listPgReviewerBots, upsertPgReviewerBot } from './pg-bots.js';
 import { listPgRunGroups } from './pg-run-groups.js';
 import {
-  createPgReviewRun,
-  findPgActiveReviewRun,
-  listPgLatestFailedRuns,
-  mapReviewRunRow,
-  queryPgReviewRuns,
+  createPgReviewRun, findPgActiveReviewRun, listPgLatestFailedRuns, mapReviewRunRow, queryPgReviewRuns,
   touchPgReviewRun,
 } from './pg-runs.js';
 import { getPgSettings, savePgSettings } from './pg-settings.js';
@@ -382,6 +362,22 @@ export class PgStore implements AppStore {
 
   async getLatestMaintenanceRun(kind: MaintenanceKind): Promise<MaintenanceRun | null> {
     return getLatestPgMaintenanceRun(this.db, kind);
+  }
+
+  async replaceModelPrices(source: PriceSource, entries: readonly PriceEntry[], fetchedAt: Date): Promise<number> {
+    return replacePgModelPrices(this.db, source, entries, fetchedAt);
+  }
+
+  async getModelPrice(provider: string, model: string): Promise<StoredModelPrice | null> {
+    return getPgModelPrice(this.db, provider, model);
+  }
+
+  async listModelPrices(keys: readonly ModelKey[]): Promise<StoredModelPrice[]> {
+    return listPgModelPrices(this.db, keys);
+  }
+
+  async pricesFetchedAt(): Promise<Array<{ source: PriceSource; fetchedAt: Date }>> {
+    return pgPricesFetchedAt(this.db);
   }
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {

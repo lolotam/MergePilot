@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { BotNameTakenError, sameBotName } from '../core/types.js';
-import type { ApiProvider, BotLogo, JudgeSettings, PanelMode, WorkspaceSettings } from '../core/types.js';
+import type { ApiProvider, BotLogo, JudgeSettings, PanelMode, PriceOverride, WorkspaceSettings } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
@@ -35,6 +35,7 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
           fallback: Array.isArray(row.judgeFallback) ? (row.judgeFallback as JudgeSettings['fallback']) : [],
         }
       : null,
+    priceOverrides: Array.isArray(row.priceOverrides) ? (row.priceOverrides as PriceOverride[]) : [],
     botName: row.botName,
     botLogo: row.botLogo as BotLogo,
     panelMode: row.panelMode as PanelMode,
@@ -55,9 +56,10 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
 }
 
 /**
- * Upserts the settings. `runRetentionDays`, `repoColors`, `judge` and the panel fields (`botName`,
- * `botLogo`, `panelMode`, `panelMinAgreement`) left undefined keep the stored value (a new row gets
- * the column defaults: 30 days, no colors, the "MergePilot" bot, separate reviews).
+ * Upserts the settings. `runRetentionDays`, `repoColors`, `judge`, `priceOverrides` and the panel
+ * fields (`botName`, `botLogo`, `panelMode`, `panelMinAgreement`) left undefined keep the stored
+ * value (a new row gets the column defaults: 30 days, no colors, no manual prices, the
+ * "MergePilot" bot, separate reviews).
  * Throws BotNameTakenError when `botName` matches an extra bot's name.
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
@@ -80,6 +82,7 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
   if (settings.runRetentionDays !== undefined) values.runRetentionDays = settings.runRetentionDays;
   if (settings.repoColors !== undefined) values.repoColors = settings.repoColors;
   if (settings.judge !== undefined) Object.assign(values, judgeColumns(settings.judge));
+  if (settings.priceOverrides !== undefined) values.priceOverrides = settings.priceOverrides;
   if (settings.botName !== undefined) values.botName = settings.botName;
   if (settings.botLogo !== undefined) values.botLogo = settings.botLogo;
   if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
@@ -87,9 +90,15 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
   await withLiveWorkspace(db, settings.workspaceId, async (tx) => {
     const botName = settings.botName;
     if (botName !== undefined) {
-      // The main bot's name must differ from every extra bot's, checked under the bot-name lock.
+      // A renamed main bot must differ from every extra bot's name, checked under the bot-name lock.
+      // An unchanged name is not re-checked, so saving other settings is never blocked by it.
       await lockBotNames(tx, settings.workspaceId);
-      const extras = await tx
+      const stored = await tx
+        .select({ name: workspaceSettings.botName })
+        .from(workspaceSettings)
+        .where(eq(workspaceSettings.workspaceId, settings.workspaceId));
+      const renamed = !stored[0] || !sameBotName(stored[0].name, botName);
+      const extras = !renamed ? [] : await tx
         .select({ name: reviewerBots.name })
         .from(reviewerBots)
         .where(eq(reviewerBots.workspaceId, settings.workspaceId));

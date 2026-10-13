@@ -39,6 +39,8 @@ export function mergeSettings(
     repoColors: update.repoColors ?? current?.repoColors ?? {},
     // Undefined keeps the stored judge; null turns it off and clears it.
     judge: update.judge !== undefined ? update.judge : (current?.judge ?? null),
+    // Undefined keeps the stored manual prices; [] clears them (ADR-0016).
+    priceOverrides: update.priceOverrides ?? current?.priceOverrides ?? [],
     // The reviewer panel (ADR-0017): undefined keeps the stored value; the stores fill the defaults.
     botName: update.botName ?? current?.botName,
     botLogo: update.botLogo ?? current?.botLogo,
@@ -78,6 +80,8 @@ export async function validateSettings(
 
   const fallbackProblem = await validateFallback(store, workspaceId, settings, settings.fallback ?? []);
   if (fallbackProblem) return fallbackProblem;
+  const priceProblem = validatePriceOverrides(settings.priceOverrides ?? []);
+  if (priceProblem) return priceProblem;
   return settings.judge ? validateJudge(store, workspaceId, settings.judge) : null;
 }
 
@@ -125,6 +129,19 @@ export async function validateFallback(
 /** True when an extra bot of the workspace already uses this name (ignoring case and spaces around it). */
 export async function botNameTakenByExtraBot(store: AppStore, workspaceId: string, name: string): Promise<boolean> {
   return (await store.listReviewerBots(workspaceId)).some((bot) => sameBotName(bot.name, name));
+}
+
+/** One manual price per model: the schema checks each entry, this checks the list. */
+function validatePriceOverrides(overrides: ReadonlyArray<{ provider: string; model: string }>): SettingsProblem | null {
+  const seen = new Set<string>();
+  for (const o of overrides) {
+    const id = `${o.provider}\u0000${o.model.toLowerCase()}`;
+    if (seen.has(id)) {
+      return { code: 'price_override_duplicate', message: `priceOverrides: ${o.provider}:${o.model} is listed twice` };
+    }
+    seen.add(id);
+  }
+  return null;
 }
 
 /**

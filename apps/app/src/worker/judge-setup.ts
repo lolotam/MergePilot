@@ -4,6 +4,7 @@ import {
   type FetchLike,
   type JudgeEntry,
   type JudgeFilterSummary,
+  type JudgePriceLookup,
   type JudgeReport,
   type Secret,
   type TokenUsage,
@@ -30,7 +31,7 @@ export async function workspaceJudge(
   workspaceId: string,
   credentials: ProcessReviewCredentials,
   logger: Logger,
-  context: { jobId: string; runId: string; fetch?: FetchLike | undefined },
+  context: { jobId: string; runId: string; fetch?: FetchLike | undefined; priceLookup?: JudgePriceLookup | undefined },
 ): Promise<WorkspaceJudge> {
   const config = settings.judge;
   if (!config?.enabled) return { secrets: [] };
@@ -48,6 +49,8 @@ export async function workspaceJudge(
   const judge = createJudge({
     entries,
     ...(context.fetch ? { fetch: context.fetch } : {}),
+    // Catalog and workspace prices first (ADR-0016); the static Jev table stays the last resort.
+    ...(context.priceLookup ? { priceLookup: context.priceLookup } : {}),
     onCall: (event) =>
       logger.info(
         {

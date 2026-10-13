@@ -165,6 +165,7 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
         runRetentionDays: 30,
         repoColors: {},
         judge: null,
+        priceOverrides: [],
       },
     });
 
