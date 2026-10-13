@@ -21,7 +21,8 @@ describe('actionJudge', () => {
       env,
       (m) => logs.push(m),
     );
-    expect(out.judge?.mode).toBe('filter');
+    // The old single mode still works: filter -> filter + dedupe.
+    expect(out.judge?.uses).toEqual(['filter', 'dedupe']);
     expect(out.judge?.threshold).toBe(0.35);
     expect(out.judge?.judge.entries).toEqual([
       { provider: 'typesafe', model: 'jev-latest', hasKey: true },
@@ -31,6 +32,15 @@ describe('actionJudge', () => {
     expect(out.secrets.map((s) => s.reveal())).toEqual([key('ts')]);
     expect(logs.some((l) => l.includes('OPENCODE_API_KEY') && l.includes('skipped'))).toBe(true);
     expect(logs.join('\n')).not.toContain(key('ts'));
+    expect(logs.some((l) => l.includes('uses filter, dedupe'))).toBe(true);
+  });
+
+  it('passes the configured uses through, and says when an enabled judge has none', () => {
+    const logs: string[] = [];
+    const out = actionJudge(config({ provider: 'typesafe', uses: ['annotate', 'filter'] }), {}, (m) => logs.push(m));
+    expect(out.judge?.uses).toEqual(['annotate', 'filter']);
+    actionJudge(config({ provider: 'typesafe', uses: [] }), {}, (m) => logs.push(m));
+    expect(logs.some((l) => l.includes('uses none'))).toBe(true);
   });
 
   it('formats one judge.call line without the state', () => {

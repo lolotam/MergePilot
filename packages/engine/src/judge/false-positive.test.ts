@@ -27,7 +27,7 @@ const PATCH = '@@ -1,2 +1,3 @@\n a\n+b\n c\n@@ -40,2 +41,3 @@\n x\n+y\n z';
 function input(fetch: Parameters<typeof createJudge>[0]['fetch'], overrides: Partial<FalsePositiveInput> = {}): FalsePositiveInput {
   return {
     judge: createJudge({ entries: [{ provider: 'typesafe', model: 'jev-latest', apiKey: judgeSecret() }], fetch, sleep: noSleep }),
-    mode: 'filter',
+    uses: ['filter', 'dedupe'],
     threshold: 0.35,
     findings: [finding('a', 2), finding('b', 42), finding('c', 3)],
     files: [{ path: 'src/a.ts', patch: PATCH }],
@@ -54,7 +54,7 @@ describe('runFalsePositiveFilter', () => {
     expect(out.unavailable).toBeUndefined();
   });
 
-  it('filter mode never drops a critical or high finding; a low score is shown on it instead', async () => {
+  it('filter alone never drops a critical or high finding; a low score is shown on it instead', async () => {
     const { fetch } = mockFetch(noulReply({ f1: 0.1, f2: 0.1, f3: 0.1 }));
     const base = input(fetch);
     const findings = base.findings.map((f, i) => ({ ...f, severity: (['critical', 'high', 'medium'] as const)[i]! }));
@@ -64,17 +64,46 @@ describe('runFalsePositiveFilter', () => {
     expect(out.filtered.map((f) => f.title)).toEqual(['Bug c']);
   });
 
-  it('annotate mode keeps every finding and adds the confidence line', async () => {
-    const { fetch } = mockFetch(noulReply({ f1: 0.82, f2: 0.1, f3: 0.5 }));
-    const out = await runFalsePositiveFilter(input(fetch, { mode: 'annotate' }));
+  it('annotate alone keeps every finding and adds the confidence line to each', async () => {
+    const { fetch, calls } = mockFetch(noulReply({ f1: 0.82, f2: 0.1, f3: 0.5 }));
+    const out = await runFalsePositiveFilter(input(fetch, { uses: ['annotate'] }));
+    expect(calls).toHaveLength(1);
     expect(out.findings).toHaveLength(3);
     expect(out.findings[0]?.body).toBe('body a\n\n<sub>Jev confidence: 0.82</sub>');
+    expect(out.findings.every((f) => f.body.includes('Jev confidence'))).toBe(true);
     expect(out.filtered).toEqual([]);
+    expect(out.uses).toEqual(['annotate']);
+  });
+
+  it('filter alone annotates only the low findings it kept, not the confident ones', async () => {
+    const { fetch } = mockFetch(noulReply({ f1: 0.9, f2: 0.1, f3: 0.2 }));
+    const base = input(fetch, { uses: ['filter'] });
+    const findings = base.findings.map((f, i) => ({ ...f, severity: (['medium', 'medium', 'high'] as const)[i]! }));
+    const out = await runFalsePositiveFilter({ ...base, findings });
+    expect(out.findings.map((f) => f.id)).toEqual(['a', 'c']);
+    expect(out.findings[0]?.body).toBe('body a');
+    expect(out.findings[1]?.body).toContain('Jev confidence: 0.20');
+    expect(out.filtered.map((f) => f.title)).toEqual(['Bug b']);
+  });
+
+  it('annotate + filter in ONE request: low ones dropped, critical/high kept, every kept finding annotated', async () => {
+    const { fetch, calls } = mockFetch(noulReply({ f1: 0.9, f2: 0.1, f3: 0.05, f4: 0.6 }));
+    const base = input(fetch, { uses: new Set(['annotate', 'filter'] as const) });
+    const findings = [...base.findings, finding('d', 4)].map((f, i) => ({
+      ...f,
+      severity: (['medium', 'low', 'critical', 'medium'] as const)[i]!,
+    }));
+    const out = await runFalsePositiveFilter({ ...base, findings });
+    expect(calls).toHaveLength(1);
+    expect(out.findings.map((f) => f.id)).toEqual(['a', 'c', 'd']);
+    expect(out.findings.map((f) => /Jev confidence: ([\d.]+)/.exec(f.body)?.[1])).toEqual(['0.90', '0.05', '0.60']);
+    expect(out.filtered).toEqual([{ title: 'Bug b', path: 'src/a.ts', line: 42, noul: 0.1 }]);
+    expect(out.uses).toEqual(['annotate', 'filter']);
   });
 
   it('annotates in Arabic for an Arabic review', async () => {
     const { fetch } = mockFetch(noulReply({ f1: 0.5, f2: 0.5, f3: 0.5 }));
-    const out = await runFalsePositiveFilter(input(fetch, { mode: 'annotate', language: 'ar' }));
+    const out = await runFalsePositiveFilter(input(fetch, { uses: ['annotate'], language: 'ar' }));
     expect(out.findings[0]?.body).toContain('ثقة Jev: 0.50');
   });
 
@@ -87,11 +116,14 @@ describe('runFalsePositiveFilter', () => {
     expect(out.filtered).toEqual([]);
   });
 
-  it('does nothing in off mode', async () => {
-    const { fetch, calls } = mockFetch(noulReply({}));
-    const out = await runFalsePositiveFilter(input(fetch, { mode: 'off' }));
-    expect(calls).toHaveLength(0);
-    expect(out.findings).toHaveLength(3);
+  it('sends no request without annotate or filter (dedupe/consensus only, or no uses at all)', async () => {
+    for (const uses of [['dedupe', 'consensus'] as const, [] as const]) {
+      const { fetch, calls } = mockFetch(noulReply({}));
+      const out = await runFalsePositiveFilter(input(fetch, { uses }));
+      expect(calls).toHaveLength(0);
+      expect(out.findings).toHaveLength(3);
+      expect(out.checked).toBe(0);
+    }
   });
 
   it('redacts secrets and neutralises prompt delimiters in the state', async () => {

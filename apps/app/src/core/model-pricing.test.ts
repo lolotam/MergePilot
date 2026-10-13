@@ -57,7 +57,7 @@ describe('judge prices', () => {
     enabled: true,
     provider: 'opencode-zen',
     model: 'jev-1.13',
-    mode: 'filter',
+    uses: ['filter', 'dedupe'],
     threshold: 0.4,
     fallback: [{ provider: 'openrouter', model: 'typesafe/jev-1.13' }, { provider: 'typesafe', model: 'jev-latest' }],
   };
