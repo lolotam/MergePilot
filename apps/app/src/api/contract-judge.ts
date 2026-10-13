@@ -4,7 +4,10 @@ import {
   JUDGE_KEY_ONLY_PROVIDER_IDS,
   JUDGE_MODES,
   JUDGE_PROVIDER_IDS,
+  JUDGE_USES,
+  judgeUsesFromMode,
   MAX_JUDGE_FALLBACKS,
+  normalizeJudgeUses,
 } from '@mergepilot/engine';
 
 /**
@@ -18,8 +21,12 @@ export type KeyProvider = z.infer<typeof KeyProviderSchema>;
 
 export const JudgeProviderSchema = z.enum(JUDGE_PROVIDER_IDS);
 export type JudgeProvider = z.infer<typeof JudgeProviderSchema>;
+/** The single mode before multi-use; still accepted on PUT from older web bundles. */
 export const JudgeModeSchema = z.enum(JUDGE_MODES);
 export type JudgeMode = z.infer<typeof JudgeModeSchema>;
+/** annotate | filter | dedupe | consensus (ADR-0015 multi-use). */
+export const JudgeUseSchema = z.enum(JUDGE_USES);
+export type JudgeUse = z.infer<typeof JudgeUseSchema>;
 
 const JevModelIdSchema = z.string().trim().min(1).max(200);
 
@@ -28,15 +35,31 @@ export const JudgeFallbackSettingSchema = z.object({
   model: JevModelIdSchema,
 });
 
-/** Part of PUT settings (admin): left out keeps the stored judge, null turns it off and clears it. */
-export const JudgeSettingsSchema = z.object({
-  enabled: z.boolean(),
-  provider: JudgeProviderSchema,
-  model: JevModelIdSchema,
-  mode: JudgeModeSchema,
-  threshold: z.number().min(0).max(1),
-  fallback: z.array(JudgeFallbackSettingSchema).max(MAX_JUDGE_FALLBACKS).default([]),
-});
+/**
+ * Part of PUT settings (admin): left out keeps the stored judge, null turns it off and clears it.
+ * `uses` replaces the old `mode`, which is still accepted and mapped (off → dedupe, annotate →
+ * annotate + dedupe, filter → filter + dedupe) so older web bundles keep working; when both are
+ * sent, `uses` wins. One of them is required. Unknown uses are rejected (400). The result always
+ * has `uses` (no repeats, fixed order) and never `mode`.
+ */
+export const JudgeSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    provider: JudgeProviderSchema,
+    model: JevModelIdSchema,
+    uses: z.array(JudgeUseSchema).max(JUDGE_USES.length).optional(),
+    mode: JudgeModeSchema.optional(),
+    threshold: z.number().min(0).max(1),
+    fallback: z.array(JudgeFallbackSettingSchema).max(MAX_JUDGE_FALLBACKS).default([]),
+  })
+  .refine((judge) => judge.uses !== undefined || judge.mode !== undefined, {
+    message: 'judge.uses is required',
+    path: ['uses'],
+  })
+  .transform(({ mode, uses, ...judge }) => ({
+    ...judge,
+    uses: normalizeJudgeUses(uses ?? judgeUsesFromMode(mode ?? 'off')),
+  }));
 export type JudgeSettings = z.infer<typeof JudgeSettingsSchema>;
 
 /** GET (member) /api/workspaces/:workspaceId/judge/providers — the fixed Jev-only model table. */
@@ -75,7 +98,9 @@ export const JudgeAttemptSchema = z.object({
 
 /** `result.judge` of a run: what the judge did, every attempt, and its own tokens and cost. */
 export const JudgeRunSchema = z.object({
-  mode: JudgeModeSchema,
+  /** The configured uses. Absent on runs recorded before multi-use, which carry `mode` instead. */
+  uses: z.array(JudgeUseSchema).optional(),
+  mode: JudgeModeSchema.optional(),
   threshold: z.number(),
   checked: z.number(),
   filtered: z.array(z.object({ title: z.string(), path: z.string(), line: z.number(), noul: z.number() })),

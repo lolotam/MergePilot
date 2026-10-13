@@ -1,7 +1,7 @@
 # ADR-0015: Jev Judge — A "System One" Decision Layer With an Explicit Fallback Chain
 
 - **Status:** Accepted (2026-10-13)
-- **Related to:** ADR-0002, ADR-0008, ADR-0010, ADR-0011, ADR-0013, docs/decisions.ar.md (batch 9, Q26–Q27)
+- **Related to:** ADR-0002, ADR-0008, ADR-0010, ADR-0011, ADR-0013, docs/decisions.ar.md (batch 9, Q26–Q27; batch 12, Q32)
 
 ## Context
 
@@ -115,3 +115,42 @@ each, and later asked for a fallback chain so a failed judge provider does not l
 - **The two judge failures are disclosed separately.** If the false-positive filter fails, the
   summary says the review was published unfiltered. If only the semantic duplicate check fails, the
   summary says "Jev duplicate check unavailable" instead.
+
+## Amendment (2026-10-13): multi-use («multi-use»)
+
+**Context.** The owner asked to use Jev for several purposes at once (decisions log, س32). The
+single `mode` (`off | annotate | filter`) could not give "annotate everything + filter + dedupe"
+together, and `off` was confusing because the duplicate check still ran. Live, he ticked "Enable"
+but left the separate "Mode" select on its default "Off", so the filter never ran.
+
+**Decision.**
+
+1. **Uses replace the mode.** `JudgeUse = 'annotate' | 'filter' | 'dedupe' | 'consensus'`
+   (`JUDGE_USES`, `packages/engine/src/judge/uses.ts`). A judge has a set of zero or more uses:
+   - `annotate`: a "Jev confidence: 0.82" line on every posted finding the judge scored;
+   - `filter`: drops findings below `threshold`. Critical and high are never dropped (first
+     amendment); low-confidence findings that are kept get the confidence line;
+   - `dedupe`: the semantic duplicate check (use case 2). It now runs only when this use is on;
+   - `consensus`: for the coming reviewer panel, to decide whether two bots' findings are the same
+     issue. It is stored and validated now, and nothing reads it yet.
+2. **One request.** `annotate` and `filter` share the one false-positive request per review. With
+   both on, findings are filtered and every remaining finding gets its confidence line. Without
+   either, no false-positive request is sent.
+3. **Enabled and idle.** `enabled: false` means nothing runs, whatever the uses. An empty set with
+   `enabled: true` is allowed: the judge is idle and the settings card shows an amber warning.
+   Switching "Enable" on while the set is empty pre-selects `annotate` + `dedupe`.
+4. **The old mode is still accepted** in `.mergepilot.yml` `judge:` and on `PUT /settings` (older
+   web bundles), mapped so today's behaviour is kept (the duplicate check always ran):
+   `off` → `[dedupe]`, `annotate` → `[annotate, dedupe]`, `filter` → `[filter, dedupe]`. When both
+   are given, `uses` wins. A `judge:` section with neither keeps the old default (`[dedupe]`). The
+   API needs one of the two and rejects unknown uses (400).
+5. **Disclosure.** The review summary names the configured uses (`Jev uses: filter, dedupe`), the
+   run record stores `uses` (older runs keep `mode`), and the Action logs them.
+6. **SaaS.** Migration 0010 adds `workspace_settings.judge_uses text[] NOT NULL DEFAULT '{}'`,
+   with a CHECK that each element is one of the four uses, and backfills it from `judge_mode` with
+   the mapping above. `judge_mode` stays for one release so a rollback still works. The app no
+   longer reads it and writes the closest old mode there (filter, else annotate, else off).
+
+**Consequences.** The owner can turn on any combination without a second Jev call. A judge whose
+uses are all off costs nothing. Decision 4's "whenever the judge is enabled, including mode `off`"
+no longer holds: the duplicate check needs `dedupe`.

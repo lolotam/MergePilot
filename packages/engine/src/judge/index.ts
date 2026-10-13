@@ -3,6 +3,7 @@ export * from './types.js';
 export * from './call.js';
 export * from './judge.js';
 export * from './questions.js';
+export * from './uses.js';
 export * from './false-positive.js';
 export * from './same-issue.js';
 export * from './config.js';

@@ -1,5 +1,6 @@
 import {
   createJudge,
+  describeJudgeUses,
   judgeChainOf,
   JUDGE_PROVIDERS,
   Secret,
@@ -47,6 +48,7 @@ export function actionJudge(
     return { ...entry, apiKey };
   });
   const judge = createJudge({ entries, onCall: (event) => log(judgeCallLine(event)) });
-  log(`Jev judge: ${judge.label} (mode ${config.judge.mode}, threshold ${config.judge.threshold}, ${entries.length - 1} fallbacks)`);
-  return { judge: { judge, mode: config.judge.mode, threshold: config.judge.threshold }, secrets };
+  const { uses, threshold } = config.judge;
+  log(`Jev judge: ${judge.label} (uses ${describeJudgeUses(uses)}, threshold ${threshold}, ${entries.length - 1} fallbacks)`);
+  return { judge: { judge, uses, threshold }, secrets };
 }

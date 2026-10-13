@@ -25,6 +25,9 @@ export interface WorkspaceJudge {
  * with the workspace key for that provider. An entry without a readable key stays in the chain
  * without a key, so the judge skips it and discloses "no-key". One `judge.call` log line per
  * attempt: provider, model, counts, timing and tokens, never the state.
+ *
+ * A disabled judge is absent whatever its uses; an enabled one with no uses is created but makes
+ * no request (the review and the duplicate check each look at `uses`).
  */
 export async function workspaceJudge(
   settings: WorkspaceSettings,
@@ -70,7 +73,7 @@ export async function workspaceJudge(
         `Jev judge call to ${event.provider}:${event.model} ${event.ok ? 'answered' : `failed (${event.code ?? 'error'})`}`,
       ),
   });
-  return { judge: { judge, mode: config.mode, threshold: config.threshold }, secrets };
+  return { judge: { judge, uses: [...config.uses], threshold: config.threshold }, secrets };
 }
 
 /** `result.judge` for the run record: what the judge did, every attempt, its tokens and cost. */
@@ -82,7 +85,7 @@ export function judgeRunRecord(
 ): ReviewRunJudge {
   const unavailable = filter?.unavailable ?? semantic?.unavailable ?? report.unavailable;
   return {
-    mode: judge.mode,
+    uses: [...judge.uses],
     threshold: judge.threshold,
     checked: filter?.checked ?? 0,
     filtered: filter?.filtered ?? [],

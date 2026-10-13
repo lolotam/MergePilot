@@ -86,7 +86,7 @@ describe('processReviewJob — automatic model prices (ADR-0016)', () => {
   });
 
   it('prices the judge from the catalog before its static table', async () => {
-    const judge: JudgeSettings = { enabled: true, provider: 'opencode-zen', model: 'jev-1.13', mode: 'annotate', threshold: 0.35, fallback: [] };
+    const judge: JudgeSettings = { enabled: true, provider: 'opencode-zen', model: 'jev-1.13', uses: ['annotate', 'dedupe'], threshold: 0.35, fallback: [] };
     const finding = { path: 'src/main.ts', line: 2, side: 'RIGHT', title: 'Bug', body: 'Bug body', severity: 'medium', category: 'correctness', evidence: 'b', confidence: 0.9 };
     const fakeModel = {
       label: 'test-model',

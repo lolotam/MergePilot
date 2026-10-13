@@ -133,6 +133,10 @@ function renderIncompleteWarning(reasons: string[], isArabic: boolean): string {
 function renderJudge(judge: JudgeSummaryInput, isArabic: boolean): string | undefined {
   const lines: string[] = [];
   if (judge.answeredBy) lines.push(`> Jev: \`${neutralize(judge.answeredBy)}\``);
+  if (judge.uses) {
+    const list = judge.uses.length > 0 ? judge.uses.map((use) => `\`${use}\``).join(isArabic ? '، ' : ', ') : '—';
+    lines.push(isArabic ? `> استخدامات Jev: ${list}` : `> Jev uses: ${list}`);
+  }
   if (judge.unavailable) {
     const code = neutralize(judge.unavailable);
     lines.push(
