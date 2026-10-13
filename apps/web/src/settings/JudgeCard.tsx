@@ -5,6 +5,7 @@ import type { JudgeProvider, JudgeSettings } from '@mergepilot/app/contract';
 import { api, type JudgeProvidersResponse, type KeyProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
 import { JudgeTestButton } from './JudgeTestButton.js';
+import { DEFAULT_ENABLED_USES, JudgeUsesField } from './JudgeUses.js';
 import { fieldClass, labelClass, ProviderSelect } from './providers.js';
 import { usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
 
@@ -24,7 +25,7 @@ const modelsOf = (catalog: Catalog, provider: JudgeProvider): string[] =>
 function defaults(catalog: Catalog, keyed: readonly KeyProvider[] | undefined): JudgeSettings {
   const first = catalog.find((p) => !keyed || keyed.includes(p.id)) ?? catalog[0];
   const provider: JudgeProvider = first?.id ?? 'typesafe';
-  return { enabled: false, provider, model: first?.models[0] ?? '', mode: 'off', threshold: 0.35, fallback: [] };
+  return { enabled: false, provider, model: first?.models[0] ?? '', uses: [], threshold: 0.35, fallback: [] };
 }
 
 interface JevModelSelectProps {
@@ -54,7 +55,7 @@ function JevModelSelect({ id, label, models, value, disabled, onChange }: JevMod
   );
 }
 
-/** «الحَكَم (Jev)» — the judge, its mode and threshold, and up to three fallbacks (ADR-0015). */
+/** «الحَكَم (Jev)» — the judge, its uses and threshold, and up to three fallbacks (ADR-0015). */
 export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardProps) {
   const { t } = useI18n();
   const settings = useWorkspaceSettings(workspaceId).data?.settings;
@@ -84,6 +85,12 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
   const disabled = isMember || !settings || patch.isPending || !value;
   const update = (next: Partial<JudgeSettings>) => value && setDraft({ ...value, ...next });
   const missingKey = value && keyedProviders && !keyedProviders.includes(value.provider);
+  const noKey = (provider: JudgeProvider) => Boolean(keyedProviders && !keyedProviders.includes(provider));
+  const thresholdDisabled = disabled || !value?.uses.includes('filter');
+  // The owner ticked "Enable" and left the old mode on Off, so nothing ran: switching the judge on
+  // with no uses pre-selects annotate + dedupe (he can untick them).
+  const setEnabled = (enabled: boolean) =>
+    update(enabled && value?.uses.length === 0 ? { enabled, uses: [...DEFAULT_ENABLED_USES] } : { enabled });
 
   return (
     <div className="p-6 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs">
@@ -106,7 +113,7 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
               type="checkbox"
               checked={value.enabled}
               disabled={disabled}
-              onChange={(e) => update({ enabled: e.target.checked })}
+              onChange={(e) => setEnabled(e.target.checked)}
               className="w-4 h-4 accent-brand-600"
             />
             {t('judgeEnabled')}
@@ -129,22 +136,7 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
               disabled={disabled}
               onChange={(model) => update({ model })}
             />
-            <div>
-              <label htmlFor="judge-mode" className={labelClass}>
-                {t('judgeModeLabel')}
-              </label>
-              <select
-                id="judge-mode"
-                value={value.mode}
-                disabled={disabled}
-                onChange={(e) => update({ mode: e.target.value as JudgeSettings['mode'] })}
-                className={fieldClass}
-              >
-                <option value="off">{t('judgeModeOff')}</option>
-                <option value="annotate">{t('judgeModeAnnotate')}</option>
-                <option value="filter">{t('judgeModeFilter')}</option>
-              </select>
-            </div>
+            <JudgeUsesField value={value.uses} disabled={disabled} onChange={(uses) => update({ uses })} />
             <div>
               <label htmlFor="judge-threshold" className={labelClass}>
                 {t('judgeThresholdLabel')}
@@ -158,7 +150,7 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
                   max={1}
                   step={0.05}
                   value={value.threshold}
-                  disabled={disabled}
+                  disabled={thresholdDisabled}
                   onChange={(e) => update({ threshold: Number(e.target.value) })}
                   className="flex-1 accent-brand-600"
                 />
@@ -169,7 +161,7 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
                   max={1}
                   step={0.05}
                   value={value.threshold}
-                  disabled={disabled}
+                  disabled={thresholdDisabled}
                   onChange={(e) => update({ threshold: Math.min(1, Math.max(0, Number(e.target.value))) })}
                   className={`${fieldClass} w-24`}
                   dir="ltr"
@@ -179,6 +171,11 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
             </div>
           </div>
           {missingKey ? <p className="text-xs text-amber-700 dark:text-amber-300">{t('judgeNoKey')}</p> : null}
+          {value.enabled && value.uses.length === 0 ? (
+            <p role="status" className="text-xs font-semibold text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+              {t('judgeIdle')}
+            </p>
+          ) : null}
 
           <div className="flex flex-col gap-3">
             <div>
@@ -192,8 +189,13 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
                   className="p-4 border border-ink-200 dark:border-ink-800 rounded-2xl bg-ink-50/50 dark:bg-ink-950/20 flex flex-col gap-3"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-ink-800 dark:text-ink-200">
+                    <span className="inline-flex items-center gap-2 text-xs font-bold text-ink-800 dark:text-ink-200">
                       {t('judgeFallbackItem', { index: String(index + 1) })}
+                      {noKey(entry.provider) ? (
+                        <span className="px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 text-[10px] font-semibold">
+                          {t('judgeFallbackNoKey')}
+                        </span>
+                      ) : null}
                     </span>
                     <button
                       type="button"

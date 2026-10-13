@@ -12,7 +12,7 @@ const judge = (overrides: Record<string, unknown> = {}) => ({
   enabled: true,
   provider: 'typesafe',
   model: 'jev-latest',
-  mode: 'filter',
+  uses: ['annotate', 'filter', 'dedupe'],
   threshold: 0.4,
   fallback: [],
   ...overrides,
@@ -61,6 +61,31 @@ describe('Jev judge settings, keys and routes (ADR-0015)', { timeout: 25000 }, (
     expect((await read()).judge).toEqual(value);
     expect((await put({ judge: null })).statusCode).toBe(200);
     expect((await read()).judge).toBeNull();
+  });
+
+  it('saves zero or more uses, still maps the old mode, and rejects unknown uses', async () => {
+    await saveTypesafe();
+    const usesAfter = async (fields: Record<string, unknown>) => {
+      const { uses: _uses, ...rest } = judge();
+      const res = await put({ judge: { ...rest, ...fields } });
+      expect(res.statusCode).toBe(200);
+      return (await read()).judge.uses as string[];
+    };
+    expect(await usesAfter({ uses: ['dedupe', 'consensus', 'annotate', 'dedupe'] })).toEqual(['annotate', 'dedupe', 'consensus']);
+    // Enabled with nothing to do is allowed: the judge is idle.
+    expect(await usesAfter({ uses: [] })).toEqual([]);
+    // Older web bundles send `mode`.
+    expect(await usesAfter({ mode: 'off' })).toEqual(['dedupe']);
+    expect(await usesAfter({ mode: 'annotate' })).toEqual(['annotate', 'dedupe']);
+    expect(await usesAfter({ mode: 'filter' })).toEqual(['filter', 'dedupe']);
+    expect(await usesAfter({ mode: 'filter', uses: ['annotate'] })).toEqual(['annotate']);
+    expect((await read()).judge).not.toHaveProperty('mode');
+
+    const { uses: _uses, ...noUses } = judge();
+    expect(await errorCode({ judge: judge({ uses: ['annotate', 'loud'] }) })).toBe('validation_error');
+    expect(await errorCode({ judge: judge({ mode: 'dedupe', uses: undefined }) })).toBe('validation_error');
+    expect(await errorCode({ judge: noUses })).toBe('validation_error');
+    expect((await read()).judge.uses).toEqual(['annotate']);
   });
 
   it('accepts only Jev models for each provider, at most 3 fallbacks and no repeats', async () => {

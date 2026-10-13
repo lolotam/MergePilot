@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { JudgeUnavailableError, type Finding, type Judge, type JudgeRequest } from '@mergepilot/engine';
 import type { GitHubClient, GitHubReviewComment } from './client.js';
 import { deduplicateFindings } from './dedupe.js';
-import { judgeSummaryInput, withJudgeUsage } from './judge-summary.js';
+import { dedupeJudgeOf, judgeSummaryInput, withJudgeUsage, type ReviewJudge } from './judge-summary.js';
 import { renderReviewSummary } from './summary.js';
 
 const publisherLogin = 'github-actions[bot]';
@@ -91,6 +91,36 @@ describe('deduplicateFindings — Jev semantic check', () => {
   });
 });
 
+describe('deduplicateFindings — only when the judge has the dedupe use', () => {
+  const params = { owner: 'o', repo: 'r', pull_number: 1, publisherLogin };
+  const reviewJudge = (uses: ReviewJudge['uses'], judge: Judge): ReviewJudge => ({ judge, uses, threshold: 0.35 });
+
+  it('dedupe off: no semantic call, the paraphrase is published', async () => {
+    for (const uses of [['annotate', 'filter', 'consensus'], []] as Array<ReviewJudge['uses']>) {
+      const judge = fakeJudge(() => 0.99);
+      const result = await deduplicateFindings(client, {
+        ...params,
+        findings: [finding('dup', 50, 'User can be undefined before use')],
+        judge: dedupeJudgeOf(reviewJudge(uses, judge)),
+      });
+      expect(judge.calls).toHaveLength(0);
+      expect(result.kept.map((f) => f.id)).toEqual(['dup']);
+    }
+  });
+
+  it('dedupe on: the semantic call happens', async () => {
+    const judge = fakeJudge(() => 0.99);
+    const result = await deduplicateFindings(client, {
+      ...params,
+      findings: [finding('dup', 50, 'User can be undefined before use')],
+      judge: dedupeJudgeOf(reviewJudge(['dedupe'], judge)),
+    });
+    expect(judge.calls).toHaveLength(1);
+    expect(result.dropped.map((f) => f.id)).toEqual(['dup']);
+    expect(dedupeJudgeOf(undefined)).toBeUndefined();
+  });
+});
+
 describe('judge disclosure in the summary', () => {
   const base = {
     language: 'en' as const,
@@ -116,18 +146,36 @@ describe('judge disclosure in the summary', () => {
           before: [{ provider: 'openrouter', model: 'x', code: 'rate-limited', skipped: false }],
         },
       },
-      { mode: 'filter', threshold: 0.35, checked: 2, filtered: [{ title: 'Nit', path: 'a.ts', line: 3, noul: 0.12 }] },
+      { uses: ['filter', 'dedupe'], threshold: 0.35, checked: 2, filtered: [{ title: 'Nit', path: 'a.ts', line: 3, noul: 0.12 }] },
     );
     const md = renderReviewSummary({ ...base, judge });
     expect(md).toContain('Jev: `opencode-zen:jev-1.13-free (fallback 2; openrouter failed: rate-limited)`');
     expect(md).toContain('<summary>Filtered by Jev (1)</summary>');
     expect(md).toContain('- Nit · `a.ts:3` · 0.12');
+    expect(md).toContain('> Jev uses: `filter`, `dedupe`');
+  });
+
+  it('names the configured uses, even when only the duplicate check ran (Arabic too)', () => {
+    const report = { attempts: [{ provider: 'typesafe', model: 'jev-latest', ok: true, ms: 1 }], inputTokens: 5, outputTokens: 0 };
+    const judge = judgeSummaryInput(report, undefined, ['dedupe', 'annotate']);
+    expect(judge?.uses).toEqual(['annotate', 'dedupe']);
+    expect(renderReviewSummary({ ...base, judge })).toContain('> Jev uses: `annotate`, `dedupe`');
+    expect(renderReviewSummary({ ...base, language: 'ar', judge })).toContain('> استخدامات Jev: `annotate`، `dedupe`');
+  });
+
+  it('discloses the configured uses even when the judge made no request', () => {
+    const idle = { attempts: [], inputTokens: 0, outputTokens: 0 };
+    expect(judgeSummaryInput(idle, undefined, ['consensus'])).toEqual({ uses: ['consensus'] });
+    expect(judgeSummaryInput(undefined, undefined, ['filter', 'dedupe'])).toEqual({ uses: ['filter', 'dedupe'] });
+    expect(renderReviewSummary({ ...base, judge: judgeSummaryInput(idle, undefined, []) })).toContain('> Jev uses: —');
+    // No judge configured: nothing to disclose.
+    expect(judgeSummaryInput(undefined, undefined, undefined)).toBeUndefined();
   });
 
   it('says the judge was unavailable (Arabic too)', () => {
     const judge = judgeSummaryInput(
       { attempts: [{ provider: 'typesafe', model: 'jev-latest', ok: false, code: 'auth', ms: 1 }], inputTokens: 0, outputTokens: 0, unavailable: 'auth' },
-      { findings: [], mode: 'filter', threshold: 0.35, checked: 0, filtered: [], unavailable: 'auth' },
+      { findings: [], uses: ['filter'], threshold: 0.35, checked: 0, filtered: [], unavailable: 'auth' },
     );
     expect(renderReviewSummary({ ...base, judge })).toContain('Jev judge unavailable: auth');
     expect(renderReviewSummary({ ...base, language: 'ar', judge })).toContain('حَكَم Jev غير متاح: auth');
@@ -144,7 +192,7 @@ describe('judge disclosure in the summary', () => {
         outputTokens: 0,
         unavailable: 'timeout',
       },
-      { findings: [], mode: 'filter', threshold: 0.35, checked: 2, filtered: [] },
+      { findings: [], uses: ['filter'], threshold: 0.35, checked: 2, filtered: [] },
     );
     const text = renderReviewSummary({ ...base, judge });
     expect(text).toContain('Jev duplicate check unavailable: timeout');
