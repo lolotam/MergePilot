@@ -44,4 +44,14 @@ describe('BudgetAdmission', () => {
     expect(await admission.admit('ws', 1, under(0, 5))).not.toBeNull();
     expect(admission.heldUsd('ws')).toBe(1);
   });
+
+  it('a review finishing while the next one is being checked does not come back as held', async () => {
+    const admission = new BudgetAdmission();
+    const releaseFirst = await admission.admit('ws', 1, under(0, 5));
+    const second = await admission.admit('ws', 1, async (r) => { releaseFirst!(); return r < 5; });
+    expect(second).not.toBeNull();
+    expect(admission.heldUsd('ws')).toBe(1);
+    second!();
+    expect(admission.heldUsd('ws')).toBe(0);
+  });
 });

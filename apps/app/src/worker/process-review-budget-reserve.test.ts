@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { Secret, SUBSCRIPTION_PREFIX } from '@mergepilot/engine';
 import { BudgetAdmission } from './budget-admission.js';
 import { panelSetup, WS } from './panel.fixtures.js';
 import { processReviewJob } from './process-review.js';
 
 // Reviews of one workspace running at once: each admitted review holds its bots × the
-// per-review budget (default $1) until it finishes, so parallel reviews cannot all pass on the
+// per-review budget (default $0.50) until it finishes, so parallel reviews cannot all pass on the
 // same spend figure, and a merely queued review never counts against another.
 
 describe('processReviewJob — monthly budget with reviews running in parallel', () => {
@@ -29,5 +30,20 @@ describe('processReviewJob — monthly budget with reviews running in parallel',
     const h = await panelSetup({ settings: { monthlyBudgetUsd: 10 }, monthlyCost: 8.5 });
     const result = await processReviewJob(h.job, { ...h.deps, budgetAdmission: admission });
     expect(result.status).toBe('completed');
+  });
+
+  it('holds the per-review budget only for bots that pay per call, never for subscription bots', async () => {
+    const paid = new BudgetAdmission();
+    const paidAdmit = vi.spyOn(paid, 'admit');
+    const h1 = await panelSetup({ settings: { monthlyBudgetUsd: 10 }, monthlyCost: 0, bots: [{ slot: 2 }] });
+    await processReviewJob(h1.job, { ...h1.deps, budgetAdmission: paid });
+    expect(paidAdmit.mock.calls[0]?.[1]).toBe(1); // two bots × the default $0.50
+
+    const sub = new BudgetAdmission();
+    const subAdmit = vi.spyOn(sub, 'admit');
+    const h2 = await panelSetup({ settings: { monthlyBudgetUsd: 10 }, monthlyCost: 0, bots: [{ slot: 2 }] });
+    const deps = { ...h2.deps, budgetAdmission: sub, credentials: { resolve: async () => new Secret(`${SUBSCRIPTION_PREFIX}placeholder`) } };
+    await processReviewJob(h2.job, deps);
+    expect(subAdmit.mock.calls[0]?.[1]).toBe(0);
   });
 });

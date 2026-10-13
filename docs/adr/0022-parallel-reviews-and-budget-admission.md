@@ -16,7 +16,7 @@ check racy: every job read the same month spend before any of them recorded its 
   worker's memory limit is 1 GB.
 - The monthly-budget check goes through `BudgetAdmission`, one per worker process:
   - the check is serialized per workspace;
-  - an admitted review holds its bots × the per-review budget until it finishes, and then releases it;
+  - an admitted review holds its paid bots × the per-review budget until it finishes, and then releases it. A bot on a consumer subscription holds nothing, because it has no incremental cost; its paid fallbacks are not reserved;
   - a review is admitted when the month spend plus what admitted reviews hold is below the budget;
   - admission is first come, first served, and queued reviews never count against another;
   - a review that is not admitted is skipped with `monthly budget reached`, as before.

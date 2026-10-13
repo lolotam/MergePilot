@@ -1,3 +1,4 @@
+import { SUBSCRIPTION_PREFIX } from '@mergepilot/engine';
 import { processBudgetAdmission } from './budget-admission.js';
 import {
   listPullRequestFiles,
@@ -215,11 +216,13 @@ async function sharedSteps(
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
     const budget = settings.monthlyBudgetUsd;
     // Reviews admitted before this one and still running have not recorded their cost: each
-    // holds its bots × the per-review budget until it finishes (first come, first served).
+    // holds its paid bots × the per-review budget until it finishes (first come, first served).
+    // A bot on a consumer subscription costs nothing extra, so it holds nothing.
     const admission = deps.budgetAdmission ?? processBudgetAdmission;
+    const paidBots = (await Promise.all(runs.map((br) => usesSubscription(deps, workspaceId, br.bot.provider)))).filter((sub) => !sub).length;
     releaseBudget = await admission.admit(
       workspaceId,
-      runs.length * mainConfig.effectiveConfig.budget.perReviewUsd,
+      paidBots * mainConfig.effectiveConfig.budget.perReviewUsd,
       async (reservedUsd) => (await deps.store.monthCostUsd(workspaceId, monthStart)) + reservedUsd < budget,
     ) ?? undefined;
     if (!releaseBudget) {
@@ -274,4 +277,14 @@ async function sharedSteps(
     },
     releaseBudget,
   };
+}
+
+/** True when the provider's stored credential is a consumer subscription (no incremental cost). Unknown counts as paid. */
+async function usesSubscription(deps: ProcessReviewDeps, workspaceId: string, provider: string): Promise<boolean> {
+  try {
+    const secret = await deps.credentials.resolve(workspaceId, provider as Parameters<ProcessReviewDeps['credentials']['resolve']>[1]);
+    return secret.reveal().startsWith(SUBSCRIPTION_PREFIX);
+  } catch {
+    return false;
+  }
 }

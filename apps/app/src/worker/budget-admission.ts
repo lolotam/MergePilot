@@ -21,9 +21,9 @@ export class BudgetAdmission {
     this.turns.set(workspaceId, mine);
     await previous;
     try {
-      const held = this.reserved.get(workspaceId) ?? 0;
-      if (!(await fits(held))) return null;
-      this.reserved.set(workspaceId, held + amountUsd);
+      if (!(await fits(this.reserved.get(workspaceId) ?? 0))) return null;
+      // Read again: a review may have finished (and released) while `fits` was awaiting.
+      this.reserved.set(workspaceId, (this.reserved.get(workspaceId) ?? 0) + amountUsd);
       let released = false;
       return () => {
         if (released) return;
