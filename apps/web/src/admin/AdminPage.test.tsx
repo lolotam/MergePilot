@@ -91,18 +91,20 @@ describe('AdminPage', () => {
     expect(screen.getByText('Unverified')).toBeTruthy();
     expect(adminApi.getUsers).toHaveBeenLastCalledWith({ limit: 50, offset: 0 });
 
+    // The term arrives in one input event, so the result never depends on typing speed; the
+    // debounce itself is covered with fake timers in hooks.test.tsx.
     const search = screen.getByPlaceholderText('Search users by name or email...');
-    await user.type(search, 'SARA@');
+    await user.click(search);
+    await user.paste('SARA@');
     await waitFor(() =>
       expect(adminApi.getUsers).toHaveBeenLastCalledWith({ limit: 50, offset: 0, q: 'SARA@' }),
     );
-    // Debounced: no request for the partial terms typed on the way.
     const terms = vi.mocked(adminApi.getUsers).mock.calls.map(([params]) => params?.q);
     expect(terms.filter((q) => q !== undefined)).toEqual(['SARA@']);
 
     vi.mocked(adminApi.getUsers).mockResolvedValue({ ...usersFixture, users: [], total: 0 });
     await user.clear(search);
-    await user.type(search, 'nobody');
+    await user.paste('nobody');
     expect(await screen.findByText('No users found.')).toBeTruthy();
     expect(adminApi.getUsers).toHaveBeenLastCalledWith({ limit: 50, offset: 0, q: 'nobody' });
   });
