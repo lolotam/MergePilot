@@ -17,7 +17,7 @@ import { AddKeyModal } from '../components/AddKeyModal.js';
 import { WorkspaceGeneralCard } from '../components/WorkspaceGeneralCard.js';
 import { WorkspaceDangerZone } from '../components/WorkspaceDangerZone.js';
 import { BackupCard } from '../settings/BackupCard.js';
-import { ReviewSettingsCard } from '../settings/ReviewSettingsCard.js';
+import { ReviewerPanel } from '../settings/bots/ReviewerPanel.js';
 import { RepoColorsCard } from '../settings/RepoColorsCard.js';
 import { RetentionCard } from '../settings/RetentionCard.js';
 import { JudgeCard } from '../settings/JudgeCard.js';
@@ -87,8 +87,8 @@ export function SettingsPage() {
         <WorkspaceGeneralCard workspaceId={workspaceId} workspaceName={currentWorkspace.name} isMember={isMember} />
       )}
 
-      {/* Review Settings Section */}
-      <ReviewSettingsCard
+      {/* Review settings, one tab per reviewer bot, then the panel output (ADR-0017) */}
+      <ReviewerPanel
         workspaceId={workspaceId}
         settings={settingsData?.settings}
         isLoading={settingsLoading}

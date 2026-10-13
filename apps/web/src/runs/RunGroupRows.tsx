@@ -3,6 +3,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, ExternalLink } 
 import type { ReviewRun, RunGroup } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
 import { RunActionCell } from './RunActionCell.js';
+import { RunBotChip, showsRunBot } from './RunBotChip.js';
 import { RunModelBadge, RunProviderBadge, RunSeverityChips } from './RunBadges.js';
 import { RunDate, RunStatusBadge, RunTokens, formatCost, isDeletable } from './RunCells.js';
 import { RunDuration } from './RunDuration.js';
@@ -50,8 +51,11 @@ function PrLink({ run }: { run: Pick<ReviewRun, 'repoFullName' | 'pullNumber'> }
   );
 }
 
-/** The cells after the PR cell; a sub-row and a single-run row show the run itself. */
-function RunDetailCells({ run, ctx }: { run: ReviewRun; ctx: RunRowsContext }) {
+/**
+ * The cells after the PR cell; a sub-row and a single-run row show the run itself. `showBot` adds
+ * the bot chip (an extra bot's run, or a PR reviewed by several bots; ADR-0017).
+ */
+function RunDetailCells({ run, ctx, showBot }: { run: ReviewRun; ctx: RunRowsContext; showBot: boolean }) {
   return (
     <>
       <td className={td}><RunStatusBadge status={run.status} /></td>
@@ -59,6 +63,7 @@ function RunDetailCells({ run, ctx }: { run: ReviewRun; ctx: RunRowsContext }) {
         <div className="flex flex-col items-start gap-1">
           <RunProviderBadge provider={run.provider} />
           <RunModelBadge model={run.model} effort={run.effort} fallbackFrom={run.fallbackFrom} />
+          {showBot ? <RunBotChip run={run} /> : null}
         </div>
       </td>
       <td className={td}>
@@ -171,7 +176,7 @@ export function RunGroupRows({ group, number, color, shortRepo, expanded, onTogg
       <ClickableRow testId="run-row" label={pr} className={rowClass(color, allSelected)} onActivate={() => ctx.onOpenRun(latest.id)}>
         {lead(String(number), deletableIds, allSelected, false, t('selectPrRuns', { pr }))}
         {prCell}
-        <RunDetailCells run={latest} ctx={ctx} />
+        <RunDetailCells run={latest} ctx={ctx} showBot={showsRunBot(latest, group.runs)} />
       </ClickableRow>
     );
   }
@@ -215,7 +220,7 @@ export function RunGroupRows({ group, number, color, shortRepo, expanded, onTogg
                   {run.headSha.slice(0, 7)}
                 </span>
               </td>
-              <RunDetailCells run={run} ctx={ctx} />
+              <RunDetailCells run={run} ctx={ctx} showBot={showsRunBot(run, group.runs)} />
             </ClickableRow>
           ))
         : null}

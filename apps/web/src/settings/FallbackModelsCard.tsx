@@ -16,9 +16,12 @@ export interface FallbackModelsCardProps {
   providers?: readonly ApiProvider[] | undefined;
   disabled?: boolean;
   error?: string | undefined;
+  /** Element id prefix, unique per page (default `fallback`; an extra bot uses its own). */
+  idPrefix?: string;
 }
 
 interface RowProps {
+  idPrefix: string;
   workspaceId: string;
   index: number;
   count: number;
@@ -33,10 +36,10 @@ interface RowProps {
 const iconButton =
   'p-1.5 rounded-lg text-ink-600 dark:text-ink-300 hover:bg-ink-200 dark:hover:bg-ink-700 disabled:opacity-30 focus:ring-2 focus:ring-brand-500 focus:outline-hidden';
 
-function FallbackRow({ workspaceId, index, count, entry, providers, disabled, onUpdate, onMove, onRemove }: RowProps) {
+function FallbackRow({ idPrefix, workspaceId, index, count, entry, providers, disabled, onUpdate, onMove, onRemove }: RowProps) {
   const { t } = useI18n();
   const efforts = useModelEfforts(workspaceId, entry.provider, entry.model);
-  const prefix = `fallback-${index}`;
+  const prefix = `${idPrefix}-${index}`;
   return (
     <li className="p-4 border border-ink-200 dark:border-ink-800 rounded-2xl bg-ink-50/50 dark:bg-ink-950/20 flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
@@ -93,7 +96,15 @@ function FallbackRow({ workspaceId, index, count, entry, providers, disabled, on
 }
 
 /** «النماذج الاحتياطية»: up to 3 ordered models, used only on disclosed failures (ADR-0008). */
-export function FallbackModelsCard({ workspaceId, fallbacks, onChange, providers, disabled = false, error }: FallbackModelsCardProps) {
+export function FallbackModelsCard({
+  workspaceId,
+  fallbacks,
+  onChange,
+  providers,
+  disabled = false,
+  error,
+  idPrefix = 'fallback',
+}: FallbackModelsCardProps) {
   const { t } = useI18n();
   const firstProvider = providers?.[0];
   const canAdd = !disabled && fallbacks.length < MAX_FALLBACKS && (providers === undefined || firstProvider !== undefined);
@@ -115,12 +126,12 @@ export function FallbackModelsCard({ workspaceId, fallbacks, onChange, providers
 
   return (
     <section
-      aria-labelledby="fallback-title"
+      aria-labelledby={`${idPrefix}-title`}
       className="p-5 bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-2xl flex flex-col gap-4"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 id="fallback-title" className="text-sm font-bold text-ink-900 dark:text-ink-100">
+          <h3 id={`${idPrefix}-title`} className="text-sm font-bold text-ink-900 dark:text-ink-100">
             {t('fallbackCardTitle')}
           </h3>
           <p className="text-xs text-ink-500 dark:text-ink-400 mt-1 max-w-2xl leading-relaxed">{t('fallbackCardDesc')}</p>
@@ -150,6 +161,7 @@ export function FallbackModelsCard({ workspaceId, fallbacks, onChange, providers
         <ol className="flex flex-col gap-3">
           {fallbacks.map((entry, index) => (
             <FallbackRow
+              idPrefix={idPrefix}
               key={`${index}-${entry.provider}`}
               workspaceId={workspaceId}
               index={index}

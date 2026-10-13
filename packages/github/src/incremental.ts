@@ -1,5 +1,5 @@
 import type { CompareCommitsResult, GitHubClient } from './client.js';
-import { parseMarker, type ReviewMarker } from './marker.js';
+import { MAIN_BOT_SLOT, markerBotSlot, parseMarker, type ReviewMarker } from './marker.js';
 import type { PullRequestFile } from './pr-files.js';
 import type { ReviewScope } from './summary.js';
 
@@ -8,6 +8,8 @@ export interface FindLastReviewedHeadOptions {
   repo: string;
   pull_number: number;
   publisherLogin: string;
+  /** The reviewer-panel bot (ADR-0017), default 1: only its own reviews are a base. */
+  botSlot?: number | undefined;
 }
 
 export interface SelectIncrementalFilesOptions {
@@ -18,6 +20,8 @@ export interface SelectIncrementalFilesOptions {
   publisherLogin: string;
   prFiles: PullRequestFile[];
   configHash?: string;
+  /** The reviewer-panel bot (ADR-0017), default 1. */
+  botSlot?: number | undefined;
 }
 
 export type SelectIncrementalFilesResult =
@@ -33,7 +37,7 @@ const MAX_COMPARE_FILES = 300;
  */
 export async function findLastReviewedMarker(
   client: GitHubClient,
-  { owner, repo, pull_number, publisherLogin }: FindLastReviewedHeadOptions,
+  { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }: FindLastReviewedHeadOptions,
 ): Promise<ReviewMarker | null> {
   let page = 1;
   let lastMarker: ReviewMarker | null = null;
@@ -51,7 +55,7 @@ export async function findLastReviewedMarker(
       if (review.body && review.user?.login === publisherLogin) {
         const marker = parseMarker(review.body);
         // A partial (failed / budget-skipped) review did not cover its commits: never a base.
-        if (marker?.headSha && marker.status !== 'partial') {
+        if (marker?.headSha && marker.status !== 'partial' && markerBotSlot(marker) === botSlot) {
           lastMarker = marker;
         }
       }
@@ -100,6 +104,7 @@ export async function selectIncrementalFiles(
     publisherLogin,
     prFiles,
     configHash,
+    botSlot,
   }: SelectIncrementalFilesOptions,
 ): Promise<SelectIncrementalFilesResult> {
   const lastMarker = await findLastReviewedMarker(client, {
@@ -107,6 +112,7 @@ export async function selectIncrementalFiles(
     repo,
     pull_number,
     publisherLogin,
+    botSlot,
   });
 
   if (lastMarker === null) {

@@ -30,6 +30,8 @@ export function useUpdateSettingsMutation(workspaceId: string) {
     onSuccess: () => {
       showToast(t('settingsSavedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
+      // The main bot's name and logo are saved with the settings (ADR-0017).
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'bots'] });
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');

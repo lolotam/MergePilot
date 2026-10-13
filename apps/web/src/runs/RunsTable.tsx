@@ -22,8 +22,8 @@ export const groupKey = (g: Pick<RunGroup, 'repoFullName' | 'pullNumber'>) => `$
 
 /**
  * The runs table, one row per PR (ADR-0014): `#`, selection, PR, then the run columns. A PR with
- * several runs expands into sub-rows. A reviewer/bot column (multi-bot reviews) will go right
- * after the PR column, telling the sub-rows apart.
+ * several runs expands into sub-rows. A run of another reviewer bot (ADR-0017) shows a bot chip
+ * under its provider and model, telling the sub-rows apart.
  */
 export function RunsTable({ groups, offset, sort, dir, onSort, overrides, expanded, onToggleExpand, ...ctx }: RunsTableProps) {
   const { t } = useI18n();

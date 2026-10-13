@@ -34,9 +34,13 @@ export {
 
 export {
   buildMarker,
+  buildBotCommentMarker,
+  commentBotSlot,
+  markerBotSlot,
   parseMarker,
   type ReviewMarker,
 } from './marker.js';
+export { escapeInline, renderBotIdentity, renderBotLogo, type BotIdentity } from './bot-identity.js';
 
 export {
   renderFindingComment,
@@ -102,3 +106,15 @@ export {
   type ReviewPullRequestContext,
   type ReviewPullRequestResult,
 } from './review-pull-request.js';
+export {
+  CONSENSUS_LINE_WINDOW,
+  foundByLabel,
+  mergePanelFindings,
+  withFoundBy,
+  type ClusterKind,
+  type ConsensusCluster,
+  type MergePanelInput,
+  type MergePanelResult,
+  type PanelBotFindings,
+} from './consensus.js';
+export { renderPanelSummary, type PanelBotRow, type PanelSummaryInput } from './panel-summary.js';

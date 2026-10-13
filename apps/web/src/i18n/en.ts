@@ -4,6 +4,7 @@ import { enAdmin } from './admin-en.js';
 import { enRuns } from './runs-en.js';
 import { enJudge } from './judge-en.js';
 import { enBackup } from './backup-en.js';
+import { enBots } from './bots-en.js';
 
 export const en: I18nDictionary = {
   ...enSettings,
@@ -11,6 +12,7 @@ export const en: I18nDictionary = {
   ...enRuns,
   ...enJudge,
   ...enBackup,
+  ...enBots,
   // App
   appName: 'MergePilot',
   appTagline: 'AI-Powered Pull Request Review Engine',
