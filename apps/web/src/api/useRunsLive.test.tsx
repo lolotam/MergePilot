@@ -84,9 +84,17 @@ describe('useRunsLive (ADR-0021)', () => {
     expect(hook.result.current).toBe('live');
   });
 
+  it('catches up with one refetch on every open, including the first', () => {
+    const { invalidate } = setup();
+    latest().open();
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['workspaces', 'ws-1', 'runs'] });
+  });
+
   it('invalidates the runs queries once per burst of events, after the debounce', () => {
     const { invalidate } = setup();
     latest().open();
+    invalidate.mockClear();
 
     latest().emitRun({ runId: 'a', status: 'queued', kind: 'created' });
     latest().emitRun({ runId: 'b', status: 'running', kind: 'created' });
@@ -106,6 +114,7 @@ describe('useRunsLive (ADR-0021)', () => {
   it('starts polling every 30 s after the stream stays down for 30 s, and stops on reconnect', () => {
     const { invalidate, hook } = setup();
     latest().open();
+    invalidate.mockClear();
     latest().fail();
     expect(hook.result.current).toBe('connecting');
 
@@ -126,14 +135,16 @@ describe('useRunsLive (ADR-0021)', () => {
     expect(invalidate).toHaveBeenCalledTimes(3);
   });
 
-  it('does not poll when the stream comes back within 30 s', () => {
+  it('does not poll when the stream comes back within 30 s, but still catches up once', () => {
     const { invalidate, hook } = setup();
     latest().open();
+    invalidate.mockClear();
     latest().fail();
     act(() => vi.advanceTimersByTime(LIVE_DOWN_FALLBACK_MS / 2));
     latest().open();
     act(() => vi.advanceTimersByTime(LIVE_DOWN_FALLBACK_MS * 2));
-    expect(invalidate).not.toHaveBeenCalled();
+    // Events from the short outage are not replayed: the reconnect refetches once, then no polling.
+    expect(invalidate).toHaveBeenCalledTimes(1);
     expect(hook.result.current).toBe('live');
   });
 
@@ -151,6 +162,7 @@ describe('useRunsLive (ADR-0021)', () => {
   it('on a run detail page refetches only that run, and only for its own events', () => {
     const { invalidate } = setup('run-9');
     latest().open();
+    invalidate.mockClear();
 
     latest().emitRun({ runId: 'other', status: 'completed', kind: 'updated' });
     act(() => vi.advanceTimersByTime(LIVE_DEBOUNCE_MS));
@@ -165,6 +177,7 @@ describe('useRunsLive (ADR-0021)', () => {
     const { invalidate, hook } = setup();
     const source = latest();
     source.open();
+    invalidate.mockClear();
     source.emitRun({ runId: 'a', status: 'queued', kind: 'created' });
     hook.unmount();
 

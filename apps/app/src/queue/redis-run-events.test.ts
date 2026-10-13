@@ -98,4 +98,21 @@ describe('RedisRunEventBus', () => {
     bus.publish(event);
     expect(c.publisher.publish).not.toHaveBeenCalled();
   });
+
+  it('makes concurrent listeners wait for the same subscribe and fail with it', async () => {
+    const c = fakeClients();
+    let reject!: (err: Error) => void;
+    c.subscriber.subscribe.mockImplementationOnce(() => new Promise<number>((_, r) => { reject = r; }));
+    const bus = new RedisRunEventBus({ publisher: c.publisher, subscriber: c.makeSubscriber });
+
+    const first = bus.subscribe('ws-1', () => {});
+    const second = bus.subscribe('ws-1', () => {});
+    reject(new Error('subscribe refused'));
+    await expect(first).rejects.toThrow('subscribe refused');
+    await expect(second).rejects.toThrow('subscribe refused');
+
+    // Nothing is left counted: the next listener subscribes Redis again.
+    await bus.subscribe('ws-1', () => {});
+    expect(c.subscriber.subscribe).toHaveBeenCalledTimes(2);
+  });
 });

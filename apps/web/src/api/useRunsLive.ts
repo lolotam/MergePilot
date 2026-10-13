@@ -96,11 +96,10 @@ export function useRunsLive(workspaceId: string, options: RunsLiveOptions = {}):
       es.onopen = () => {
         if (downTimer) clearTimeout(downTimer);
         downTimer = undefined;
-        const wasDown = Boolean(poll);
         stopPolling();
         setState('live');
-        // Changes made while the stream was down are not replayed; catch up once.
-        if (wasDown) refetch();
+        // Events are not replayed: catch up on every open (first connect, short or long outage).
+        refetch();
       };
       es.onerror = () => {
         setState((s) => (s === 'polling' ? s : 'connecting'));

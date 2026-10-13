@@ -15,6 +15,11 @@ export interface RunStreamOptions {
   keepAliveMs: number;
   /** The reconnect delay the browser is told to use (`retry:`). */
   retryMs: number;
+  /**
+   * A stream is closed after this long; the browser reconnects and passes the session and
+   * membership checks again, so a removed member or an ended session stops receiving events.
+   */
+  maxLifetimeMs: number;
 }
 
 export const DEFAULT_RUN_STREAM_OPTIONS: RunStreamOptions = {
@@ -22,6 +27,7 @@ export const DEFAULT_RUN_STREAM_OPTIONS: RunStreamOptions = {
   global: 500,
   keepAliveMs: 25_000,
   retryMs: 5_000,
+  maxLifetimeMs: 10 * 60_000,
 };
 
 export interface RunEventsRouteDeps {
@@ -94,7 +100,7 @@ export function registerRunEventsRoutes(app: FastifyInstance, deps: RunEventsRou
       }
 
       // Filled in as the stream opens; `end` releases whatever exists, once.
-      const stream: { raw?: ServerResponse; keepAlive?: ReturnType<typeof setInterval> } = {};
+      const stream: { raw?: ServerResponse; keepAlive?: ReturnType<typeof setInterval>; lifetime?: ReturnType<typeof setTimeout> } = {};
       let unsubscribe: (() => void) | undefined;
       let ended = false;
       const end = () => {
@@ -102,6 +108,7 @@ export function registerRunEventsRoutes(app: FastifyInstance, deps: RunEventsRou
         ended = true;
         open.delete(end);
         if (stream.keepAlive) clearInterval(stream.keepAlive);
+        if (stream.lifetime) clearTimeout(stream.lifetime);
         unsubscribe?.();
         limiter.release(userId);
         if (stream.raw && !stream.raw.writableEnded) stream.raw.end();
@@ -141,6 +148,8 @@ export function registerRunEventsRoutes(app: FastifyInstance, deps: RunEventsRou
       open.add(end);
       stream.keepAlive = setInterval(() => raw.write(': keep-alive\n\n'), options.keepAliveMs);
       stream.keepAlive.unref?.();
+      stream.lifetime = setTimeout(end, options.maxLifetimeMs);
+      stream.lifetime.unref?.();
       // The response's `close` fires when the browser goes (the request's fires once it is read).
       raw.on('close', end);
       raw.on('error', end);

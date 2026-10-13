@@ -58,6 +58,8 @@ export class RedisRunEventBus implements RunEventBus {
   private subscriber: RunEventsSubscriberClient | undefined;
   private readonly local = new EventEmitter();
   private readonly channelUsers = new Map<string, number>();
+  /** The Redis subscribe of a channel, shared by every listener that joins while it is pending. */
+  private readonly channelReady = new Map<string, Promise<void>>();
   private readonly onError: (name: string) => void;
   private closed = false;
 
@@ -84,13 +86,18 @@ export class RedisRunEventBus implements RunEventBus {
     const subscriber = this.ensureSubscriber();
     const users = this.channelUsers.get(channel) ?? 0;
     this.channelUsers.set(channel, users + 1);
-    if (users === 0) {
-      try {
-        await subscriber.subscribe(channel);
-      } catch (err) {
-        this.release(channel);
-        throw err;
-      }
+    let ready = this.channelReady.get(channel);
+    if (users === 0 || !ready) {
+      ready = subscriber.subscribe(channel).then(() => undefined);
+      this.channelReady.set(channel, ready);
+    }
+    try {
+      // Every concurrent listener waits for the same subscribe and fails with it.
+      await ready;
+    } catch (err) {
+      if (this.channelReady.get(channel) === ready) this.channelReady.delete(channel);
+      this.release(channel);
+      throw err;
     }
     const handler = (event: RunEvent) => listener(event);
     this.local.on(channel, handler);
@@ -108,6 +115,7 @@ export class RedisRunEventBus implements RunEventBus {
     this.closed = true;
     this.local.removeAllListeners();
     this.channelUsers.clear();
+    this.channelReady.clear();
     const quits = [this.publisher.quit()];
     if (this.subscriber) quits.push(this.subscriber.quit());
     await Promise.allSettled(quits);
@@ -134,6 +142,7 @@ export class RedisRunEventBus implements RunEventBus {
       return;
     }
     this.channelUsers.delete(channel);
+    this.channelReady.delete(channel);
     if (this.closed || !this.subscriber) return;
     this.subscriber.unsubscribe(channel).catch((err: unknown) => this.onError(errorName(err)));
   }

@@ -122,6 +122,19 @@ describe('GET /api/workspaces/:workspaceId/runs/events (ADR-0021)', () => {
     expect(bus.listenerCount('ws-1')).toBe(0);
     expect(limiter.openStreams()).toBe(0);
   });
+  it('closes a stream after its maximum lifetime, so the browser reconnects through the checks again', async () => {
+    await h.app.close();
+    h = await createSseHarness();
+    bus = new MemoryRunEventBus();
+    limiter = registerRunEventsRoutes(h.app, {
+      auth: h.auth, runEvents: bus, runStreams: { perUser: 2, global: 10, keepAliveMs: 60_000, maxLifetimeMs: 200 },
+    });
+    port = await listen(h.app);
+    const s = await open();
+    expect(s.status).toBe(200);
+    await eventually(() => limiter.openStreams() === 0);
+    expect(bus.listenerCount('ws-1')).toBe(0);
+  });
 });
 
 describe('runs events route inside the dashboard API', () => {
