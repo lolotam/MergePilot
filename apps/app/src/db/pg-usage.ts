@@ -1,5 +1,5 @@
 import { and, asc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
-import type { FinishReviewRunOptions, ReviewRunStatus } from '../core/types.js';
+import type { FinishReviewRunOptions, ReviewRunStatus, StaleRunRef } from '../core/types.js';
 import { FINISHED_RUN_STATUSES, usageMonth, type MonthlyUsage } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
 import { reviewRuns, workspaceUsageMonthly } from './schema.js';
@@ -120,10 +120,14 @@ export async function finishPgReviewRun(
 }
 
 /** Fails stale queued/running runs; each one counts as a failed run in its month's usage. */
-export async function failPgStaleRuns(db: AppDb, heartbeatBefore: Date): Promise<number> {
+export async function failPgStaleRuns(
+  db: AppDb,
+  heartbeatBefore: Date,
+  onFailed?: (failed: readonly StaleRunRef[]) => void,
+): Promise<number> {
   const now = new Date();
   const pg: PgBase = db;
-  return pg.transaction(async (tx) => {
+  const refs = await pg.transaction(async (tx) => {
     const failed = await tx
       .update(reviewRuns)
       .set({ status: 'failed', detail: 'interrupted', finishedAt: now, updatedAt: now })
@@ -133,7 +137,7 @@ export async function failPgStaleRuns(db: AppDb, heartbeatBefore: Date): Promise
           lt(reviewRuns.updatedAt, heartbeatBefore),
         ),
       )
-      .returning({ workspaceId: reviewRuns.workspaceId, createdAt: reviewRuns.createdAt });
+      .returning({ id: reviewRuns.id, workspaceId: reviewRuns.workspaceId, createdAt: reviewRuns.createdAt });
     const byMonth = new Map<string, UsageDelta>();
     for (const r of failed) {
       const d = deltaFor(r.workspaceId, new Date(r.createdAt), 'failed', null, undefined);
@@ -142,8 +146,11 @@ export async function failPgStaleRuns(db: AppDb, heartbeatBefore: Date): Promise
       byMonth.set(key, prev ? { ...prev, runsTotal: prev.runsTotal + 1, runsFailed: prev.runsFailed + 1 } : d);
     }
     for (const d of byMonth.values()) await addUsage(tx, d);
-    return failed.length;
+    return failed.map((r): StaleRunRef => ({ workspaceId: r.workspaceId, id: r.id }));
   });
+  // After the commit, so a listener never hears about a change that was rolled back.
+  if (refs.length > 0) onFailed?.(refs);
+  return refs.length;
 }
 
 export async function monthPgCostUsd(db: AppDb, workspaceId: string, monthStart: Date): Promise<number> {

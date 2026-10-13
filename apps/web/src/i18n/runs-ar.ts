@@ -72,4 +72,8 @@ export const arRuns: Record<keyof typeof enRuns, string> = {
   adminRetentionRunNow: 'شغّله دلوقتي',
   adminRetentionStarted: 'التنظيف بدأ',
   adminRetentionBusy: 'فيه تنظيف شغال بالفعل',
+
+  liveIndicator: 'مباشر',
+  liveConnecting: 'بيتصل…',
+  livePolling: 'بيتحدث كل 30 ثانية',
 };

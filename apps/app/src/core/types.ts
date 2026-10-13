@@ -336,8 +336,11 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
    * options.limit (default 25).
    */
   listLatestFailedRuns(workspaceId: string, options?: LatestFailedRunsOptions): Promise<ReviewRun[]>;
-  /** Fails queued/running runs whose heartbeat (updatedAt) is older than `heartbeatBefore`. */
-  failStaleRuns(heartbeatBefore: Date): Promise<number>;
+  /**
+   * Fails queued/running runs whose heartbeat (updatedAt) is older than `heartbeatBefore`.
+   * `onFailed`, when given, receives the failed runs' ids after the change is saved (ADR-0021).
+   */
+  failStaleRuns(heartbeatBefore: Date, onFailed?: (failed: readonly StaleRunRef[]) => void): Promise<number>;
   /**
    * Cost of the UTC month containing `monthStart` and every later month, from the monthly usage
    * summary (finished runs), so deleting runs never lowers it.
@@ -358,6 +361,12 @@ export interface Vault {
   readonly keyVersion: number;
   encrypt(plaintext: string, context: { workspaceId: string; provider: KeyProvider }): Promise<string>;
   decrypt(ciphertext: string, context: { workspaceId: string; provider: KeyProvider }): Promise<string>;
+}
+
+/** A run the stale sweep failed: just enough to say which row changed. */
+export interface StaleRunRef {
+  workspaceId: string;
+  id: string;
 }
 
 export interface ReviewJob {

@@ -70,4 +70,8 @@ export const enRuns = {
   adminRetentionRunNow: 'Run now',
   adminRetentionStarted: 'Cleanup started',
   adminRetentionBusy: 'A cleanup is already running',
+
+  liveIndicator: 'Live',
+  liveConnecting: 'Connecting…',
+  livePolling: 'Updating every 30s',
 };

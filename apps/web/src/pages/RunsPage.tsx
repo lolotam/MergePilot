@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { RotateCcw } from 'lucide-react';
 import { useRunGroupsQuery, useRunReposQuery, useMeQuery } from '../api/hooks.js';
+import { useRunsLive } from '../api/useRunsLive.js';
 import { useI18n } from '../i18n/context.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { LiveIndicator } from '../runs/LiveIndicator.js';
 import { RunsFilterBar } from '../runs/RunsFilterBar.js';
 import { RunsPagination } from '../runs/RunsPagination.js';
 import { RetryAllFailedModal } from '../runs/RetryAllFailedModal.js';
@@ -28,6 +30,8 @@ export function RunsPage() {
   const isMember = currentWorkspace?.role === 'member';
   const canRetry = currentWorkspace ? currentWorkspace.role === 'admin' || currentWorkspace.role === 'owner' : false;
 
+  // New and finished runs show up without a reload (ADR-0021).
+  const liveState = useRunsLive(workspaceId);
   const retryRunMutation = useRetryRunMutation(workspaceId);
   const retryFailedMutation = useRetryFailedRunsMutation(workspaceId);
 
@@ -185,17 +189,20 @@ export function RunsPage() {
         title={t('runsTitle')}
         subtitle={t('runsDesc')}
         action={
-          canRetry ? (
-            <button
-              type="button"
-              onClick={() => setRetryModalOpen(true)}
-              disabled={retryFailedMutation.isPending}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md bg-brand-600 hover:bg-brand-700 text-white shadow-xs transition-colors disabled:opacity-50"
-            >
-              <RotateCcw className={`w-3.5 h-3.5 ${retryFailedMutation.isPending ? 'animate-spin' : ''}`} />
-              <span>{t('retryAllFailed')}</span>
-            </button>
-          ) : null
+          <>
+            <LiveIndicator state={liveState} />
+            {canRetry ? (
+              <button
+                type="button"
+                onClick={() => setRetryModalOpen(true)}
+                disabled={retryFailedMutation.isPending}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md bg-brand-600 hover:bg-brand-700 text-white shadow-xs transition-colors disabled:opacity-50"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${retryFailedMutation.isPending ? 'animate-spin' : ''}`} />
+                <span>{t('retryAllFailed')}</span>
+              </button>
+            ) : null}
+          </>
         }
       />
 

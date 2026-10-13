@@ -13,6 +13,8 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useRunDetailQuery, useMeQuery } from '../api/hooks.js';
+import { useRunsLive } from '../api/useRunsLive.js';
+import { LiveIndicator } from './LiveIndicator.js';
 import { useRetryRunMutation } from './useRunRetry.js';
 import { useI18n } from '../i18n/context.js';
 import type { I18nKey } from '../i18n/ar.js';
@@ -27,6 +29,8 @@ export default function RunDetailPage() {
   const { workspaceId = '', runId = '' } = useParams();
   const { t, language } = useI18n();
   const { data, isLoading, error } = useRunDetailQuery(workspaceId, runId);
+  // This run's status changes refresh the page without a reload (ADR-0021).
+  const liveState = useRunsLive(workspaceId, { runId });
   const meQuery = useMeQuery();
   const meData = meQuery?.data;
   const currentWorkspace = meData?.workspaces?.find((w) => w.id === workspaceId);
@@ -99,6 +103,7 @@ export default function RunDetailPage() {
 
         {/* Actions (Retry & GitHub Review link) */}
         <div className="flex items-center gap-2.5">
+          <LiveIndicator state={liveState} />
           {(run.status === 'failed' || run.status === 'skipped') && (
             <button
               type="button"

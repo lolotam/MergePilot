@@ -3,6 +3,8 @@ import { Worker, type ConnectionOptions, type Job } from 'bullmq';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
+import { MemoryRunEventBus } from '../core/run-events.js';
+import { withRunEvents } from '../core/run-events-store.js';
 import type { PauseCommandJob, ReviewJob } from '../core/types.js';
 import { createQueueConnection, PAUSE_COMMAND_JOB_NAME, type QueueJobData } from '../queue/bullmq-queue.js';
 import { createGitHubAppFactory } from './github-app-factory.js';
@@ -134,8 +136,12 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
 
   const workerLog = options?.logger ?? createLogger({ service: 'worker' });
 
+  // Every run row the worker creates or finishes also tells the dashboard (ADR-0021).
+  const runEvents = services.runEvents ?? new MemoryRunEventBus();
+  const store = withRunEvents(services.store, runEvents);
+
   const deps: ProcessReviewDeps = {
-    store: services.store,
+    store,
     credentials: services.credentials,
     githubAppFactory,
     logger: workerLog,
@@ -164,7 +170,7 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     try {
       // Stale = no heartbeat (updated_at) for STALE_RUN_HEARTBEAT_MS; a live review touches it every 60 s.
       const heartbeatBefore = new Date(Date.now() - STALE_RUN_HEARTBEAT_MS);
-      const failedCount = await services.store.failStaleRuns(heartbeatBefore);
+      const failedCount = await store.failStaleRuns(heartbeatBefore);
       if (failedCount > 0) {
         deps.log?.(`Marked ${failedCount} stale running/queued run(s) as failed (interrupted)`);
       }

@@ -145,8 +145,13 @@ export function defineReviewRunLifecycleContract(
       expect((await store.getReviewRun(WS, live.id))?.status).toBe('running');
 
       // A cutoff in the future makes every in-progress run stale; finished runs are untouched.
-      const failed = await store.failStaleRuns(new Date(Date.now() + MINUTE));
+      const reported: Array<{ workspaceId: string; id: string }> = [];
+      const failed = await store.failStaleRuns(new Date(Date.now() + MINUTE), (refs) => reported.push(...refs));
       expect(failed).toBeGreaterThanOrEqual(2);
+      // The callback names exactly the failed runs (ADR-0021 live updates).
+      expect(reported).toHaveLength(failed);
+      expect(reported).toEqual(expect.arrayContaining([{ workspaceId: WS, id: live.id }, { workspaceId: WS, id: queued.id }]));
+      expect(reported.map((r) => r.id)).not.toContain(done.id);
       for (const id of [live.id, queued.id]) {
         const r = await store.getReviewRun(WS, id);
         expect(r?.status).toBe('failed');
