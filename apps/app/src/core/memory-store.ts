@@ -18,6 +18,9 @@ import {
   startMemoryMaintenance,
 } from './memory-maintenance.js';
 import { DEFAULT_RUN_RETENTION_DAYS, usageMonth } from './run-types.js';
+import type { PriceEntry, PriceSource } from '@mergepilot/engine';
+import { MemoryPriceTable } from './memory-prices.js';
+import type { ModelKey, StoredModelPrice } from './price-types.js';
 import type {
   KeyProvider,
   AppStore,
@@ -49,6 +52,7 @@ export class MemoryStore implements AppStore {
   /** Monthly usage keyed by workspace id, a NUL separator and `YYYY-MM-01`. */
   readonly usage = new Map<string, MonthlyUsage>();
   readonly maintenance: MaintenanceRun[] = [];
+  readonly prices = new MemoryPriceTable();
 
   /** Mirrors the Postgres organization check: no writes for a workspace deleted in this store. */
   private assertLive(workspaceId: string): void {
@@ -110,12 +114,13 @@ export class MemoryStore implements AppStore {
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
       judge: s.judge ? { ...s.judge, fallback: [...s.judge.fallback] } : null,
+      priceOverrides: (s.priceOverrides ?? []).map((o) => ({ ...o })),
     };
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
     this.assertLive(settings.workspaceId);
-    // Like the Postgres store: undefined keeps the stored retention, colors and judge.
+    // Like the Postgres store: undefined keeps the stored retention, colors, judge and price overrides.
     const stored = this.settings.get(settings.workspaceId);
     this.settings.set(settings.workspaceId, {
       ...settings,
@@ -125,6 +130,7 @@ export class MemoryStore implements AppStore {
           : stored?.runRetentionDays !== undefined ? stored.runRetentionDays : DEFAULT_RUN_RETENTION_DAYS,
       repoColors: { ...(settings.repoColors ?? stored?.repoColors ?? {}) },
       judge: settings.judge !== undefined ? settings.judge : (stored?.judge ?? null),
+      priceOverrides: (settings.priceOverrides ?? stored?.priceOverrides ?? []).map((o) => ({ ...o })),
     });
   }
 
@@ -336,6 +342,22 @@ export class MemoryStore implements AppStore {
 
   async getLatestMaintenanceRun(kind: MaintenanceKind): Promise<MaintenanceRun | null> {
     return latestMemoryMaintenance(this.maintenance, kind);
+  }
+
+  async replaceModelPrices(source: PriceSource, entries: readonly PriceEntry[], fetchedAt: Date): Promise<number> {
+    return this.prices.replace(source, entries, fetchedAt);
+  }
+
+  async getModelPrice(provider: string, model: string): Promise<StoredModelPrice | null> {
+    return this.prices.get(provider, model);
+  }
+
+  async listModelPrices(keys: readonly ModelKey[]): Promise<StoredModelPrice[]> {
+    return this.prices.list(keys);
+  }
+
+  async pricesFetchedAt(): Promise<Array<{ source: PriceSource; fetchedAt: Date }>> {
+    return this.prices.fetchedAt();
   }
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {

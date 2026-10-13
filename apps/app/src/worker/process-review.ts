@@ -1,17 +1,5 @@
-import { createHash } from 'node:crypto';
-import {
-  createReviewModel,
-  MergePilotConfigSchema,
-  redactSecrets,
-  type MergePilotConfig,
-  type ReviewModel,
-} from '@mergepilot/engine';
-import {
-  loadRepoConfig,
-  publishReview,
-  renderReviewSummary,
-  type FileContent,
-} from '@mergepilot/github';
+import { createReviewModel, redactSecrets, type MergePilotConfig, type ReviewModel } from '@mergepilot/engine';
+import { loadRepoConfig, publishReview, renderReviewSummary } from '@mergepilot/github';
 import {
   ActiveRunExistsError,
   WorkspaceDeletedError,
@@ -23,6 +11,8 @@ import {
 } from '../core/types.js';
 import { workerLogger } from '../core/logger.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
+import { judgePriceLookup, resolvePricing } from '../core/model-pricing.js';
+import { effectiveConfigFor } from './effective-config.js';
 import { executeReview } from './execute-review.js';
 import { judgeRunParts, workspaceJudge } from './judge-setup.js';
 import { pausedWithNotice, PAUSED_DETAIL } from './pause-check.js';
@@ -157,51 +147,11 @@ export async function processReviewJob(
       deps.ssrfLookup,
     );
 
-    let effectiveConfig: MergePilotConfig;
-    let rulesFiles: FileContent[];
-    let configHash: string;
-
-    if ('missing' in repoConfigResult) {
-      effectiveConfig = MergePilotConfigSchema.parse({
-        provider: chosenProvider,
-        model: chosenModel,
-        ...(chosenEffort ? { effort: chosenEffort } : {}),
-        fallback: fallbackList,
-        language: settings.language,
-        review: { minSeverity: settings.minSeverity ?? 'medium' },
-      });
-      rulesFiles = [];
-      configHash = createHash('sha256')
-        .update(JSON.stringify({ provider: chosenProvider, model: chosenModel, language: settings.language }))
-        .digest('hex')
-        .slice(0, 12);
-    } else if ('errors' in repoConfigResult) {
-      throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
-    } else {
-      // In the SaaS the workspace's dashboard settings choose the provider, model, effort, fallbacks
-      // and review language (the repo file may target the GitHub Action, e.g. `provider:
-      // claude-code`); the repo still supplies its review rules and other settings.
-      // A repo-provided baseUrl never reaches the effective config: a key must not be sent to a
-      // URL from repository content (ADR-0008 amendment). The custom base URL comes only from the
-      // workspace credential, through `customBaseUrl` below.
-      const { baseUrl: _repoBaseUrl, effort: _repoEffort, ...repoConfig } = repoConfigResult.config;
-      const sameModel = repoConfig.provider === chosenProvider && repoConfig.model === chosenModel;
-      effectiveConfig = {
-        ...repoConfig,
-        provider: chosenProvider,
-        model: chosenModel,
-        ...(chosenEffort ? { effort: chosenEffort } : {}),
-        fallback: fallbackList,
-        language: settings.language,
-        review: {
-          ...repoConfig.review,
-          minSeverity: settings.minSeverity ?? repoConfig.review.minSeverity,
-        },
-        budget: sameModel ? repoConfig.budget : { ...repoConfig.budget, pricing: undefined },
-      };
-      rulesFiles = repoConfigResult.rulesFiles;
-      configHash = createHash('sha256').update(repoConfigResult.configText).digest('hex').slice(0, 12);
-    }
+    const built = effectiveConfigFor(repoConfigResult, choice, fallbackList, settings);
+    const { rulesFiles, configHash } = built;
+    // The primary model's price (ADR-0016): workspace override, repo file, catalog, else unknown.
+    const pricing = await resolvePricing({ store: deps.store, settings, repoPricing: built.repoPricing }, chosenProvider, chosenModel);
+    const effectiveConfig: MergePilotConfig = { ...built.config, budget: { ...built.config.budget, pricing: pricing.pricing } };
 
     if (settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined) {
       const now = deps.now ? deps.now() : new Date();
@@ -256,6 +206,7 @@ export async function processReviewJob(
       jobId: job.deliveryId,
       runId: run.id,
       fetch: deps.judgeFetch,
+      priceLookup: await judgePriceLookup(deps.store, settings),
     });
     credStore.addKnownSecrets(judgeSetup.secrets);
 
@@ -310,16 +261,19 @@ export async function processReviewJob(
       const rr = reviewResult.runResult;
       const judged = judgeRunParts(judgeSetup, rr.usage, rr.judge, reviewResult.judgeSemantic);
       judgeNote = judged.note;
-      payload = prepareRunResult({
-        summary: rr.summary,
-        inlineFindings: rr.inline,
-        summaryOnlyFindings: rr.summaryOnly,
-        language: effectiveConfig.language,
-        usage: judged.usage,
-        verification: rr.verification,
-        judge: judged.judge,
-        knownSecrets: credStore.getKnownSecrets(),
-      });
+      payload = {
+        ...prepareRunResult({
+          summary: rr.summary,
+          inlineFindings: rr.inline,
+          summaryOnlyFindings: rr.summaryOnly,
+          language: effectiveConfig.language,
+          usage: judged.usage,
+          verification: rr.verification,
+          judge: judged.judge,
+          knownSecrets: credStore.getKnownSecrets(),
+        }),
+        pricing: pricing.record,
+      };
       findingsCount = rr.inline.length + rr.summaryOnly.length;
     } else if (status === 'skipped') {
       findingsCount = 0;

@@ -8,9 +8,11 @@ import type {
   ReviewModel,
   Severity,
 } from '@mergepilot/engine';
+import type { ModelPriceStore, PriceOverride, RunPricing } from './price-types.js';
 import type { RepoColorKey, RunMaintenanceStore } from './run-types.js';
 
 export * from './run-types.js';
+export * from './price-types.js';
 
 /** Workspace roles (ADR-0007). Order matters: each role includes everything below it. */
 export const ROLES = ['member', 'admin', 'owner'] as const;
@@ -93,6 +95,8 @@ export interface WorkspaceSettings {
   repoColors?: Record<string, RepoColorKey> | undefined;
   /** The Jev judge (ADR-0015); null / undefined = never configured (off). */
   judge?: JudgeSettings | null | undefined;
+  /** Manual model prices (ADR-0016); stores read back [] by default, undefined on save keeps them. */
+  priceOverrides?: PriceOverride[] | undefined;
 }
 
 /** The Jev judge of a workspace: the configured provider plus up to three explicit fallbacks. */
@@ -149,6 +153,8 @@ export interface ReviewRunResultPayload {
   };
   /** What the Jev judge did on this run (ADR-0015); its tokens are also in `usage`. */
   judge?: ReviewRunJudge | undefined;
+  /** Which source priced the primary model (ADR-0016). */
+  pricing?: RunPricing | undefined;
 }
 
 export interface ReviewRunJudge {
@@ -246,7 +252,7 @@ export interface ListReviewRunsResult {
 }
 
 /** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
-export interface AppStore extends RunMaintenanceStore {
+export interface AppStore extends RunMaintenanceStore, ModelPriceStore {
   /** Returns false when this delivery id was already recorded (duplicate webhook). */
   recordDelivery(deliveryId: string, event: string): Promise<boolean>;
 

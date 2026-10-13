@@ -12,9 +12,11 @@ import { z } from 'zod';
 import { API_PROVIDER_IDS, SeveritySchema } from '@mergepilot/engine';
 import { JudgeRunSchema, JudgeSettingsSchema, KeyProviderSchema } from './contract-judge.js';
 import { RepoColorsSchema, RunRetentionDaysSchema } from './contract-runs.js';
+import { PriceOverridesSchema, RunPricingSchema } from './contract-prices.js';
 
 export * from './contract-runs.js';
 export * from './contract-judge.js';
+export * from './contract-prices.js';
 
 export const ApiProviderSchema = z.enum(API_PROVIDER_IDS);
 export type ApiProvider = z.infer<typeof ApiProviderSchema>;
@@ -73,6 +75,8 @@ export const SettingsSchema = z.object({
   repoColors: RepoColorsSchema.optional(),
   /** The Jev judge (ADR-0015); null = off and cleared. Left out on PUT keeps the stored judge. */
   judge: JudgeSettingsSchema.nullable().optional(),
+  /** Manual model prices (ADR-0016, admin); left out on PUT keeps them, [] clears them. */
+  priceOverrides: PriceOverridesSchema.optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -219,6 +223,7 @@ export const ReviewRunResultSchema = z.object({
     })
     .optional(),
   judge: JudgeRunSchema.optional(),
+  pricing: RunPricingSchema.optional(),
 });
 export type ReviewRunResult = z.infer<typeof ReviewRunResultSchema>;
 

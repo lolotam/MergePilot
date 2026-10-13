@@ -1,0 +1,65 @@
+import type { PriceEntry, PriceSource } from '@mergepilot/engine';
+
+/** A manual price for one model, set by a workspace admin; it wins over every other source. */
+export interface PriceOverride {
+  provider: string;
+  model: string;
+  inputPerMTok: number;
+  outputPerMTok: number;
+  cacheReadPerMTok?: number | undefined;
+  cacheWritePerMTok?: number | undefined;
+}
+
+/** A catalog price as stored in `model_prices`. */
+export interface StoredModelPrice extends PriceEntry {
+  fetchedAt: Date;
+}
+
+export interface ModelKey {
+  provider: string;
+  model: string;
+}
+
+/** The model price part of AppStore (ADR-0016). */
+export interface ModelPriceStore {
+  /**
+   * In one transaction: upserts this source's entries and deletes this source's rows that are not
+   * in the new set. Call it only for a source that fetched OK. Returns the number of entries kept.
+   */
+  replaceModelPrices(source: PriceSource, entries: readonly PriceEntry[], fetchedAt: Date): Promise<number>;
+  /** Exact (provider, model) first, then a case-insensitive match. */
+  getModelPrice(provider: string, model: string): Promise<StoredModelPrice | null>;
+  /** Every row matching one of the keys, exactly or case-insensitively (pick with `pickPrice`). */
+  listModelPrices(keys: readonly ModelKey[]): Promise<StoredModelPrice[]>;
+  /** The newest `fetched_at` of each source that has rows. */
+  pricesFetchedAt(): Promise<Array<{ source: PriceSource; fetchedAt: Date }>>;
+}
+
+const lower = (key: ModelKey): string => `${key.provider.toLowerCase()}\u0000${key.model.toLowerCase()}`;
+
+/** The row for this model among `rows`: the exact match first, then a case-insensitive one. */
+export function pickPrice<T extends ModelKey>(rows: readonly T[], provider: string, model: string): T | undefined {
+  const exact = rows.find((r) => r.provider === provider && r.model === model);
+  if (exact) return exact;
+  const wanted = lower({ provider, model });
+  return [...rows]
+    .filter((r) => lower(r) === wanted)
+    .sort((a, b) => `${a.provider}\u0000${a.model}`.localeCompare(`${b.provider}\u0000${b.model}`))[0];
+}
+
+/** The workspace's manual price for this model: exact first, then case-insensitive. */
+export function findOverride(overrides: readonly PriceOverride[] | undefined, provider: string, model: string): PriceOverride | undefined {
+  return pickPrice(overrides ?? [], provider, model);
+}
+
+/** Which source priced a model: `static` is the judge's built-in Jev table (the last resort). */
+export type PricingSource = 'override' | 'repo' | `catalog:${PriceSource}` | 'static' | 'unknown';
+
+/** `result.pricing` of a run: what priced its primary model; null prices when unknown. */
+export interface RunPricing {
+  source: PricingSource;
+  inputPerMTok: number | null;
+  outputPerMTok: number | null;
+  /** ISO time the catalog price was fetched (catalog sources only). */
+  fetchedAt?: string | undefined;
+}

@@ -41,6 +41,7 @@ const config: AppConfig = {
 export interface ProviderHarness {
   app: FastifyInstance;
   credentials: CredentialService;
+  store: PgStore;
   adminCookie: () => string;
   memberCookie: () => string;
   /** The addresses the fake DNS answers with; change it to simulate DNS rebinding. */
@@ -94,6 +95,7 @@ export async function createProviderHarness(customFetch?: FetchLike): Promise<Pr
   return {
     app,
     credentials,
+    store,
     adminCookie: () => signedSessionCookie('t-adm', config.authSecret),
     memberCookie: () => signedSessionCookie('t-mem', config.authSecret),
     dns,

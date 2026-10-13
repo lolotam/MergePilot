@@ -4,24 +4,12 @@ import { deleteWorkspaceInTx, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
-  KeyProvider,
-  AppStore,
-  DeleteRunsTarget,
-  FinishReviewRunOptions,
-  Installation,
-  LatestFailedRunsOptions,
-  ListReviewRunGroupsResult,
-  ListReviewRunsOptions,
-  ListReviewRunsResult,
-  MaintenanceKind,
-  MaintenanceRun,
-  MonthlyUsage,
-  NewReviewRun,
-  RetentionPolicy,
-  ReviewRun,
-  StoredCredential,
-  WorkspaceSettings,
+  KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions, ListReviewRunGroupsResult,
+  ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun, MonthlyUsage, NewReviewRun, RetentionPolicy,
+  ReviewRun, StoredCredential, WorkspaceSettings, ModelKey, StoredModelPrice,
 } from '../core/types.js';
+import type { PriceEntry, PriceSource } from '@mergepilot/engine';
+import { getPgModelPrice, listPgModelPrices, pgPricesFetchedAt, replacePgModelPrices } from './pg-prices.js';
 import {
   deletePgReviewRuns,
   finishPgMaintenanceRun,
@@ -367,6 +355,22 @@ export class PgStore implements AppStore {
 
   async getLatestMaintenanceRun(kind: MaintenanceKind): Promise<MaintenanceRun | null> {
     return getLatestPgMaintenanceRun(this.db, kind);
+  }
+
+  async replaceModelPrices(source: PriceSource, entries: readonly PriceEntry[], fetchedAt: Date): Promise<number> {
+    return replacePgModelPrices(this.db, source, entries, fetchedAt);
+  }
+
+  async getModelPrice(provider: string, model: string): Promise<StoredModelPrice | null> {
+    return getPgModelPrice(this.db, provider, model);
+  }
+
+  async listModelPrices(keys: readonly ModelKey[]): Promise<StoredModelPrice[]> {
+    return listPgModelPrices(this.db, keys);
+  }
+
+  async pricesFetchedAt(): Promise<Array<{ source: PriceSource; fetchedAt: Date }>> {
+    return pgPricesFetchedAt(this.db);
   }
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {

@@ -32,6 +32,8 @@ export function mergeSettings(
     repoColors: update.repoColors ?? current?.repoColors ?? {},
     // Undefined keeps the stored judge; null turns it off and clears it.
     judge: update.judge !== undefined ? update.judge : (current?.judge ?? null),
+    // Undefined keeps the stored manual prices; [] clears them (ADR-0016).
+    priceOverrides: update.priceOverrides ?? current?.priceOverrides ?? [],
   };
 }
 
@@ -85,7 +87,22 @@ export async function validateSettings(
     const problem = await keyProblem(entry.provider, 'fallback_key_missing', 'fallback');
     if (problem) return problem;
   }
+  const priceProblem = validatePriceOverrides(settings.priceOverrides ?? []);
+  if (priceProblem) return priceProblem;
   return settings.judge ? validateJudge(store, workspaceId, settings.judge) : null;
+}
+
+/** One manual price per model: the schema checks each entry, this checks the list. */
+function validatePriceOverrides(overrides: ReadonlyArray<{ provider: string; model: string }>): SettingsProblem | null {
+  const seen = new Set<string>();
+  for (const o of overrides) {
+    const id = `${o.provider}\u0000${o.model.toLowerCase()}`;
+    if (seen.has(id)) {
+      return { code: 'price_override_duplicate', message: `priceOverrides: ${o.provider}:${o.model} is listed twice` };
+    }
+    seen.add(id);
+  }
+  return null;
 }
 
 /**

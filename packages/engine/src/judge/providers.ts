@@ -31,6 +31,9 @@ export interface JudgeProviderEntry {
 /**
  * The per-provider Jev model table. The OpenRouter id is not confirmed against the live API: a
  * wrong id shows up as the provider's own (redacted) 4xx message in the key test.
+ * `inputPerMTok` is the last-resort price (ADR-0016): catalog and workspace prices come first.
+ * OpenRouter's public model list does not include the Jev ids; its per-model endpoint gives
+ * `typesafe/jev-1.13` at 0.042 USD/MTok input (0 output), and `~typesafe/jev-latest` points to it.
  */
 export const JUDGE_PROVIDERS: Readonly<Record<JudgeProviderId, JudgeProviderEntry>> = {
   typesafe: {
@@ -44,7 +47,10 @@ export const JUDGE_PROVIDERS: Readonly<Record<JudgeProviderId, JudgeProviderEntr
     id: 'openrouter',
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api',
-    models: [{ id: '~typesafe/jev-latest' }, { id: 'typesafe/jev-1.13' }],
+    models: [
+      { id: '~typesafe/jev-latest', inputPerMTok: 0.042 },
+      { id: 'typesafe/jev-1.13', inputPerMTok: 0.042 },
+    ],
     envName: 'OPENROUTER_API_KEY',
   },
   'vercel-gateway': {
