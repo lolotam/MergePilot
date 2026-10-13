@@ -116,6 +116,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     withCallTimeout(input.model, limits.callTimeoutMs),
     fallbackModels.map((m) => withCallTimeout(m, limits.callTimeoutMs)),
   );
+  const subscriptionPricing = { inputPerMTok: 0, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 };
+  const currentPricing = () => model.includedInSubscription ? subscriptionPricing : budgetCfg.pricing;
   // Every key a model in the chain may send is redacted before ANY model call, fallbacks included.
   const knownSecrets = secretsToRedact(input.knownSecrets, input.model, fallbackModels);
 
@@ -222,8 +224,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
   const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
   let estimatedCostUsd: number | undefined;
-  if (budgetCfg.pricing) {
-    const pricing = budgetCfg.pricing;
+  const initialPricing = currentPricing();
+  if (initialPricing) {
+    const pricing = initialPricing;
     estimatedCostUsd = callPromptTokens.reduce(
       (sum, tokens) => sum + estimateCostUsd({ inputTokens: tokens, maxOutputTokens: reviewOutputTokens }, pricing),
       0,
@@ -232,7 +235,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       // Worst case for the verification call: its hunks are a subset of the review prompt.
       estimatedCostUsd += estimateCostUsd(
         { inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens },
-        budgetCfg.pricing,
+        pricing,
       );
     }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
@@ -244,7 +247,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
 
   // Real spend across every call of this review; usage-less calls count at their estimate.
-  const spend = new SpendTracker(budgetCfg.pricing, budgetCfg.perReviewUsd);
+  const spend = new SpendTracker(currentPricing, budgetCfg.perReviewUsd);
 
   // ── Steps d + e: model call(s), parse, recovery ────────────────────────
   const passContext: ReviewPassContext = {
@@ -351,7 +354,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // Pricing belongs to the configured model; after a fallback the cost is unknown (tokens still count).
   const disclosure = model.disclosure(knownSecrets);
   let reviewCostUsd: number | undefined;
-  if (budgetCfg.pricing && !disclosure.fallbackFrom) {
+  if (model.onlySubscriptionCalls) {
+    reviewCostUsd = 0;
+  } else if (budgetCfg.pricing && !disclosure.fallbackFrom) {
     // Real cost where usage was reported, the estimate for calls without usage (ADR-0011).
     reviewCostUsd = spend.spentUsd;
   }

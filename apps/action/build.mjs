@@ -25,10 +25,12 @@ await build({
 
 // esbuild marks each module with a `// <path>` comment. pnpm shortens long store folder
 // names on Windows only, so those comments differ by OS and the committed bundle would never
-// match CI's rebuild. Dropping the path comments makes the bundle byte-identical everywhere.
+// match CI's rebuild. Lazy __esm/__commonJS initializers also use those paths as diagnostic
+// object keys. Normalize the keys to the public package path and drop path comments.
 const outfile = resolve(outdir, 'index.js');
 const stripped = readFileSync(outfile, 'utf8')
   .split('\n')
   .filter((line) => !/^\/\/ (\.\.\/)+(node_modules|packages|apps)\//.test(line))
+  .map((line) => line.replace(/^(\s*)"(?:\.\.\/)+node_modules\/\.pnpm\/[^/]+\/node_modules\/([^"]+)"(?=\([^)]*\) \{)/, '$1"$2"'))
   .join('\n');
 writeFileSync(outfile, stripped);

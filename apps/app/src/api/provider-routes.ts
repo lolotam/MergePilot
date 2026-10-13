@@ -5,6 +5,8 @@ import {
   LlmFailure,
   providerEntry,
   testConnection,
+  redactSecrets,
+  Secret,
   type ApiProviderId,
   type CatalogModel,
 } from '@mergepilot/engine';
@@ -70,7 +72,7 @@ function statusFor(kind: string): number {
 }
 
 export function redact(text: string, key: string): string {
-  return key ? text.replaceAll(key, '[REDACTED]') : text;
+  return key ? redactSecrets(text, [new Secret(key)]).text.replaceAll('[REDACTED:known]', '[REDACTED]') : text;
 }
 
 function parseProvider(request: FastifyRequest, reply: FastifyReply): ApiProviderId | undefined {

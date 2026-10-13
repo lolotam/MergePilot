@@ -58,6 +58,8 @@ export function useSaveKeyMutation(workspaceId: string) {
     onSuccess: () => {
       showToast(t('keySavedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] });
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
@@ -75,6 +77,8 @@ export function useDeleteKeyMutation(workspaceId: string) {
     onSuccess: () => {
       showToast(t('keyDeletedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] });
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');

@@ -27,6 +27,9 @@ import {
 } from './http.js';
 import type { ApiProviderId } from './ids.js';
 import { providerEntry, resolveBaseUrl } from './registry.js';
+import { decodeSubscription } from '../credentials/subscription.js';
+import { Secret } from '../credentials/secret.js';
+import { SubscriptionAdapter } from './subscription/adapter.js';
 
 export interface TestConnectionOptions {
   baseUrl?: string;
@@ -197,6 +200,17 @@ export async function testConnection(
   const elapsed = () => Date.now() - started;
 
   try {
+    const subscription = decodeSubscription(keyValue(apiKey) ?? '', provider);
+    if (subscription) {
+      const adapter = new SubscriptionAdapter(subscription.provider, new Secret(keyValue(apiKey)!));
+      let reply = '';
+      for await (const chunk of adapter.stream({ model, messages: [{ role: 'user', content: PROMPT }],
+        maxOutputTokens: 1024, signal: controller.signal, ...(options.effort ? { effort: options.effort } : {}) })) {
+        if (chunk.type === 'text-delta') reply += chunk.text;
+      }
+      return reply.trim() ? { ok: true, ms: elapsed(), model, reply: reply.trim() }
+        : { ok: false, ms: elapsed(), code: 'invalid-response', message: 'Subscription model returned no text' };
+    }
     const request = plan(provider, apiKey, model, options);
     let res: Response;
     try {

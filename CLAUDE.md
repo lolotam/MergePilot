@@ -1,6 +1,8 @@
-# CLAUDE.md — MergePilot
+# Claude instructions — MergePilot
 
-Read before any task: `docs/prd/v0.2.ar.md`, `docs/architecture.md`, `docs/adr/`.
+@AGENTS.md
+
+`AGENTS.md` is the shared source of project instructions. Apply it when working in this repository. For provider and subscription-authentication work, also read `docs/subscription-auth.md`.
 
 ## Hard rules
 

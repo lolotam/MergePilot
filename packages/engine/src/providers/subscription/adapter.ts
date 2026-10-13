@@ -1,0 +1,117 @@
+import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai/models';
+import type { CredentialStore, Message } from '@earendil-works/pi-ai';
+import { decodeSubscription, type SubscriptionProvider } from '../../credentials/subscription.js';
+import type { Secret } from '../../credentials/secret.js';
+import { LlmAdapter } from '../../llm/adapter.js';
+import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
+import { DEFAULT_RETRY_POLICY } from '../../llm/retry.js';
+import type { GenerateOptions, StreamChunk } from '../../llm/types.js';
+import { redactSecrets } from '../../security/redact.js';
+import { subscriptionProvider } from './auth.js';
+import { failureFromResponse } from '../http.js';
+
+export function subscriptionModels(provider: SubscriptionProvider) {
+  return subscriptionProvider(provider).getModels().map((model) => ({
+    id: model.id,
+    name: model.name,
+    efforts: getSupportedThinkingLevels(model),
+    contextWindow: model.contextWindow,
+  }));
+}
+
+/** Streams only model text; no agent tools or subprocesses are enabled. */
+export class SubscriptionAdapter extends LlmAdapter {
+  override readonly retryPolicy = DEFAULT_RETRY_POLICY;
+  constructor(override readonly provider: SubscriptionProvider, private secret: Secret,
+    private readonly resolveSecret?: () => Promise<Secret>) { super(); }
+
+  async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    let envelope;
+    try {
+      if (this.resolveSecret) this.secret = await this.resolveSecret();
+      envelope = decodeSubscription(this.secret.reveal(), this.provider);
+    } catch {
+      throw new LlmFailure({ provider: this.provider, code: options.signal?.aborted ? 'ABORTED' : 'INVALID_CREDENTIAL',
+        message: 'Subscription credential could not be resolved; sign in again' });
+    }
+    if (!envelope) throw new LlmFailure({ provider: this.provider, code: 'INVALID_CREDENTIAL', message: 'Subscription login is required' });
+    // The SaaS resolves and persists refreshes under its database lock before reaching this adapter.
+    // Env-based consumers keep a refreshed value in memory for this call.
+    let credential = envelope.credential;
+    const store: CredentialStore = {
+      read: async () => credential,
+      list: async () => [{ providerId: subscriptionProvider(this.provider).id, type: 'oauth' }],
+      modify: async (_id, fn) => {
+        const next = await fn(credential);
+        if (next?.type === 'oauth') credential = next;
+        return credential;
+      },
+      delete: async () => { throw new Error('Logout is owned by the credential service'); },
+    };
+    const models = createModels({ credentials: store, authContext: { env: async () => undefined, fileExists: async () => false } });
+    const provider = subscriptionProvider(this.provider);
+    models.setProvider(provider);
+    const model = models.getModel(provider.id, options.model);
+    if (!model) throw new LlmFailure({ provider: this.provider, code: 'BAD_REQUEST', message: `Unknown subscription model: ${options.model}` });
+    const efforts = getSupportedThinkingLevels(model);
+    const requestedEffort = options.thinking === 'off' && efforts.includes('off') ? 'off' : options.effort;
+    const effort = efforts.find((level) => level === requestedEffort || (requestedEffort === 'none' && level === 'off'));
+    if (options.effort !== undefined && !effort) {
+      throw new LlmFailure({ provider: this.provider, code: 'BAD_REQUEST', message: `Unsupported subscription effort: ${options.effort}` });
+    }
+    const messages: Message[] = options.messages.map((message) => message.role === 'assistant'
+      ? { role: 'assistant', content: [{ type: 'text', text: message.content }], api: model.api, provider: model.provider, model: model.id,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: 'stop', timestamp: Date.now() }
+      : { role: message.role, content: message.content, timestamp: Date.now() });
+    let status: number | undefined;
+    let headers: Record<string, string> = {};
+    let httpFailure: LlmFailure | undefined;
+    let networkFailure: LlmFailure | undefined;
+    try {
+      for await (const event of models.streamSimple(model, { messages }, {
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(effort ? { thinking: effort } : {}),
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        maxTokens: options.maxOutputTokens,
+        maxRetries: 0,
+        transport: 'sse',
+        fetch: async (input, init) => {
+          let response: Response;
+          try { response = await globalThis.fetch(input, init); }
+          catch (error) {
+            networkFailure = new LlmFailure({ provider: this.provider,
+              code: options.signal?.aborted ? 'ABORTED' : error instanceof Error && error.name === 'TimeoutError' ? 'TIMEOUT' : 'NETWORK',
+              message: 'Could not reach the subscription provider' });
+            throw networkFailure;
+          }
+          status = response.status;
+          headers = Object.fromEntries(response.headers);
+          if (!response.ok) httpFailure = await failureFromResponse(response.clone(), this.provider, this.secret);
+          return response;
+        },
+        onResponse(response) { status = response.status; headers = response.headers; },
+      })) {
+        if (event.type === 'text_delta') yield { type: 'text-delta', text: event.delta };
+        if (event.type === 'error') {
+          const message = redactSecrets(event.error.errorMessage ?? 'Subscription request failed', [this.secret]).text;
+          if (event.reason === 'aborted') throw new LlmFailure({ provider: this.provider, code: 'ABORTED', message });
+          if (httpFailure) throw httpFailure;
+          if (networkFailure) throw networkFailure;
+          if (status && status >= 400) throw failureFromHttp({ provider: this.provider, status, headers, bodyText: message });
+          throw new LlmFailure({ provider: this.provider, code: 'UNKNOWN', message });
+        }
+        if (event.type === 'done') {
+          const usage = event.message.usage;
+          yield { type: 'usage', usage: { inputTokens: usage.input, outputTokens: usage.output, cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite } };
+          yield { type: 'finish', reason: event.reason === 'length' ? 'max-tokens' : 'stop' };
+          return;
+        }
+      }
+      throw new LlmFailure({ provider: this.provider, code: 'UNKNOWN', message: 'Subscription stream ended without a result' });
+    } catch (error) {
+      if (error instanceof LlmFailure) throw error;
+      throw new LlmFailure({ provider: this.provider, code: options.signal?.aborted ? 'ABORTED' : 'UNKNOWN',
+        message: 'Subscription request failed; test the connection or sign in again' });
+    }
+  }
+}

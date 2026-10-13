@@ -3,6 +3,8 @@
 - **Status:** Accepted (2026-10-13)
 - **Related to:** ADR-0008, ADR-0014, ADR-0015, docs/decisions.ar.md (batch 10, Q29)
 
+**Amendment — ADR-0020:** a connected consumer subscription overrides API-token price estimates with zero incremental API cost and records `source: 'static'`. Its token usage remains recorded. API-key, judge, and unknown-cost-after-fallback rules below remain applicable to those calls.
+
 ## Context
 
 In the SaaS, a run's cost was known only when the repo's `.mergepilot.yml` gave `budget.pricing`

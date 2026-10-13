@@ -33,11 +33,12 @@ export const termsEn: LegalDocument = {
     },
     {
       id: 'api-keys-billing',
-      title: '4. Customer API Keys and Third-Party Provider Costs',
+      title: '4. Provider Credentials, Subscriptions and Costs',
       paragraphs: [
-        'MergePilot operates under a Bring Your Own Key (BYOK) architecture. You supply your own API credentials for AI providers (Anthropic, OpenAI, Google Gemini).',
+        'You provide your own AI-provider API keys or connect an OpenAI/Codex, Anthropic/Claude, or xAI/Grok subscription. Each workspace has one active credential per provider; switching methods replaces the previous credential.',
         'All AI usage charges and model execution fees are billed directly to you by your selected AI provider under your independent account and agreement with them. MergePilot does not intermediate AI token billing and is not responsible for provider invoices or rate limits.',
         'You may configure monthly budget caps in MergePilot to halt reviews when a threshold is met, but you remain responsible for monitoring your provider account usage.',
+        'Subscription-backed requests show zero incremental API cost in MergePilot; subscription fees and provider usage limits still apply separately. Paid API fallback and judge requests are accounted for under their own pricing rules.',
       ],
     },
     {

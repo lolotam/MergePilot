@@ -24,7 +24,7 @@ export const privacyEn: LegalDocument = {
         'Account Data: Name, email address, and avatar image obtained when you sign in via Google or GitHub OAuth.',
         'GitHub App Installation Data: Account login, installation ID, repository names, pull request numbers, and commit SHAs.',
         'Review Run Metadata: Execution status, estimated review cost in USD, and timestamps.',
-        'Customer AI Provider API Keys: Customer-supplied API keys for Anthropic, OpenAI, or Google Gemini are stored fully encrypted with AES-256-GCM and never echoed back in the user interface after saving.',
+        'AI Provider Credentials: Customer-supplied API keys and connected OpenAI/Codex, Anthropic/Claude, or xAI/Grok subscription access tokens, refresh tokens, expiry and account identifiers are encrypted with AES-256-GCM. Secret values are never returned to the user interface after saving.',
       ],
     },
     {
@@ -32,7 +32,7 @@ export const privacyEn: LegalDocument = {
       title: '3. Data We Do NOT Store',
       paragraphs: [
         'Source Code: MergePilot does not store your repository source code.',
-        'Pull request diffs and file contents are inspected ephemerally in memory at review time and dispatched exclusively to your selected AI provider using your own API credentials. They are never persisted or retained on MergePilot storage systems.',
+        'Pull request diffs and file contents are inspected in memory at review time and sent to your configured AI provider using your active API-key or subscription credentials. Review results, including findings and suggestions, are retained according to your workspace retention settings.',
       ],
     },
     {
@@ -85,7 +85,7 @@ export const privacyEn: LegalDocument = {
       ],
       bulletPoints: [
         'Authentication: Google and GitHub for secure single sign-on.',
-        'AI Providers: Anthropic, OpenAI, and Google Gemini — prompts and diff snippets are transmitted directly using the customer’s own API key under the customer’s agreement with the respective provider.',
+        'AI Providers: your configured providers, including Anthropic, OpenAI, Google Gemini and xAI. Prompts and diff snippets use your active API-key or subscription credentials. Subscription tokens are refreshed through the provider’s authentication service.',
         'Hosting & Database: Secure cloud infrastructure hosting our web application and session stores.',
       ],
     },
@@ -101,7 +101,7 @@ export const privacyEn: LegalDocument = {
       id: 'retention-deletion',
       title: '9. Data Retention and Deletion',
       paragraphs: [
-        'We retain workspace metadata as long as your account remains active. You may delete workspaces, remove API keys, or uninstall the GitHub App at any time.',
+        'We retain workspace metadata as long as your account remains active. You may delete workspaces, remove API keys or connected subscription credentials, or uninstall the GitHub App at any time. Pending subscription login attempts expire after 15 minutes.',
         `To request complete deletion of your account and all associated data, contact us at ${SUPPORT_EMAIL}. All relevant data will be permanently deleted within 30 days of receiving your verified request.`,
       ],
     },
@@ -109,7 +109,7 @@ export const privacyEn: LegalDocument = {
       id: 'security',
       title: '10. Security and Key Encryption',
       paragraphs: [
-        'We implement industry-standard security controls including TLS 1.3 in transit, and AES-256-GCM symmetric encryption for all customer API keys at rest.',
+        'We use HTTPS/TLS in transit and AES-256-GCM envelope encryption for stored customer API keys and subscription tokens.',
         'API keys and secrets are strictly excluded from logs, error reports, and client payloads.',
       ],
     },

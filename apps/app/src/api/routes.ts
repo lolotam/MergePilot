@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Auth } from '../auth/auth.js';
 import { isUserPlatformAdmin } from '../admin/guard.js';
 import { requireRole } from '../auth/guard.js';
-import type { FetchLike } from '@mergepilot/engine';
+import { SUBSCRIPTION_PREFIX, type FetchLike } from '@mergepilot/engine';
 import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
@@ -28,6 +28,8 @@ import { registerBackupRoutes } from './backup-routes.js';
 import { registerBotRoutes } from './bot-routes.js';
 import { botNameTakenByExtraBot, mergeSettings, validateSettings } from './settings-validation.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
+import { registerSubscriptionRoutes } from './subscription-routes.js';
+import type { SubscriptionLoginFn } from '../credentials/subscription-login.js';
 
 export interface DashboardApiDeps {
   auth: Auth;
@@ -46,6 +48,7 @@ export interface DashboardApiDeps {
   runEvents?: RunEventBus | undefined;
   /** Test seam: live stream limits and keep-alive interval. */
   runStreams?: Partial<RunStreamOptions> | undefined;
+  subscriptionLogin?: SubscriptionLoginFn | undefined;
 }
 
 const toIso = (d: Date | string) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
@@ -163,6 +166,7 @@ export function registerDashboardApi(
         baseUrl: k.baseUrl ?? null,
         createdAt: toIso(k.createdAt),
         createdBy: k.createdBy,
+        authMethod: k.authMethod ?? 'api-key',
       }));
       return reply.status(200).send({ keys: safeKeys });
     },
@@ -193,6 +197,9 @@ export function registerDashboardApi(
         );
       }
       const apiKey = bodyParse.data.apiKey.trim();
+      if (apiKey.startsWith(SUBSCRIPTION_PREFIX)) {
+        return sendError(reply, 400, 'validation_error', 'Use subscription sign-in instead of the API key field');
+      }
       let baseUrl = bodyParse.data.baseUrl?.trim();
 
       if (provider === 'custom') {
@@ -302,6 +309,7 @@ export function registerDashboardApi(
   registerInstallationRoutes(app, deps);
   registerRunsRoutes(app, deps);
   registerProviderRoutes(app, deps);
+  registerSubscriptionRoutes(app, deps);
   registerJudgeRoutes(app, deps);
   registerPricesRoutes(app, deps);
   registerBotRoutes(app, deps);

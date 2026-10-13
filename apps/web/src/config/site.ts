@@ -4,4 +4,4 @@ export const SUPPORT_EMAIL = 'admin@walidmohamed.com';
 export const OPERATOR_NAME = 'Walidmohamed';
 export const GOVERNING_LAW = 'the State of Kuwait';
 export const GOVERNING_LAW_AR = 'دولة الكويت';
-export const LAST_UPDATED = '2026-10-12';
+export const LAST_UPDATED = '2026-10-13';

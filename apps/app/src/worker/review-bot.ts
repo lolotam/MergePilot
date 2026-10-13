@@ -49,7 +49,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       deps.ssrfLookup,
     );
     // Slot 1's config (and its price) was built once by the shared steps; an extra bot prices its own model.
-    const { effectiveConfig, rulesFiles, configHash, pricing } =
+    const { effectiveConfig, rulesFiles, configHash, pricing: configuredPricing } =
       slot === MAIN_BOT_SLOT
         ? ctx.mainConfig
         : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store);
@@ -75,6 +75,9 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
           : {}),
       });
     }
+    const pricing: RunPricing = model.includedInSubscription
+      ? { source: 'static', inputPerMTok: 0, outputPerMTok: 0 }
+      : configuredPricing;
     // A configured fallback left out (no key, or a custom URL that failed the SSRF check) is
     // disclosed in the log and on the run record; it is never called.
     const skippedNote = skippedFallbacksNote(model);

@@ -21,14 +21,14 @@ describe('Legal Pages - Privacy and Terms', () => {
     it('renders in Arabic with table of contents and last updated date', () => {
       renderWithLang(React.createElement(PrivacyPage, null), 'ar');
       expect(screen.getByRole('heading', { level: 1 })).toBeDefined();
-      expect(screen.getByText(/2026-10-12/)).toBeDefined();
+      expect(screen.getByText(/2026-10-13/)).toBeDefined();
       expect(screen.getByText(/جدول المحتويات|المحتويات/i)).toBeDefined();
     });
 
     it('renders in English with table of contents', () => {
       renderWithLang(React.createElement(PrivacyPage, null), 'en');
       expect(screen.getByRole('heading', { level: 1, name: /Privacy Policy/i })).toBeDefined();
-      expect(screen.getByText(/2026-10-12/)).toBeDefined();
+      expect(screen.getByText(/2026-10-13/)).toBeDefined();
       expect(screen.getByText(/Table of Contents/i)).toBeDefined();
     });
 
@@ -57,14 +57,14 @@ describe('Legal Pages - Privacy and Terms', () => {
     it('renders in Arabic and includes governing law and date', () => {
       renderWithLang(React.createElement(TermsPage, null), 'ar');
       expect(screen.getByRole('heading', { level: 1 })).toBeDefined();
-      expect(screen.getByText(/2026-10-12/)).toBeDefined();
+      expect(screen.getByText(/2026-10-13/)).toBeDefined();
       expect(screen.getByText(new RegExp(GOVERNING_LAW_AR))).toBeDefined();
     });
 
     it('renders in English and includes governing law', () => {
       renderWithLang(React.createElement(TermsPage, null), 'en');
       expect(screen.getByRole('heading', { level: 1, name: /Terms of Service/i })).toBeDefined();
-      expect(screen.getByText(/2026-10-12/)).toBeDefined();
+      expect(screen.getByText(/2026-10-13/)).toBeDefined();
       expect(screen.getByText(new RegExp(GOVERNING_LAW))).toBeDefined();
     });
   });

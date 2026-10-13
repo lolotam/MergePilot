@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { InstallationAlreadyLinkedError } from '../core/types.js';
-import { deleteWorkspaceInTx, withLiveWorkspace } from './workspace-lock.js';
+import { deleteWorkspaceInTx, lockCredential, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
@@ -190,6 +190,25 @@ export class PgStore implements AppStore {
     await withLiveWorkspace(this.db, credential.workspaceId, (tx) => writePgCredential(tx, credential));
   }
 
+  async modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>, signal?: AbortSignal): Promise<StoredCredential | null> {
+    return withLiveWorkspace(this.db, workspaceId, async (tx) => {
+      await lockCredential(tx, workspaceId, provider);
+      signal?.throwIfAborted();
+      const rows = await tx.select().from(providerCredentials)
+        .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
+      const row = rows[0];
+      const current: StoredCredential | null = row ? { ...row, provider: row.provider as KeyProvider, createdAt: new Date(row.createdAt) } : null;
+      const next = await change(current);
+      signal?.throwIfAborted();
+      if (next && next !== current) await writePgCredential(tx, next);
+      else if (!next) await tx.delete(providerCredentials)
+        .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
+      // Cancellation during the SQL write aborts this transaction before COMMIT.
+      signal?.throwIfAborted();
+      return next;
+    });
+  }
+
   async restoreWorkspace(workspaceId: string, restore: WorkspaceRestore): Promise<void> {
     await restorePgWorkspace(this.db, workspaceId, restore);
   }
@@ -241,14 +260,7 @@ export class PgStore implements AppStore {
   }
 
   async deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void> {
-    await this.db
-      .delete(providerCredentials)
-      .where(
-        and(
-          eq(providerCredentials.workspaceId, workspaceId),
-          eq(providerCredentials.provider, provider),
-        ),
-      );
+    await this.modifyCredential(workspaceId, provider, async () => null);
   }
 
   async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {

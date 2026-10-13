@@ -28,6 +28,7 @@ export * from './contract-models.js';
 export * from './contract-runs.js';
 export * from './contract-judge.js';
 export * from './contract-prices.js';
+export * from './contract-subscriptions.js';
 
 export type Severity = z.infer<typeof SeveritySchema>;
 
@@ -99,6 +100,7 @@ export const KeysResponseSchema = z.object({
   keys: z.array(
     z.object({
       provider: KeyProviderSchema,
+      authMethod: z.enum(['api-key', 'subscription', 'unknown']).optional(),
       last4: z.string(),
       createdAt: z.string(),
       createdBy: z.string(),

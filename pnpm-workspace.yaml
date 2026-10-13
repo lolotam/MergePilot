@@ -1,3 +1,10 @@
 packages:
   - packages/*
   - apps/*
+
+# These packages use their shipped JS or platform binaries; no install scripts are required.
+allowBuilds:
+  '@google/genai': false
+  esbuild: false
+  msgpackr-extract: false
+  protobufjs: false
