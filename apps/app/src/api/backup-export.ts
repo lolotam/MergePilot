@@ -50,13 +50,21 @@ export async function buildBackupFile(
   const fileKey = salt && options.passphrase ? await deriveBackupKey(options.passphrase, salt) : null;
   const credentials: BackupCredential[] = [];
   for (const meta of keys) {
-    const baseUrl = meta.provider === 'custom' ? (meta.baseUrl ?? null) : null;
-    const entry: BackupCredential = { provider: meta.provider, ...(baseUrl ? { baseUrl } : {}), last4: meta.last4 };
     if (fileKey && salt) {
-      const { secret } = await deps.credentials.resolveCredential(workspace.id, meta.provider);
-      entry.key = sealBackupKey(secret.reveal(), fileKey, salt, { provider: meta.provider, baseUrl });
+      // The key and its URL come from ONE read, so a custom key rotated with a new URL during the
+      // export can never be sealed (and later restored) against the old endpoint.
+      const resolved = await deps.credentials.resolveCredential(workspace.id, meta.provider);
+      const baseUrl = meta.provider === 'custom' ? (resolved.baseUrl ?? null) : null;
+      credentials.push({
+        provider: meta.provider,
+        ...(baseUrl ? { baseUrl } : {}),
+        last4: meta.last4,
+        key: sealBackupKey(resolved.secret.reveal(), fileKey, salt, { provider: meta.provider, baseUrl }),
+      });
+      continue;
     }
-    credentials.push(entry);
+    const baseUrl = meta.provider === 'custom' ? (meta.baseUrl ?? null) : null;
+    credentials.push({ provider: meta.provider, ...(baseUrl ? { baseUrl } : {}), last4: meta.last4 });
   }
 
   const file: BackupFile = {
