@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { TokenUsage } from '../llm/types.js';
-import { parseReviewAnswer, ReviewAnswerSchema } from '../review/answer.js';
+import { FINDINGS_MISSING_REASON, parseReviewAnswer, ReviewAnswerSchema } from '../review/answer.js';
 import { estimateTokens } from '../review/budget.js';
 import { secretsToRedact } from '../review/model.js';
 import { needsTruncationRetry } from '../review/split.js';
@@ -154,6 +154,12 @@ export async function runAudit(input: RunAuditInput): Promise<AuditResult> {
             retryNotes.push(`truncation retry failed: ${describeCallError(err, knownSecrets)}`);
           }
         }
+      }
+
+      // An audit chunk answered without a findings list was not audited: it is a failed chunk,
+      // never "No findings" (ADR-0011 amendment).
+      if (parseResult.ok && parseResult.findingsMissing) {
+        parseResult = { ok: false, code: 'invalid-json', error: FINDINGS_MISSING_REASON };
       }
 
       if (!parseResult.ok && retryNotes.length > 0) {

@@ -1,50 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import {
-  ACTIVE_RUN_STATUSES,
-  ActiveRunExistsError,
-  InstallationAlreadyLinkedError,
-  REUSABLE_RUN_STATUSES,
+  ACTIVE_RUN_STATUSES, ActiveRunExistsError, InstallationAlreadyLinkedError, REUSABLE_RUN_STATUSES,
   WorkspaceDeletedError,
 } from './types.js';
 import { compareRuns, filterRuns, findActiveRun, selectLatestFailedRuns } from './memory-runs.js';
 import {
-  deleteMemoryBot,
-  deleteMemoryWorkspaceBots,
-  keepPanelSettings,
-  listMemoryBots,
-  panelSettingsOrDefaults,
+  deleteMemoryBot, deleteMemoryWorkspaceBots, keepPanelSettings, listMemoryBots, panelSettingsOrDefaults,
   upsertMemoryBot,
 } from './memory-bots.js';
 import { BotNameTakenError, sameBotName, type ReviewerBot } from './bot-types.js';
 import {
-  addMemoryUsage,
-  deleteMemoryRuns,
-  finishMemoryMaintenance,
-  groupMemoryRuns,
-  latestMemoryMaintenance,
-  memoryRetentionPolicies,
-  pruneMemoryRuns,
-  startMemoryMaintenance,
+  addMemoryUsage, deleteMemoryRuns, finishMemoryMaintenance, groupMemoryRuns, latestMemoryMaintenance,
+  memoryRetentionPolicies, pruneMemoryRuns, startMemoryMaintenance,
 } from './memory-maintenance.js';
 import { DEFAULT_RUN_RETENTION_DAYS, usageMonth } from './run-types.js';
+import type { PriceEntry, PriceSource } from '@mergepilot/engine';
+import { MemoryPriceTable } from './memory-prices.js';
+import type { ModelKey, StoredModelPrice } from './price-types.js';
 import type {
-  KeyProvider,
-  AppStore,
-  DeleteRunsTarget,
-  FinishReviewRunOptions,
-  Installation,
-  LatestFailedRunsOptions,
-  ListReviewRunGroupsResult,
-  ListReviewRunsOptions,
-  ListReviewRunsResult,
-  MaintenanceKind,
-  MaintenanceRun,
-  MonthlyUsage,
-  NewReviewRun,
-  RetentionPolicy,
-  ReviewRun,
-  StoredCredential,
-  WorkspaceSettings,
+  KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
+  ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
+  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StoredCredential, WorkspaceSettings,
 } from './types.js';
 
 /** In-memory AppStore for tests and local development. Same contract as the Postgres store. */
@@ -58,6 +34,7 @@ export class MemoryStore implements AppStore {
   /** Monthly usage keyed by workspace id, a NUL separator and `YYYY-MM-01`. */
   readonly usage = new Map<string, MonthlyUsage>();
   readonly maintenance: MaintenanceRun[] = [];
+  readonly prices = new MemoryPriceTable();
   /** Extra reviewer-panel bots (slots 2-5), see memory-bots.ts. */
   readonly bots = new Map<string, ReviewerBot>();
 
@@ -121,18 +98,21 @@ export class MemoryStore implements AppStore {
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
       judge: s.judge ? { ...s.judge, fallback: [...s.judge.fallback] } : null,
+      priceOverrides: (s.priceOverrides ?? []).map((o) => ({ ...o })),
       ...panelSettingsOrDefaults(s),
     };
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
     this.assertLive(settings.workspaceId);
+    // Like the Postgres store: undefined keeps the stored retention, colors, judge and price overrides,
+    // and only a renamed main bot is checked against the extra bots' names.
+    const stored = this.settings.get(settings.workspaceId);
     const botName = settings.botName;
-    if (botName !== undefined && listMemoryBots(this.bots, settings.workspaceId).some((bot) => sameBotName(bot.name, botName))) {
+    const renamed = botName !== undefined && !(stored?.botName && sameBotName(stored.botName, botName));
+    if (renamed && listMemoryBots(this.bots, settings.workspaceId).some((bot) => sameBotName(bot.name, botName))) {
       throw new BotNameTakenError(botName);
     }
-    // Like the Postgres store: undefined keeps the stored retention, colors and judge.
-    const stored = this.settings.get(settings.workspaceId);
     this.settings.set(settings.workspaceId, {
       ...settings,
       runRetentionDays:
@@ -141,6 +121,7 @@ export class MemoryStore implements AppStore {
           : stored?.runRetentionDays !== undefined ? stored.runRetentionDays : DEFAULT_RUN_RETENTION_DAYS,
       repoColors: { ...(settings.repoColors ?? stored?.repoColors ?? {}) },
       judge: settings.judge !== undefined ? settings.judge : (stored?.judge ?? null),
+      priceOverrides: (settings.priceOverrides ?? stored?.priceOverrides ?? []).map((o) => ({ ...o })),
       ...keepPanelSettings(settings, stored),
     });
   }
@@ -370,6 +351,22 @@ export class MemoryStore implements AppStore {
 
   async getLatestMaintenanceRun(kind: MaintenanceKind): Promise<MaintenanceRun | null> {
     return latestMemoryMaintenance(this.maintenance, kind);
+  }
+
+  async replaceModelPrices(source: PriceSource, entries: readonly PriceEntry[], fetchedAt: Date): Promise<number> {
+    return this.prices.replace(source, entries, fetchedAt);
+  }
+
+  async getModelPrice(provider: string, model: string): Promise<StoredModelPrice | null> {
+    return this.prices.get(provider, model);
+  }
+
+  async listModelPrices(keys: readonly ModelKey[]): Promise<StoredModelPrice[]> {
+    return this.prices.list(keys);
+  }
+
+  async pricesFetchedAt(): Promise<Array<{ source: PriceSource; fetchedAt: Date }>> {
+    return this.prices.fetchedAt();
   }
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {

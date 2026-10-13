@@ -17,6 +17,7 @@ import {
 } from './queries.js';
 import { getUsers } from './queries-users.js';
 import { getWorkspaces } from './queries-workspaces.js';
+import type { FetchLike } from '@mergepilot/engine';
 
 export interface AdminApiDeps {
   auth: Auth;
@@ -24,6 +25,8 @@ export interface AdminApiDeps {
   config: AppConfig;
   /** For the maintenance routes (run retention); without it they report 503 / no last run. */
   store?: AppStore | undefined;
+  /** Test seam: the fetch the manual price refresh uses (its URLs are fixed constants). */
+  priceFetch?: FetchLike | undefined;
 }
 
 const PageQuerySchema = z.object({
@@ -105,5 +108,5 @@ export function registerAdminApi(app: FastifyInstance, deps: AdminApiDeps): void
     },
   );
 
-  registerMaintenanceRoutes(app, guard, deps.store);
+  registerMaintenanceRoutes(app, guard, deps.store, deps.priceFetch);
 }

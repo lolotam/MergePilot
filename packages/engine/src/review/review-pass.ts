@@ -8,6 +8,7 @@ import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
+import { FINDINGS_MISSING_REASON } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import { retryEmptyWithoutThinking, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
@@ -123,7 +124,9 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     findings: parsed.findings,
     droppedInvalid: parsed.droppedInvalid,
     totalUsage: recovery.totalUsage,
-    incompleteReasons: recovery.incompleteReasons,
+    incompleteReasons: parsed.findingsMissing
+      ? [...recovery.incompleteReasons, FINDINGS_MISSING_REASON]
+      : recovery.incompleteReasons,
   };
 }
 

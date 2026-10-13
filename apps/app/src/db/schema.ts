@@ -66,6 +66,8 @@ export const workspaceSettings = pgTable('workspace_settings', {
   judgeMode: text('judge_mode').notNull().default('off'),
   judgeThreshold: numeric('judge_threshold', { precision: 4, scale: 3 }).notNull().default('0.35'),
   judgeFallback: jsonb('judge_fallback').notNull().default(sql`'[]'::jsonb`),
+  /** Migration 0008: manual model prices (ADR-0016), at most 50. */
+  priceOverrides: jsonb('price_overrides').notNull().default(sql`'[]'::jsonb`),
   /** Migration 0009: the reviewer panel's main bot and output mode (ADR-0017). */
   botName: text('bot_name').notNull().default('MergePilot'),
   botLogo: text('bot_logo').notNull().default('pilot'),
@@ -211,6 +213,26 @@ export const maintenanceRuns = pgTable(
       .on(table.kind)
       .where(sql`finished_at IS NULL`),
     index('idx_maintenance_runs_kind_started_at').on(table.kind, table.startedAt.desc()),
+  ],
+);
+
+/** Migration 0008: model prices from the public catalogs (ADR-0016), USD per million tokens. */
+export const modelPrices = pgTable(
+  'model_prices',
+  {
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    inputPerMTok: numeric('input_per_mtok', { precision: 12, scale: 6 }).notNull(),
+    outputPerMTok: numeric('output_per_mtok', { precision: 12, scale: 6 }).notNull(),
+    cacheReadPerMTok: numeric('cache_read_per_mtok', { precision: 12, scale: 6 }),
+    cacheWritePerMTok: numeric('cache_write_per_mtok', { precision: 12, scale: 6 }),
+    source: text('source').notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.model] }),
+    index('idx_model_prices_lower').on(sql`lower(${table.provider})`, sql`lower(${table.model})`),
+    index('idx_model_prices_source_fetched_at').on(table.source, table.fetchedAt.desc()),
   ],
 );
 
