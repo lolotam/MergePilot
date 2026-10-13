@@ -90,9 +90,15 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
   await withLiveWorkspace(db, settings.workspaceId, async (tx) => {
     const botName = settings.botName;
     if (botName !== undefined) {
-      // The main bot's name must differ from every extra bot's, checked under the bot-name lock.
+      // A renamed main bot must differ from every extra bot's name, checked under the bot-name lock.
+      // An unchanged name is not re-checked, so saving other settings is never blocked by it.
       await lockBotNames(tx, settings.workspaceId);
-      const extras = await tx
+      const stored = await tx
+        .select({ name: workspaceSettings.botName })
+        .from(workspaceSettings)
+        .where(eq(workspaceSettings.workspaceId, settings.workspaceId));
+      const renamed = !stored[0] || !sameBotName(stored[0].name, botName);
+      const extras = !renamed ? [] : await tx
         .select({ name: reviewerBots.name })
         .from(reviewerBots)
         .where(eq(reviewerBots.workspaceId, settings.workspaceId));

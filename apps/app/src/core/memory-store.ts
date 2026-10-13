@@ -105,12 +105,14 @@ export class MemoryStore implements AppStore {
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
     this.assertLive(settings.workspaceId);
+    // Like the Postgres store: undefined keeps the stored retention, colors, judge and price overrides,
+    // and only a renamed main bot is checked against the extra bots' names.
+    const stored = this.settings.get(settings.workspaceId);
     const botName = settings.botName;
-    if (botName !== undefined && listMemoryBots(this.bots, settings.workspaceId).some((bot) => sameBotName(bot.name, botName))) {
+    const renamed = botName !== undefined && !(stored?.botName && sameBotName(stored.botName, botName));
+    if (renamed && listMemoryBots(this.bots, settings.workspaceId).some((bot) => sameBotName(bot.name, botName))) {
       throw new BotNameTakenError(botName);
     }
-    // Like the Postgres store: undefined keeps the stored retention, colors, judge and price overrides.
-    const stored = this.settings.get(settings.workspaceId);
     this.settings.set(settings.workspaceId, {
       ...settings,
       runRetentionDays:
