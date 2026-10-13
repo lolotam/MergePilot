@@ -54,6 +54,14 @@ describe('bot chip on runs', () => {
     await waitFor(() => expect(chips().map((c) => c.textContent)).toEqual(['Owl bot', 'MergePilot']));
   });
 
+  it('names an older main-bot run (no name snapshot) after the main bot as it is now', async () => {
+    const renamed = { ...BOTS, main: { ...BOTS.main, name: 'Captain' } };
+    vi.mocked(client.fetchApi).mockImplementation(async (path: string) => (path.endsWith('/bots') ? renamed : {}));
+    renderRunsPage({ groups: [makeGroup([makeRun({ id: 'r1', botSlot: 1, botName: null }), makeRun({ id: 'r2', botSlot: 2, botName: 'Owl bot' })])] });
+    fireEvent.click(screen.getByRole('button', { name: /Show the runs of/ }));
+    await waitFor(() => expect(chips().map((c) => c.textContent)).toContain('Captain'));
+  });
+
   it('logo lookup: slot 1 is the main bot; an extra slot only while it keeps the run name', () => {
     expect(runBotLogo(BOTS, 1, null)).toBe('pilot');
     expect(runBotLogo(BOTS, 2, 'owl BOT')).toBe('owl');

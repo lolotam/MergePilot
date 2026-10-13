@@ -24,8 +24,10 @@ export function RunBotChip({ run }: { run: Pick<ReviewRun, 'botSlot' | 'botName'
   const { t } = useI18n();
   const { workspaceId = '' } = useParams();
   const bots = useBotsQuery(workspaceId).data;
-  const name = run.botName ?? MAIN_BOT_DEFAULT_NAME;
-  const logo = runBotLogo(bots, run.botSlot ?? 1, run.botName);
+  const slot = run.botSlot ?? 1;
+  // Runs from before the snapshot existed have no name: slot 1 shows the main bot's current name.
+  const name = run.botName ?? (slot === 1 ? bots?.main?.name : undefined) ?? MAIN_BOT_DEFAULT_NAME;
+  const logo = runBotLogo(bots, slot, run.botName);
   return (
     <span
       data-testid="run-bot-chip"

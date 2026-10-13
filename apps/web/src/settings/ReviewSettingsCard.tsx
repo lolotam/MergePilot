@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sliders } from 'lucide-react';
 import type { FallbackEntry, Settings, Severity } from '@mergepilot/app/contract';
 import type { BotLogo } from '../api/bots.js';
@@ -60,8 +60,18 @@ export function ReviewSettingsCard({
   const heavyDefault: ApiProvider =
     keyedProviders && !keyedProviders.includes(provider) ? (keyedProviders[0] ?? provider) : provider;
 
+  // Refill the form only when a field it shows changed on the server: a patch to another part of
+  // the settings (panel output, retention, judge…) must not discard unsaved edits here.
+  const shownKey = useRef<string | null>(null);
   useEffect(() => {
     if (!settings) return;
+    const key = JSON.stringify([
+      settings.botName, settings.botLogo, settings.provider, settings.model, settings.effort, settings.heavyProvider,
+      settings.heavyModel, settings.heavyEffort, settings.heavyThresholdLines, settings.fallback, settings.minSeverity,
+      settings.language, settings.monthlyBudgetUsd,
+    ]);
+    if (key === shownKey.current) return;
+    shownKey.current = key;
     setBotName(settings.botName ?? MAIN_BOT_DEFAULT_NAME);
     setBotLogo(settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO);
     setProvider(settings.provider);

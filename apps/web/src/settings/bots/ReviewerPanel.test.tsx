@@ -184,6 +184,17 @@ describe('Reviewer panel settings (bot tabs)', () => {
     expect(await screen.findByText('Another bot in this workspace already has this name')).toBeDefined();
   });
 
+  it('a panel output change keeps unsaved edits in the main bot form', async () => {
+    fakeBotsServer();
+    renderPanel();
+    const name = (await screen.findByRole('textbox', { name: 'Bot name' })) as HTMLInputElement;
+    await user.clear(name);
+    await user.type(name, 'Draft name');
+    await user.click(screen.getByRole('radio', { name: 'One consensus review' }));
+    await screen.findByRole('combobox', { name: 'Minimum agreement' });
+    expect(((await screen.findByRole('textbox', { name: 'Bot name' })) as HTMLInputElement).value).toBe('Draft name');
+  });
+
   it('panel output: the mode radio and the minimum agreement save; agreement shows in consensus only', async () => {
     const server = fakeBotsServer();
     renderPanel();
