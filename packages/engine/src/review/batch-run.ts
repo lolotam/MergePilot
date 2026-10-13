@@ -7,7 +7,7 @@
 import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
-import { parseReviewAnswer, type ParseReviewAnswerResult } from './answer.js';
+import { FINDINGS_MISSING_REASON, parseReviewAnswer, type ParseReviewAnswerResult } from './answer.js';
 import { estimateTokens } from './budget.js';
 import { describePaths, retryEmptyWithoutThinking, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
@@ -181,6 +181,7 @@ export async function executeBatchedReview(
         answered++;
         if (outcome.parsed.summary.trim().length > 0) batchSummaries.push(outcome.parsed.summary.trim());
         batchFindings.push(...outcome.parsed.findings);
+        if (outcome.parsed.findingsMissing) incompleteReasons.push(`${label}: ${FINDINGS_MISSING_REASON}`);
       } else {
         incompleteReasons.push(`${label}: ${outcome.parsed.error}`);
       }

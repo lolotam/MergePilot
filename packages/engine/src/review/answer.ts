@@ -44,6 +44,16 @@ const ReviewAnswerLooseSchema = z.object({
   findings: z.array(z.unknown()),
 });
 
+/**
+ * Some models answer with a summary and leave the findings list out entirely. That answer is
+ * kept (no findings) only when no candidate has a list, and the caller discloses it as
+ * incomplete: it is never read as a silent "no findings".
+ */
+const SummaryOnlyAnswerSchema = z.object({ summary: z.string().min(1) });
+
+/** Incomplete-review reason for an answer that had a summary but no findings list. */
+export const FINDINGS_MISSING_REASON = 'the model answered without a findings list (no inline findings from it)';
+
 
 export type ParseErrorCode = 'truncated' | 'invalid-json' | 'empty-response';
 
@@ -169,7 +179,7 @@ export function isTruncatedAnswer(finishReason: string | undefined, hasUnclosedO
 // ---------------------------------------------------------------------------
 
 export type ParseReviewAnswerResult =
-  | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number }
+  | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number; findingsMissing?: true }
   | { ok: false; error: string; code: ParseErrorCode };
 
 /**
@@ -194,6 +204,7 @@ export function parseReviewAnswer(
 
   let firstParseError: string | null = null;
   let matchedAnswer: z.infer<typeof ReviewAnswerLooseSchema> | null = null;
+  let summaryOnly: string | null = null;
 
   for (const candidate of candidates) {
     let parsed: unknown;
@@ -210,9 +221,17 @@ export function parseReviewAnswer(
     if (loose.success) {
       matchedAnswer = loose.data;
       break;
+    }
+    const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
+    if (bare.success && summaryOnly === null && !(parsed as Record<string, unknown>).findings) {
+      summaryOnly = bare.data.summary;
     } else if (!firstParseError) {
       firstParseError = loose.error.message;
     }
+  }
+
+  if (!matchedAnswer && summaryOnly !== null) {
+    return { ok: true, summary: summaryOnly, findings: [], droppedInvalid: 0, findingsMissing: true };
   }
 
   if (!matchedAnswer) {

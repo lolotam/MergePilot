@@ -71417,6 +71417,8 @@ var ReviewAnswerLooseSchema = external_exports.object({
   summary: external_exports.string().min(1),
   findings: external_exports.array(external_exports.unknown())
 });
+var SummaryOnlyAnswerSchema = external_exports.object({ summary: external_exports.string().min(1) });
+var FINDINGS_MISSING_REASON = "the model answered without a findings list (no inline findings from it)";
 var MAX_SCAN_RESTARTS = 20;
 function scanBalancedObjects(text, from, emit) {
   let depth = 0;
@@ -71500,6 +71502,7 @@ function parseReviewAnswer(text, options) {
   const { candidates, hasUnclosedObject } = extractCandidateObjects(text);
   let firstParseError = null;
   let matchedAnswer = null;
+  let summaryOnly = null;
   for (const candidate of candidates) {
     let parsed;
     try {
@@ -71514,9 +71517,16 @@ function parseReviewAnswer(text, options) {
     if (loose.success) {
       matchedAnswer = loose.data;
       break;
+    }
+    const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
+    if (bare.success && summaryOnly === null && !parsed.findings) {
+      summaryOnly = bare.data.summary;
     } else if (!firstParseError) {
       firstParseError = loose.error.message;
     }
+  }
+  if (!matchedAnswer && summaryOnly !== null) {
+    return { ok: true, summary: summaryOnly, findings: [], droppedInvalid: 0, findingsMissing: true };
   }
   if (!matchedAnswer) {
     const isTruncated = isTruncatedAnswer(options?.finishReason, hasUnclosedObject);
@@ -72279,6 +72289,8 @@ async function executeBatchedReview(input2) {
         if (outcome.parsed.summary.trim().length > 0)
           batchSummaries.push(outcome.parsed.summary.trim());
         batchFindings.push(...outcome.parsed.findings);
+        if (outcome.parsed.findingsMissing)
+          incompleteReasons.push(`${label}: ${FINDINGS_MISSING_REASON}`);
       } else {
         incompleteReasons.push(`${label}: ${outcome.parsed.error}`);
       }
@@ -72467,7 +72479,7 @@ async function runSinglePass(ctx) {
     findings: parsed.findings,
     droppedInvalid: parsed.droppedInvalid,
     totalUsage: recovery.totalUsage,
-    incompleteReasons: recovery.incompleteReasons
+    incompleteReasons: parsed.findingsMissing ? [...recovery.incompleteReasons, FINDINGS_MISSING_REASON] : recovery.incompleteReasons
   };
 }
 async function runBatchedPass(ctx, batches) {
