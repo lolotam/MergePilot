@@ -36,6 +36,8 @@ export interface ProcessReviewDeps {
   customFetch?: FetchLike | undefined;
   /** Test seam: the fetch the Jev judge uses (its endpoints are fixed preset URLs). */
   judgeFetch?: FetchLike | undefined;
+  /** The app's public URL (`MERGEPILOT_BASE_URL`), for the bot logos in panel reviews (ADR-0017). */
+  baseUrl?: string | undefined;
 }
 
 export interface ProcessReviewResult {

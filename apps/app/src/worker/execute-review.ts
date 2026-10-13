@@ -1,50 +1,27 @@
 import {
   redactSecrets,
-  runReview,
   type Finding,
-  type MergePilotConfig,
-  type ReviewModel,
   type ReviewRunResult,
-  type Secret,
 } from '@mergepilot/engine';
 import {
   deduplicateFindings,
-  hasNothingNewToReview,
   judgeBudgetLeft,
   dedupeJudgeOf,
   judgeSummaryInput,
-  withJudgeUsage,
-  listPullRequestFiles,
   NOTHING_NEW_DETAIL,
+  withJudgeUsage,
   publishReview,
   renderReviewSummary,
-  reviewScopeOf,
-  selectIncrementalFiles,
-  type FileContent,
+  type BotIdentity,
   type GitHubClient,
   type PublishReviewResult,
-  type ReviewJudge,
   type SemanticDedupeResult,
 } from '@mergepilot/github';
+import { DEFAULT_PUBLISHER_LOGIN, runBotReview, type BotReviewParams } from './bot-review-run.js';
 
-export interface ExecuteReviewParams {
-  client: GitHubClient;
-  owner: string;
-  repo: string;
-  pullNumber: number;
-  headSha: string;
-  baseSha: string;
-  prTitle: string;
-  prBody: string;
-  config: MergePilotConfig;
-  configHash: string;
-  rulesFiles: FileContent[];
-  model: ReviewModel;
-  knownSecrets?: Secret[] | undefined;
-  publisherLogin?: string | undefined;
-  log?: ((message: string) => void) | undefined;
-  /** Optional Jev judge (ADR-0015): false-positive filter and semantic duplicate check. */
-  judge?: ReviewJudge | undefined;
+export interface ExecuteReviewParams extends BotReviewParams {
+  /** The reviewer-panel bot shown at the top of the summary (ADR-0017); none for a lone main bot. */
+  identity?: BotIdentity | undefined;
 }
 
 export interface ExecuteReviewOutcome {
@@ -69,6 +46,36 @@ const PROVIDER_ENV_MAP: Record<string, string> = {
   'claude-code': 'CLAUDE_CODE_OAUTH_TOKEN',
 };
 
+/** The review link GitHub returned, or one built from the review id. */
+export function reviewUrlOf(
+  publish: PublishReviewResult,
+  capturedHtmlUrl: string | undefined,
+  pr: { owner: string; repo: string; pullNumber: number },
+): string | null {
+  if (capturedHtmlUrl) return capturedHtmlUrl;
+  if ('reviewId' in publish && typeof publish.reviewId === 'number') {
+    return `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.pullNumber}#pullrequestreview-${publish.reviewId}`;
+  }
+  return null;
+}
+
+/** Wraps the client so the `html_url` of the review it creates is kept. */
+export function capturingReviewUrl(client: GitHubClient): { client: GitHubClient; url: () => string | undefined } {
+  let captured: string | undefined;
+  const wrapped: GitHubClient = {
+    ...client,
+    createReview: async (cp) => {
+      const res = await client.createReview(cp);
+      if (res && 'html_url' in res && typeof (res as { html_url: unknown }).html_url === 'string') {
+        captured = (res as { html_url: string }).html_url;
+      }
+      return res;
+    },
+  };
+  return { client: wrapped, url: () => captured };
+}
+
+/** Reviews one bot's PR head and publishes its review (the main bot, or a bot in separate mode). */
 export async function executeReview(
   params: ExecuteReviewParams,
 ): Promise<ExecuteReviewOutcome> {
@@ -78,60 +85,23 @@ export async function executeReview(
     repo,
     pullNumber,
     headSha,
-    prTitle,
-    prBody,
     config,
     configHash,
-    rulesFiles,
     model,
     knownSecrets = [],
-    publisherLogin = 'github-actions[bot]',
+    publisherLogin = DEFAULT_PUBLISHER_LOGIN,
     log,
     judge,
+    botSlot,
+    identity,
   } = params;
 
-  log?.(`Listing files for pull request #${pullNumber}...`);
-  const { files: prFiles } = await listPullRequestFiles(client, {
-    owner,
-    repo,
-    pull_number: pullNumber,
-  });
-  log?.(`Found ${prFiles.length} files in PR diff`);
-
-  log?.('Selecting files for review (incremental check)...');
-  const incremental = await selectIncrementalFiles(client, {
-    owner,
-    repo,
-    pull_number: pullNumber,
-    headSha,
-    prFiles,
-    publisherLogin,
-    configHash,
-  });
-
-  const filesToReview = incremental.files;
-  const scope = reviewScopeOf(incremental);
-  log?.(`Review scope: ${scope.mode} (${filesToReview.length} files)`);
-  if (hasNothingNewToReview(incremental)) {
-    log?.(`Review skipped: ${NOTHING_NEW_DETAIL}`);
+  const run = await runBotReview(params);
+  if (run.kind === 'nothing-new') {
     return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL, publish: { status: 'skipped-no-changes' } };
   }
-
-  log?.('Running review...');
-  const reviewResult = await runReview({
-    config,
-    pr: {
-      title: prTitle,
-      body: prBody,
-    },
-    files: filesToReview,
-    anchorFiles: prFiles,
-    rulesFiles,
-    model,
-    knownSecrets,
-    judge,
-  });
-  log?.(`Review completed with status: ${reviewResult.status}`);
+  const { reviewResult, scope } = run;
+  const shown = identity ? { identity } : {};
 
   // ADR-0008: when an explicit fallback model answered, the summary names it and says why.
   const disclosure = reviewResult.status === 'skipped-budget' ? undefined : reviewResult;
@@ -166,6 +136,7 @@ export async function executeReview(
         judge: dedupeJudgeOf(judge),
         knownSecrets,
         maxUsd: judgeBudgetLeft(config, reviewResult.costUsd, judge),
+        ...(botSlot !== undefined ? { botSlot } : {}),
       });
       deduplicated = dedupeResult.kept;
       judgeSemantic = dedupeResult.semantic;
@@ -198,6 +169,7 @@ export async function executeReview(
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),
+      ...shown,
     });
   } else if (reviewResult.status === 'skipped-budget') {
     outcome = 'skipped-budget';
@@ -214,6 +186,7 @@ export async function executeReview(
       scope,
       outcome: 'skipped-budget',
       reason: reviewResult.reason,
+      ...shown,
     });
   } else {
     outcome = 'failed';
@@ -244,23 +217,14 @@ export async function executeReview(
       ...fallbackSummary,
       outcome: 'failed',
       reason,
+      ...shown,
     });
   }
 
-  let capturedHtmlUrl: string | undefined;
-  const wrappedClient: GitHubClient = {
-    ...client,
-    createReview: async (cp) => {
-      const res = await client.createReview(cp);
-      if (res && 'html_url' in res && typeof (res as { html_url: unknown }).html_url === 'string') {
-        capturedHtmlUrl = (res as { html_url: string }).html_url;
-      }
-      return res;
-    },
-  };
+  const capture = capturingReviewUrl(client);
 
   log?.(`Publishing review as ${publisherLogin}...`);
-  const publish = await publishReview(wrappedClient, {
+  const publish = await publishReview(capture.client, {
     owner,
     repo,
     pull_number: pullNumber,
@@ -274,22 +238,16 @@ export async function executeReview(
     // Partial unless every reviewable file was covered (no failed batch, no file dropped for budget).
     partial: !(outcome === 'completed' && reviewResult.status === 'completed' && reviewResult.complete),
     alreadyDeduplicated: true,
+    ...(botSlot !== undefined ? { botSlot } : {}),
   });
   log?.(`Review publication outcome: ${publish.status}`);
-
-  let reviewUrl: string | null = null;
-  if (capturedHtmlUrl) {
-    reviewUrl = capturedHtmlUrl;
-  } else if ('reviewId' in publish && typeof publish.reviewId === 'number') {
-    reviewUrl = `https://github.com/${owner}/${repo}/pull/${pullNumber}#pullrequestreview-${publish.reviewId}`;
-  }
 
   return {
     outcome,
     costUsd,
     detail,
     publish,
-    reviewUrl,
+    reviewUrl: reviewUrlOf(publish, capture.url(), { owner, repo, pullNumber }),
     runResult: reviewResult,
     ...(disclosure?.modelUsed ? { modelUsed: disclosure.modelUsed } : {}),
     ...(disclosure?.fallbackFrom ? { fallbackFrom: disclosure.fallbackFrom } : {}),
