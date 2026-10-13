@@ -16,7 +16,7 @@ import {
   reviewScopeOf,
   selectIncrementalFiles,
 } from './incremental.js';
-import { judgeSummaryInput, withJudgeUsage, type ReviewJudge } from './judge-summary.js';
+import { dedupeJudgeOf, judgeSummaryInput, withJudgeUsage, type ReviewJudge } from './judge-summary.js';
 import { isPrPaused, postPauseNoticeOnce } from './pause.js';
 import { listPullRequestFiles } from './pr-files.js';
 import { publishReview, type PublishReviewResult } from './publish.js';
@@ -224,7 +224,7 @@ export async function reviewPullRequest(
       pull_number: pullNumber,
       publisherLogin,
       findings: reviewResult.inline,
-      judge: judge?.judge,
+      judge: dedupeJudgeOf(judge),
       knownSecrets,
       maxUsd: judgeBudgetLeft(config, reviewResult.costUsd, judge),
     });
@@ -250,7 +250,7 @@ export async function reviewPullRequest(
       ...fallbackSummary,
       scope,
       outcome: 'completed',
-      judge: judgeSummaryInput(judgeReport, reviewResult.judge),
+      judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),

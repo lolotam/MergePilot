@@ -30,7 +30,7 @@ const judgeSettings = (overrides: Partial<JudgeSettings> = {}): JudgeSettings =>
   enabled: true,
   provider: 'typesafe',
   model: 'jev-latest',
-  mode: 'filter',
+  uses: ['filter', 'dedupe'],
   threshold: 0.35,
   fallback: [],
   ...overrides,
@@ -80,6 +80,7 @@ describe('processReviewJob — Jev judge (ADR-0015)', () => {
       ['vercel-gateway', false, 'no-key'],
       ['opencode-zen', true, null],
     ]);
+    expect(judge?.uses).toEqual(['filter', 'dedupe']);
     expect(judge?.inputTokens).toBe(120);
     expect(run?.result?.usage?.inputTokens).toBeGreaterThanOrEqual(170);
     expect(run?.result?.findings.map((f) => f.title)).toEqual(['Real bug']);
@@ -87,6 +88,7 @@ describe('processReviewJob — Jev judge (ADR-0015)', () => {
     const summary = String(h.reviews[0]?.body);
     expect(summary).toContain('Jev: `opencode-zen:jev-1.13-free (fallback 2;');
     expect(summary).toContain('Filtered by Jev (1)');
+    expect(summary).toContain('Jev uses: `filter`, `dedupe`');
 
     const calls = h.info.mock.calls.filter(([fields]) => (fields as { event?: string }).event === 'judge.call');
     expect(calls).toHaveLength(3);
@@ -105,10 +107,23 @@ describe('processReviewJob — Jev judge (ADR-0015)', () => {
     expect(String(h.reviews[0]?.body)).toContain('Jev judge unavailable: server');
   });
 
-  it('does not call the judge when it is disabled', async () => {
-    const h = setup(judgeSettings({ enabled: false }), () => answers({}));
+  it('does not call the judge when it is disabled, whatever its uses, or enabled with no uses', async () => {
+    for (const judge of [judgeSettings({ enabled: false, uses: ['annotate', 'filter', 'dedupe', 'consensus'] }), judgeSettings({ uses: [] })]) {
+      const h = setup(judge, () => answers({}));
+      await processReviewJob(h.job, h.deps);
+      expect(h.fetchSpy).not.toHaveBeenCalled();
+      expect((await h.latestRun())?.result?.judge).toBeUndefined();
+      expect((await h.latestRun())?.result?.findings).toHaveLength(2);
+    }
+  });
+
+  it('annotates and filters with ONE judge request when both uses are on', async () => {
+    const h = setup(judgeSettings({ uses: ['annotate', 'filter'] }), () => answers({ f1: 0.9, f2: 0.1 }));
     await processReviewJob(h.job, h.deps);
-    expect(h.fetchSpy).not.toHaveBeenCalled();
-    expect((await h.latestRun())?.result?.judge).toBeUndefined();
+    expect(h.fetchSpy).toHaveBeenCalledTimes(1);
+    const run = await h.latestRun();
+    expect(run?.result?.findings.map((f) => f.title)).toEqual(['Real bug']);
+    expect(run?.result?.findings[0]?.body).toContain('Jev confidence: 0.90');
+    expect(run?.result?.judge?.uses).toEqual(['annotate', 'filter']);
   });
 });

@@ -1,26 +1,29 @@
 /**
- * Use case 1 (ADR-0015): the false-positive filter, run after review and verify. One Jev request
- * per review holds one `noul` question per finding ("is this a real problem in the shown code?").
- * `annotate` adds the confidence to each comment; `filter` drops findings below the threshold and
- * returns them so the summary lists them (disclosed, never silent). When the judge is unavailable
- * the findings come back unchanged with the failure code.
+ * Use case 1 (ADR-0015): the false-positive check, run after review and verify. One Jev request
+ * per review holds one `noul` question per finding ("is this a real problem in the shown code?"),
+ * and that one request serves both uses (multi-use amendment):
+ * - `annotate` adds the confidence to every finding it scored;
+ * - `filter` drops findings below the threshold and returns them so the summary lists them
+ *   (disclosed, never silent). Critical and high are never dropped.
+ * With both on, findings are filtered and every remaining one gets its confidence line. When the
+ * judge is unavailable the findings come back unchanged with the failure code.
  */
 import type { Secret } from '../credentials/secret.js';
 import type { Finding } from '../review/types.js';
 import { JudgeUnavailableError, judgeFailureCode, type Judge } from './judge.js';
 import { hunkAround, noul, untrustedText } from './questions.js';
 import type { JudgeAnswer, JudgeJson, JudgeQuestion } from './types.js';
+import { normalizeJudgeUses, type JudgeUse, type JudgeUses } from './uses.js';
 
 /** Severities the filter never drops, whatever Jev answers (ADR-0015). */
 const NEVER_FILTERED: ReadonlySet<string> = new Set(['critical', 'high']);
 
-export const JUDGE_MODES = ['off', 'annotate', 'filter'] as const;
-export type JudgeMode = (typeof JUDGE_MODES)[number];
 export const DEFAULT_JUDGE_THRESHOLD = 0.35;
 
 export interface FalsePositiveInput {
   judge: Judge;
-  mode: JudgeMode;
+  /** Only `annotate` and `filter` matter here; neither of them means no request. */
+  uses: JudgeUses;
   threshold: number;
   findings: Finding[];
   /** The redacted patches the review saw. */
@@ -40,7 +43,8 @@ export interface FilteredFinding {
 
 export interface FalsePositiveOutcome {
   findings: Finding[];
-  mode: JudgeMode;
+  /** Every configured use, in the fixed order (the summary names them). */
+  uses: JudgeUse[];
   threshold: number;
   checked: number;
   filtered: FilteredFinding[];
@@ -59,16 +63,19 @@ export function confidenceLine(noulValue: number, language: 'ar' | 'en'): string
 }
 
 export async function runFalsePositiveFilter(input: FalsePositiveInput): Promise<FalsePositiveOutcome> {
-  const { findings, mode, threshold } = input;
+  const { findings, threshold } = input;
+  const uses = normalizeJudgeUses(input.uses);
+  const annotate = uses.includes('annotate');
+  const filter = uses.includes('filter');
   const unchanged = (unavailable?: string): FalsePositiveOutcome => ({
     findings,
-    mode,
+    uses,
     threshold,
     checked: 0,
     filtered: [],
     ...(unavailable ? { unavailable } : {}),
   });
-  if (mode === 'off' || findings.length === 0) return unchanged();
+  if ((!annotate && !filter) || findings.length === 0) return unchanged();
 
   const patches = new Map(input.files.map((f) => [f.path, f.patch]));
   const state: Record<string, JudgeJson> = {};
@@ -112,15 +119,15 @@ export async function runFalsePositiveFilter(input: FalsePositiveInput): Promise
     const value = answer?.type === 'noul' ? answer.noul : undefined;
     if (value === undefined) {
       kept.push(finding);
-    } else if (mode === 'filter' && value < threshold && !NEVER_FILTERED.has(finding.severity)) {
+    } else if (filter && value < threshold && !NEVER_FILTERED.has(finding.severity)) {
       filtered.push({ title: finding.title, path: finding.path, line: finding.line, noul: value });
-    } else if (mode === 'annotate' || (mode === 'filter' && value < threshold)) {
-      // Filter mode never drops critical/high findings (the reviewed code could try to steer the
+    } else if (annotate || (filter && value < threshold)) {
+      // The filter never drops critical/high findings (the reviewed code could try to steer the
       // judge); a low score on one is shown as a confidence line instead.
       kept.push({ ...finding, body: `${finding.body}\n\n${confidenceLine(value, input.language)}` });
     } else {
       kept.push(finding);
     }
   });
-  return { findings: kept, mode, threshold, checked: findings.length, filtered };
+  return { findings: kept, uses, threshold, checked: findings.length, filtered };
 }

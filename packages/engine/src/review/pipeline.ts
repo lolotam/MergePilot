@@ -21,7 +21,8 @@ import { buildBatchPrompt } from './batch-run.js';
 import { checkBudget, estimateTokens } from './budget.js';
 import { ReviewDeadline, withCallTimeout } from './call.js';
 import { estimateCostUsd } from '../budget/cost.js';
-import { runFalsePositiveFilter, type FalsePositiveOutcome, type JudgeMode } from '../judge/false-positive.js';
+import { runFalsePositiveFilter, type FalsePositiveOutcome } from '../judge/false-positive.js';
+import { hasJudgeUse, type JudgeUses } from '../judge/uses.js';
 import type { Judge } from '../judge/judge.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
@@ -63,8 +64,11 @@ export interface RunReviewInput {
   knownSecrets: Secret[];
   libraryDocs?: LibraryDoc[] | undefined;
   signal?: AbortSignal | undefined;
-  /** Optional Jev judge (ADR-0015); its false-positive filter runs after the verify pass. */
-  judge?: { judge: Judge; mode: JudgeMode; threshold: number } | undefined;
+  /**
+   * Optional Jev judge (ADR-0015); its false-positive check runs after the verify pass when `uses`
+   * has `annotate` or `filter` (one request covers both).
+   */
+  judge?: { judge: Judge; uses: JudgeUses; threshold: number } | undefined;
 }
 
 /** What the Jev false-positive filter did (the kept findings are the result's findings). */
@@ -297,7 +301,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // ── Step e3: Jev false-positive filter (ADR-0015) ──────────────────────
   // A failed judge leaves the findings unchanged; the outcome carries its code for disclosure.
   let judge: JudgeFilterSummary | undefined;
-  if (input.judge && input.judge.mode !== 'off' && modelFindings.length > 0) {
+  const judgeChecks =
+    input.judge !== undefined && (hasJudgeUse(input.judge.uses, 'annotate') || hasJudgeUse(input.judge.uses, 'filter'));
+  if (input.judge && judgeChecks && modelFindings.length > 0) {
     const { findings: judged, ...summary } = await runFalsePositiveFilter({
       ...input.judge,
       findings: modelFindings,
