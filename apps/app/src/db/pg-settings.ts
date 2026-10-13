@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { ApiProvider, JudgeSettings, WorkspaceSettings } from '../core/types.js';
+import type { ApiProvider, BotLogo, JudgeSettings, PanelMode, WorkspaceSettings } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
 import { workspaceSettings } from './schema.js';
@@ -34,6 +34,10 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
           fallback: Array.isArray(row.judgeFallback) ? (row.judgeFallback as JudgeSettings['fallback']) : [],
         }
       : null,
+    botName: row.botName,
+    botLogo: row.botLogo as BotLogo,
+    panelMode: row.panelMode as PanelMode,
+    panelMinAgreement: Number(row.panelMinAgreement),
   };
 }
 
@@ -50,8 +54,9 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
 }
 
 /**
- * Upserts the settings. `runRetentionDays`, `repoColors` and `judge` left undefined keep the stored value
- * (a new row gets the column defaults: 30 days, no colors).
+ * Upserts the settings. `runRetentionDays`, `repoColors`, `judge` and the panel fields (`botName`,
+ * `botLogo`, `panelMode`, `panelMinAgreement`) left undefined keep the stored value (a new row gets
+ * the column defaults: 30 days, no colors, the "MergePilot" bot, separate reviews).
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
   const budgetStr = settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined
@@ -73,6 +78,10 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
   if (settings.runRetentionDays !== undefined) values.runRetentionDays = settings.runRetentionDays;
   if (settings.repoColors !== undefined) values.repoColors = settings.repoColors;
   if (settings.judge !== undefined) Object.assign(values, judgeColumns(settings.judge));
+  if (settings.botName !== undefined) values.botName = settings.botName;
+  if (settings.botLogo !== undefined) values.botLogo = settings.botLogo;
+  if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
+  if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
   await withLiveWorkspace(db, settings.workspaceId, async (tx) => {
     await tx
       .insert(workspaceSettings)

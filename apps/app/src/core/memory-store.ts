@@ -8,6 +8,15 @@ import {
 } from './types.js';
 import { compareRuns, filterRuns, findActiveRun, selectLatestFailedRuns } from './memory-runs.js';
 import {
+  deleteMemoryBot,
+  deleteMemoryWorkspaceBots,
+  keepPanelSettings,
+  listMemoryBots,
+  panelSettingsOrDefaults,
+  upsertMemoryBot,
+} from './memory-bots.js';
+import type { ReviewerBot } from './bot-types.js';
+import {
   addMemoryUsage,
   deleteMemoryRuns,
   finishMemoryMaintenance,
@@ -49,6 +58,8 @@ export class MemoryStore implements AppStore {
   /** Monthly usage keyed by workspace id, a NUL separator and `YYYY-MM-01`. */
   readonly usage = new Map<string, MonthlyUsage>();
   readonly maintenance: MaintenanceRun[] = [];
+  /** Extra reviewer-panel bots (slots 2-5), see memory-bots.ts. */
+  readonly bots = new Map<string, ReviewerBot>();
 
   /** Mirrors the Postgres organization check: no writes for a workspace deleted in this store. */
   private assertLive(workspaceId: string): void {
@@ -110,6 +121,7 @@ export class MemoryStore implements AppStore {
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
       judge: s.judge ? { ...s.judge, fallback: [...s.judge.fallback] } : null,
+      ...panelSettingsOrDefaults(s),
     };
   }
 
@@ -125,7 +137,21 @@ export class MemoryStore implements AppStore {
           : stored?.runRetentionDays !== undefined ? stored.runRetentionDays : DEFAULT_RUN_RETENTION_DAYS,
       repoColors: { ...(settings.repoColors ?? stored?.repoColors ?? {}) },
       judge: settings.judge !== undefined ? settings.judge : (stored?.judge ?? null),
+      ...keepPanelSettings(settings, stored),
     });
+  }
+
+  async listReviewerBots(workspaceId: string): Promise<ReviewerBot[]> {
+    return listMemoryBots(this.bots, workspaceId);
+  }
+
+  async upsertReviewerBot(workspaceId: string, bot: ReviewerBot): Promise<ReviewerBot> {
+    this.assertLive(workspaceId);
+    return upsertMemoryBot(this.bots, workspaceId, bot, this.settings.get(workspaceId)?.botName);
+  }
+
+  async deleteReviewerBot(workspaceId: string, slot: number): Promise<boolean> {
+    return deleteMemoryBot(this.bots, workspaceId, slot);
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
@@ -162,6 +188,8 @@ export class MemoryStore implements AppStore {
       findingsCount: run.findingsCount ?? null,
       result: run.result ?? null,
       reviewUrl: run.reviewUrl ?? null,
+      botSlot: run.botSlot ?? 1,
+      botName: run.botName ?? null,
     };
     let reusable: ReviewRun | undefined;
     if (run.jobId) {
@@ -180,9 +208,9 @@ export class MemoryStore implements AppStore {
     // Emulates the partial unique index of migration 0004: one queued/running run per head.
     if (
       ACTIVE_RUN_STATUSES.includes(run.status) &&
-      findActiveRun(this.runs.values(), run, reusable?.id)
+      findActiveRun(this.runs.values(), { ...run, botSlot: starting.botSlot }, reusable?.id)
     ) {
-      throw new ActiveRunExistsError(run.repoFullName, run.pullNumber);
+      throw new ActiveRunExistsError(run.repoFullName, run.pullNumber, starting.botSlot);
     }
     if (reusable) {
       const updated: ReviewRun = { ...reusable, ...run, ...starting };
@@ -238,8 +266,9 @@ export class MemoryStore implements AppStore {
     repoFullName: string,
     pullNumber: number,
     headSha: string,
+    botSlot?: number,
   ): Promise<ReviewRun | null> {
-    const run = findActiveRun(this.runs.values(), { workspaceId, repoFullName, pullNumber, headSha });
+    const run = findActiveRun(this.runs.values(), { workspaceId, repoFullName, pullNumber, headSha, botSlot });
     return run ? { ...run } : null;
   }
 
@@ -346,6 +375,7 @@ export class MemoryStore implements AppStore {
       }
     }
     this.settings.delete(workspaceId);
+    deleteMemoryWorkspaceBots(this.bots, workspaceId);
     for (const [key, run] of this.runs.entries()) {
       if (run.workspaceId === workspaceId) {
         this.runs.delete(key);

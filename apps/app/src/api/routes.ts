@@ -21,7 +21,8 @@ import { registerInstallationRoutes } from './installation-routes.js';
 import { registerJudgeRoutes } from './judge-routes.js';
 import { invalidateModelsCache, registerProviderRoutes } from './provider-routes.js';
 import { registerRunsRoutes } from './runs-routes.js';
-import { mergeSettings, validateSettings } from './settings-validation.js';
+import { registerBotRoutes } from './bot-routes.js';
+import { botNameTakenByExtraBot, mergeSettings, validateSettings } from './settings-validation.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
 
 export interface DashboardApiDeps {
@@ -109,6 +110,10 @@ export function registerDashboardApi(
       const merged = mergeSettings(workspaceId, previous, parsed.data);
       const problem = await validateSettings(deps.store, workspaceId, merged);
       if (problem) return sendError(reply, 400, problem.code, problem.message);
+      // The main bot's name must differ from every extra bot's (ADR-0017).
+      if (parsed.data.botName !== undefined && (await botNameTakenByExtraBot(deps.store, workspaceId, parsed.data.botName))) {
+        return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
+      }
 
       await deps.store.saveSettings(merged);
       request.log.info(
@@ -282,5 +287,6 @@ export function registerDashboardApi(
   registerRunsRoutes(app, deps);
   registerProviderRoutes(app, deps);
   registerJudgeRoutes(app, deps);
+  registerBotRoutes(app, deps);
   registerWorkspaceLifecycleRoutes(app, deps);
 }

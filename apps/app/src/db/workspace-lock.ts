@@ -43,8 +43,8 @@ export async function withLiveWorkspace<T>(
 }
 
 /**
- * Deletes a workspace inside the caller's transaction. The organization row goes first (members
- * and invitations cascade), so writes holding its share lock (withLiveWorkspace) finish before this
+ * Deletes a workspace inside the caller's transaction. The organization row goes first (members,
+ * invitations and reviewer bots cascade), so writes holding its share lock (withLiveWorkspace) finish before this
  * proceeds and later ones see it gone and throw WorkspaceDeletedError. Then the workspace-scoped
  * rows (no foreign key to the organization), including the monthly usage, are removed and its
  * installations unlinked.
