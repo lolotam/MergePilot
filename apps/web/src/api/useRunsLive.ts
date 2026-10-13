@@ -7,6 +7,11 @@ export const LIVE_DEBOUNCE_MS = 300;
 export const LIVE_DOWN_FALLBACK_MS = 30_000;
 /** The poll interval while the stream is down, and the retry delay once the browser gave up. */
 export const LIVE_FALLBACK_POLL_MS = 30_000;
+/**
+ * While the stream is live, a light refetch this often reconciles anything a lost event missed
+ * (e.g. a worker that could not publish to Redis while the page's stream stayed healthy).
+ */
+export const LIVE_RECONCILE_MS = 120_000;
 
 /**
  * `live`: the stream is open. `connecting`: (re)connecting. `polling`: down for 30 s, refetching
@@ -59,13 +64,30 @@ export function useRunsLive(workspaceId: string, options: RunsLiveOptions = {}):
           .then(() => queryClient.invalidateQueries({ queryKey }));
         return;
       }
+      // A first load already restarted once absorbs this refetch: refetch it again once it settles.
+      for (const q of queryClient.getQueryCache().findAll({ queryKey })) {
+        if (q.state.data === undefined && q.state.fetchStatus === 'fetching') followUps.add(q);
+      }
       void queryClient.invalidateQueries({ queryKey });
     };
+    // Tracked per query: a sibling settling first must not use up another query's follow-up, and
+    // refetching only the settled query keeps a still-loading sibling from absorbing it.
+    const followUps = new WeakSet<object>();
+    const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || !followUps.has(event.query) || event.query.state.fetchStatus !== 'idle') return;
+      followUps.delete(event.query);
+      void queryClient.invalidateQueries({ queryKey: event.query.queryKey, exact: true });
+    });
 
     let source: EventSource | undefined;
     let debounce: ReturnType<typeof setTimeout> | undefined;
     let downTimer: ReturnType<typeof setTimeout> | undefined;
     let poll: ReturnType<typeof setInterval> | undefined;
+    let reconcile: ReturnType<typeof setInterval> | undefined;
+    const stopReconcile = () => {
+      if (reconcile) clearInterval(reconcile);
+      reconcile = undefined;
+    };
     let reopen: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
 
@@ -118,8 +140,11 @@ export function useRunsLive(workspaceId: string, options: RunsLiveOptions = {}):
         setState('live');
         // Events are not replayed: catch up on every open (first connect, short or long outage).
         refetch();
+        stopReconcile();
+        reconcile = setInterval(refetch, LIVE_RECONCILE_MS);
       };
       es.onerror = () => {
+        stopReconcile();
         setState((s) => (s === 'polling' ? s : 'connecting'));
         markDown();
         // A closed source (e.g. 401/429/503 answers) is never retried by the browser: retry later.
@@ -142,6 +167,8 @@ export function useRunsLive(workspaceId: string, options: RunsLiveOptions = {}):
       source?.close();
       for (const t of [debounce, downTimer, reopen]) if (t) clearTimeout(t);
       stopPolling();
+      stopReconcile();
+      unsubscribeCache();
     };
   }, [workspaceId, runId, queryClient]);
 
