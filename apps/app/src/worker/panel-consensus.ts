@@ -1,4 +1,6 @@
+import { hasJudgeUse } from '@mergepilot/engine';
 import {
+  dedupeJudgeOf,
   deduplicateFindings,
   judgeBudgetLeft,
   mergePanelFindings,
@@ -56,13 +58,17 @@ export async function publishConsensus(
   knownSecrets.push(...judgeSetup.secrets);
   const judge = judgeSetup.judge;
   const budget = () => judgeBudgetLeft(ctx.mainConfig.effectiveConfig, undefined, judge);
+  // Each judge use is opt-in (ADR-0015 multi-use): "same issue?" across bots needs `consensus`,
+  // the check against slot 1's earlier comments needs `dedupe`.
+  const consensusJudge = judge && hasJudgeUse(judge.uses, 'consensus') ? judge.judge : undefined;
+  const dedupeJudge = dedupeJudgeOf(judge);
 
   const merge = await mergePanelFindings({
     bots: completed.map(({ br, rr }) => ({ slot: br.bot.slot, name: br.bot.name, inline: rr.inline, summaryOnly: rr.summaryOnly })),
     minAgreement: settings.panelMinAgreement ?? 1,
-    judge: judge?.judge,
+    judge: consensusJudge,
     knownSecrets,
-    maxUsd: judge ? budget() : undefined,
+    maxUsd: consensusJudge ? budget() : undefined,
   });
   const merged = merge.kept.filter((c) => c.kind === 'inline').map((c) => withFoundBy(c, merge.total, language));
   const deduped = await deduplicateFindings(ctx.client, {
@@ -71,9 +77,9 @@ export async function publishConsensus(
     pull_number: job.pullNumber,
     publisherLogin: ctx.publisherLogin,
     findings: merged,
-    judge: judge?.judge,
+    judge: dedupeJudge,
     knownSecrets,
-    maxUsd: judge ? budget() : undefined,
+    maxUsd: dedupeJudge ? budget() : undefined,
     botSlot: MAIN_BOT_SLOT,
   });
   addJudgeUsage(holder.pending, judge?.judge.report());

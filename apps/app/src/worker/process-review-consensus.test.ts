@@ -108,7 +108,7 @@ describe('processReviewJob — consensus mode', () => {
   });
 
   it('asks the workspace judge whether differently worded findings are the same issue', async () => {
-    const judge: JudgeSettings = { enabled: true, provider: 'typesafe', model: 'jev-latest', mode: 'filter', threshold: 0.35, fallback: [] };
+    const judge: JudgeSettings = { enabled: true, provider: 'typesafe', model: 'jev-latest', uses: ['filter', 'consensus'], threshold: 0.35, fallback: [] };
     const h = await panelSetup({
       settings: { ...consensus(2), judge, minSeverity: 'low' },
       bots: [{ slot: 2, name: 'Owl' }],
