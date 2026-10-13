@@ -16,6 +16,7 @@ import { PageHeader } from '../components/PageHeader.js';
 import { AddKeyModal } from '../components/AddKeyModal.js';
 import { WorkspaceGeneralCard } from '../components/WorkspaceGeneralCard.js';
 import { WorkspaceDangerZone } from '../components/WorkspaceDangerZone.js';
+import { BackupCard } from '../settings/BackupCard.js';
 import { ReviewerPanel } from '../settings/bots/ReviewerPanel.js';
 import { RepoColorsCard } from '../settings/RepoColorsCard.js';
 import { RetentionCard } from '../settings/RetentionCard.js';
@@ -193,6 +194,8 @@ export function SettingsPage() {
           </div>
         )}
       </div>
+
+      {currentWorkspace && <BackupCard workspaceId={workspaceId} role={currentWorkspace.role} />}
 
       {currentWorkspace && (
         <WorkspaceDangerZone workspaceId={workspaceId} workspaceName={currentWorkspace.name} role={currentWorkspace.role} />

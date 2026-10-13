@@ -14,10 +14,16 @@ import type {
   ApiProvider,
   KeyProvider,
   JudgeProvidersResponse,
+  BackupPreview,
+  BackupSection,
+  ExportBackupBody,
 } from '@mergepilot/app/contract';
 
 export type { PricesResponse } from '@mergepilot/app/contract';
 export type {
+  BackupPreview,
+  BackupSection,
+  ExportBackupBody,
   KeyProvider,
   JudgeProvidersResponse,
   ReviewRun,
@@ -125,6 +131,26 @@ export class ApiClientError extends Error {
   }
 }
 
+/** The dashboard error body (`{ error: { code, message, ...details } }`) as an ApiClientError. */
+async function toApiClientError(res: Response): Promise<ApiClientError> {
+  let code = `HTTP_${res.status}`;
+  let message = res.statusText || 'Request failed';
+  let details: Record<string, unknown> = {};
+  try {
+    const data = (await res.json()) as ErrorBody;
+    if (data?.error?.message) {
+      const { code: bodyCode, message: bodyMessage, ...rest } = data.error as ErrorBody['error'] &
+        Record<string, unknown>;
+      message = bodyMessage;
+      code = bodyCode;
+      details = rest;
+    }
+  } catch {
+    // Fallback to HTTP status text
+  }
+  return new ApiClientError(message, code, res.status, details);
+}
+
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: 'include',
@@ -136,22 +162,7 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
   });
 
   if (!res.ok) {
-    let code = `HTTP_${res.status}`;
-    let message = res.statusText || 'Request failed';
-    let details: Record<string, unknown> = {};
-    try {
-      const data = (await res.json()) as ErrorBody;
-      if (data?.error?.message) {
-        const { code: bodyCode, message: bodyMessage, ...rest } = data.error as ErrorBody['error'] &
-          Record<string, unknown>;
-        message = bodyMessage;
-        code = bodyCode;
-        details = rest;
-      }
-    } catch {
-      // Fallback to HTTP status text
-    }
-    throw new ApiClientError(message, code, res.status, details);
+    throw await toApiClientError(res);
   }
 
   if (res.status === 204) {
@@ -159,6 +170,26 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
   }
 
   return (await res.json()) as T;
+}
+
+/**
+ * POST /backup/export: the server seals the keys with the passphrase and answers the file as an
+ * attachment; this returns it as a Blob with the server's file name (ADR-0018).
+ */
+export async function downloadBackup(
+  workspaceId: string,
+  body: ExportBackupBody,
+): Promise<{ filename: string; blob: Blob }> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/backup/export`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await toApiClientError(res);
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'mergepilot-settings.json';
+  return { filename, blob: await res.blob() };
 }
 
 function runsQueryString(params: GetRunsParams | undefined, groupBy?: 'pr'): string {
@@ -263,6 +294,15 @@ export const api = {
     fetchApi<{ id: string; name: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
       method: 'PATCH',
       body: JSON.stringify({ name }),
+    }),
+  /** Owner only. `dryRun` returns the preview and writes nothing (ADR-0018). */
+  restoreBackup: (
+    workspaceId: string,
+    body: { file: unknown; passphrase?: string | undefined; dryRun: boolean; sections: BackupSection[] },
+  ) =>
+    fetchApi<BackupPreview>(`/api/workspaces/${encodeURIComponent(workspaceId)}/backup/restore`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
   deleteWorkspace: (workspaceId: string, confirmName: string) =>
     fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {

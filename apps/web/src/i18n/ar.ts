@@ -2,6 +2,7 @@ import { arSettings } from './settings-ar.js';
 import { arAdmin } from './admin-ar.js';
 import { arRuns } from './runs-ar.js';
 import { arJudge } from './judge-ar.js';
+import { arBackup } from './backup-ar.js';
 import { arPrices } from './prices-ar.js';
 import { arBots } from './bots-ar.js';
 
@@ -10,6 +11,7 @@ export const ar = {
   ...arAdmin,
   ...arRuns,
   ...arJudge,
+  ...arBackup,
   ...arPrices,
   ...arBots,
   // App

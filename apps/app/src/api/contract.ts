@@ -22,6 +22,7 @@ import {
 import { RepoColorsSchema, RunRetentionDaysSchema } from './contract-runs.js';
 import { PriceOverridesSchema, RunPricingSchema } from './contract-prices.js';
 
+export * from './contract-backup.js';
 export * from './contract-bots.js';
 export * from './contract-models.js';
 export * from './contract-runs.js';

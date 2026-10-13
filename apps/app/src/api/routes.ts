@@ -22,6 +22,7 @@ import { registerJudgeRoutes } from './judge-routes.js';
 import { registerPricesRoutes } from './prices-routes.js';
 import { invalidateModelsCache, registerProviderRoutes } from './provider-routes.js';
 import { registerRunsRoutes } from './runs-routes.js';
+import { registerBackupRoutes } from './backup-routes.js';
 import { registerBotRoutes } from './bot-routes.js';
 import { botNameTakenByExtraBot, mergeSettings, validateSettings } from './settings-validation.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
@@ -298,5 +299,6 @@ export function registerDashboardApi(
   registerJudgeRoutes(app, deps);
   registerPricesRoutes(app, deps);
   registerBotRoutes(app, deps);
+  registerBackupRoutes(app, deps);
   registerWorkspaceLifecycleRoutes(app, deps);
 }

@@ -12,6 +12,7 @@ import { defineActiveRunContract } from './store-contract-active-run.js';
 import { defineRetentionContract } from './store-contract-retention.js';
 import { definePricesContract } from './store-contract-prices.js';
 import { defineReviewerBotContract } from './store-contract-bots.js';
+import { defineBackupRestoreContract } from './store-contract-backup.js';
 
 /** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
 export const STORE_CONTRACT_WORKSPACES = [
@@ -25,6 +26,8 @@ export const STORE_CONTRACT_WORKSPACES = [
   'ws-k3-other',
   'ws-bots',
   'ws-bots-other',
+  'ws-backup',
+  'ws-backup-other',
 ] as const;
 
 export function describeStoreContract(
@@ -378,5 +381,6 @@ export function describeStoreContract(
     defineRetentionContract(createStore, cleanup);
     definePricesContract(createStore, cleanup);
     defineReviewerBotContract(createStore, cleanup);
+    defineBackupRestoreContract(createStore, cleanup);
   });
 }
