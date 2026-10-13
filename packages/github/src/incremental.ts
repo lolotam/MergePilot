@@ -1,5 +1,6 @@
 import type { CompareCommitsResult, GitHubClient } from './client.js';
 import { MAIN_BOT_SLOT, markerBotSlot, parseMarker, type ReviewMarker } from './marker.js';
+import { ownHunks } from './own-hunks.js';
 import type { PullRequestFile } from './pr-files.js';
 import type { ReviewScope } from './summary.js';
 
@@ -88,7 +89,8 @@ export async function findLastReviewedHead(
  * - No previous review: full ("first review")
  * - Config hash changed: full ("configuration changed since last review")
  * - Same head: incremental with 0 files (nothing new to review)
- * - Ahead: incremental with intersecting files between compare and prFiles, using compare patch
+ * - Ahead: incremental with intersecting files between compare and prFiles, using the compare
+ *   patch's hunks that are also in the PR's own diff (a base-branch merge adds none of its own)
  * - Compare at GitHub's 300-file cap (possibly truncated): full ("comparison too large")
  * - Compare error: full ("comparison unavailable")
  * - Diverged, behind, or 404: full ("history rewritten since last review")
@@ -187,7 +189,10 @@ export async function selectIncrementalFiles(
     };
 
     if (compareFile.patch !== undefined) {
-      mapped.patch = compareFile.patch;
+      // Only the PR's own hunks: a base-branch merge brings in changes the PR did not make.
+      const own = ownHunks(compareFile.patch, prFile.patch);
+      if (own === undefined) continue;
+      mapped.patch = own;
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== undefined) {

@@ -125384,6 +125384,45 @@ async function readFilesAtRef(client, { owner, repo, ref, paths }) {
   return results;
 }
 
+function changedLines(patch, sign) {
+  const lines = /* @__PURE__ */ new Set();
+  for (const line of patch.split("\n")) {
+    if (!line.startsWith(sign) || line.startsWith(`${sign}${sign}${sign} `))
+      continue;
+    const content = line.slice(1).trim();
+    if (content)
+      lines.add(content);
+  }
+  return lines;
+}
+function splitHunks(patch) {
+  const hunks = [];
+  let current = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@") && current.length > 0) {
+      hunks.push(current.join("\n"));
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length > 0)
+    hunks.push(current.join("\n"));
+  return hunks.filter((hunk) => hunk.startsWith("@@"));
+}
+function ownHunks(comparePatch, prPatch) {
+  if (prPatch === void 0)
+    return comparePatch;
+  const added = changedLines(prPatch, "+");
+  const removed = changedLines(prPatch, "-");
+  const kept = splitHunks(comparePatch).filter((hunk) => {
+    const changes = hunk.split("\n").slice(1).filter((line) => (line.startsWith("+") || line.startsWith("-")) && line.slice(1).trim() !== "");
+    if (changes.length === 0)
+      return true;
+    return changes.some((line) => (line.startsWith("+") ? added : removed).has(line.slice(1).trim()));
+  });
+  return kept.length > 0 ? kept.join("\n") : void 0;
+}
+
 var REVIEWS_PAGE_SIZE2 = 100;
 var MAX_COMPARE_FILES = 300;
 async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
@@ -125481,7 +125520,10 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       changes: compareFile.changes ?? prFile.changes
     };
     if (compareFile.patch !== void 0) {
-      mapped.patch = compareFile.patch;
+      const own2 = ownHunks(compareFile.patch, prFile.patch);
+      if (own2 === void 0)
+        continue;
+      mapped.patch = own2;
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== void 0) {

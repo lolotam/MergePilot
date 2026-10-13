@@ -63,3 +63,19 @@
 **السلبي والمحاذير:**
 - استدعاء إضافي لـ GitHub Compare API وجلب تعليقات الـ PR السابقة (مكالمات خفيفة ومحدودة مقارنة بتوفير تكلفة الـ LLM).
 - في حالة force-push يعود النظام تلقائيًا للمراجعة الكاملة لضمان الدقة وتجنب فقدان أي تغييرات.
+
+## Amendment (2026-10-13): base-branch merges are not the PR's changes
+
+Seen on lolotam/MergePilot#96, #97 and #103: after the author ran `git merge origin/main`, the incremental review looked at what main had changed, such as another PR's decisions-log entry, as if it were the PR's own work. It then reported that "the patch does not match the description".
+
+The incremental file set was already limited to files in the PR's own diff. A file that both the PR and main touched, however, still carried the full compare patch, main's hunks included.
+
+**What changes.** For each such file, only the compare hunks that belong to the PR are kept (`packages/github/src/own-hunks.ts`). A hunk is the PR's when one of its non-blank added or removed lines is also added or removed in the PR's own diff (base...head).
+
+Main's changes reach the branch through the merge, so they are on the base and never in that diff:
+- a merge-only push leaves nothing new to review;
+- a merge plus a real change reviews only the real change.
+
+**When nothing is dropped:**
+- a hunk with only blank-line changes is kept;
+- when GitHub omits the PR patch because the file is too large, the whole compare patch is kept.

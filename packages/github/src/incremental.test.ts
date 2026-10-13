@@ -11,10 +11,10 @@ describe('selectIncrementalFiles', () => {
     {
       path: 'src/main.ts',
       status: 'modified',
-      patch: '@@ -1 +1 @@\n-old\n+new',
-      additions: 1,
-      deletions: 1,
-      changes: 2,
+      patch: '@@ -1 +1 @@\n-old\n+new\n@@ -10 +10 @@\n-incOld\n+incNew',
+      additions: 2,
+      deletions: 2,
+      changes: 4,
     },
     {
       path: 'src/utils.ts',
