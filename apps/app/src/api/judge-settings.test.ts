@@ -88,7 +88,7 @@ describe('Jev judge settings, keys and routes (ADR-0015)', { timeout: 25000 }, (
     expect(res.json().providers).toEqual([
       { id: 'typesafe', label: 'TypeSafe', models: ['jev-latest'], keyOnly: true },
       { id: 'openrouter', label: 'OpenRouter', models: ['~typesafe/jev-latest', 'typesafe/jev-1.13'], keyOnly: false },
-      { id: 'vercel-gateway', label: 'Vercel AI Gateway', models: ['typesafe-ai/jev'], keyOnly: true },
+      { id: 'vercel-gateway', label: 'Vercel AI Gateway', models: ['typesafe-ai/jev'], keyOnly: false },
       { id: 'opencode-zen', label: 'OpenCode Zen', models: ['jev-1.13-free', 'jev-1.13'], keyOnly: false },
     ]);
   });

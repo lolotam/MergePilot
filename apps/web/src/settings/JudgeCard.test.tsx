@@ -15,7 +15,7 @@ const catalog: client.JudgeProvidersResponse = {
   providers: [
     { id: 'typesafe', label: 'TypeSafe', models: ['jev-latest'], keyOnly: true },
     { id: 'openrouter', label: 'OpenRouter', models: ['~typesafe/jev-latest', 'typesafe/jev-1.13'], keyOnly: false },
-    { id: 'vercel-gateway', label: 'Vercel AI Gateway', models: ['typesafe-ai/jev'], keyOnly: true },
+    { id: 'vercel-gateway', label: 'Vercel AI Gateway', models: ['typesafe-ai/jev'], keyOnly: false },
     { id: 'opencode-zen', label: 'OpenCode Zen', models: ['jev-1.13-free', 'jev-1.13'], keyOnly: false },
   ],
 };
@@ -56,13 +56,23 @@ describe('JudgeCard (Jev)', () => {
   it('offers only Jev models for the chosen provider, and only providers with a key plus the Jev-only types', async () => {
     renderCard({ keyed: ['typesafe', 'opencode-zen'] });
     const provider = await screen.findByLabelText('Judge provider', { selector: '#judge-provider' });
-    expect(optionValues(provider)).toEqual(['typesafe', 'vercel-gateway', 'opencode-zen']);
+    expect(optionValues(provider)).toEqual(['typesafe', 'opencode-zen']);
     expect(optionValues(screen.getByLabelText('Jev model', { selector: '#judge-model' }))).toEqual(['jev-latest']);
 
     fireEvent.change(provider, { target: { value: 'opencode-zen' } });
     const model = screen.getByLabelText('Jev model', { selector: '#judge-model' }) as HTMLSelectElement;
     expect(optionValues(model)).toEqual(['jev-1.13-free', 'jev-1.13']);
     expect(model.value).toBe('jev-1.13-free');
+  });
+
+  it('shows only Jev for a stored Vercel AI Gateway key, though that key also serves review models', async () => {
+    renderCard({ keyed: ['typesafe', 'vercel-gateway'] });
+    const provider = await screen.findByLabelText('Judge provider', { selector: '#judge-provider' });
+    expect(optionValues(provider)).toEqual(['typesafe', 'vercel-gateway']);
+    fireEvent.change(provider, { target: { value: 'vercel-gateway' } });
+    const model = screen.getByLabelText('Jev model', { selector: '#judge-model' }) as HTMLSelectElement;
+    expect(optionValues(model)).toEqual(['typesafe-ai/jev']);
+    expect(model.value).toBe('typesafe-ai/jev');
   });
 
   it('adds up to three fallback rows, removes one, and saves the judge', async () => {

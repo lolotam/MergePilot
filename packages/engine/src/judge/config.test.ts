@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../config/parse.js';
 import { judgeChainOf, JudgeConfigSchema } from './config.js';
-import { JUDGE_PROVIDER_IDS, jevModelIds } from './providers.js';
+import { isApiProviderId } from '../providers/ids.js';
+import { isJudgeKeyOnlyProviderId, JUDGE_KEY_ONLY_PROVIDER_IDS, JUDGE_PROVIDER_IDS, jevModelIds, systemOneUrl } from './providers.js';
 
 describe('judge config', () => {
   it('defaults the model, mode off and threshold 0.35', () => {
@@ -18,6 +19,15 @@ describe('judge config', () => {
     }
     expect(JudgeConfigSchema.safeParse({ provider: 'openrouter', model: 'openai/gpt-5' }).success).toBe(false);
     expect(JudgeConfigSchema.safeParse({ provider: 'typesafe', fallback: [{ provider: 'opencode-zen', model: 'glm-5' }] }).success).toBe(false);
+  });
+
+  it('keeps Vercel AI Gateway on Jev only for the judge, though it is also a review provider now', () => {
+    expect(jevModelIds('vercel-gateway')).toEqual(['typesafe-ai/jev']);
+    expect(systemOneUrl('vercel-gateway')).toBe('https://ai-gateway.vercel.sh/typesafe/v1/systemone');
+    expect(JUDGE_KEY_ONLY_PROVIDER_IDS).toEqual(['typesafe']);
+    expect(isJudgeKeyOnlyProviderId('vercel-gateway')).toBe(false);
+    expect(isApiProviderId('vercel-gateway')).toBe(true);
+    expect(JudgeConfigSchema.safeParse({ provider: 'vercel-gateway', model: 'anthropic/claude-sonnet-4.5' }).success).toBe(false);
   });
 
   it('takes at most three fallbacks and rejects a baseUrl', () => {

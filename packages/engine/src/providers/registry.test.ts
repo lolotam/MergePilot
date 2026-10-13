@@ -15,6 +15,7 @@ describe('provider registry', () => {
         'deepseek',
         'nvidia',
         'openrouter',
+        'vercel-gateway',
         'opencode-zen',
         'opencode-go',
         'zai',
@@ -58,6 +59,28 @@ describe('provider registry', () => {
     expect(providerEntry('xiaomi-token-plan').keyHint).toBe('tp-');
     expect(providerEntry('xiaomi').label).toBe('Xiaomi MiMo');
     expect(providerEntry('xiaomi-token-plan').label).toBe('Xiaomi MiMo Token Plan (Singapore)');
+  });
+
+  it('adds Vercel AI Gateway as an OpenAI-compatible preset with a fixed URL (ADR-0008 amendment)', () => {
+    expect(isApiProviderId('vercel-gateway')).toBe(true);
+    expect(providerEntry('vercel-gateway')).toEqual({
+      id: 'vercel-gateway',
+      label: 'Vercel AI Gateway',
+      kind: 'openai-compatible',
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      thinkingStyle: 'reasoning_effort',
+      defaultModel: 'anthropic/claude-sonnet-4.5',
+      envName: 'AI_GATEWAY_API_KEY',
+      requiresBaseUrl: false,
+      streamUsage: true,
+    });
+    expect(resolveBaseUrl('vercel-gateway', 'https://proxy.example/v1')).toBe('https://ai-gateway.vercel.sh/v1');
+    expect(credentialEnvName('vercel-gateway')).toBe('AI_GATEWAY_API_KEY');
+  });
+
+  it('drops batch-only variants and the Jev judge model from the Vercel chat list', () => {
+    const models = ['openai/gpt-5', 'openai/gpt-5-batch', 'typesafe-ai/jev', 'anthropic/claude-sonnet-4.5'].map((id) => ({ id }));
+    expect(chatModelsFor('vercel-gateway', models).map((m) => m.id)).toEqual(['openai/gpt-5', 'anthropic/claude-sonnet-4.5']);
   });
 
   it('requires a base URL only for custom and never overrides a preset', () => {

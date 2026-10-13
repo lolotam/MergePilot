@@ -52,6 +52,21 @@ describe('OpenAICompatibleAdapter', () => {
     expect(calls[0]?.body).toMatchObject({ model: 'grok-4', stream: true, max_tokens: 100, stream_options: { include_usage: true } });
   });
 
+  it('streams from Vercel AI Gateway on its fixed URL, asking for usage and sending reasoning_effort', async () => {
+    const { fetch, calls } = mockFetch(okStream());
+    const adapter = new OpenAICompatibleAdapter({ provider: 'vercel-gateway', apiKey: KEY, baseUrl: 'https://proxy.example/v1', fetch });
+    const result = await collectText(adapter.stream({ ...base, model: 'anthropic/claude-sonnet-4.5', effort: 'high' }));
+    expect(result.usage).toEqual({ inputTokens: 30, outputTokens: 7, cacheReadTokens: 20, cacheWriteTokens: 0 });
+    expect(calls[0]?.url).toBe('https://ai-gateway.vercel.sh/v1/chat/completions');
+    expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
+    expect(calls[0]?.body).toMatchObject({
+      model: 'anthropic/claude-sonnet-4.5',
+      stream: true,
+      stream_options: { include_usage: true },
+      reasoning_effort: 'high',
+    });
+  });
+
   it('maps DeepSeek cache hits and length finish', async () => {
     const { fetch } = mockFetch(
       sseResponse([

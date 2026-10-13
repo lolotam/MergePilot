@@ -46,7 +46,7 @@ export const JudgeProvidersResponseSchema = z.object({
       id: JudgeProviderSchema,
       label: z.string(),
       models: z.array(z.string()),
-      /** True for providers whose key serves only the judge (TypeSafe, Vercel AI Gateway). */
+      /** True for providers whose key serves only the judge (TypeSafe); Vercel AI Gateway also reviews. */
       keyOnly: z.boolean(),
     }),
   ),
