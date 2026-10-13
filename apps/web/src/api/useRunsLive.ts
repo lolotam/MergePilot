@@ -42,15 +42,21 @@ export function useRunsLive(workspaceId: string, options: RunsLiveOptions = {}):
   useEffect(() => {
     if (!workspaceId || typeof EventSource === 'undefined') return undefined;
     const queryKey = runId ? ['workspaces', workspaceId, 'runs', runId] : ['workspaces', workspaceId, 'runs'];
+    // First loads already restarted once: a slow one is never restarted again, so steady events
+    // cannot starve it.
+    const restarted = new WeakSet<object>();
     const refetch = () => {
       // A first load still in flight (no data yet) would absorb the refetch and could answer with
-      // what it read before the event: cancel it so a fresh request starts.
-      const firstLoadInFlight = queryClient
+      // what it read before the event: cancel only that query so a fresh request starts.
+      const firstLoads = queryClient
         .getQueryCache()
         .findAll({ queryKey })
-        .some((q) => q.state.data === undefined && q.state.fetchStatus === 'fetching');
-      if (firstLoadInFlight) {
-        void queryClient.cancelQueries({ queryKey }).then(() => queryClient.invalidateQueries({ queryKey }));
+        .filter((q) => q.state.data === undefined && q.state.fetchStatus === 'fetching' && !restarted.has(q));
+      if (firstLoads.length > 0) {
+        for (const q of firstLoads) restarted.add(q);
+        void queryClient
+          .cancelQueries({ queryKey, predicate: (q) => firstLoads.includes(q) })
+          .then(() => queryClient.invalidateQueries({ queryKey }));
         return;
       }
       void queryClient.invalidateQueries({ queryKey });

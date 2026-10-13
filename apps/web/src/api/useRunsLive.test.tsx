@@ -196,9 +196,15 @@ describe('useRunsLive (ADR-0021)', () => {
     renderHook(() => useRunsLive('ws-1'), { wrapper });
 
     latest().open();
-    expect(cancel).toHaveBeenCalledWith({ queryKey: ['workspaces', 'ws-1', 'runs'] });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(cancel.mock.calls[0]?.[0]).toMatchObject({ queryKey: ['workspaces', 'ws-1', 'runs'] });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['workspaces', 'ws-1', 'runs'] });
+
+    // The same slow first load is never restarted twice: later events only invalidate.
+    latest().emitRun({ runId: 'a', status: 'queued', kind: 'created' });
+    act(() => vi.advanceTimersByTime(LIVE_DEBOUNCE_MS));
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to polling when the first connection hangs without opening or failing', () => {
