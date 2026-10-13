@@ -251,7 +251,7 @@ export function parseReviewAnswer(
     return {
       ok: false,
       code: 'invalid-json',
-      error: `invalid-json: ${firstParseError ?? 'no valid JSON object found matching review schema'}`,
+      error: `invalid-json: ${firstParseError ?? `the answer has no JSON object (${text.length} characters)`}`,
     };
   }
 

@@ -4,7 +4,7 @@ import { parseReviewAnswer } from './answer.js';
 import {
   describePaths,
   generateWithTimeout,
-  retryEmptyWithoutThinking,
+  retryUnusableAnswer,
   ReviewDeadline,
   withCallTimeout,
 } from './call.js';
@@ -115,14 +115,14 @@ describe('ReviewDeadline and describePaths', () => {
   });
 });
 
-describe('retryEmptyWithoutThinking', () => {
+describe('retryUnusableAnswer', () => {
   const parse = (r: ReviewModelResponse) => parseReviewAnswer(r.text, { finishReason: r.finishReason });
   const empty = parseReviewAnswer('');
 
   it('leaves an answer that is not empty alone', async () => {
     const model: ReviewModel = { label: 'fake', generate: vi.fn() };
     const parsed = parseReviewAnswer('{"summary": "cut', { finishReason: 'max-tokens' });
-    const result = await retryEmptyWithoutThinking({
+    const result = await retryUnusableAnswer({
       parsed,
       model,
       spend: new SpendTracker(undefined, 1),
@@ -138,7 +138,7 @@ describe('retryEmptyWithoutThinking', () => {
   it('skips the retry, disclosed, when the budget cannot afford it', async () => {
     const model: ReviewModel = { label: 'fake', generate: vi.fn() };
     const spend = new SpendTracker({ inputPerMTok: 0, outputPerMTok: 10, cacheReadPerMTok: 0, cacheWritePerMTok: 0 }, 0.0001);
-    const result = await retryEmptyWithoutThinking({
+    const result = await retryUnusableAnswer({
       parsed: empty,
       model,
       spend,
@@ -159,7 +159,7 @@ describe('retryEmptyWithoutThinking', () => {
         throw new LlmFailure({ code: 'SERVER', provider: 'fake', message: 'boom' });
       },
     };
-    const result = await retryEmptyWithoutThinking({
+    const result = await retryUnusableAnswer({
       parsed: empty,
       model,
       spend: new SpendTracker(undefined, 1),
