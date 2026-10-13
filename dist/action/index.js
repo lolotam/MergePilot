@@ -125384,6 +125384,51 @@ async function readFilesAtRef(client, { owner, repo, ref, paths }) {
   return results;
 }
 
+function changesOf(lines) {
+  const changes = [];
+  for (const line of lines) {
+    if (line.startsWith("+++ ") || line.startsWith("--- "))
+      continue;
+    if (!line.startsWith("+") && !line.startsWith("-"))
+      continue;
+    const content = line.slice(1).trim();
+    if (content)
+      changes.push({ sign: line[0], content });
+  }
+  return changes;
+}
+function changeSet(patch) {
+  return new Set(changesOf(patch ? patch.split("\n") : []).map((c) => `${c.sign}${c.content}`));
+}
+function splitHunks(patch) {
+  const hunks = [];
+  let current = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@") && current.length > 0) {
+      hunks.push(current.join("\n"));
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length > 0)
+    hunks.push(current.join("\n"));
+  return hunks.filter((hunk) => hunk.startsWith("@@"));
+}
+function withoutBaseHunks(comparePatch, basePatch, prPatch) {
+  if (basePatch === void 0)
+    return comparePatch;
+  const base = changeSet(basePatch);
+  const pr = changeSet(prPatch);
+  const kept = splitHunks(comparePatch).filter((hunk) => {
+    const keys = changesOf(hunk.split("\n").slice(1)).map((c) => `${c.sign}${c.content}`);
+    if (keys.length === 0)
+      return true;
+    const fromBase = keys.every((key) => base.has(key)) && keys.some((key) => !pr.has(key));
+    return !fromBase;
+  });
+  return kept.length > 0 ? kept.join("\n") : void 0;
+}
+
 var REVIEWS_PAGE_SIZE2 = 100;
 var MAX_COMPARE_FILES = 300;
 async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
@@ -125412,7 +125457,7 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
   }
   return lastMarker;
 }
-async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot }) {
+async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot, baseSha }) {
   const lastMarker = await findLastReviewedMarker(client, {
     owner,
     repo,
@@ -125467,6 +125512,7 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
     };
   }
   const prFileMap = new Map(prFiles.map((file2) => [file2.path, file2]));
+  const basePatches = await baseBranchPatches(client, { owner, repo, since: lastMarker.headSha, baseSha }, comparison, prFileMap);
   const files = [];
   for (const compareFile of comparison.files) {
     const prFile = prFileMap.get(compareFile.filename);
@@ -125481,7 +125527,10 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       changes: compareFile.changes ?? prFile.changes
     };
     if (compareFile.patch !== void 0) {
-      mapped.patch = compareFile.patch;
+      const own2 = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
+      if (own2 === void 0)
+        continue;
+      mapped.patch = own2;
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== void 0) {
@@ -125495,6 +125544,22 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
     sinceSha: lastMarker.headSha,
     ...comparison.totalCommits !== void 0 ? { commitCount: comparison.totalCommits } : {}
   };
+}
+async function baseBranchPatches(client, { owner, repo, since, baseSha }, comparison, prFileMap) {
+  const patches = /* @__PURE__ */ new Map();
+  if (!baseSha || !comparison.files.some((f3) => f3.patch !== void 0 && prFileMap.has(f3.filename)))
+    return patches;
+  let base;
+  try {
+    base = await client.compareCommits({ owner, repo, base: since, head: baseSha });
+  } catch {
+    return patches;
+  }
+  for (const file2 of base?.files ?? []) {
+    if (file2.patch !== void 0)
+      patches.set(file2.filename, file2.patch);
+  }
+  return patches;
 }
 function reviewScopeOf(selection) {
   if (selection.mode === "incremental") {
@@ -125993,7 +126058,7 @@ var PROVIDER_ENV_MAP2 = {
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
 };
 async function reviewPullRequest(ctx) {
-  const { client, owner, repo, pullNumber, headSha, prTitle, prBody, config: config2, configHash, rulesFiles, model, knownSecrets = [], publisherLogin = "github-actions[bot]", log, judge } = ctx;
+  const { client, owner, repo, pullNumber, headSha, baseSha, prTitle, prBody, config: config2, configHash, rulesFiles, model, knownSecrets = [], publisherLogin = "github-actions[bot]", log, judge } = ctx;
   const pr = await client.getPullRequest({ owner, repo, pull_number: pullNumber });
   const prLabels = pr.labels?.map((l) => l.name) ?? [];
   const paused = await isPrPaused(client, {
@@ -126032,7 +126097,8 @@ async function reviewPullRequest(ctx) {
     headSha,
     publisherLogin,
     prFiles,
-    configHash
+    configHash,
+    baseSha
   });
   const filesToReview = selection.files;
   log?.(selection.mode === "incremental" ? `Incremental review: ${filesToReview.length} files changed since ${selection.sinceSha.slice(0, 7)}` : `Full review: ${selection.reason}`);

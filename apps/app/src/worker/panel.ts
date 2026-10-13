@@ -126,6 +126,7 @@ export async function runPanel(ctx: PanelContext, runs: BotRun[], noKey: PanelBo
         repo: ctx.repo,
         pullNumber: ctx.job.pullNumber,
         headSha: ctx.job.headSha,
+        baseSha: ctx.job.baseSha,
         configHash: ctx.mainConfig.configHash,
         publisherLogin: ctx.publisherLogin,
         log: ctx.deps.log,

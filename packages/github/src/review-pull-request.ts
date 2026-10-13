@@ -113,6 +113,7 @@ export async function reviewPullRequest(
     repo,
     pullNumber,
     headSha,
+    baseSha,
     prTitle,
     prBody,
     config,
@@ -168,6 +169,7 @@ export async function reviewPullRequest(
     publisherLogin,
     prFiles,
     configHash,
+    baseSha,
   });
 
   const filesToReview = selection.files;
