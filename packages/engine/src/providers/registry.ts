@@ -100,6 +100,16 @@ const ENTRIES: Record<ApiProviderId, EntryInit> = {
     envName: 'OPENROUTER_API_KEY',
     streamUsage: true,
   },
+  'vercel-gateway': {
+    label: 'Vercel AI Gateway',
+    kind: 'openai-compatible',
+    // Fixed (ADR-0008 amendment); the same key also serves the Jev judge on /typesafe (ADR-0015).
+    baseUrl: 'https://ai-gateway.vercel.sh/v1',
+    thinkingStyle: 'reasoning_effort',
+    defaultModel: 'anthropic/claude-sonnet-4.5',
+    envName: 'AI_GATEWAY_API_KEY',
+    streamUsage: true,
+  },
   'opencode-zen': {
     label: 'OpenCode Zen',
     kind: 'openai-compatible',
@@ -192,10 +202,13 @@ export function listProviders(): ReadonlyArray<Readonly<ProviderEntry>> {
  * OpenCode serves each model family on its own endpoint: GPT, Grok and Muse on /responses,
  * Claude, some Qwen and (on Go) MiniMax on /messages, Gemini on Google's path, Jev on
  * /systemone. MergePilot speaks /chat/completions to them, so those families are left out.
+ * Vercel AI Gateway lists batch-only `-batch` variants and the Jev judge model (served only on
+ * /typesafe/v1/systemone, ADR-0015), neither of which is a chat model.
  */
 const NOT_CHAT_COMPLETIONS: Partial<Record<ApiProviderId, RegExp>> = {
   'opencode-zen': /^(gpt-|grok-|muse-spark|claude-|gemini-|jev-|qwen3\.(8-flash|7-|6-|5-))/,
   'opencode-go': /^(gpt-|grok-|muse-spark|claude-|qwen|minimax-)/,
+  'vercel-gateway': /-batch$|^typesafe-ai\/jev/,
 };
 
 /** Drops the models a preset lists but does not serve on /chat/completions. */

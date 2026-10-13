@@ -12,6 +12,7 @@ export const SAAS_PROVIDERS: readonly ApiProvider[] = [
   'deepseek',
   'nvidia',
   'openrouter',
+  'vercel-gateway',
   'opencode-zen',
   'opencode-go',
   'zai',
@@ -22,8 +23,11 @@ export const SAAS_PROVIDERS: readonly ApiProvider[] = [
   'custom',
 ];
 
-/** Key types that serve only the Jev judge (ADR-0015): never review providers. */
-export const JUDGE_KEY_ONLY_PROVIDERS = ['typesafe', 'vercel-gateway'] as const satisfies readonly KeyProvider[];
+/**
+ * Key types that serve only the Jev judge (ADR-0015): never review providers. Vercel AI Gateway
+ * is a review provider whose key also serves the judge (ADR-0008 amendment), like OpenRouter.
+ */
+export const JUDGE_KEY_ONLY_PROVIDERS = ['typesafe'] as const satisfies readonly KeyProvider[];
 
 export function isJudgeKeyOnly(provider: KeyProvider): provider is (typeof JUDGE_KEY_ONLY_PROVIDERS)[number] {
   return (JUDGE_KEY_ONLY_PROVIDERS as readonly KeyProvider[]).includes(provider);

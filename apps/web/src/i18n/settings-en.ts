@@ -1,6 +1,7 @@
 export const enSettings = {
   // New Providers (J2)
   providerOpenrouter: 'OpenRouter',
+  providerVercelGateway: 'Vercel AI Gateway',
   providerDeepseek: 'DeepSeek',
   providerXai: 'xAI (Grok)',
   providerNvidia: 'NVIDIA',

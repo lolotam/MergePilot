@@ -42,6 +42,16 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect(listModels).toHaveBeenCalledTimes(2);
   });
 
+  it('lists Vercel AI Gateway models with its stored key', async () => {
+    vi.mocked(listModels).mockResolvedValue(MODELS);
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'vercel-gateway', apiKey: keyFor('vg'), userId: 'u-admin' });
+    const res = await get('vercel-gateway', h.memberCookie());
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ models: MODELS });
+    expect(vi.mocked(listModels).mock.calls[0]?.[0]).toBe('vercel-gateway');
+    expect(vi.mocked(listModels).mock.calls[0]?.[1]).toBe(keyFor('vg'));
+  });
+
   it('drops the cached list when the key is replaced', async () => {
     vi.mocked(listModels).mockResolvedValue(MODELS);
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('o1'), userId: 'u-admin' });

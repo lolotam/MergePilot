@@ -128,6 +128,9 @@ describe('default thinking headroom (P0.1)', () => {
     expect(isCompatibleReasoningModel('openrouter', 'openai/o3-mini')).toBe(true);
     expect(isCompatibleReasoningModel('openrouter', 'google/gemini-3-flash')).toBe(true);
     expect(isCompatibleReasoningModel('openrouter', 'meta-llama/llama-3-70b')).toBe(false);
+    // Vercel AI Gateway uses the same creator/model ids as OpenRouter.
+    expect(isCompatibleReasoningModel('vercel-gateway', 'openai/gpt-5')).toBe(true);
+    expect(isCompatibleReasoningModel('vercel-gateway', 'meta/llama-3.3-70b')).toBe(false);
     expect(isCompatibleReasoningModel('zai', 'glm-4.6', 'glm')).toBe(true);
     expect(isCompatibleReasoningModel('zai-coding', 'glm-4.6', 'glm')).toBe(true);
     expect(isCompatibleReasoningModel('nvidia', 'nvidia/nemotron-3-super-120b-a12b')).toBe(true);

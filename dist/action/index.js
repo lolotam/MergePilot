@@ -50328,6 +50328,7 @@ var API_PROVIDER_IDS = [
   "deepseek",
   "nvidia",
   "openrouter",
+  "vercel-gateway",
   "opencode-zen",
   "opencode-go",
   "zai",
@@ -50408,6 +50409,16 @@ var ENTRIES = {
     thinkingStyle: "reasoning_effort",
     defaultModel: "openai/gpt-5",
     envName: "OPENROUTER_API_KEY",
+    streamUsage: true
+  },
+  "vercel-gateway": {
+    label: "Vercel AI Gateway",
+    kind: "openai-compatible",
+    // Fixed (ADR-0008 amendment); the same key also serves the Jev judge on /typesafe (ADR-0015).
+    baseUrl: "https://ai-gateway.vercel.sh/v1",
+    thinkingStyle: "reasoning_effort",
+    defaultModel: "anthropic/claude-sonnet-4.5",
+    envName: "AI_GATEWAY_API_KEY",
     streamUsage: true
   },
   "opencode-zen": {
@@ -95849,7 +95860,7 @@ function isCompatibleReasoningModel(provider, model, style) {
   if (provider === "nvidia" && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
     return true;
   }
-  if (provider === "openrouter") {
+  if (provider === "openrouter" || provider === "vercel-gateway") {
     if (lowerModel.includes(":thinking") || /nemotron|qwq|deepseek-r1/.test(lowerModel) || lowerModel.includes("reasoner") || lowerModel.includes("r1") || lowerModel.includes("thinking") || /\b(?:o1|o3|o4|gpt-5)\b/.test(lowerModel) || /gemini-(?:[3-9]|2\.[5-9])/.test(lowerModel)) {
       return true;
     }

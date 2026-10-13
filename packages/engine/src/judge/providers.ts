@@ -8,8 +8,12 @@
 export const JUDGE_PROVIDER_IDS = ['typesafe', 'openrouter', 'vercel-gateway', 'opencode-zen'] as const;
 export type JudgeProviderId = (typeof JUDGE_PROVIDER_IDS)[number];
 
-/** Judge providers whose key is used for nothing else: stored as credentials, never review providers. */
-export const JUDGE_KEY_ONLY_PROVIDER_IDS = ['typesafe', 'vercel-gateway'] as const;
+/**
+ * Judge providers whose key is used for nothing else: stored as credentials, never review
+ * providers. `vercel-gateway` left this list (ADR-0008 amendment): its key serves review models
+ * on /v1 and the judge on /typesafe, like `openrouter` and `opencode-zen`.
+ */
+export const JUDGE_KEY_ONLY_PROVIDER_IDS = ['typesafe'] as const;
 export type JudgeKeyOnlyProviderId = (typeof JUDGE_KEY_ONLY_PROVIDER_IDS)[number];
 
 export interface JevModel {

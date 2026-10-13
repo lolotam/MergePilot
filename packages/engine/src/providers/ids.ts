@@ -11,6 +11,7 @@ export const API_PROVIDER_IDS = [
   'deepseek',
   'nvidia',
   'openrouter',
+  'vercel-gateway',
   'opencode-zen',
   'opencode-go',
   'zai',
