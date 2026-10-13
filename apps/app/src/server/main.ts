@@ -6,6 +6,8 @@ import { registerAuthRoutes } from '../auth/index.js';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
+import { MemoryRunEventBus } from '../core/run-events.js';
+import { withRunEvents } from '../core/run-events-store.js';
 import type { AppStore, ReviewQueue } from '../core/types.js';
 import { createServer, type ServerProbes } from './create-server.js';
 import { registerStatic } from './static.js';
@@ -45,9 +47,12 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
       env,
     }));
 
-  const store = options?.storeFactory
-    ? await options.storeFactory(config.databaseUrl)
-    : services.store;
+  // Runs created here (retries) reach the live runs table too (ADR-0021).
+  const runEvents = services.runEvents ?? new MemoryRunEventBus();
+  const store = withRunEvents(
+    options?.storeFactory ? await options.storeFactory(config.databaseUrl) : services.store,
+    runEvents,
+  );
 
   const queue = options?.queueFactory
     ? await options.queueFactory(config.redisUrl)
@@ -153,6 +158,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
           auth: services.auth,
           credentials: services.credentials,
           queue,
+          runEvents,
         });
       } else {
         try {
@@ -174,6 +180,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
               auth: services.auth,
               credentials: services.credentials,
               queue,
+              runEvents,
             });
           } else {
             instance.log.warn(

@@ -3,11 +3,13 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { createAuth, type Auth } from '../auth/index.js';
 import type { AppConfig } from '../core/config.js';
 import { MemoryStore } from '../core/memory-store.js';
+import { MemoryRunEventBus, type RunEventBus } from '../core/run-events.js';
 import type { AppStore, PauseCommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
 import { CredentialService } from '../credentials/index.js';
 import { createDb, runMigrations } from '../db/index.js';
 import * as dbSchema from '../db/schema.js';
 import { BullMqReviewQueue } from '../queue/index.js';
+import { RedisRunEventBus } from '../queue/redis-run-events.js';
 import { EnvelopeVault } from '../vault/index.js';
 
 export class InMemoryReviewQueue implements ReviewQueue {
@@ -45,6 +47,8 @@ export interface AppServices {
   credentials: CredentialService;
   auth: Auth;
   queue: ReviewQueue;
+  /** Live run updates (ADR-0021); optional so hand-built test services can leave it out. */
+  runEvents?: RunEventBus | undefined;
   close: () => Promise<void>;
 }
 
@@ -116,6 +120,7 @@ export async function buildServices(
 
   let queue: ReviewQueue;
   let closeQueue: () => Promise<void>;
+  let runEvents: RunEventBus;
 
   if (config.redisUrl.startsWith('memory:') || config.redisUrl === 'memory:') {
     const memQueue = new InMemoryReviewQueue();
@@ -123,12 +128,15 @@ export async function buildServices(
     closeQueue = async () => {
       await memQueue.close();
     };
+    runEvents = new MemoryRunEventBus();
   } else {
     const bullQueue = new BullMqReviewQueue({ redisUrl: config.redisUrl });
     queue = bullQueue;
     closeQueue = async () => {
       await bullQueue.close();
     };
+    // Its own publish and subscribe connections, apart from the queue's (ADR-0021).
+    runEvents = new RedisRunEventBus({ redisUrl: config.redisUrl });
   }
 
   const vault = buildVault(config.masterKey, env);
@@ -136,7 +144,7 @@ export async function buildServices(
   const auth = createAuth({ db, config });
 
   const close = async () => {
-    await Promise.allSettled([closeQueue(), closeDb()]);
+    await Promise.allSettled([closeQueue(), closeDb(), runEvents.close()]);
   };
 
   return {
@@ -146,6 +154,7 @@ export async function buildServices(
     credentials,
     auth,
     queue,
+    runEvents,
     close,
   };
 }

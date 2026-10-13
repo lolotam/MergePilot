@@ -8,6 +8,7 @@ import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import { BotNameTakenError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
 import type { CredentialService } from '../credentials/service.js';
+import type { RunEventBus } from '../core/run-events.js';
 import type { GitHubAppClientFactory } from '../worker/types.js';
 import { KeyProviderSchema, SettingsUpdateSchema, SaveKeyRequestSchema } from './contract.js';
 import { validateKey as defaultValidateKey } from './validate-key.js';
@@ -22,6 +23,7 @@ import { registerJudgeRoutes } from './judge-routes.js';
 import { registerPricesRoutes } from './prices-routes.js';
 import { invalidateModelsCache, registerProviderRoutes } from './provider-routes.js';
 import { registerRunsRoutes } from './runs-routes.js';
+import type { RunStreamOptions } from './runs-events-routes.js';
 import { registerBackupRoutes } from './backup-routes.js';
 import { registerBotRoutes } from './bot-routes.js';
 import { botNameTakenByExtraBot, mergeSettings, validateSettings } from './settings-validation.js';
@@ -42,6 +44,10 @@ export interface DashboardApiDeps {
   /** Test seams for the custom base URL SSRF guard (ADR-0010): DNS lookup and guarded fetch. */
   ssrfLookup?: DnsLookupFn | undefined;
   customFetch?: FetchLike | undefined;
+  /** Live run updates (ADR-0021); without it the stream answers 503 and the dashboard polls. */
+  runEvents?: RunEventBus | undefined;
+  /** Test seam: live stream limits and keep-alive interval. */
+  runStreams?: Partial<RunStreamOptions> | undefined;
   subscriptionLogin?: SubscriptionLoginFn | undefined;
 }
 

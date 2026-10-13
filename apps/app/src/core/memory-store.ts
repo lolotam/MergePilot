@@ -21,7 +21,7 @@ import type { ModelKey, StoredModelPrice } from './price-types.js';
 import type {
   KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
   ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
-  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StoredCredential, WorkspaceRestore,
+  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StaleRunRef, StoredCredential, WorkspaceRestore,
   WorkspaceSettings,
 } from './types.js';
 
@@ -294,8 +294,8 @@ export class MemoryStore implements AppStore {
     return selectLatestFailedRuns(this.runs.values(), workspaceId, options);
   }
 
-  async failStaleRuns(heartbeatBefore: Date): Promise<number> {
-    let count = 0;
+  async failStaleRuns(heartbeatBefore: Date, onFailed?: (failed: readonly StaleRunRef[]) => void): Promise<number> {
+    const refs: StaleRunRef[] = [];
     const now = new Date();
     for (const [id, r] of this.runs.entries()) {
       if (
@@ -306,10 +306,11 @@ export class MemoryStore implements AppStore {
         const failed: ReviewRun = { ...r, status: 'failed', detail: 'interrupted', finishedAt: now, updatedAt: now };
         this.runs.set(id, failed);
         addMemoryUsage(this.usage, { ...failed, costUsd: null, result: null });
-        count++;
+        refs.push({ workspaceId: r.workspaceId, id });
       }
     }
-    return count;
+    if (refs.length > 0) onFailed?.(refs);
+    return refs.length;
   }
 
   async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;

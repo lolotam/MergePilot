@@ -3,6 +3,7 @@ import { requireRole } from '../auth/guard.js';
 import { sendError } from './helpers.js';
 import { toRunDto, toRunGroupDto } from './run-dto.js';
 import { registerRunsDeleteRoutes } from './runs-delete.js';
+import { registerRunEventsRoutes } from './runs-events-routes.js';
 import { parseRunsListQuery } from './runs-query.js';
 import { registerRunsRetryRoutes } from './runs-retry.js';
 import type { DashboardApiDeps } from './routes.js';
@@ -10,6 +11,7 @@ import type { DashboardApiDeps } from './routes.js';
 export function registerRunsRoutes(app: FastifyInstance, deps: DashboardApiDeps): void {
   registerRunsRetryRoutes(app, deps);
   registerRunsDeleteRoutes(app, deps);
+  registerRunEventsRoutes(app, deps);
 
   // 1. GET /api/workspaces/:workspaceId/runs/repos (distinct repo names)
   app.get(

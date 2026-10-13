@@ -8,6 +8,7 @@ import type {
   ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
   MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, ReviewerBot, StoredCredential, WorkspaceRestore,
   WorkspaceSettings, ModelKey,
+  StaleRunRef,
   StoredModelPrice,
 } from '../core/types.js';
 import type { PriceEntry, PriceSource } from '@mergepilot/engine';
@@ -313,8 +314,8 @@ export class PgStore implements AppStore {
     return listPgLatestFailedRuns(this.db, workspaceId, options);
   }
 
-  async failStaleRuns(heartbeatBefore: Date): Promise<number> {
-    return failPgStaleRuns(this.db, heartbeatBefore);
+  async failStaleRuns(heartbeatBefore: Date, onFailed?: (failed: readonly StaleRunRef[]) => void): Promise<number> {
+    return failPgStaleRuns(this.db, heartbeatBefore, onFailed);
   }
 
   async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
