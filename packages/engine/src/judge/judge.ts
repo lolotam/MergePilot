@@ -10,6 +10,9 @@ import type { Secret } from '../credentials/secret.js';
 import { LlmFailure } from '../llm/failure.js';
 import type { FetchLike } from '../providers/http.js';
 import { estimateTokens } from '../review/budget.js';
+
+/** Output tokens assumed per question in the budget preflight (a noul/choice/score answer is far smaller). */
+export const JUDGE_OUTPUT_TOKENS_PER_QUESTION = 64;
 import { callSystemOne, JUDGE_CALL_TIMEOUT_MS, JudgeResponseError } from './call.js';
 import { jevModelPrice, type JudgeProviderId } from './providers.js';
 import type { JudgeAttempt, JudgeDecision, JudgeRequest } from './types.js';
@@ -181,6 +184,9 @@ export function createJudge(options: JudgeOptions): Judge {
     const deadline = now() + totalTimeoutMs;
     const attempts: JudgeAttempt[] = [];
     const estimate = estimateTokens(JSON.stringify({ state: request.state, questions: request.questions }));
+    // Jev answers are short typed values; this generous per-question allowance keeps the
+    // preflight conservative when a price has an output rate.
+    const outputEstimate = questions * JUDGE_OUTPUT_TOKENS_PER_QUESTION;
     let lastCode = 'no-key';
 
     for (let index = startAt; index < entries.length; index++) {
@@ -203,7 +209,9 @@ export function createJudge(options: JudgeOptions): Judge {
         continue;
       }
       const price = priceOf(entry.provider, entry.model);
-      if (price !== undefined && request.maxUsd !== undefined && (estimate * price.inputPerMTok) / 1_000_000 > request.maxUsd) {
+      const worstCaseUsd =
+        price === undefined ? undefined : (estimate * price.inputPerMTok + outputEstimate * (price.outputPerMTok ?? 0)) / 1_000_000;
+      if (worstCaseUsd !== undefined && request.maxUsd !== undefined && worstCaseUsd > request.maxUsd) {
         skip('budget');
         continue;
       }

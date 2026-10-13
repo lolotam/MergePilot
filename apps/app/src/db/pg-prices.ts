@@ -1,4 +1,4 @@
-import { and, asc, eq, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { PriceEntry, PriceSource } from '@mergepilot/engine';
 import { pickPrice, type ModelKey, type StoredModelPrice } from '../core/price-types.js';
 import type { AppDb } from './pg-store.js';
@@ -25,6 +25,10 @@ function mapRow(row: typeof modelPrices.$inferSelect): StoredModelPrice {
 }
 
 const str = (value: number | undefined): string | null => (value === undefined ? null : String(value));
+
+/** A row's key: provider and model ids never contain a tab. */
+const priceKey = (provider: string, model: string): string => `${provider}	${model}`;
+const rowKey = sql<string>`${modelPrices.provider} || chr(9) || ${modelPrices.model}`;
 
 /** Upserts this source's entries and deletes its rows not in the new set, in one transaction. */
 export async function replacePgModelPrices(
@@ -66,9 +70,19 @@ export async function replacePgModelPrices(
           },
         });
     }
-    // Rows of this source that the new list no longer has (the upsert refreshed fetched_at of the rest).
-    const stale = rows.length > 0 ? sql`${modelPrices.fetchedAt} <> ${fetchedAt}` : sql`true`;
-    await tx.delete(modelPrices).where(and(eq(modelPrices.source, source), stale));
+    // Rows of this source that the new list no longer has, by key (never by timestamp, so a
+    // concurrent or clock-skewed refresh cannot delete prices this list still has).
+    const kept = new Set(rows.map((r) => priceKey(r.provider, r.model)));
+    const existing = await tx
+      .select({ provider: modelPrices.provider, model: modelPrices.model })
+      .from(modelPrices)
+      .where(eq(modelPrices.source, source));
+    const stale = existing.map((r) => priceKey(r.provider, r.model)).filter((key) => !kept.has(key));
+    for (let i = 0; i < stale.length; i += UPSERT_CHUNK) {
+      await tx
+        .delete(modelPrices)
+        .where(and(eq(modelPrices.source, source), inArray(rowKey, stale.slice(i, i + UPSERT_CHUNK))));
+    }
   });
   return rows.length;
 }

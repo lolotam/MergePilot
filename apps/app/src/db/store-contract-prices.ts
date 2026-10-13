@@ -61,6 +61,20 @@ export function definePricesContract(
     }
   });
 
+  it('drops the rows a new list no longer has by key, even when both refreshes share a timestamp', async () => {
+    const store = await createStore();
+    try {
+      const a = entry({ provider: 'openrouter', model: 'a', inputPerMTok: 1, outputPerMTok: 1, source: 'openrouter' });
+      const b = entry({ provider: 'openrouter', model: 'b', inputPerMTok: 2, outputPerMTok: 2, source: 'openrouter' });
+      await store.replaceModelPrices('openrouter', [a, b], T1);
+      await store.replaceModelPrices('openrouter', [{ ...a, inputPerMTok: 5 }], T1);
+      expect((await store.getModelPrice('openrouter', 'a'))?.inputPerMTok).toBe(5);
+      expect(await store.getModelPrice('openrouter', 'b')).toBeNull();
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   it('finds a price exactly first, then case-insensitively, and lists prices for many models', async () => {
     const store = await createStore();
     try {
@@ -77,6 +91,8 @@ export function definePricesContract(
       expect((await store.getModelPrice('openrouter', 'vendor/model-B'))?.inputPerMTok).toBe(3);
       expect((await store.getModelPrice('openrouter', 'vendor/model-b'))?.inputPerMTok).toBe(2);
       expect(await store.getModelPrice('anthropic', 'vendor/model-a')).toBeNull();
+      // Two ids differ only in case: an inexact lookup is ambiguous, so the price stays unknown.
+      expect(await store.getModelPrice('openrouter', 'VENDOR/MODEL-B')).toBeNull();
 
       const listed = await store.listModelPrices([
         { provider: 'openrouter', model: 'VENDOR/MODEL-A' },

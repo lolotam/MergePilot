@@ -37,14 +37,17 @@ export interface ModelPriceStore {
 
 const lower = (key: ModelKey): string => `${key.provider.toLowerCase()}\u0000${key.model.toLowerCase()}`;
 
-/** The row for this model among `rows`: the exact match first, then a case-insensitive one. */
+/**
+ * The row for this model among `rows`: the exact match first, then a case-insensitive one only
+ * when it is unambiguous. Two ids that differ only in case may carry different prices, so the
+ * price stays unknown rather than guessing between them.
+ */
 export function pickPrice<T extends ModelKey>(rows: readonly T[], provider: string, model: string): T | undefined {
   const exact = rows.find((r) => r.provider === provider && r.model === model);
   if (exact) return exact;
   const wanted = lower({ provider, model });
-  return [...rows]
-    .filter((r) => lower(r) === wanted)
-    .sort((a, b) => `${a.provider}\u0000${a.model}`.localeCompare(`${b.provider}\u0000${b.model}`))[0];
+  const matches = rows.filter((r) => lower(r) === wanted);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 /** The workspace's manual price for this model: exact first, then case-insensitive. */

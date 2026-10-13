@@ -70659,6 +70659,7 @@ async function callSystemOne(call) {
   }
 }
 
+var JUDGE_OUTPUT_TOKENS_PER_QUESTION = 64;
 function dedupeBefore(failed) {
   const seen = /* @__PURE__ */ new Set();
   const out = [];
@@ -70759,6 +70760,7 @@ function createJudge(options) {
     const deadline = now() + totalTimeoutMs;
     const attempts = [];
     const estimate = estimateTokens(JSON.stringify({ state: request2.state, questions: request2.questions }));
+    const outputEstimate = questions * JUDGE_OUTPUT_TOKENS_PER_QUESTION;
     let lastCode = "no-key";
     for (let index = startAt; index < entries.length; index++) {
       const entry = entries[index];
@@ -70781,7 +70783,8 @@ function createJudge(options) {
         continue;
       }
       const price = priceOf(entry.provider, entry.model);
-      if (price !== void 0 && request2.maxUsd !== void 0 && estimate * price.inputPerMTok / 1e6 > request2.maxUsd) {
+      const worstCaseUsd = price === void 0 ? void 0 : (estimate * price.inputPerMTok + outputEstimate * (price.outputPerMTok ?? 0)) / 1e6;
+      if (worstCaseUsd !== void 0 && request2.maxUsd !== void 0 && worstCaseUsd > request2.maxUsd) {
         skip("budget");
         continue;
       }

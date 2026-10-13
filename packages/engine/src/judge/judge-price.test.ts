@@ -43,6 +43,14 @@ describe('judge prices: catalog lookup before the static table', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('counts the output price in the budget preflight, not just the input', async () => {
+    const { fetch, calls } = mockFetch(noulReply({ q1: 0.9 }, { input_tokens: 10, output_tokens: 0 }));
+    // Input alone fits the budget; one question's output allowance at 1000 USD/MTok does not.
+    const judge = createJudge({ entries: [typesafe], fetch, priceLookup: () => ({ inputPerMTok: 0, outputPerMTok: 1000 }) });
+    await expect(judge.decide({ ...request, maxUsd: 0.01 })).rejects.toMatchObject({ code: 'budget' });
+    expect(calls).toHaveLength(0);
+  });
+
   it('keeps the cost the provider reports over any price', async () => {
     const { fetch } = mockFetch(
       jsonResponse({
