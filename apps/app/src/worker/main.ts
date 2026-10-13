@@ -13,6 +13,9 @@ import { processReviewJob } from './process-review.js';
 import { startMaintenanceScheduler, type MaintenanceScheduler } from './retention-schedule.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
 
+/** Review jobs one worker runs at once. A review mostly waits on model calls, so 8 is cheap. */
+export const DEFAULT_WORKER_CONCURRENCY = 8;
+
 /** A queued/running run with no heartbeat for this long is failed as `interrupted`. */
 export const STALE_RUN_HEARTBEAT_MS = 15 * 60 * 1000;
 const STALE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
@@ -46,13 +49,13 @@ export function startHealthServer(port: number): Promise<http.Server> {
 }
 
 /**
- * Creates a BullMQ worker for the 'reviews' queue with concurrency 2 by default.
+ * Creates a BullMQ worker for the 'reviews' queue with `DEFAULT_WORKER_CONCURRENCY` by default.
  */
 export function createReviewWorker(
   deps: ProcessReviewDeps,
   options?: ReviewWorkerOptions,
 ): Worker<QueueJobData> {
-  const concurrency = options?.concurrency ?? 2;
+  const concurrency = options?.concurrency ?? DEFAULT_WORKER_CONCURRENCY;
   const connection = options?.connection ?? { host: 'localhost', port: 6379 };
 
   const worker = new Worker<QueueJobData>(
@@ -150,7 +153,10 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   };
 
   const concurrencyStr = env.WORKER_CONCURRENCY?.trim();
-  const concurrency = concurrencyStr ? parseInt(concurrencyStr, 10) : 2;
+  const concurrency = concurrencyStr ? Number(concurrencyStr) : DEFAULT_WORKER_CONCURRENCY;
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error('WORKER_CONCURRENCY must be a whole number of at least 1');
+  }
 
   let connection = options?.connection;
   if (!connection && !config.redisUrl.startsWith('memory:')) {

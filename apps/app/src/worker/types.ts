@@ -38,6 +38,8 @@ export interface ProcessReviewDeps {
   judgeFetch?: FetchLike | undefined;
   /** The app's public URL (`MERGEPILOT_BASE_URL`), for the bot logos in panel reviews (ADR-0017). */
   baseUrl?: string | undefined;
+  /** Monthly-budget admission shared by the jobs of this worker (test seam; default: the process's). */
+  budgetAdmission?: import('./budget-admission.js').BudgetAdmission | undefined;
 }
 
 export interface ProcessReviewResult {

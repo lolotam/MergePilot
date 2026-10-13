@@ -1,3 +1,5 @@
+import { SUBSCRIPTION_PREFIX } from '@mergepilot/engine';
+import { processBudgetAdmission } from './budget-admission.js';
 import {
   listPullRequestFiles,
   loadRepoConfig,
@@ -123,6 +125,7 @@ export async function processReviewJob(
     return duplicate;
   }
 
+  let releaseBudget: (() => void) | undefined;
   try {
     logger.info({
       event: 'job.start', jobId: job.deliveryId, runId: lead.run.id, workspace: workspaceId,
@@ -133,6 +136,7 @@ export async function processReviewJob(
     try {
       const shared = await sharedSteps({ ...base, settings }, runs, main, lead, logSkip, startTime, panelActive);
       if ('result' in shared) return shared.result;
+      releaseBudget = shared.releaseBudget;
       ctx = { ...shared.ctx, mode };
     } catch (error) {
       const results = await Promise.all(
@@ -147,10 +151,13 @@ export async function processReviewJob(
     return results.get(MAIN_BOT_SLOT) ?? duplicate;
   } finally {
     for (const br of runs) br.stopHeartbeat();
+    releaseBudget?.();
   }
 }
 
-type SharedOutcome = { result: ProcessReviewResult } | { ctx: Omit<PanelContext, 'mode'> };
+type SharedOutcome =
+  | { result: ProcessReviewResult }
+  | { ctx: Omit<PanelContext, 'mode'>; releaseBudget?: (() => void) | undefined };
 
 /**
  * The steps every bot shares, run once: PR, pause, repository config, the main bot's model and
@@ -168,6 +175,7 @@ async function sharedSteps(
 ): Promise<SharedOutcome> {
   const { settings, ...base } = shared;
   const { job, deps, workspaceId } = base;
+  let releaseBudget: (() => void) | undefined;
   const [owner, repo] = job.repoFullName.split('/');
   if (!owner || !repo) throw new Error(`Invalid repoFullName: ${job.repoFullName}`);
 
@@ -206,8 +214,18 @@ async function sharedSteps(
   if (settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined) {
     const now = deps.now ? deps.now() : new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-    const currentMonthCost = await deps.store.monthCostUsd(workspaceId, monthStart);
-    if (currentMonthCost >= settings.monthlyBudgetUsd) {
+    const budget = settings.monthlyBudgetUsd;
+    // Reviews admitted before this one and still running have not recorded their cost: each
+    // holds its paid bots × the per-review budget until it finishes (first come, first served).
+    // A bot on a consumer subscription costs nothing extra, so it holds nothing.
+    const admission = deps.budgetAdmission ?? processBudgetAdmission;
+    const paidBots = (await Promise.all(runs.map((br) => usesSubscription(deps, workspaceId, br.bot.provider)))).filter((sub) => !sub).length;
+    releaseBudget = await admission.admit(
+      workspaceId,
+      paidBots * mainConfig.effectiveConfig.budget.perReviewUsd,
+      async (reservedUsd) => (await deps.store.monthCostUsd(workspaceId, monthStart)) + reservedUsd < budget,
+    ) ?? undefined;
+    if (!releaseBudget) {
       for (const br of runs) {
         const own = br === main ? mainChoice : br.bot;
         let reviewUrl: string | null = null;
@@ -238,18 +256,35 @@ async function sharedSteps(
     }
   }
 
-  // Judge prices (workspace override, then catalog; ADR-0016), read once for every bot's judge.
-  const judgePrices = await judgePriceLookup(deps.store, settings);
-
-  // The panel lists the PR's files once for every bot; a lone main bot lists them itself.
-  const prFiles = panelActive
-    ? (await listPullRequestFiles(client, { owner, repo, pull_number: job.pullNumber })).files
-    : undefined;
+  let judgePrices: Awaited<ReturnType<typeof judgePriceLookup>>;
+  let prFiles: Awaited<ReturnType<typeof listPullRequestFiles>>['files'] | undefined;
+  try {
+    // Judge prices (workspace override, then catalog; ADR-0016), read once for every bot's judge.
+    judgePrices = await judgePriceLookup(deps.store, settings);
+    // The panel lists the PR's files once for every bot; a lone main bot lists them itself.
+    prFiles = panelActive
+      ? (await listPullRequestFiles(client, { owner, repo, pull_number: job.pullNumber })).files
+      : undefined;
+  } catch (error) {
+    releaseBudget?.(); // the job never reaches the caller's release
+    throw error;
+  }
 
   return {
     ctx: {
       ...base, settings, owner, repo, client, publisherLogin, prTitle, prBody, repoConfigResult,
       mainChoice, mainConfig, judgePrices, panelActive, prFiles, baseUrl: deps.baseUrl, startTime,
     },
+    releaseBudget,
   };
+}
+
+/** True when the provider's stored credential is a consumer subscription (no incremental cost). Unknown counts as paid. */
+async function usesSubscription(deps: ProcessReviewDeps, workspaceId: string, provider: string): Promise<boolean> {
+  try {
+    const secret = await deps.credentials.resolve(workspaceId, provider as Parameters<ProcessReviewDeps['credentials']['resolve']>[1]);
+    return secret.reveal().startsWith(SUBSCRIPTION_PREFIX);
+  } catch {
+    return false;
+  }
 }
