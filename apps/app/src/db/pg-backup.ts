@@ -11,12 +11,13 @@ import {
 import type { AppDb } from './pg-store.js';
 import { writePgSettings } from './pg-settings.js';
 import { providerCredentials, reviewerBots, workspaceSettings } from './schema.js';
-import { lockBotNames, withLiveWorkspace, type AppTx } from './workspace-lock.js';
+import { lockBotNames, lockCredential, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
 // Settings restore (ADR-0018): settings, extra bots and keys in one transaction.
 
 /** Upserts one vault-encrypted credential by (workspace, provider) inside the caller's transaction. */
 export async function writePgCredential(tx: AppTx, credential: StoredCredential): Promise<void> {
+  await lockCredential(tx, credential.workspaceId, credential.provider);
   const values = {
     id: credential.id,
     ciphertext: credential.ciphertext,
@@ -73,6 +74,8 @@ export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore
     if (restore.bots) await tx.delete(reviewerBots).where(eq(reviewerBots.workspaceId, workspaceId));
     if (restore.settings) await writePgSettings(tx, { ...restore.settings, workspaceId });
     if (restore.bots) await replacePgBots(tx, workspaceId, restore.bots);
-    for (const credential of restore.credentials ?? []) await writePgCredential(tx, { ...credential, workspaceId });
+    for (const credential of [...(restore.credentials ?? [])].sort((a, b) => a.provider.localeCompare(b.provider))) {
+      await writePgCredential(tx, { ...credential, workspaceId });
+    }
   });
 }

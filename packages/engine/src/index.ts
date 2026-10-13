@@ -1,4 +1,7 @@
 export * from './credentials/index.js';
+export * from './credentials/subscription.js';
+export * from './providers/subscription/auth.js';
+export * from './providers/subscription/adapter.js';
 export * from './config/index.js';
 export * from './diff/index.js';
 export * from './review/answer.js';

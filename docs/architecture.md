@@ -1,7 +1,6 @@
-# MergePilot — المعمارية (A0.1)
+# MergePilot — المعمارية الحالية
 
-> بتوصف **شكل الكود** المخطط. المتطلبات في [PRD v0.2](prd/v0.2.ar.md)، والقرارات في [`adr/`](adr/).
-> لو حصل تعارض: الـ PRD بيكسب في **إيه** نبني، والملف ده بيكسب في **شكل** الكود.
+> بتوصف شكل الكود المنفّذ. الحالة الحالية في [PRD v0.3](prd/v0.3.ar.md)، والقرارات في [`adr/`](adr/). تعديل الاشتراكات الحالي في [ADR-0019](adr/0019-dashboard-subscription-auth.md).
 
 ## 1. المبدأ
 
@@ -23,25 +22,26 @@ packages/
   engine/              المحرك — ما بيستوردش من apps/ أبدًا
     src/
       llm/             عقد LlmAdapter + LlmFailure + retry policy (مشتق من Harness، ADR-0003)
-      providers/       anthropic/ openai/ gemini/ — adapters فوق الـ SDKs الرسمية
-                       agent-cli/claude-code/ — AgentCliRunner بيشغّل Claude Code الأصلي (ADR-0006)
+      providers/       anthropic/ openai/ gemini/ compatible/ — adapters لمزوّدي الـ API
+                       subscription/ — تسجيل دخول وبروتوكولات اشتراكات Codex وClaude وGrok عن طريق pi-ai
+                       claude-code/ — تشغيل Claude Code الأصلي للـ Action
       credentials/     CredentialStore + CredentialInfo (ADR-0002)
-      auth/            إطار OAuth + TokenManager — مقفول افتراضيًا (ADR-0004)
+                       subscription.ts — envelope مشفّر لبيانات الاشتراك، منفصل عن مفتاح الـ API
       config/          قراءة .mergepilot.yml والتحقق منه (Zod)
-      context/         diff، الملفات المرتبطة، ملفات القواعد، نسخ المكتبات، التوثيق
-      analyzers/       فحص الأسرار + قواعد ثابتة آمنة (ما بتشغلش كود المستودع)
+      diff/            تحليل وتصنيف الفروقات والأسطر
+      context/         نسخ المكتبات والتوثيق
+      security/        كشف الأسرار وتعتيمها والمسارات الحساسة
       review/          بناء الـ prompt، استدعاء المزود، الـ schema بتاع الملاحظات
       validate/        مرور التحقق، التأكد من الموضع في الـ diff، منع التكرار، الترتيب
       budget/          تقدير التوكنات، جدول الأسعار، حدود الصرف
       audit/           الفحص الكامل الدوري — تقسيم المستودع وتجميع التقرير
       judge/           حَكَم Jev (System One): فلترة الملاحظات الغلط وفحص التكرار، بسلسلة احتياطي صريحة (ADR-0015)
       pricing/         جلب أسعار النماذج من القوايم العامة (OpenRouter وVercel وmodels.dev) وتحويلها (ADR-0016)
-      publish/         صياغة المراجعة (ملخص + تعليقات) — بدون استدعاء GitHub نفسه
   github/              عميل GitHub: قراءة الـ PR بالصفحات، النشر، العلامة المخفية، فحص الـ SHA
 apps/
   action/              GitHub Action (الإصدار الأول)
-  cli/                 تشغيل محلي على PR موجود — dry-run افتراضيًا
-  app/                 GitHub App + سيرفر (المرحلة التانية — مش موجود دلوقتي)
+  app/                 GitHub App + API + خزنة المفاتيح + workers للمراجعة
+  web/                 لوحة التحكم — إعدادات المزوّدين وتسجيل الدخول بالاشتراك
 docs/  prd/  adr/  architecture.md  decisions.ar.md
 reference/             مستودعات مرجعية — مستبعدة من git، قراءة بس
 ```
@@ -56,35 +56,27 @@ apps/*  ────────────────────────
 ```
 
 - `engine/src/llm` ما بيعتمدش على أي حاجة جوه المحرك.
-- `providers/*` بتعتمد بس على `llm` و`credentials`.
-- `review` بيعتمد على `llm`، وعمره ما بيعتمد على مزود معين.
-- `review` بيختار المزود عن طريق الـ registry.
-- `publish` بيبني شكل المراجعة كبيانات. الإرسال نفسه بيحصل في `packages/github`.
+- `providers/*` بتطبّق عقد `llm` وبتستخدم `credentials` و`security`، ومعاها SDKs أو pi-ai حسب الطريقة.
+- `review` بياخد `ReviewModel`، من غير اعتماد على مزوّد معين. الـ factory بيبني النموذج من الإعدادات ومخزن بيانات الدخول.
+- صياغة ونشر المراجعات موجودين في `packages/github`.
+- `apps/app/src/api/contract*.ts` هو العقد المشترك بين Fastify ولوحة React. الـ worker بيحل بيانات الدخول من `CredentialService` قبل نداءات المحرك.
 
-## 4. العقود الأساسية (بالأسماء — التفاصيل وقت التنفيذ)
+## 4. العقود الأساسية
 
 ```ts
-// llm — مشتق من DeepSeek Harness (MIT)
+// packages/engine/src/llm/adapter.ts
 abstract class LlmAdapter {
+  abstract readonly provider: string;
   abstract stream(opts: GenerateOptions): AsyncIterable<StreamChunk>;
   listModels?(): Promise<ModelEntry[]>;
   retryPolicy?: RetryPolicy;
 }
-type StreamChunk = TextDelta | ToolCallDelta | Usage | Finish;
-type LlmFailure = { code: LlmFailureCode; message: string; status?: number;
-                    retryAfterMs?: number; requestId?: string };
-// LlmFailureCode: INVALID_CREDENTIAL | RATE_LIMIT | QUOTA | CONTEXT_WINDOW_EXCEEDED
-//                 | TIMEOUT | SERVER | BAD_REQUEST
-
-// review
-interface ReviewProvider {
-  capabilities(): ProviderCapabilities;
-  validateConnection(): Promise<ConnectionStatus>;
-  estimateUsage(req: ReviewRequest): UsageEstimate;
-  review(req: ReviewRequest): Promise<ReviewResult>;
+// packages/engine/src/review/model.ts
+interface ReviewModel {
+  readonly label: string;
+  readonly includedInSubscription?: boolean;
+  generate(request: ReviewModelRequest): Promise<ReviewModelResponse>;
 }
-type Finding = { id; path; line; side; title; body; severity; category;
-                 evidence; suggestion?; ruleRef?; confidence };
 
 // credentials
 interface CredentialStore {
@@ -99,4 +91,4 @@ interface CredentialStore {
 - **أي سر اتحمّل مابيتكتبش في log، ولا بيرجع في خطأ، ولا بيروح للنموذج.**
 - **مفيش تحويل خفي لمزود أو نموذج تاني.** أي فشل بيرجع `LlmFailure` واضح.
 - **الكود اللي بننسخه من مراجع بترخيص MIT** ملفه بيحتفظ بإشعار الحقوق الأصلي، وبيتسجل في [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
-- **مفيش أي كود من مسارات تسجيل الدخول بالاشتراكات** في `reference/`.
+- **تسجيل الدخول بالاشتراك** بيستخدم مكتبة pi-ai، وتوكناته بتتخزن في الخزنة المشفّرة. استبدال بيانات الدخول وحذفها وتجديدها بيتزامنوا بقفل لكل مساحة عمل ومزوّد؛ التفاصيل في [تسجيل الدخول بالاشتراك](subscription-auth.md).

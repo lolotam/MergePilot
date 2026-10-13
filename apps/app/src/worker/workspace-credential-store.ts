@@ -1,4 +1,4 @@
-import type { CredentialInfo, CredentialRef, CredentialStore, RequestPurpose, Secret } from '@mergepilot/engine';
+import { decodeSubscription, type CredentialInfo, type CredentialRef, type CredentialStore, type RequestPurpose, type Secret } from '@mergepilot/engine';
 import type { ApiProvider } from '../core/types.js';
 import type { ProcessReviewCredentials } from './types.js';
 
@@ -31,7 +31,7 @@ export class WorkspaceCredentialStore implements CredentialStore {
 
   async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
     const existing = this.secrets.get(ref.provider);
-    if (existing) return existing;
+    if (existing && !decodeSubscription(existing.reveal(), ref.provider)) return existing;
     const resolved = await this.credentials.resolve(this.workspaceId, ref.provider as ApiProvider);
     this.secrets.set(ref.provider, resolved);
     return resolved;

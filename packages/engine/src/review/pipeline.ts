@@ -106,7 +106,9 @@ export type ReviewRunResult =
 export async function runReview(input: RunReviewInput): Promise<ReviewRunResult> {
   const { config, pr, files, rulesFiles, signal } = input;
   const reviewCfg = config.review;
-  const budgetCfg = config.budget;
+  const budgetCfg = input.model.includedInSubscription
+    ? { ...config.budget, pricing: { inputPerMTok: 0, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 } }
+    : config.budget;
   const limits = reviewLimits(reviewCfg);
   const deadline = new ReviewDeadline(limits.totalTimeoutMs);
   // One chain per review, so a fallback lasts for the rest of this review only (ADR-0008).

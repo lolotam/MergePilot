@@ -2,6 +2,8 @@
 
 Multi-provider AI code review for GitHub pull requests.
 
+This Action uses repository API-key secrets or the existing official `claude-code` mode. The dashboard's ChatGPT/Codex, Claude, and Grok sign-in controls belong to the GitHub App; see [subscription authentication](../../docs/subscription-auth.md) for that setup.
+
 ## Features
 
 - **Incremental reviews** (ADR-0012): once MergePilot has reviewed a PR, later pushes review only the new commits (GitHub compare API), while inline comments stay anchored on the PR's own diff (RIGHT side). A full review runs instead on the first review, after a force-push / rewritten history, when `.mergepilot.yml` changed, or when the compare is too large or unavailable. The review summary states which mode was used.

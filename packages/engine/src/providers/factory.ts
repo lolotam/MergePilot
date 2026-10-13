@@ -1,5 +1,7 @@
 import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
+import { decodeSubscription, isSubscriptionProvider } from '../credentials/subscription.js';
+import { SubscriptionAdapter } from './subscription/adapter.js';
 import { credentialEnvName, type AnyCredentialStore } from '../credentials/store.js';
 import type { LlmAdapter } from '../llm/adapter.js';
 import { LlmFailure } from '../llm/failure.js';
@@ -45,7 +47,12 @@ export function createAdapter(
   apiKey: Secret | undefined,
   customBaseUrl?: string,
   customFetch?: FetchLike,
+  resolveSubscriptionSecret?: () => Promise<Secret>,
 ): LlmAdapter {
+  if (apiKey && decodeSubscription(apiKey.reveal(), provider)) {
+    if (!isSubscriptionProvider(provider)) throw new Error('Subscription authentication is unavailable for this provider');
+    return new SubscriptionAdapter(provider, apiKey, resolveSubscriptionSecret);
+  }
   const entry = providerEntry(provider);
   if (entry.kind === 'openai-compatible') {
     if (provider === 'custom' && !customBaseUrl?.trim()) throw new Error(CUSTOM_BASE_URL_MISSING);
@@ -68,6 +75,7 @@ function withRetries(adapter: LlmAdapter, model: string, effort: string | undefi
   const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
   return {
     label: base.label,
+    ...(adapter instanceof SubscriptionAdapter ? { includedInSubscription: true } : {}),
     ...(base.outputTokensFor ? { outputTokensFor: base.outputTokensFor } : {}),
     generate(request) {
       return withRetry(
@@ -131,7 +139,8 @@ export async function resolveFallbacks(
       continue;
     }
     try {
-      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch), entry.model, entry.effort));
+      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch,
+        () => store.resolve({ provider: entry.provider }, 'review')), entry.model, entry.effort));
     } catch {
       resolved.skipped.push({ label, reason: 'the provider could not be set up' });
     }
@@ -190,7 +199,8 @@ export async function createReviewModel(
   const apiKey =
     provider === 'custom' ? await resolveKey(store, provider) : await store.resolve({ provider }, 'review');
   // `config.baseUrl` is deliberately NOT read: it comes from the repository (ADR-0008 amendment).
-  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch);
+  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch,
+    () => store.resolve({ provider }, 'review'));
 
   if (!config.model) {
     throw new Error(`Model is required for provider: ${config.provider}`);

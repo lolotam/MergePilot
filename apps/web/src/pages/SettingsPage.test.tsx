@@ -203,7 +203,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
 
     renderComponent();
 
-    const addKeyBtn = screen.getByRole('button', { name: /إضافة مفتاح جديد/i });
+    const addKeyBtn = screen.getByRole('button', { name: /إضافة بيانات دخول/i });
     await user.click(addKeyBtn);
 
     // Modal opens with password input

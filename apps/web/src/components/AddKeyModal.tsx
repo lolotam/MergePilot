@@ -5,6 +5,7 @@ import { useI18n } from '../i18n/context.js';
 import { isJudgeKeyOnly, KEY_PROVIDERS, ProviderSelect } from '../settings/providers.js';
 import { runConnectionTest, useTestReason } from '../settings/TestKeyButton.js';
 import { Modal } from './Modal.js';
+import { SubscriptionSignIn } from '../settings/SubscriptionSignIn.js';
 
 export interface AddKeyModalProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
   const { t } = useI18n();
   const testReason = useTestReason();
   const [keyProvider, setKeyProvider] = useState<KeyProvider>('anthropic');
+  const [authMethod, setAuthMethod] = useState<'api-key' | 'subscription'>('api-key');
+  const supportsSubscription = keyProvider === 'openai' || keyProvider === 'anthropic' || keyProvider === 'xai';
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [baseUrlInput, setBaseUrlInput] = useState('');
   const [keyError, setKeyError] = useState('');
@@ -25,6 +28,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
 
   const handleClose = () => {
+    setAuthMethod('api-key');
     setApiKeyInput('');
     setBaseUrlInput('');
     setKeyError('');
@@ -66,6 +70,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (authMethod === 'subscription') return;
     setKeyError('');
 
     if (apiKeyInput.length < 8) {
@@ -93,8 +98,8 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={t('addKeyModalTitle')}
-      description={t('addKeyModalDesc')}
+      title={t(authMethod === 'subscription' ? 'subscriptionModalTitle' : 'addKeyModalTitle')}
+      {...(authMethod === 'subscription' ? {} : { description: t('addKeyModalDesc') })}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
         <ProviderSelect<KeyProvider>
@@ -104,10 +109,27 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
           options={KEY_PROVIDERS}
           onChange={(next) => {
             setKeyProvider(next);
+            setAuthMethod('api-key');
+            setApiKeyInput('');
             setTestResult(null);
             setKeyError('');
           }}
         />
+
+        {supportsSubscription && workspaceId && <div>
+          <label htmlFor="credential-auth-method" className="block text-xs font-semibold mb-1.5">{t('authMethodLabel')}</label>
+          <select id="credential-auth-method" value={authMethod} onChange={(event) => {
+            setAuthMethod(event.target.value as 'api-key' | 'subscription'); setApiKeyInput(''); setKeyError(''); setTestResult(null);
+          }} className="w-full px-3.5 py-2 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-xs">
+            <option value="api-key">{t('authMethodApiKey')}</option>
+            <option value="subscription">{t('authMethodSubscription')}</option>
+          </select>
+        </div>}
+
+        {authMethod === 'subscription' && workspaceId && supportsSubscription ? <>
+          <SubscriptionSignIn key={keyProvider} workspaceId={workspaceId} provider={keyProvider} onConnected={handleClose} />
+          <button type="button" onClick={handleClose} className="px-4 py-2 rounded-full border border-ink-300 dark:border-ink-700 text-xs">{t('cancel')}</button>
+        </> : <>
 
         {keyProvider === 'custom' && (
           <div>
@@ -215,6 +237,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
             </button>
           </div>
         </div>
+        </>}
       </form>
     </Modal>
   );

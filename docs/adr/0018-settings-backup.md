@@ -18,6 +18,8 @@ holds a plaintext key, and the browser never sees one.
 
 ## Decision
 
+**Amendment — ADR-0019:** the same passphrase-encrypted `key` field may contain a versioned subscription envelope. Restore validates its provider and OAuth fields with a 20,000-character plaintext limit, and `ct` allows up to 32,768 base64url characters. Raw API keys keep the 500-character limit. Subscription restores share the provider credential lock with refresh and disconnect; a rotated/revoked refresh token requires a new sign-in.
+
 ### The file
 
 `mergepilot-settings-<workspace-slug>-<YYYYMMDD>.json`:

@@ -26,7 +26,7 @@ export const SealedKeySchema = z.object({
   salt: Base64Url(64),
   iv: Base64Url(64),
   tag: Base64Url(64),
-  ct: Base64Url(2048),
+  ct: Base64Url(32768),
 });
 
 /** A credential in the file: `baseUrl` only for `custom`; `key` is left out by "export without keys". */

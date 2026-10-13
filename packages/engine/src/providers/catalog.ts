@@ -9,6 +9,8 @@ import { FALLBACK_EFFORTS } from './effort.js';
 import { failureFromResponse, failureFromThrown, keyValue, type FetchLike, type KeyInput } from './http.js';
 import type { ApiProviderId } from './ids.js';
 import { providerEntry, resolveBaseUrl } from './registry.js';
+import { decodeSubscription } from '../credentials/subscription.js';
+import { subscriptionModels } from './subscription/adapter.js';
 
 export type { CatalogModel } from './catalog-types.js';
 
@@ -151,6 +153,8 @@ export async function listModels(
   apiKey: KeyInput,
   options: ListModelsOptions = {},
 ): Promise<CatalogModel[]> {
+  const subscription = decodeSubscription(keyValue(apiKey) ?? '', provider);
+  if (subscription) return sortUnique(subscriptionModels(subscription.provider));
   let models: CatalogModel[];
   if (provider === 'anthropic') models = await listAnthropic(apiKey, options);
   else if (provider === 'openai') models = await listOpenAI(apiKey, options);

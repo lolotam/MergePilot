@@ -9,6 +9,17 @@ import {
 import { runReview } from './pipeline.js';
 
 describe('runReview - USD budget and pricing', () => {
+  it('records zero incremental cost for a subscription even when API prices would exceed the budget', async () => {
+    const model = { ...makeModel(makeAnswerJson(), { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 }), includedInSubscription: true };
+    const result = await runReview({
+      config: makeConfig({ budget: { perReviewUsd: 0.0001, maxInputTokens: 200000,
+        pricing: { inputPerMTok: 100, outputPerMTok: 100, cacheReadPerMTok: 100, cacheWritePerMTok: 100 } } }),
+      pr: { title: 'T', body: 'B' }, files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }],
+      rulesFiles: [], model, knownSecrets: [],
+    });
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') expect(result.costUsd).toBe(0);
+  });
   it('rejects with skipped-budget when estimated cost exceeds perReviewUsd and never calls model', async () => {
     const generateMock = vi.fn();
     const model: ReviewModel = {

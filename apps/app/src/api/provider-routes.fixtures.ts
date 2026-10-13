@@ -9,6 +9,7 @@ import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import type { AppConfig } from '../core/config.js';
 import type { DnsLookupFn } from '../core/ssrf.js';
 import { CredentialService } from '../credentials/service.js';
+import type { SubscriptionLoginFn } from '../credentials/subscription-login.js';
 import { runMigrations } from '../db/migrate.js';
 import { PgStore } from '../db/pg-store.js';
 import * as dbSchema from '../db/schema.js';
@@ -52,7 +53,7 @@ export interface ProviderHarness {
 }
 
 /** Fastify + PGlite with an admin and a member in workspace `ws-1`; DNS and custom fetch faked. */
-export async function createProviderHarness(customFetch?: FetchLike): Promise<ProviderHarness> {
+export async function createProviderHarness(customFetch?: FetchLike, subscriptionLogin?: SubscriptionLoginFn): Promise<ProviderHarness> {
   resetProviderTestRateLimits();
   const pglite = new PGlite();
   await runMigrations(pglite);
@@ -75,6 +76,7 @@ export async function createProviderHarness(customFetch?: FetchLike): Promise<Pr
     config,
     ssrfLookup,
     validateKey: async () => undefined,
+    ...(subscriptionLogin ? { subscriptionLogin } : {}),
     ...(customFetch ? { customFetch } : {}),
   });
 

@@ -31,6 +31,7 @@ export class MemoryStore implements AppStore {
   readonly installations = new Map<number, Installation | Omit<Installation, 'workspaceId'>>();
   readonly settings = new Map<string, WorkspaceSettings>();
   readonly credentials = new Map<string, StoredCredential>();
+  private readonly credentialLocks = new Map<string, Promise<void>>();
   readonly runs = new Map<string, ReviewRun>();
   readonly deletedWorkspaces = new Set<string>();
   /** Monthly usage keyed by workspace id, a NUL separator and `YYYY-MM-01`. */
@@ -147,8 +148,27 @@ export class MemoryStore implements AppStore {
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
-    this.assertLive(credential.workspaceId);
-    this.credentials.set(`${credential.workspaceId}:${credential.provider}`, { ...credential });
+    await this.modifyCredential(credential.workspaceId, credential.provider, async () => ({ ...credential }));
+  }
+
+  async modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>): Promise<StoredCredential | null> {
+    const key = `${workspaceId}:${provider}`;
+    const previous = this.credentialLocks.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const lock = new Promise<void>((resolve) => { release = resolve; });
+    this.credentialLocks.set(key, lock);
+    await previous;
+    try {
+      this.assertLive(workspaceId);
+      const next = await change(this.credentials.get(key) ?? null);
+      this.assertLive(workspaceId);
+      if (next) this.credentials.set(key, { ...next });
+      else this.credentials.delete(key);
+      return next;
+    } finally {
+      release();
+      if (this.credentialLocks.get(key) === lock) this.credentialLocks.delete(key);
+    }
   }
 
   async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
@@ -162,7 +182,7 @@ export class MemoryStore implements AppStore {
   }
 
   async deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void> {
-    this.credentials.delete(`${workspaceId}:${provider}`);
+    await this.modifyCredential(workspaceId, provider, async () => null);
   }
 
   async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {

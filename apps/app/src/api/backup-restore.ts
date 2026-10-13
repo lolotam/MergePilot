@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { SUBSCRIPTION_PREFIX } from '@mergepilot/engine';
 import { BadPassphraseError, deriveBackupKey, openBackupKey, sealedKeySalt, type SealedKey } from '../backup/passphrase-crypto.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import {
@@ -130,7 +131,10 @@ async function planCredentials(deps: RestoreDeps, req: RestoreRequest, file: Bac
     }
 
     // The key route's request rules (length, a URL), then its SSRF guard (ADR-0010).
-    const shape = SaveKeyRequestSchema.safeParse({ apiKey: apiKey.trim(), ...(baseUrl ? { baseUrl } : {}) });
+    const keySchema = apiKey.startsWith(SUBSCRIPTION_PREFIX)
+      ? SaveKeyRequestSchema.extend({ apiKey: SaveKeyRequestSchema.shape.apiKey.max(20_000) })
+      : SaveKeyRequestSchema;
+    const shape = keySchema.safeParse({ apiKey: apiKey.trim(), ...(baseUrl ? { baseUrl } : {}) });
     if (!shape.success) throw zodProblem(field, shape.error, apiKey);
     if (baseUrl) {
       try {
