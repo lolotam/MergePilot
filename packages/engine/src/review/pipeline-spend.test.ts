@@ -94,10 +94,9 @@ describe('runReview — spend across retries and batches (ADR-0011)', () => {
     }
   });
 
-  it('stop + broken JSON fails as invalid-json with no retry and no batching', async () => {
-    const { model, calls } = scriptedModel([
-      () => ({ text: '{"summary": "x", "findings": [', finishReason: 'stop' }),
-    ]);
+  it('stop + broken JSON is asked once more for JSON only, then fails as invalid-json without batching', async () => {
+    const broken = (): ReviewModelResponse => ({ text: '{"summary": "x", "findings": [', finishReason: 'stop' });
+    const { model, calls } = scriptedModel([broken, broken]);
     const result = await runReview({
       config: makeConfig(),
       pr: { title: 'T', body: 'B' },
@@ -106,9 +105,9 @@ describe('runReview — spend across retries and batches (ADR-0011)', () => {
       model,
       knownSecrets: [],
     });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(result.status).toBe('failed');
-    if (result.status === 'failed') expect(result.reason).toMatch(/^invalid-json/);
+    if (result.status === 'failed') expect(result.reason).toMatch(/^invalid-json.*\(also after asking for JSON only\)/);
   });
 });
 

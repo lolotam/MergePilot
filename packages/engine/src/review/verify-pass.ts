@@ -11,7 +11,7 @@ import { z } from 'zod';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { estimateTokens } from './budget.js';
-import { retryEmptyWithoutThinking, type ReviewDeadline } from './call.js';
+import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { combineUsage, needsTruncationRetry, type ReviewableFileWithPatch } from './split.js';
 import { describeCallError, requestedOutputTokens, type SpendTracker } from './spend.js';
@@ -87,7 +87,7 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     spend.record(promptTokens, firstRequested, res.usage);
     totalUsage = combineUsage(totalUsage, res.usage);
 
-    const empty = await retryEmptyWithoutThinking({
+    const empty = await retryUnusableAnswer({
       parsed: parse(res),
       model,
       spend,

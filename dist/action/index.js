@@ -114272,7 +114272,7 @@ function parseReviewAnswer(text, options) {
     return {
       ok: false,
       code: "invalid-json",
-      error: `invalid-json: ${firstParseError ?? "no valid JSON object found matching review schema"}`
+      error: `invalid-json: ${firstParseError ?? `the answer has no JSON object (${text.length} characters)`}`
     };
   }
   const answer = matchedAnswer;
@@ -114693,10 +114693,16 @@ function describePaths(paths, max = 10, maxLength = 60) {
   const shown = paths.slice(0, max).map(shorten2).join(", ");
   return paths.length > max ? `${shown} +${paths.length - max} more` : shown;
 }
-async function retryEmptyWithoutThinking(input2) {
-  const { parsed, spend, promptTokens, requestedOutputTokens: requestedOutputTokens2 } = input2;
-  if (parsed.ok || parsed.code !== "empty-response")
+var JSON_ONLY_REMINDER = "\n\nIMPORTANT: your previous reply was not the required JSON. Reply with only the JSON object described above: no prose, no markdown fences, nothing before or after it.";
+async function retryUnusableAnswer(input2) {
+  const { parsed } = input2;
+  if (parsed.ok)
     return { parsed, thinkingOff: false };
+  if (parsed.code === "invalid-json")
+    return retryForJsonOnly(input2);
+  if (parsed.code !== "empty-response")
+    return { parsed, thinkingOff: false };
+  const { spend, promptTokens, requestedOutputTokens: requestedOutputTokens2 } = input2;
   if (!spend.canAfford(promptTokens, requestedOutputTokens2)) {
     return { parsed, note: "empty-response retry skipped: budget limit reached", thinkingOff: false };
   }
@@ -114720,6 +114726,26 @@ async function retryEmptyWithoutThinking(input2) {
       note: `empty-response retry failed: ${describeCallError(err, input2.knownSecrets)}`,
       thinkingOff: false
     };
+  }
+}
+async function retryForJsonOnly(input2) {
+  const { parsed, spend, requestedOutputTokens: requestedOutputTokens2 } = input2;
+  const promptTokens = input2.promptTokens + estimateTokens(JSON_ONLY_REMINDER);
+  if (!spend.canAfford(promptTokens, requestedOutputTokens2)) {
+    return { parsed, note: "invalid-json retry skipped: budget limit reached", thinkingOff: false };
+  }
+  try {
+    const response = await input2.model.generate({ ...input2.request, user: `${input2.request.user}${JSON_ONLY_REMINDER}` });
+    spend.record(promptTokens, requestedOutputTokens2, response.usage);
+    const retried = input2.parse(response);
+    if (!retried.ok) {
+      const error62 = retried.code === "invalid-json" ? retried.error : `invalid-json: ${retried.error}`;
+      return { parsed: { ...retried, code: "invalid-json", error: `${error62} (also after asking for JSON only)` }, response, usage: response.usage, thinkingOff: false };
+    }
+    return { parsed: retried, response, usage: response.usage, thinkingOff: false };
+  } catch (err) {
+    spend.record(promptTokens, requestedOutputTokens2, void 0);
+    return { parsed, note: `invalid-json retry failed: ${describeCallError(err, input2.knownSecrets)}`, thinkingOff: false };
   }
 }
 
@@ -114977,7 +115003,7 @@ async function reviewOneBatch(input2, prompt, promptTokens) {
   const first = await model.generate(request2);
   spend.record(promptTokens, reviewOutputTokens, first.usage);
   let usage = first.usage;
-  const empty = await retryEmptyWithoutThinking({
+  const empty = await retryUnusableAnswer({
     parsed: parseReviewResponse(first),
     model,
     spend,
@@ -115194,7 +115220,7 @@ async function runSinglePass(ctx) {
   } catch (err) {
     return failedCall(err, ctx.knownSecrets);
   }
-  const empty = await retryEmptyWithoutThinking({
+  const empty = await retryUnusableAnswer({
     parsed: parseReviewResponse(response),
     model,
     spend,
@@ -115527,7 +115553,7 @@ async function runVerifyPass(input2) {
     const res = await model.generate(request2);
     spend.record(promptTokens, firstRequested, res.usage);
     totalUsage = combineUsage(totalUsage, res.usage);
-    const empty = await retryEmptyWithoutThinking({
+    const empty = await retryUnusableAnswer({
       parsed: parse5(res),
       model,
       spend,

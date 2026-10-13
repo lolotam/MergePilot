@@ -7,6 +7,7 @@
  */
 
 import type { Secret } from '../credentials/secret.js';
+import { estimateTokens } from './budget.js';
 import { LlmFailure } from '../llm/failure.js';
 import type { TokenUsage } from '../llm/types.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
@@ -126,15 +127,24 @@ export interface EmptyRetryResult<P extends ParsedAnswer> {
   thinkingOff: boolean;
 }
 
+/** Appended to the user prompt for the one retry after an answer that was not the JSON asked for. */
+export const JSON_ONLY_REMINDER =
+  '\n\nIMPORTANT: your previous reply was not the required JSON. Reply with only the JSON object described above: no prose, no markdown fences, nothing before or after it.';
+
 /**
- * Retries a call ONCE with thinking off when it returned no visible text (e.g. a GLM model that
- * spent every output token on reasoning). Anything else is returned unchanged.
+ * Retries a call ONCE when its answer was unusable, and returns anything else unchanged:
+ * - no visible text (e.g. a GLM model that spent every output token on reasoning): with thinking off;
+ * - text without the JSON object asked for (e.g. a subscription model, whose backend cannot
+ *   enforce the response schema, answering in prose): with a JSON-only reminder.
  */
-export async function retryEmptyWithoutThinking<P extends ParsedAnswer>(
+export async function retryUnusableAnswer<P extends ParsedAnswer>(
   input: EmptyRetryInput<P>,
 ): Promise<EmptyRetryResult<P>> {
-  const { parsed, spend, promptTokens, requestedOutputTokens } = input;
-  if (parsed.ok || parsed.code !== 'empty-response') return { parsed, thinkingOff: false };
+  const { parsed } = input;
+  if (parsed.ok) return { parsed, thinkingOff: false };
+  if (parsed.code === 'invalid-json') return retryForJsonOnly(input);
+  if (parsed.code !== 'empty-response') return { parsed, thinkingOff: false };
+  const { spend, promptTokens, requestedOutputTokens } = input;
 
   if (!spend.canAfford(promptTokens, requestedOutputTokens)) {
     return { parsed, note: 'empty-response retry skipped: budget limit reached', thinkingOff: false };
@@ -159,5 +169,29 @@ export async function retryEmptyWithoutThinking<P extends ParsedAnswer>(
       note: `empty-response retry failed: ${describeCallError(err, input.knownSecrets)}`,
       thinkingOff: false,
     };
+  }
+}
+
+async function retryForJsonOnly<P extends ParsedAnswer>(input: EmptyRetryInput<P>): Promise<EmptyRetryResult<P>> {
+  const { parsed, spend, requestedOutputTokens } = input;
+  // The retry's prompt is longer by the reminder: gate and charge it at that size.
+  const promptTokens = input.promptTokens + estimateTokens(JSON_ONLY_REMINDER);
+  if (!spend.canAfford(promptTokens, requestedOutputTokens)) {
+    return { parsed, note: 'invalid-json retry skipped: budget limit reached', thinkingOff: false };
+  }
+  try {
+    const response = await input.model.generate({ ...input.request, user: `${input.request.user}${JSON_ONLY_REMINDER}` });
+    spend.record(promptTokens, requestedOutputTokens, response.usage);
+    const retried = input.parse(response);
+    if (!retried.ok) {
+      // Terminal: whatever went wrong (prose again, a cut answer), no third call follows, so the
+      // result is reported as invalid-json and never handed to the truncation recovery.
+      const error = retried.code === 'invalid-json' ? retried.error : `invalid-json: ${retried.error}`;
+      return { parsed: { ...retried, code: 'invalid-json', error: `${error} (also after asking for JSON only)` }, response, usage: response.usage, thinkingOff: false };
+    }
+    return { parsed: retried, response, usage: response.usage, thinkingOff: false };
+  } catch (err) {
+    spend.record(promptTokens, requestedOutputTokens, undefined);
+    return { parsed, note: `invalid-json retry failed: ${describeCallError(err, input.knownSecrets)}`, thinkingOff: false };
   }
 }
