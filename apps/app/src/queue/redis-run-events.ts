@@ -15,10 +15,14 @@ export interface RunEventsPublisherClient {
   quit(): Promise<unknown>;
 }
 
+/** Local event emitted to every listener when the Redis subscriber connection drops. */
+const LOST = Symbol('run-events-lost');
+
 export interface RunEventsSubscriberClient {
   subscribe(channel: string): Promise<unknown>;
   unsubscribe(channel: string): Promise<unknown>;
   on(event: 'message', listener: (channel: string, message: string) => void): unknown;
+  on(event: 'close', listener: () => void): unknown;
   quit(): Promise<unknown>;
 }
 
@@ -80,7 +84,7 @@ export class RedisRunEventBus implements RunEventBus {
       .catch((err: unknown) => this.onError(errorName(err)));
   }
 
-  async subscribe(workspaceId: string, listener: RunEventListener): Promise<() => void> {
+  async subscribe(workspaceId: string, listener: RunEventListener, onLost?: () => void): Promise<() => void> {
     if (this.closed) throw new Error('run event bus is closed');
     const channel = runEventsChannel(workspaceId);
     const subscriber = this.ensureSubscriber();
@@ -101,11 +105,14 @@ export class RedisRunEventBus implements RunEventBus {
     }
     const handler = (event: RunEvent) => listener(event);
     this.local.on(channel, handler);
+    const lost = () => onLost?.();
+    this.local.on(LOST, lost);
     let active = true;
     return () => {
       if (!active) return;
       active = false;
       this.local.off(channel, handler);
+      this.local.off(LOST, lost);
       this.release(channel);
     };
   }
@@ -129,6 +136,11 @@ export class RedisRunEventBus implements RunEventBus {
         // A message must name the workspace of the channel it came on.
         if (!event || runEventsChannel(event.workspaceId) !== channel) return;
         this.local.emit(channel, event);
+      });
+      // Pub/sub does not replay what was published while the connection was down: tell every
+      // listener so its stream ends and the browser reconnects and refetches.
+      subscriber.on('close', () => {
+        if (!this.closed) this.local.emit(LOST);
       });
       this.subscriber = subscriber;
     }

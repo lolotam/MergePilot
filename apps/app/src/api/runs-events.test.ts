@@ -135,6 +135,23 @@ describe('GET /api/workspaces/:workspaceId/runs/events (ADR-0021)', () => {
     await eventually(() => limiter.openStreams() === 0);
     expect(bus.listenerCount('ws-1')).toBe(0);
   });
+  it('ends the stream when the bus reports lost delivery, so the browser reconnects and catches up', async () => {
+    await h.app.close();
+    h = await createSseHarness();
+    let lost: (() => void) | undefined;
+    const lossyBus = {
+      publish: () => {},
+      subscribe: async (_ws: string, _listener: unknown, onLost?: () => void) => { lost = onLost; return () => {}; },
+      close: async () => {},
+    };
+    limiter = registerRunEventsRoutes(h.app, { auth: h.auth, runEvents: lossyBus, runStreams: { perUser: 2, global: 10, keepAliveMs: 60_000 } });
+    port = await listen(h.app);
+    const s = await open();
+    expect(s.status).toBe(200);
+    expect(limiter.openStreams()).toBe(1);
+    lost?.();
+    await eventually(() => limiter.openStreams() === 0);
+  });
 });
 
 describe('runs events route inside the dashboard API', () => {

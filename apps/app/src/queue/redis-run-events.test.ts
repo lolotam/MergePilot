@@ -16,12 +16,13 @@ function fakeClients() {
   const subscriber = {
     subscribe: vi.fn(async (_channel: string) => 1),
     unsubscribe: vi.fn(async (_channel: string) => 0),
-    on: (event: 'message', listener: (channel: string, message: string) => void) => emitter.on(event, listener),
+    on: ((event: string, listener: (...args: never[]) => void) => emitter.on(event, listener)) as RunEventsSubscriberClient['on'],
     quit: vi.fn(async () => 'OK'),
   } satisfies RunEventsSubscriberClient;
   const makeSubscriber = vi.fn(() => subscriber);
   const deliver = (channel: string, message: string) => emitter.emit('message', channel, message);
-  return { published, publisher, subscriber, makeSubscriber, deliver };
+  const dropConnection = () => emitter.emit('close');
+  return { published, publisher, subscriber, makeSubscriber, deliver, dropConnection };
 }
 
 const event: RunEvent = { workspaceId: 'ws-1', runId: 'run-1', status: 'completed', kind: 'updated' };
@@ -114,5 +115,23 @@ describe('RedisRunEventBus', () => {
     // Nothing is left counted: the next listener subscribes Redis again.
     await bus.subscribe('ws-1', () => {});
     expect(c.subscriber.subscribe).toHaveBeenCalledTimes(2);
+  });
+
+  it('tells every listener when the Redis connection drops, and stops after they leave', async () => {
+    const c = fakeClients();
+    const bus = new RedisRunEventBus({ publisher: c.publisher, subscriber: c.makeSubscriber });
+    const lost1 = vi.fn();
+    const lost2 = vi.fn();
+    const stop1 = await bus.subscribe('ws-1', () => {}, lost1);
+    await bus.subscribe('ws-2', () => {}, lost2);
+
+    c.dropConnection();
+    expect(lost1).toHaveBeenCalledTimes(1);
+    expect(lost2).toHaveBeenCalledTimes(1);
+
+    stop1();
+    c.dropConnection();
+    expect(lost1).toHaveBeenCalledTimes(1);
+    expect(lost2).toHaveBeenCalledTimes(2);
   });
 });

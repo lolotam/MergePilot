@@ -115,9 +115,14 @@ export function registerRunEventsRoutes(app: FastifyInstance, deps: RunEventsRou
       };
 
       try {
-        unsubscribe = await bus.subscribe(workspaceId, (event) => {
-          if (!ended && event.workspaceId === workspaceId) stream.raw?.write(sseEvent(event));
-        });
+        unsubscribe = await bus.subscribe(
+          workspaceId,
+          (event) => {
+            if (!ended && event.workspaceId === workspaceId) stream.raw?.write(sseEvent(event));
+          },
+          // Events may have been missed: end the stream so the browser reconnects and catches up.
+          () => end(),
+        );
       } catch (err) {
         end();
         request.log.warn(

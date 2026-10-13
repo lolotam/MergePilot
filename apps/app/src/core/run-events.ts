@@ -23,8 +23,12 @@ export interface RunEventPublisher {
 }
 
 export interface RunEventBus extends RunEventPublisher {
-  /** Listens to one workspace's events; resolves to the function that stops listening. */
-  subscribe(workspaceId: string, listener: RunEventListener): Promise<() => void>;
+  /**
+   * Listens to one workspace's events; resolves to the function that stops listening. `onLost`
+   * is called when delivery may have missed events (e.g. the Redis connection dropped): the
+   * listener should end its stream so the browser reconnects and catches up.
+   */
+  subscribe(workspaceId: string, listener: RunEventListener, onLost?: () => void): Promise<() => void>;
   close(): Promise<void>;
 }
 
