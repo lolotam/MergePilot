@@ -71519,7 +71519,7 @@ function parseReviewAnswer(text, options) {
       break;
     }
     const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
-    if (bare.success && summaryOnly === null && !parsed.findings) {
+    if (bare.success && summaryOnly === null && parsed.findings === void 0) {
       summaryOnly = bare.data.summary;
     } else if (!firstParseError) {
       firstParseError = loose.error.message;
@@ -120398,6 +120398,9 @@ async function runAudit(input2) {
             retryNotes.push(`truncation retry failed: ${describeCallError(err, knownSecrets)}`);
           }
         }
+      }
+      if (parseResult.ok && parseResult.findingsMissing) {
+        parseResult = { ok: false, code: "invalid-json", error: FINDINGS_MISSING_REASON };
       }
       if (!parseResult.ok && retryNotes.length > 0) {
         parseResult = { ...parseResult, error: [parseResult.error, ...retryNotes].join("; ") };

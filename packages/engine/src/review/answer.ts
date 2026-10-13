@@ -223,7 +223,8 @@ export function parseReviewAnswer(
       break;
     }
     const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
-    if (bare.success && summaryOnly === null && !(parsed as Record<string, unknown>).findings) {
+    // Only a truly absent key: `findings: null`, `0` or `""` is a present non-list, so invalid-json.
+    if (bare.success && summaryOnly === null && (parsed as Record<string, unknown>).findings === undefined) {
       summaryOnly = bare.data.summary;
     } else if (!firstParseError) {
       firstParseError = loose.error.message;

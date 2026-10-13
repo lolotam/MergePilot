@@ -21,8 +21,10 @@ describe('an answer without a findings list', () => {
     expect(result).toEqual({ ok: true, summary: 'Final.', findings: [], droppedInvalid: 0 });
   });
 
-  it('still rejects findings that are present but not a list', () => {
-    expect(parseReviewAnswer('{"summary":"s","findings":"none"}')).toMatchObject({ ok: false, code: 'invalid-json' });
+  it('still rejects findings that are present but not a list, falsy values included', () => {
+    for (const value of ['"none"', 'null', '0', '""', 'false']) {
+      expect(parseReviewAnswer(`{"summary":"s","findings":${value}}`)).toMatchObject({ ok: false, code: 'invalid-json' });
+    }
   });
 
   it('publishes the summary but marks the review incomplete, never a silent clean review', async () => {
