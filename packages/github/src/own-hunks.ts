@@ -1,22 +1,34 @@
 /**
- * Keeps, from the patch of a file between the last reviewed head and the new head, only the hunks
- * that belong to the PR itself (ADR-0012 amendment). After the author merges the base branch into
- * the PR branch, the compare range also carries the base branch's changes to files the PR touches;
- * those lines are on the base, so they are not in the PR's own diff (base...head) and are dropped.
- * A hunk stays when one of its added or removed lines (ignoring blank lines) is also added or
- * removed in the PR's own patch; a hunk with no non-blank changed line is kept. Without the PR
- * patch (too large for GitHub) nothing is dropped.
+ * Drops, from the patch of a file between the last reviewed head and the new head, the hunks that
+ * a base-branch merge brought in (ADR-0012 amendment). A hunk is dropped only when it is proven to
+ * be the base branch's: every non-blank line it adds or removes is added or removed the same way
+ * in the base branch's own changes over that range (`basePatch`), and at least one of them is not
+ * a change of the PR's own diff (base...head). Anything uncertain is kept and reviewed: dropping a
+ * real PR change (a later deletion of an earlier PR edit, say) would hide it, while reviewing an
+ * extra base hunk only costs a little noise. Without the base patch nothing is dropped.
  */
 
-/** Non-blank content of the lines a patch adds (`+`) or removes (`-`). */
-function changedLines(patch: string, sign: '+' | '-'): Set<string> {
-  const lines = new Set<string>();
-  for (const line of patch.split('\n')) {
-    if (!line.startsWith(sign) || line.startsWith(`${sign}${sign}${sign} `)) continue;
+type Sign = '+' | '-';
+
+interface Change {
+  sign: Sign;
+  content: string;
+}
+
+/** The non-blank lines a patch (or hunk body) adds and removes, header lines excluded. */
+function changesOf(lines: readonly string[]): Change[] {
+  const changes: Change[] = [];
+  for (const line of lines) {
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
+    if (!line.startsWith('+') && !line.startsWith('-')) continue;
     const content = line.slice(1).trim();
-    if (content) lines.add(content);
+    if (content) changes.push({ sign: line[0] as Sign, content });
   }
-  return lines;
+  return changes;
+}
+
+function changeSet(patch: string | undefined): Set<string> {
+  return new Set(changesOf(patch ? patch.split('\n') : []).map((c) => `${c.sign}${c.content}`));
 }
 
 function splitHunks(patch: string): string[] {
@@ -33,19 +45,24 @@ function splitHunks(patch: string): string[] {
   return hunks.filter((hunk) => hunk.startsWith('@@'));
 }
 
-/** The PR's own hunks of `comparePatch`; undefined when none is left; the whole patch without a PR patch. */
-export function ownHunks(comparePatch: string, prPatch: string | undefined): string | undefined {
-  if (prPatch === undefined) return comparePatch;
-  const added = changedLines(prPatch, '+');
-  const removed = changedLines(prPatch, '-');
+/**
+ * `comparePatch` without the hunks proven to come from the base branch; undefined when none is
+ * left. `basePatch` is the file's patch over the base branch's own changes since the last review,
+ * `prPatch` its patch in the PR's own diff (undefined when GitHub omits it).
+ */
+export function withoutBaseHunks(
+  comparePatch: string,
+  basePatch: string | undefined,
+  prPatch: string | undefined,
+): string | undefined {
+  if (basePatch === undefined) return comparePatch;
+  const base = changeSet(basePatch);
+  const pr = changeSet(prPatch);
   const kept = splitHunks(comparePatch).filter((hunk) => {
-    const changes = hunk
-      .split('\n')
-      .slice(1)
-      .filter((line) => (line.startsWith('+') || line.startsWith('-')) && line.slice(1).trim() !== '');
-    // Nothing to compare (only blank-line edits): keep it rather than guess.
-    if (changes.length === 0) return true;
-    return changes.some((line) => (line.startsWith('+') ? added : removed).has(line.slice(1).trim()));
+    const keys = changesOf(hunk.split('\n').slice(1)).map((c) => `${c.sign}${c.content}`);
+    if (keys.length === 0) return true;
+    const fromBase = keys.every((key) => base.has(key)) && keys.some((key) => !pr.has(key));
+    return !fromBase;
   });
   return kept.length > 0 ? kept.join('\n') : undefined;
 }

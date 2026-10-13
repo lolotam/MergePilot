@@ -1,6 +1,6 @@
 import type { CompareCommitsResult, GitHubClient } from './client.js';
 import { MAIN_BOT_SLOT, markerBotSlot, parseMarker, type ReviewMarker } from './marker.js';
-import { ownHunks } from './own-hunks.js';
+import { withoutBaseHunks } from './own-hunks.js';
 import type { PullRequestFile } from './pr-files.js';
 import type { ReviewScope } from './summary.js';
 
@@ -23,6 +23,11 @@ export interface SelectIncrementalFilesOptions {
   configHash?: string;
   /** The reviewer-panel bot (ADR-0017), default 1. */
   botSlot?: number | undefined;
+  /**
+   * The PR's base commit. When given, hunks a base-branch merge brought in since the last review
+   * are left out (ADR-0012 amendment); without it every hunk of the range is reviewed.
+   */
+  baseSha?: string | undefined;
 }
 
 export type SelectIncrementalFilesResult =
@@ -90,7 +95,7 @@ export async function findLastReviewedHead(
  * - Config hash changed: full ("configuration changed since last review")
  * - Same head: incremental with 0 files (nothing new to review)
  * - Ahead: incremental with intersecting files between compare and prFiles, using the compare
- *   patch's hunks that are also in the PR's own diff (a base-branch merge adds none of its own)
+ *   patch without the hunks proven to come from a base-branch merge (needs `baseSha`)
  * - Compare at GitHub's 300-file cap (possibly truncated): full ("comparison too large")
  * - Compare error: full ("comparison unavailable")
  * - Diverged, behind, or 404: full ("history rewritten since last review")
@@ -107,6 +112,7 @@ export async function selectIncrementalFiles(
     prFiles,
     configHash,
     botSlot,
+    baseSha,
   }: SelectIncrementalFilesOptions,
 ): Promise<SelectIncrementalFilesResult> {
   const lastMarker = await findLastReviewedMarker(client, {
@@ -172,6 +178,7 @@ export async function selectIncrementalFiles(
   }
 
   const prFileMap = new Map(prFiles.map((file) => [file.path, file]));
+  const basePatches = await baseBranchPatches(client, { owner, repo, since: lastMarker.headSha, baseSha }, comparison, prFileMap);
   const files: PullRequestFile[] = [];
 
   for (const compareFile of comparison.files) {
@@ -189,8 +196,8 @@ export async function selectIncrementalFiles(
     };
 
     if (compareFile.patch !== undefined) {
-      // Only the PR's own hunks: a base-branch merge brings in changes the PR did not make.
-      const own = ownHunks(compareFile.patch, prFile.patch);
+      // A base-branch merge brings in changes the PR did not make: those hunks are left out.
+      const own = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own === undefined) continue;
       mapped.patch = own;
     }
@@ -208,6 +215,31 @@ export async function selectIncrementalFiles(
     sinceSha: lastMarker.headSha,
     ...(comparison.totalCommits !== undefined ? { commitCount: comparison.totalCommits } : {}),
   };
+}
+
+/**
+ * The base branch's own patch per file since the last reviewed head (`since...baseSha`: what a
+ * merge of the base branch can bring in), for the PR files the range touches. Empty when there is
+ * no base commit, nothing to check, or the comparison fails: then no hunk is left out.
+ */
+async function baseBranchPatches(
+  client: GitHubClient,
+  { owner, repo, since, baseSha }: { owner: string; repo: string; since: string; baseSha: string | undefined },
+  comparison: CompareCommitsResult,
+  prFileMap: ReadonlyMap<string, PullRequestFile>,
+): Promise<Map<string, string>> {
+  const patches = new Map<string, string>();
+  if (!baseSha || !comparison.files.some((f) => f.patch !== undefined && prFileMap.has(f.filename))) return patches;
+  let base: CompareCommitsResult | null;
+  try {
+    base = await client.compareCommits({ owner, repo, base: since, head: baseSha });
+  } catch {
+    return patches;
+  }
+  for (const file of base?.files ?? []) {
+    if (file.patch !== undefined) patches.set(file.filename, file.patch);
+  }
+  return patches;
 }
 
 /** The scope line shown in the review summary for a file selection. */

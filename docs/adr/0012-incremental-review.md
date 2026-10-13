@@ -66,16 +66,15 @@
 
 ## Amendment (2026-10-13): base-branch merges are not the PR's changes
 
-Seen on lolotam/MergePilot#96, #97 and #103: after the author ran `git merge origin/main`, the incremental review looked at what main had changed, such as another PR's decisions-log entry, as if it were the PR's own work. It then reported that "the patch does not match the description".
+**The problem.** Seen on lolotam/MergePilot#96, #97 and #103: after the author ran `git merge origin/main`, the incremental review looked at what main had changed, such as another PR's decisions-log entry, as if it were the PR's own work. The file set was already limited to files in the PR's own diff, but a file that both the PR and main touched still carried the whole compare patch, main's hunks included.
 
-The incremental file set was already limited to files in the PR's own diff. A file that both the PR and main touched, however, still carried the full compare patch, main's hunks included.
+**What changes.** A hunk is left out only when it is **proven** to come from the base branch (`packages/github/src/own-hunks.ts`). Two conditions must both hold:
+- every non-blank line it adds or removes is changed the same way in the base branch's own changes since the last review. That is a second comparison, `<last reviewed head>...<PR base commit>`.
+- at least one of those lines is not a change in the PR's own diff (base...head).
 
-**What changes.** For each such file, only the compare hunks that belong to the PR are kept (`packages/github/src/own-hunks.ts`). A hunk is the PR's when one of its non-blank added or removed lines is also added or removed in the PR's own diff (base...head).
+**Uncertain hunks are kept.** Dropping a real PR change would hide it, while an extra base hunk only adds a little noise. For example, a later deletion of a line the PR edited earlier does not match any line in the PR diff, but it is not in the base branch's changes either, so it is reviewed.
 
-Main's changes reach the branch through the merge, so they are on the base and never in that diff:
+**Outcomes:**
 - a merge-only push leaves nothing new to review;
-- a merge plus a real change reviews only the real change.
-
-**When nothing is dropped:**
-- a hunk with only blank-line changes is kept;
-- when GitHub omits the PR patch because the file is too large, the whole compare patch is kept.
+- a merge plus a real change reviews only the real change;
+- with no base commit, or when the second comparison fails, every hunk is reviewed as before.

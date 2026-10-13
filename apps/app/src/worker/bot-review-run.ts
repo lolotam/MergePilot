@@ -66,7 +66,7 @@ export interface BotFiles {
 
 /** The PR files a bot reviews: listed (unless given), then narrowed since its last review. */
 export async function selectBotFiles(
-  params: Pick<BotReviewParams, 'client' | 'owner' | 'repo' | 'pullNumber' | 'headSha' | 'configHash' | 'publisherLogin' | 'log' | 'botSlot' | 'prFiles'>,
+  params: Pick<BotReviewParams, 'client' | 'owner' | 'repo' | 'pullNumber' | 'headSha' | 'baseSha' | 'configHash' | 'publisherLogin' | 'log' | 'botSlot' | 'prFiles'>,
 ): Promise<BotFiles> {
   const { client, owner, repo, pullNumber, headSha, configHash, log, botSlot } = params;
   let prFiles = params.prFiles;
@@ -84,6 +84,7 @@ export async function selectBotFiles(
     prFiles,
     publisherLogin: params.publisherLogin ?? DEFAULT_PUBLISHER_LOGIN,
     configHash,
+    baseSha: params.baseSha,
     ...(botSlot !== undefined ? { botSlot } : {}),
   });
   return { prFiles, selection };
