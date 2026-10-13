@@ -92,6 +92,9 @@ describe('processReviewJob — consensus mode', () => {
     expect(h.calledModels).toEqual([]);
     const mine = (await h.runs()).filter((r) => r.jobId === h.job.deliveryId);
     expect(mine.map((r) => [r.botSlot, r.status, r.detail])).toEqual([[2, 'skipped', 'duplicate']]);
+    // The other job's main run is never touched: only this job's own rows are closed.
+    const other = (await h.runs()).filter((r) => r.jobId === 'other-job');
+    expect(other.map((r) => [r.botSlot, r.status])).toEqual([[1, 'running']]);
   });
 
   it('publishes nothing when every bot failed', async () => {
