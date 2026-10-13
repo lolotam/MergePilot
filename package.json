@@ -2,9 +2,9 @@
   "name": "mergepilot",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.18.0",
+  "packageManager": "pnpm@12.11.2",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "typecheck": "pnpm -r typecheck",

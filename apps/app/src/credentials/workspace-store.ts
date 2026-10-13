@@ -1,6 +1,6 @@
 import {
   MissingCredentialError,
-  Secret,
+  type Secret,
   type CredentialInfo,
   type CredentialProvider,
   type CredentialRef,
@@ -8,6 +8,7 @@ import {
   type RequestPurpose,
 } from '@mergepilot/engine';
 import type { AppStore, Vault } from '../core/types.js';
+import { CredentialService } from './service.js';
 
 const PROVIDER_ENV_MAP: Record<CredentialProvider, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -94,11 +95,6 @@ export class WorkspaceCredentialStore implements CredentialStore {
       );
     }
 
-    const plaintext = await this.#vault.decrypt(cred.ciphertext, {
-      workspaceId: this.#workspaceId,
-      provider: ref.provider,
-    });
-
-    return new Secret(plaintext);
+    return new CredentialService({ store: this.#store, vault: this.#vault }).resolve(this.#workspaceId, ref.provider);
   }
 }

@@ -178,7 +178,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     expect(saveButton === null || (saveButton as HTMLButtonElement).disabled).toBe(true);
 
     // Add key button should not be present
-    expect(screen.queryByRole('button', { name: /إضافة مفتاح جديد/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /إضافة بيانات دخول/i })).toBeNull();
   });
 
   it('shows the rename card to admin/owner and the danger zone to the owner only', () => {
@@ -203,7 +203,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
 
     renderComponent();
 
-    const addKeyBtn = screen.getByRole('button', { name: /إضافة مفتاح جديد/i });
+    const addKeyBtn = screen.getByRole('button', { name: /إضافة بيانات دخول/i });
     await user.click(addKeyBtn);
 
     // Modal opens with password input

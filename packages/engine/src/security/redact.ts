@@ -1,4 +1,5 @@
 import type { Secret } from '../credentials/secret.js';
+import { credentialSecretValues } from '../credentials/subscription.js';
 
 export type RedactionKind =
   | 'known'
@@ -83,8 +84,7 @@ export function redactSecrets(text: string, knownSecrets: Secret[] = []): Redact
   const lineOffsets = computeLineOffsets(text);
   const candidates: MatchCandidate[] = [];
 
-  for (const secret of knownSecrets) {
-    const value = secret.reveal();
+  for (const value of knownSecrets.flatMap((secret) => credentialSecretValues(secret.reveal()))) {
     if (!value || value.trim().length === 0) {
       continue;
     }

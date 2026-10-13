@@ -17,9 +17,12 @@ import type {
   BackupPreview,
   BackupSection,
   ExportBackupBody,
+  SubscriptionLogin,
+  SubscriptionProvider,
 } from '@mergepilot/app/contract';
 
 export type { PricesResponse } from '@mergepilot/app/contract';
+export type { SubscriptionLogin, SubscriptionProvider } from '@mergepilot/app/contract';
 export type {
   BackupPreview,
   BackupSection,
@@ -45,6 +48,7 @@ export interface MeResponseWithAdmin extends MeResponse {
 
 export interface KeyItem {
   provider: KeyProvider;
+  authMethod?: 'api-key' | 'subscription' | 'unknown';
   last4: string;
   createdAt: string;
   createdBy: string;
@@ -209,6 +213,18 @@ function runsQueryString(params: GetRunsParams | undefined, groupBy?: 'pr'): str
 }
 
 export const api = {
+  startSubscription: (workspaceId: string, provider: SubscriptionProvider) =>
+    fetchApi<SubscriptionLogin>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions/${provider}`, { method: 'POST', body: '{}' }),
+  getSubscriptionLogin: (workspaceId: string, id: string) =>
+    fetchApi<SubscriptionLogin>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions/sessions/${encodeURIComponent(id)}`),
+  answerSubscription: (workspaceId: string, id: string, promptId: string, value: string) =>
+    fetchApi<SubscriptionLogin>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions/sessions/${encodeURIComponent(id)}/input`, {
+      method: 'POST', body: JSON.stringify({ promptId, value }),
+    }),
+  finishSubscription: (workspaceId: string, id: string) =>
+    fetchApi<SubscriptionLogin>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions/sessions/${encodeURIComponent(id)}/finish`, { method: 'POST', body: '{}' }),
+  cancelSubscription: (workspaceId: string, id: string) =>
+    fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getMe: () => fetchApi<MeResponseWithAdmin>('/api/me'),
   getSettings: (workspaceId: string) =>
     fetchApi<SettingsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),

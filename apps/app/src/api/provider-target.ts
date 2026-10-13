@@ -1,4 +1,4 @@
-import type { ApiProviderId, FetchLike } from '@mergepilot/engine';
+import { SUBSCRIPTION_PREFIX, type ApiProviderId, type FetchLike } from '@mergepilot/engine';
 import { createSafeFetch, DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { AppStore } from '../core/types.js';
@@ -81,6 +81,7 @@ export async function unsavedTarget(
 ): Promise<TargetResult> {
   const key = apiKey.trim();
   if (!key) return fail(400, 'validation_error', 'apiKey is required');
+  if (key.startsWith(SUBSCRIPTION_PREFIX)) return fail(400, 'validation_error', 'Use subscription sign-in instead of the API key field');
   if (provider === 'custom') return customTarget(deps, key, baseUrl, signal);
   if (baseUrl?.trim()) return fail(400, 'base_url_not_allowed', 'Only the custom provider takes a base URL');
   return { ok: true, target: { apiKey: key } };

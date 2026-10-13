@@ -12,6 +12,8 @@ import type { FinishReason, TokenUsage } from '../llm/types.js';
 export interface ReviewModel {
   /** Stable label for logs and the review footer, e.g. `anthropic:claude-sonnet-5-5`. */
   readonly label: string;
+  /** No incremental API charge: access is covered by the connected consumer subscription. */
+  readonly includedInSubscription?: boolean;
   generate(request: ReviewModelRequest): Promise<ReviewModelResponse>;
   /**
    * Explicit fallback models from the config (ADR-0008), tried in order by the pipeline when

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { Secret } from '@mergepilot/engine';
+import { Secret, decodeSubscription, encodeSubscription, isSubscriptionProvider, refreshSubscription, SUBSCRIPTION_PREFIX,
+  type SubscriptionCredential, type SubscriptionProvider } from '@mergepilot/engine';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { KeyProvider, AppStore, StoredCredential, Vault } from '../core/types.js';
+import { coordinateRefresh } from './refresh-coordination.js';
 
 export type ValidateApiKeyFn = (provider: KeyProvider, apiKey: string, baseUrl?: string) => Promise<boolean | void>;
 
@@ -21,7 +23,7 @@ export interface SaveKeyParams {
   baseUrl?: string | null | undefined;
 }
 
-export type KeyMetadata = Omit<StoredCredential, 'ciphertext'>;
+export type KeyMetadata = Omit<StoredCredential, 'ciphertext'> & { authMethod?: 'api-key' | 'subscription' | 'unknown' };
 
 export class CredentialService {
   readonly #store: AppStore;
@@ -55,9 +57,17 @@ export class CredentialService {
       throw new Error('API key cannot be empty');
     }
 
+    // Backup restores may contain our encrypted-export OAuth envelope. The API-key path cannot import it.
+    if (trimmed.startsWith(SUBSCRIPTION_PREFIX)) {
+      if (options.validate) throw new Error('Use subscription sign-in instead of the API key field');
+      const subscription = decodeSubscription(trimmed, params.provider)!;
+      if (params.baseUrl) throw new Error('Subscription credentials cannot use a custom base URL');
+      return this.sealSubscription(params.workspaceId, subscription.provider, subscription.credential, params.userId);
+    }
+
     if (trimmed.startsWith('sk-ant-oat')) {
       throw new Error(
-        'Claude subscription tokens (sk-ant-oat...) are not supported in the SaaS. An Anthropic API key is required.',
+        'Claude subscription tokens cannot be saved as an API key. Use the Claude subscription sign-in method.',
       );
     }
 
@@ -101,7 +111,35 @@ export class CredentialService {
 
   async listKeys(workspaceId: string): Promise<KeyMetadata[]> {
     const items = await this.#store.listCredentials(workspaceId);
-    return items.map((item) => ({ ...item }));
+    return Promise.all(items.map(async (item) => {
+      if (!isSubscriptionProvider(item.provider)) return { ...item, authMethod: 'api-key' as const };
+      try {
+        const stored = await this.#store.getCredential(workspaceId, item.provider);
+        if (!stored) return { ...item, authMethod: 'unknown' as const };
+        const value = await this.#vault.decrypt(stored.ciphertext, { workspaceId, provider: item.provider });
+        return { ...item, authMethod: decodeSubscription(value, item.provider) ? 'subscription' as const : 'api-key' as const };
+      } catch {
+        // Keep disconnect/replacement available even when one encrypted credential cannot be read.
+        return { ...item, authMethod: 'unknown' as const };
+      }
+    }));
+  }
+
+  async sealSubscription(workspaceId: string, provider: SubscriptionProvider, credential: SubscriptionCredential, userId: string): Promise<StoredCredential> {
+    const value = encodeSubscription(provider, credential);
+    return { id: randomUUID(), workspaceId, provider,
+      ciphertext: await this.#vault.encrypt(value, { workspaceId, provider }),
+      keyVersion: this.#vault.keyVersion, last4: credential.access.slice(-4), createdBy: userId, createdAt: new Date(), baseUrl: null };
+  }
+
+  async saveSubscription(workspaceId: string, provider: SubscriptionProvider, credential: SubscriptionCredential, userId: string, signal?: AbortSignal): Promise<void> {
+    const sealed = await this.sealSubscription(workspaceId, provider, credential, userId);
+    signal?.throwIfAborted();
+    await this.#store.modifyCredential(workspaceId, provider, async () => {
+      // Re-check after the cross-process lock is acquired, before replacing any credential.
+      signal?.throwIfAborted();
+      return sealed;
+    }, signal);
   }
 
   async deleteKey(workspaceId: string, provider: KeyProvider): Promise<void> {
@@ -109,6 +147,26 @@ export class CredentialService {
   }
 
   async resolve(workspaceId: string, provider: KeyProvider): Promise<Secret> {
+    if (isSubscriptionProvider(provider)) {
+      const initial = await this.#store.getCredential(workspaceId, provider);
+      if (!initial) throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
+      const plaintext = await this.#vault.decrypt(initial.ciphertext, { workspaceId, provider });
+      const envelope = decodeSubscription(plaintext, provider);
+      if (!envelope || envelope.credential.expires > Date.now() + 60_000) return new Secret(plaintext);
+      return coordinateRefresh(this.#store, `${workspaceId}:${provider}`, async () => {
+        let value = '';
+        await this.#store.modifyCredential(workspaceId, provider, async (stored) => {
+          if (!stored) throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
+          value = await this.#vault.decrypt(stored.ciphertext, { workspaceId, provider });
+          const subscription = decodeSubscription(value, provider);
+          if (!subscription || subscription.credential.expires > Date.now() + 60_000) return stored;
+          const refreshed = await refreshSubscription(provider, subscription.credential, AbortSignal.timeout(30_000));
+          value = encodeSubscription(provider, refreshed);
+          return { ...stored, ciphertext: await this.#vault.encrypt(value, { workspaceId, provider }), keyVersion: this.#vault.keyVersion, last4: refreshed.access.slice(-4) };
+        });
+        return new Secret(value);
+      });
+    }
     const cred = await this.#store.getCredential(workspaceId, provider);
     if (!cred) {
       throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
@@ -127,8 +185,7 @@ export class CredentialService {
       throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
     }
 
-    const plaintext = await this.#vault.decrypt(cred.ciphertext, { workspaceId, provider });
-    return { secret: new Secret(plaintext), baseUrl: cred.baseUrl ?? null };
+    return { secret: await this.resolve(workspaceId, provider), baseUrl: cred.baseUrl ?? null };
   }
 
   async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {

@@ -6,8 +6,8 @@
 
 FROM node:22-bookworm-slim AS build
 
-# Pin pnpm via Corepack matching root package.json packageManager (pnpm@10.18.0)
-RUN corepack enable && corepack prepare pnpm@10.18.0 --activate
+# Pin pnpm via Corepack matching root package.json packageManager.
+RUN corepack enable && corepack prepare pnpm@12.11.2 --activate
 
 WORKDIR /build
 

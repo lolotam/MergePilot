@@ -51,6 +51,7 @@ export function registerPricesRoutes(app: FastifyInstance, deps: DashboardApiDep
     const models = usedModels(settings);
     const rows = await deps.store.listModelPrices(models);
     const overrides = settings.priceOverrides ?? [];
+    const subscriptions = new Set((await deps.credentials.listKeys(workspaceId)).filter((key) => key.authMethod === 'subscription').map((key) => key.provider));
     const priced: PricedModel[] = models.map(({ provider, model, role }) => {
       const found =
         role === 'judge' || role === 'judge-fallback'
@@ -58,7 +59,9 @@ export function registerPricesRoutes(app: FastifyInstance, deps: DashboardApiDep
               const j = judgeModelPrice(rows, overrides, provider as JudgeProviderId, model);
               return { price: j.price, source: j.source, fetchedAt: j.fetchedAt ? j.fetchedAt.toISOString() : null };
             })()
-          : reviewModelPrice(rows, overrides, provider, model);
+           : subscriptions.has(provider as import('../core/types.js').KeyProvider)
+             ? { price: { inputPerMTok: 0, outputPerMTok: 0 }, source: 'static' as const, fetchedAt: null }
+             : reviewModelPrice(rows, overrides, provider, model);
       return { provider, model, role, ...found, overridden: found.source === 'override' };
     });
 

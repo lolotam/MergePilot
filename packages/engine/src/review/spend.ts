@@ -30,9 +30,13 @@ export class SpendTracker {
   #spentUsd = 0;
 
   constructor(
-    private readonly pricing: ModelPricing | undefined,
+    private readonly pricing: ModelPricing | undefined | (() => ModelPricing | undefined),
     private readonly limitUsd: number,
   ) {}
+
+  private currentPricing(): ModelPricing | undefined {
+    return typeof this.pricing === 'function' ? this.pricing() : this.pricing;
+  }
 
   /** USD charged so far: real usage where reported, the estimate otherwise. 0 without pricing. */
   get spentUsd(): number {
@@ -45,18 +49,19 @@ export class SpendTracker {
   }
 
   get priced(): boolean {
-    return this.pricing !== undefined;
+    return this.currentPricing() !== undefined;
   }
 
   /** Worst-case cost of one call; 0 without pricing. */
   estimate(promptTokens: number, outputTokens: number): number {
-    if (!this.pricing) return 0;
-    return estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: outputTokens }, this.pricing);
+    const pricing = this.currentPricing();
+    if (!pricing) return 0;
+    return estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: outputTokens }, pricing);
   }
 
   /** Whether one more call of this size still fits the per-review budget. Always true without pricing. */
   canAfford(promptTokens: number, outputTokens: number): boolean {
-    if (!this.pricing) return true;
+    if (!this.currentPricing()) return true;
     return this.#spentUsd + this.estimate(promptTokens, outputTokens) <= this.limitUsd;
   }
 
@@ -65,9 +70,10 @@ export class SpendTracker {
    * estimated cost, so calls on usage-less providers still count against the budget.
    */
   record(promptTokens: number, outputTokens: number, usage: TokenUsage | undefined): void {
-    if (!this.pricing) return;
+    const pricing = this.currentPricing();
+    if (!pricing) return;
     this.#spentUsd += hasRealUsage(usage)
-      ? costUsd(usage, this.pricing)
+      ? costUsd(usage, pricing)
       : this.estimate(promptTokens, outputTokens);
   }
 }

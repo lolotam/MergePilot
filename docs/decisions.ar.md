@@ -1,5 +1,7 @@
 # سجل قرارات صاحب المشروع — MergePilot
 
+> القرارات الخاصة بمنع الاشتراكات وpi-ai في الدفعات القديمة اتحدّثت بطلب صاحب المشروع في س34 و[ADR-0020](adr/0020-dashboard-subscription-auth.md). الحالة المنفّذة موجودة في [PRD v0.3](prd/v0.3.ar.md).
+
 كل سؤال مكتوب معاه الاختيارات، والتوصية، وإجابة صاحب المشروع **بنصّها**.
 
 ## الدفعة 1 — 2026-10-11
@@ -426,6 +428,22 @@
   - استرجاع جزئي: الإعدادات بس، أو البوتات بس، أو المفاتيح بس (3 اختيارات في شاشة الاسترجاع).
 - **الشاشة:** كارت «النسخة الاحتياطية والاسترجاع» في الإعدادات، بيظهر للمالك بس، وبيقول بوضوح إن المفاتيح مش ممكن ترجع من غير كلمة المرور.
 - مفيش migration.
+
+## الدفعة 14 — 2026-10-13
+
+### س34: دخول اشتراكات Codex وClaude وGrok من لوحة التحكم
+
+**طلبات صاحب المشروع بنصّها:**
+
+«i want to add codex cli auth method subscritption to my app tak this app as refrance E:\Dev\Projects\deepseek-harness-master»
+
+اختار في سؤال طريقة التنفيذ: «Dashboard ChatGPT login».
+
+«also by same way add grok x ai auth method and claude auth consumer subscription meth by same way so evey provider has two method api and subscription auth method»
+
+«yes you are right try to check all document to update with the new structure and if ny nee»
+
+**القرار (ADR-0020):** لوحة التحكم بتوفّر API key واشتراك لـ OpenAI وAnthropic وxAI. تسجيل الدخول وبروتوكولات المزوّدين من pi-ai، بنفس المرجع. لكل مساحة عمل ومزوّد بيانات دخول نشطة واحدة، متشفّرة في الخزنة، مع تجديد متزامن وحذف واستبدال آمنين. تكلفة API الإضافية للاشتراك صفر، والتوكنات بتتحسب. المعمارية الحالية والتوثيق بيتحدّثوا بناءً على التنفيذ.
 
 ### س35: شيل قاعدة «ممنوع دخول الاشتراكات جوه الكود» من `CLAUDE.md`
 
