@@ -286,7 +286,7 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
 
   saveCredential(credential: StoredCredential): Promise<void>;
   /** Serialized across processes in Postgres, including login, deletion and OAuth refresh. Null deletes. */
-  modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>): Promise<StoredCredential | null>;
+  modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>, signal?: AbortSignal): Promise<StoredCredential | null>;
   getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null>;
   listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>>;
   deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void>;

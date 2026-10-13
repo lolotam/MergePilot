@@ -116,6 +116,17 @@ export class SubscriptionLogins {
     delete attempt.state.notice;
   }
 
+  /** Wait for an in-flight save so DELETE reports cancellation only if persistence did not win. */
+  async cancelAndWait(attempt: Attempt): Promise<boolean> {
+    const committing = attempt.committing;
+    this.cancel(attempt);
+    if (committing) {
+      try { await committing; }
+      catch { /* A cancelled save preserves the previous credential and keeps cancelled status. */ }
+    }
+    return attempt.state.status !== 'completed';
+  }
+
   close(): void {
     for (const attempt of this.attempts.values()) { clearTimeout(attempt.timer); this.cancel(attempt); }
     this.attempts.clear();

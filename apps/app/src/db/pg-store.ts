@@ -189,17 +189,21 @@ export class PgStore implements AppStore {
     await withLiveWorkspace(this.db, credential.workspaceId, (tx) => writePgCredential(tx, credential));
   }
 
-  async modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>): Promise<StoredCredential | null> {
+  async modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>, signal?: AbortSignal): Promise<StoredCredential | null> {
     return withLiveWorkspace(this.db, workspaceId, async (tx) => {
       await lockCredential(tx, workspaceId, provider);
+      signal?.throwIfAborted();
       const rows = await tx.select().from(providerCredentials)
         .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
       const row = rows[0];
       const current: StoredCredential | null = row ? { ...row, provider: row.provider as KeyProvider, createdAt: new Date(row.createdAt) } : null;
       const next = await change(current);
+      signal?.throwIfAborted();
       if (next && next !== current) await writePgCredential(tx, next);
       else if (!next) await tx.delete(providerCredentials)
         .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
+      // Cancellation during the SQL write aborts this transaction before COMMIT.
+      signal?.throwIfAborted();
       return next;
     });
   }

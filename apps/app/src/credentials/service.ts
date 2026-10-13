@@ -139,7 +139,7 @@ export class CredentialService {
       // Re-check after the cross-process lock is acquired, before replacing any credential.
       signal?.throwIfAborted();
       return sealed;
-    });
+    }, signal);
   }
 
   async deleteKey(workspaceId: string, provider: KeyProvider): Promise<void> {

@@ -6,6 +6,22 @@ import { EnvelopeVault } from '../vault/envelope-vault.js';
 
 afterEach(() => vi.useRealTimers());
 describe('subscription attempt lifecycle', () => {
+  it('reports an already-committed completion honestly when a cancellation arrives too late', async () => {
+    const logins = new SubscriptionLogins(async () => ({ type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 3600000 }));
+    const state = logins.start('ws', 'user', 'xai');
+    await Promise.resolve();
+    const attempt = logins.get('ws', 'user', state.id)!;
+    let release!: () => void;
+    const done = new Promise<void>((resolve) => { release = resolve; });
+    // Simulate storage that already committed but has not yet returned its result.
+    const finishing = logins.finish(attempt, async () => { await done; });
+    const cancelling = logins.cancelAndWait(attempt);
+    release();
+    await finishing;
+    expect(await cancelling).toBe(false);
+    expect(logins.snapshot(attempt).status).toBe('completed');
+    logins.close();
+  });
   it('honors cancellation while completion is waiting for the credential lock', async () => {
     const store = new MemoryStore();
     const service = new CredentialService({ store, vault: new EnvelopeVault(Buffer.alloc(32, 8).toString('base64')) });

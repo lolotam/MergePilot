@@ -52,7 +52,9 @@ export function registerSubscriptionRoutes(app: FastifyInstance, deps: Dashboard
   app.delete(sessionRoot, guard, async (request, reply) => {
     const { workspaceId, id } = request.params as { workspaceId: string; id: string };
     const attempt = logins.get(workspaceId, request.auth!.userId, id);
-    if (attempt) logins.cancel(attempt);
+    if (attempt && !(await logins.cancelAndWait(attempt))) {
+      return sendError(reply, 409, 'login_already_saved', 'The subscription was already saved; remove it from provider credentials to disconnect');
+    }
     return reply.status(204).send();
   });
 }

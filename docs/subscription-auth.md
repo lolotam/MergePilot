@@ -28,4 +28,6 @@ Credential-inclusive backups passphrase-encrypt the entire subscription envelope
 
 Only workspace admins and owners can start, complete, or cancel a login. Attempts are bound to the initiating user and workspace, expire after 15 minutes, and are cancelled when the dialog closes. Device codes and authorization codes are transient; authorization codes are never written to the database. Saving requires an authenticated completion request, so a finished provider login alone cannot write credentials after workspace access has been revoked.
 
+Cancellation aborts a queued credential replacement and rolls back a write before transaction commit. If persistence already committed before cancellation arrived, the cancellation endpoint reports `409 login_already_saved`; remove the saved provider credential to disconnect it.
+
 Pending login conversations live in the web process. A web-process restart requires starting a new login. Multiple web replicas need sticky routing for `/api/workspaces/*/subscriptions/*` for the duration of a login; saved credentials and refresh coordination are shared through Postgres.

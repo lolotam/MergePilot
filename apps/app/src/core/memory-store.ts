@@ -151,7 +151,7 @@ export class MemoryStore implements AppStore {
     await this.modifyCredential(credential.workspaceId, credential.provider, async () => ({ ...credential }));
   }
 
-  async modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>): Promise<StoredCredential | null> {
+  async modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>, signal?: AbortSignal): Promise<StoredCredential | null> {
     const key = `${workspaceId}:${provider}`;
     const previous = this.credentialLocks.get(key) ?? Promise.resolve();
     let release!: () => void;
@@ -159,8 +159,10 @@ export class MemoryStore implements AppStore {
     this.credentialLocks.set(key, lock);
     await previous;
     try {
+      signal?.throwIfAborted();
       this.assertLive(workspaceId);
       const next = await change(this.credentials.get(key) ?? null);
+      signal?.throwIfAborted();
       this.assertLive(workspaceId);
       if (next) this.credentials.set(key, { ...next });
       else this.credentials.delete(key);
