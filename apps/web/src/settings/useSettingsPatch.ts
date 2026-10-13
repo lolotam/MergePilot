@@ -23,6 +23,9 @@ export interface SettingsPatch {
   repoColors?: Record<string, RepoColorKey>;
   /** The Jev judge (ADR-0015); null turns it off and clears it. */
   judge?: Settings['judge'];
+  /** The reviewer panel output (ADR-0017). */
+  panelMode?: Settings['panelMode'];
+  panelMinAgreement?: Settings['panelMinAgreement'];
 }
 
 /**

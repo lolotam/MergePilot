@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Sliders } from 'lucide-react';
 import type { FallbackEntry, Settings, Severity } from '@mergepilot/app/contract';
-import type { ApiProvider } from '../api/client.js';
+import type { BotLogo } from '../api/bots.js';
+import { ApiClientError, type ApiProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
 import { EffortSelect, effortFor } from './EffortSelect.js';
 import { FallbackModelsCard } from './FallbackModelsCard.js';
@@ -9,6 +10,8 @@ import { HeavyModelCard, type HeavyModelValue } from './HeavyModelCard.js';
 import { ModelSelect } from './ModelSelect.js';
 import { fieldClass, labelClass, ProviderSelect, useModelEfforts } from './providers.js';
 import { SeveritySelect } from './SeveritySelect.js';
+import { BotIdentityFields } from './bots/BotIdentityFields.js';
+import { botNameError, MAIN_BOT_DEFAULT_LOGO, MAIN_BOT_DEFAULT_NAME } from './bots/BotLogo.js';
 
 export interface ReviewSettingsCardProps {
   workspaceId: string;
@@ -21,7 +24,7 @@ export interface ReviewSettingsCardProps {
   keyedProviders?: readonly ApiProvider[] | undefined;
 }
 
-type FormErrors = Partial<Record<'model' | 'budget' | 'heavy' | 'fallback', string>>;
+type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'heavy' | 'fallback', string>>;
 
 const NO_HEAVY: HeavyModelValue = { heavyProvider: null, heavyModel: null, heavyEffort: null, heavyThresholdLines: null };
 
@@ -48,6 +51,9 @@ export function ReviewSettingsCard({
   const [minSeverity, setMinSeverity] = useState<Severity>('medium');
   const [language, setLanguage] = useState<'ar' | 'en'>('ar');
   const [monthlyBudget, setMonthlyBudget] = useState('');
+  // The main bot's identity (ADR-0017), saved with the settings.
+  const [botName, setBotName] = useState(MAIN_BOT_DEFAULT_NAME);
+  const [botLogo, setBotLogo] = useState<BotLogo>(MAIN_BOT_DEFAULT_LOGO);
   const [errors, setErrors] = useState<FormErrors>({});
   const efforts = useModelEfforts(workspaceId, provider, model);
   // The heavy model starts on the main provider when it has a key, else on the first keyed one.
@@ -56,6 +62,8 @@ export function ReviewSettingsCard({
 
   useEffect(() => {
     if (!settings) return;
+    setBotName(settings.botName ?? MAIN_BOT_DEFAULT_NAME);
+    setBotLogo(settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO);
     setProvider(settings.provider);
     setModel(settings.model);
     setEffort(settings.effort ?? null);
@@ -81,6 +89,8 @@ export function ReviewSettingsCard({
     e.preventDefault();
     if (isMember) return;
     const next: FormErrors = {};
+    const nameProblem = botNameError(botName);
+    if (nameProblem) next.botName = t(nameProblem);
     if (!model.trim()) next.model = t('modelRequired');
     let parsedBudget: number | null = null;
     if (monthlyBudget.trim()) {
@@ -94,19 +104,26 @@ export function ReviewSettingsCard({
     if (Object.keys(next).length > 0) return;
 
     const heavyOn = Boolean(heavy.heavyProvider && heavy.heavyModel);
-    await onSave({
-      provider,
-      model: model.trim(),
-      language,
-      monthlyBudgetUsd: parsedBudget,
-      effort,
-      heavyProvider: heavyOn ? heavy.heavyProvider : null,
-      heavyModel: heavyOn ? (heavy.heavyModel?.trim() ?? null) : null,
-      heavyEffort: heavyOn ? heavy.heavyEffort : null,
-      heavyThresholdLines: heavyOn ? heavy.heavyThresholdLines : null,
-      fallback: fallback.map((f) => ({ provider: f.provider, model: f.model.trim(), effort: f.effort ?? null })),
-      minSeverity,
-    });
+    try {
+      await onSave({
+        provider,
+        model: model.trim(),
+        language,
+        monthlyBudgetUsd: parsedBudget,
+        effort,
+        heavyProvider: heavyOn ? heavy.heavyProvider : null,
+        heavyModel: heavyOn ? (heavy.heavyModel?.trim() ?? null) : null,
+        heavyEffort: heavyOn ? heavy.heavyEffort : null,
+        heavyThresholdLines: heavyOn ? heavy.heavyThresholdLines : null,
+        fallback: fallback.map((f) => ({ provider: f.provider, model: f.model.trim(), effort: f.effort ?? null })),
+        minSeverity,
+        botName: botName.trim(),
+        botLogo,
+      });
+    } catch (err) {
+      // A taken bot name is shown on the field; other errors were already shown as a toast.
+      if (err instanceof ApiClientError && err.code === 'bot_name_taken') setErrors({ botName: t('botNameTaken') });
+    }
   };
 
   return (
@@ -122,6 +139,19 @@ export function ReviewSettingsCard({
         <div className="py-4 text-sm text-ink-400">{t('loading')}</div>
       ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-6" noValidate>
+          <BotIdentityFields
+            idPrefix="main-bot"
+            name={botName}
+            onNameChange={(next) => {
+              setBotName(next);
+              if (errors.botName) setErrors(withoutError(errors, 'botName'));
+            }}
+            logo={botLogo}
+            onLogoChange={setBotLogo}
+            active
+            disabled={isMember}
+            nameError={errors.botName}
+          />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ProviderSelect
               id="settings-provider"

@@ -253,4 +253,10 @@ describe('RunDetailPage - header, grouped findings, plain text rendering, filter
 
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
+
+  it('shows the bot that ran the review next to its model', () => {
+    renderComponent({ ...sampleRun, botSlot: 3, botName: 'Fox bot' });
+    expect(screen.getByTestId('run-bot-chip').textContent).toContain('Fox bot');
+    expect(screen.getByTitle('Bot: Fox bot')).toBeDefined();
+  });
 });
