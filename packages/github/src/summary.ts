@@ -28,7 +28,7 @@ export interface ReviewSummaryInput {
    * Set when an explicit fallback model answered instead of the configured one (ADR-0008);
    * `modelLabel` is then the fallback model. Always disclosed in the summary.
    */
-  fallback?: { from: string; code: string };
+  fallback?: { from: string; code: string; detail?: string | undefined };
   /** Review scope (incremental vs full). */
   scope?: ReviewScope;
   /** The Jev judge's disclosure (ADR-0015): who answered, failures, filtered findings. */
@@ -75,9 +75,11 @@ function renderFallbackLine(input: ReviewSummaryInput, isArabic: boolean): strin
   const used = neutralize(input.modelLabel);
   const from = neutralize(input.fallback?.from ?? '');
   const code = neutralize(input.fallback?.code ?? '');
+  const detail = input.fallback?.detail ? neutralize(input.fallback.detail) : '';
+  const why = detail ? `${code}: ${detail}` : code;
   return isArabic
-    ? `> ⚠️ استُخدم النموذج الاحتياطي \`${used}\` لأن \`${from}\` فشل (${code})`
-    : `> ⚠️ Fallback model \`${used}\` was used because \`${from}\` failed (${code})`;
+    ? `> ⚠️ استُخدم النموذج الاحتياطي \`${used}\` لأن \`${from}\` فشل (${why})`
+    : `> ⚠️ Fallback model \`${used}\` was used because \`${from}\` failed (${why})`;
 }
 
 /** The review scope line (incremental since a commit, or a full review and why). */

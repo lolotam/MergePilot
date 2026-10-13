@@ -214,7 +214,11 @@ export async function reviewPullRequest(
     reviewResult.status !== 'skipped-budget' && reviewResult.fallbackFrom && reviewResult.fallbackCode
       ? {
           modelLabel: reviewResult.modelUsed ?? model.label,
-          fallback: { from: reviewResult.fallbackFrom, code: reviewResult.fallbackCode },
+          fallback: {
+            from: reviewResult.fallbackFrom,
+            code: reviewResult.fallbackCode,
+            ...(reviewResult.fallbackDetail ? { detail: redactSecrets(reviewResult.fallbackDetail, knownSecrets).text } : {}),
+          },
         }
       : {};
 

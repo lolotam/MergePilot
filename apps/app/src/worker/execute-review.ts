@@ -109,9 +109,17 @@ export async function executeReview(
     disclosure?.fallbackFrom && disclosure.fallbackCode
       ? {
           modelLabel: disclosure.modelUsed ?? model.label,
-          fallback: { from: disclosure.fallbackFrom, code: disclosure.fallbackCode },
+          fallback: {
+            from: disclosure.fallbackFrom,
+            code: disclosure.fallbackCode,
+            ...(disclosure.fallbackDetail ? { detail: redactSecrets(disclosure.fallbackDetail, knownSecrets).text } : {}),
+          },
         }
       : {};
+  if (fallbackSummary.fallback) {
+    const { from, code, detail: why } = fallbackSummary.fallback;
+    log?.(`Fallback used: ${from} failed (${code})${why ? `: ${why}` : ''}`);
+  }
 
   const envVar = PROVIDER_ENV_MAP[config.provider] ?? 'API key';
   let summaryMarkdown: string;

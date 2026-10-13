@@ -105,6 +105,7 @@ describe('FallbackChain', () => {
         modelUsed: 'xai:grok-4',
         fallbackFrom: 'openai:gpt-5',
         fallbackCode: 'rate-limit',
+        fallbackDetail: 'Too many requests',
       });
     });
 
@@ -148,7 +149,24 @@ describe('FallbackChain', () => {
         modelUsed: 'fb2:m3',
         fallbackFrom: 'primary:m1',
         fallbackCode: 'quota',
+        fallbackDetail: 'quota',
       });
+    });
+
+    it('keeps the first failure detail on one line and at most 300 characters', async () => {
+      const primary = failingModel(
+        'primary:m1',
+        new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: 'primary', message: `HTTP 401:
+  ${'x'.repeat(400)}` }),
+      );
+      const chain = new FallbackChain(primary, [mockModel('fb:m2', 'ok')]);
+      await chain.generate(req);
+
+      const detail = chain.disclosure().fallbackDetail ?? '';
+      expect(detail.startsWith('HTTP 401: xxx')).toBe(true);
+      expect(detail).toHaveLength(300);
+      expect(detail.endsWith('…')).toBe(true);
+      expect(chain.disclosure().fallbackCode).toBe('auth');
     });
 
     it('throws last error when all models in the chain fail', async () => {

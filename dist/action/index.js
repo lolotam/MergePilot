@@ -71675,7 +71675,7 @@ var FallbackChain = class {
         const last = this.#index >= this.#models.length - 1;
         if (last || request2.signal?.aborted || !kind || !FALLBACK_TRIGGERS.includes(kind))
           throw error62;
-        this.#from ??= { label: model.label, code: kind };
+        this.#from ??= { label: model.label, code: kind, detail: detailOf(error62) };
         this.#index++;
       }
     }
@@ -71685,10 +71685,18 @@ var FallbackChain = class {
     return {
       modelUsed: this.label,
       ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {},
+      ...this.#from?.detail ? { fallbackDetail: this.#from.detail } : {},
       ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}
     };
   }
 };
+var MAX_DETAIL = 300;
+function detailOf(error62) {
+  const message = error62 instanceof Error ? error62.message.replace(/\s+/g, " ").trim() : "";
+  if (!message)
+    return void 0;
+  return message.length > MAX_DETAIL ? `${message.slice(0, MAX_DETAIL - 1)}\u2026` : message;
+}
 
 function costUsd(usage, pricing) {
   const cacheReadPerMTok = pricing.cacheReadPerMTok ?? pricing.inputPerMTok;
@@ -125844,7 +125852,9 @@ function renderFallbackLine(input2, isArabic) {
   const used = neutralize2(input2.modelLabel);
   const from = neutralize2(input2.fallback?.from ?? "");
   const code = neutralize2(input2.fallback?.code ?? "");
-  return isArabic ? `> \u26A0\uFE0F \u0627\u0633\u062A\u064F\u062E\u062F\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \`${used}\` \u0644\u0623\u0646 \`${from}\` \u0641\u0634\u0644 (${code})` : `> \u26A0\uFE0F Fallback model \`${used}\` was used because \`${from}\` failed (${code})`;
+  const detail = input2.fallback?.detail ? neutralize2(input2.fallback.detail) : "";
+  const why = detail ? `${code}: ${detail}` : code;
+  return isArabic ? `> \u26A0\uFE0F \u0627\u0633\u062A\u064F\u062E\u062F\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \`${used}\` \u0644\u0623\u0646 \`${from}\` \u0641\u0634\u0644 (${why})` : `> \u26A0\uFE0F Fallback model \`${used}\` was used because \`${from}\` failed (${why})`;
 }
 function renderScopeLine(scope, isArabic) {
   if (scope.mode === "incremental") {
@@ -126130,7 +126140,11 @@ async function reviewPullRequest(ctx) {
   log?.(`Review completed with status: ${reviewResult.status}`);
   const fallbackSummary = reviewResult.status !== "skipped-budget" && reviewResult.fallbackFrom && reviewResult.fallbackCode ? {
     modelLabel: reviewResult.modelUsed ?? model.label,
-    fallback: { from: reviewResult.fallbackFrom, code: reviewResult.fallbackCode }
+    fallback: {
+      from: reviewResult.fallbackFrom,
+      code: reviewResult.fallbackCode,
+      ...reviewResult.fallbackDetail ? { detail: redactSecrets(reviewResult.fallbackDetail, knownSecrets).text } : {}
+    }
   } : {};
   const scope = reviewScopeOf(selection);
   const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";

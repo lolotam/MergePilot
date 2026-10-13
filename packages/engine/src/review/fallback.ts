@@ -38,6 +38,11 @@ export interface FallbackDisclosure {
   fallbackFrom?: string;
   /** Why the primary model was left. */
   fallbackCode?: FailureKind;
+  /**
+   * The primary model's error message (at most 300 characters), so the summary and logs say what
+   * the provider answered, not only the category. Callers redact it before showing it.
+   */
+  fallbackDetail?: string;
   /** Configured fallbacks that could not take part (e.g. no key), with the reason. */
   skippedFallbacks?: SkippedFallback[];
 }
@@ -45,7 +50,7 @@ export interface FallbackDisclosure {
 export class FallbackChain implements ReviewModel {
   readonly #models: readonly ReviewModel[];
   #index = 0;
-  #from: { label: string; code: FailureKind } | undefined;
+  #from: { label: string; code: FailureKind; detail: string | undefined } | undefined;
 
   constructor(primary: ReviewModel, fallbacks: readonly ReviewModel[] = []) {
     this.#models = [primary, ...fallbacks];
@@ -78,7 +83,7 @@ export class FallbackChain implements ReviewModel {
         const kind = failureKindOf(error);
         const last = this.#index >= this.#models.length - 1;
         if (last || request.signal?.aborted || !kind || !FALLBACK_TRIGGERS.includes(kind)) throw error;
-        this.#from ??= { label: model.label, code: kind };
+        this.#from ??= { label: model.label, code: kind, detail: detailOf(error) };
         this.#index++;
       }
     }
@@ -89,7 +94,16 @@ export class FallbackChain implements ReviewModel {
     return {
       modelUsed: this.label,
       ...(this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {}),
+      ...(this.#from?.detail ? { fallbackDetail: this.#from.detail } : {}),
       ...(skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}),
     };
   }
+}
+
+const MAX_DETAIL = 300;
+
+function detailOf(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message.replace(/\s+/g, ' ').trim() : '';
+  if (!message) return undefined;
+  return message.length > MAX_DETAIL ? `${message.slice(0, MAX_DETAIL - 1)}…` : message;
 }
