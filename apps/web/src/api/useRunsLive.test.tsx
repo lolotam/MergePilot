@@ -200,6 +200,13 @@ describe('useRunsLive (ADR-0021)', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['workspaces', 'ws-1', 'runs'] });
   });
+
+  it('falls back to polling when the first connection hangs without opening or failing', () => {
+    const { invalidate, hook } = setup();
+    act(() => vi.advanceTimersByTime(LIVE_DOWN_FALLBACK_MS));
+    expect(hook.result.current).toBe('polling');
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('useRunsLive without EventSource', () => {

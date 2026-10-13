@@ -102,6 +102,8 @@ export function useRunsLive(workspaceId: string, options: RunsLiveOptions = {}):
       if (disposed) return;
       const es = new EventSource(runEventsUrl(workspaceId), { withCredentials: true });
       source = es;
+      // A connection that hangs (neither opens nor errors) must still lead to the fallback polling.
+      markDown();
       es.addEventListener('run', onRun as EventListener);
       es.onopen = () => {
         if (downTimer) clearTimeout(downTimer);
