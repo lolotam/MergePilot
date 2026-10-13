@@ -25,6 +25,9 @@ export interface SettingsPatch {
   judge?: Settings['judge'];
   /** Manual model prices (ADR-0016): always the whole list. */
   priceOverrides?: Settings['priceOverrides'];
+  /** The reviewer panel output (ADR-0017). */
+  panelMode?: Settings['panelMode'];
+  panelMinAgreement?: Settings['panelMinAgreement'];
 }
 
 /**

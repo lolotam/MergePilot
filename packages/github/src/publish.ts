@@ -1,7 +1,7 @@
 import type { Finding } from '@mergepilot/engine';
 import type { GitHubClient, GitHubDraftReviewComment } from './client.js';
 import { deduplicateFindings } from './dedupe.js';
-import { buildMarker, parseMarker } from './marker.js';
+import { buildMarker, markerBotSlot, MAIN_BOT_SLOT, parseMarker } from './marker.js';
 import { renderFindingComment } from './render.js';
 
 export interface PublishReviewParams {
@@ -23,6 +23,11 @@ export interface PublishReviewParams {
   partial?: boolean | undefined;
   /** Set when the caller already dropped duplicates (avoids fetching the PR's comments twice). */
   alreadyDeduplicated?: boolean | undefined;
+  /**
+   * The reviewer-panel bot publishing (ADR-0017), default 1. Only this bot's earlier reviews and
+   * comments count, and slots 2-5 mark the review and its inline comments with their slot.
+   */
+  botSlot?: number | undefined;
 }
 
 export type PublishReviewResult =
@@ -53,6 +58,7 @@ export async function publishReview(
     publisherLogin,
     partial,
     alreadyDeduplicated,
+    botSlot = MAIN_BOT_SLOT,
   }: PublishReviewParams,
 ): Promise<PublishReviewResult> {
   const pr = await client.getPullRequest({ owner, repo, pull_number });
@@ -74,7 +80,7 @@ export async function publishReview(
       if (review.body && review.user?.login === publisherLogin) {
         const marker = parseMarker(review.body);
         // Only a completed review blocks; a partial one (failed / budget / incomplete) can be redone.
-        if (marker && marker.headSha === expectedHeadSha && marker.status !== 'partial') {
+        if (marker && marker.headSha === expectedHeadSha && marker.status !== 'partial' && markerBotSlot(marker) === botSlot) {
           return { status: 'skipped-duplicate', reviewId: review.id };
         }
       }
@@ -90,6 +96,7 @@ export async function publishReview(
     headSha: expectedHeadSha,
     configHash,
     ...(partial ? { status: 'partial' as const } : {}),
+    bot: botSlot,
   });
   const trimmedSummary = summaryMarkdown.trimEnd();
   const body = trimmedSummary ? `${trimmedSummary}\n\n${marker}` : marker;
@@ -103,6 +110,7 @@ export async function publishReview(
           pull_number,
           publisherLogin,
           findings: inline,
+          botSlot,
         })
       ).kept;
 
@@ -110,7 +118,7 @@ export async function publishReview(
     path: finding.path,
     line: finding.line,
     side: finding.side,
-    body: renderFindingComment(finding, { language, suggestionsAsCode }),
+    body: renderFindingComment(finding, { language, suggestionsAsCode, botSlot }),
   }));
 
   const createdReview = await client.createReview({

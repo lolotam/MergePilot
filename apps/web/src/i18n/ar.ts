@@ -3,6 +3,7 @@ import { arAdmin } from './admin-ar.js';
 import { arRuns } from './runs-ar.js';
 import { arJudge } from './judge-ar.js';
 import { arPrices } from './prices-ar.js';
+import { arBots } from './bots-ar.js';
 
 export const ar = {
   ...arSettings,
@@ -10,6 +11,7 @@ export const ar = {
   ...arRuns,
   ...arJudge,
   ...arPrices,
+  ...arBots,
   // App
   appName: 'MergePilot',
   appTagline: 'محرك مراجعة طلبات السحب المدعوم بالذكاء الاصطناعي',

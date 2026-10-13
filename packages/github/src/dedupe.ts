@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { judgeSameIssue, type Finding, type Judge, type SameIssuePair, type Secret } from '@mergepilot/engine';
 import type { GitHubClient, GitHubReviewComment } from './client.js';
+import { commentBotSlot, MAIN_BOT_SLOT } from './marker.js';
 
 export interface DeduplicateFindingsParams {
   owner: string;
@@ -16,6 +17,11 @@ export interface DeduplicateFindingsParams {
   knownSecrets?: readonly Secret[] | undefined;
   /** Spend still allowed for the judge call. */
   maxUsd?: number | undefined;
+  /**
+   * The reviewer-panel bot (ADR-0017), default 1: only its own comments count. A comment without
+   * a bot marker belongs to slot 1.
+   */
+  botSlot?: number | undefined;
 }
 
 export interface SemanticDedupeResult {
@@ -145,7 +151,7 @@ function rangesOverlap(r1: LineRange, r2: LineRange): boolean {
  */
 export async function deduplicateFindings(
   client: GitHubClient,
-  { owner, repo, pull_number, publisherLogin, findings, judge, knownSecrets = [], maxUsd }: DeduplicateFindingsParams,
+  { owner, repo, pull_number, publisherLogin, findings, judge, knownSecrets = [], maxUsd, botSlot = MAIN_BOT_SLOT }: DeduplicateFindingsParams,
 ): Promise<DeduplicateFindingsResult> {
   if (findings.length === 0) {
     return { kept: [], dropped: [] };
@@ -175,7 +181,7 @@ export async function deduplicateFindings(
     }
 
     for (const comment of comments) {
-      if (isMergePilotComment(comment, publisherLogin)) {
+      if (isMergePilotComment(comment, publisherLogin) && commentBotSlot(comment.body) === botSlot) {
         existingComments.push(comment);
       }
     }

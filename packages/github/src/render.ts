@@ -1,9 +1,12 @@
 import type { Finding } from '@mergepilot/engine';
 import { computeFindingFingerprint } from './dedupe.js';
+import { buildBotCommentMarker } from './marker.js';
 
 export interface RenderFindingOptions {
   language: 'ar' | 'en';
   suggestionsAsCode: boolean;
+  /** The reviewer-panel bot (ADR-0017); slots 2-5 append a hidden bot marker, slot 1 nothing. */
+  botSlot?: number | undefined;
 }
 
 interface Labels {
@@ -39,7 +42,7 @@ function fence(text: string, info = ''): string {
  */
 export function renderFindingComment(
   finding: Finding,
-  { language, suggestionsAsCode }: RenderFindingOptions,
+  { language, suggestionsAsCode, botSlot }: RenderFindingOptions,
 ): string {
   const labels = language === 'ar' ? LABELS_AR : LABELS_EN;
 
@@ -60,6 +63,8 @@ export function renderFindingComment(
 
   const fingerprint = computeFindingFingerprint(finding);
   sections.push(`<!-- mp:f=${fingerprint} -->`);
+  const botMarker = buildBotCommentMarker(botSlot);
+  if (botMarker) sections.push(botMarker);
 
   return sections.join('\n\n');
 }
