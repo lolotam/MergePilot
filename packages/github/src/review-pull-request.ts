@@ -3,6 +3,7 @@ import {
   redactSecrets,
   runReview,
   type Finding,
+  type DefaultedKey,
   type MergePilotConfig,
   type ParseConfigOptions,
   type ReviewModel,
@@ -24,7 +25,13 @@ import { publishReview, type PublishReviewResult } from './publish.js';
 import { renderReviewSummary } from './summary.js';
 
 export type LoadRepoConfigResult =
-  | { configText: string; config: MergePilotConfig; rulesFiles: FileContent[] }
+  | {
+      configText: string;
+      config: MergePilotConfig;
+      rulesFiles: FileContent[];
+      /** Keys the file left out and `defaults` filled: the file did not name them. */
+      defaulted?: DefaultedKey[];
+    }
   | { missing: true }
   | { errors: string[] };
 
@@ -65,6 +72,7 @@ export async function loadRepoConfig(
     configText: configFile.content,
     config,
     rulesFiles,
+    ...(parseResult.defaulted ? { defaulted: parseResult.defaulted } : {}),
   };
 }
 

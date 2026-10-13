@@ -71201,7 +71201,7 @@ function formatIssue(issue2, data) {
   }
   return `${path7 || "config"}: ${issue2.message}`;
 }
-function parseConfig(yamlText) {
+function parseConfig(yamlText, options = {}) {
   const doc = (0, import_yaml.parseDocument)(yamlText, { prettyErrors: false });
   const syntaxError = doc.errors[0];
   if (syntaxError) {
@@ -71212,11 +71212,17 @@ function parseConfig(yamlText) {
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
     return { ok: false, errors: ["config: must be a mapping of keys to values"] };
   }
-  const parsed = MergePilotConfigSchema.safeParse(data);
+  const filled = {};
+  if (options.defaults && !("provider" in data))
+    filled.provider = options.defaults.provider;
+  if (options.defaults?.model !== void 0 && !("model" in data))
+    filled.model = options.defaults.model;
+  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...data });
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((issue2) => formatIssue(issue2, data)) };
   }
-  return { ok: true, config: parsed.data };
+  const defaulted = Object.keys(filled);
+  return { ok: true, config: parsed.data, ...defaulted.length > 0 ? { defaulted } : {} };
 }
 
 var HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
@@ -126034,7 +126040,7 @@ async function loadRepoConfig(client, params) {
   if (!configFile) {
     return { missing: true };
   }
-  const parseResult = parseConfig(configFile.content);
+  const parseResult = parseConfig(configFile.content, { defaults: params.defaults });
   if (!parseResult.ok) {
     return { errors: parseResult.errors };
   }
@@ -126048,7 +126054,8 @@ async function loadRepoConfig(client, params) {
   return {
     configText: configFile.content,
     config: config2,
-    rulesFiles
+    rulesFiles,
+    ...parseResult.defaulted ? { defaulted: parseResult.defaulted } : {}
   };
 }
 var PROVIDER_ENV_MAP2 = {

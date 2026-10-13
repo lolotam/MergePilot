@@ -2,13 +2,18 @@ import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { MergePilotConfigSchema, type MergePilotConfig } from './schema.js';
 
-export type ConfigResult = { ok: true; config: MergePilotConfig } | { ok: false; errors: string[] };
+export type DefaultedKey = 'provider' | 'model';
+
+/** `defaulted` lists the keys filled from `options.defaults` (absent when none was). */
+export type ConfigResult =
+  | { ok: true; config: MergePilotConfig; defaulted?: DefaultedKey[] }
+  | { ok: false; errors: string[] };
 
 export interface ParseConfigOptions {
   /**
    * The provider and model used when the file leaves them out. The SaaS App passes the dashboard's
    * choice (it picks the provider and model itself), so its repos need not name them; the GitHub
-   * Action passes nothing and `provider` stays required.
+   * Action passes nothing and `provider` stays required. Each key is filled on its own.
    */
   defaults?: { provider: string; model?: string | undefined } | undefined;
 }
@@ -48,14 +53,13 @@ export function parseConfig(yamlText: string, options: ParseConfigOptions = {}):
     return { ok: false, errors: ['config: must be a mapping of keys to values'] };
   }
 
-  const defaults = options.defaults;
-  const withDefaults =
-    defaults && !('provider' in data)
-      ? { provider: defaults.provider, ...(defaults.model !== undefined && !('model' in data) ? { model: defaults.model } : {}), ...data }
-      : data;
-  const parsed = MergePilotConfigSchema.safeParse(withDefaults);
+  const filled: Partial<Record<DefaultedKey, string>> = {};
+  if (options.defaults && !('provider' in data)) filled.provider = options.defaults.provider;
+  if (options.defaults?.model !== undefined && !('model' in data)) filled.model = options.defaults.model;
+  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...data });
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((issue) => formatIssue(issue, data)) };
   }
-  return { ok: true, config: parsed.data };
+  const defaulted = Object.keys(filled) as DefaultedKey[];
+  return { ok: true, config: parsed.data, ...(defaulted.length > 0 ? { defaulted } : {}) };
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { PriceEntry } from '@mergepilot/engine';
 import { createHarness } from './model-settings.fixtures.js';
 import { finding, panelSetup } from './panel.fixtures.js';
 import { processReviewJob } from './process-review.js';
@@ -56,6 +57,29 @@ describe('processReviewJob — a repo .mergepilot.yml without provider', () => {
       [5, 'completed', 'anthropic', 'a-model'],
     ]);
     expect(h.created).toHaveLength(5);
+  });
+
+  it.each([
+    ['names only a model', 'model: gpt-4o\n'],
+    ['names a provider without model', 'provider: openai\n'],
+  ])('reviews on the dashboard choice when the file %s', async (_name, yaml) => {
+    const h = createHarness({ settings: {}, repoFiles: { '.mergepilot.yml': yaml } });
+    const result = await processReviewJob(h.job, h.deps);
+
+    expect(result.status).toBe('completed');
+    expect([h.getCapturedConfig()?.provider, h.getCapturedConfig()?.model]).toEqual(['anthropic', 'claude-3-5-sonnet']);
+  });
+
+  it('never applies the repo budget.pricing to a dashboard model the file did not name', async () => {
+    const catalog: PriceEntry = { provider: 'anthropic', model: 'claude-3-5-sonnet', inputPerMTok: 3, outputPerMTok: 15, source: 'models.dev' };
+    const h = createHarness({
+      settings: {},
+      repoFiles: { '.mergepilot.yml': 'budget:\n  pricing:\n    inputPerMTok: 0.001\n    outputPerMTok: 0.001\n' },
+    });
+    await h.store.replaceModelPrices('models.dev', [catalog], new Date('2026-10-13T02:30:00.000Z'));
+    await processReviewJob(h.job, h.deps);
+
+    expect((await h.latestRun())?.result?.pricing?.source).toBe('catalog:models.dev');
   });
 
   it('still fails a repo file that is invalid for another reason', async () => {

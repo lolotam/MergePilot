@@ -8,7 +8,7 @@ export interface EffectiveConfig {
   config: MergePilotConfig;
   rulesFiles: FileContent[];
   configHash: string;
-  /** The repo's `budget.pricing`, only when the repo file names the same provider and model. */
+  /** The repo's `budget.pricing`, only when the repo file itself names the same provider and model. */
   repoPricing?: ModelPricing | undefined;
 }
 
@@ -48,7 +48,8 @@ export function effectiveConfigFor(
     throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
   }
   const { baseUrl: _repoBaseUrl, effort: _repoEffort, ...repoConfig } = repoConfigResult.config;
-  const sameModel = repoConfig.provider === provider && repoConfig.model === model;
+  // Repo pricing applies only to a provider and model the file itself names, never filled ones.
+  const sameModel = !repoConfigResult.defaulted && repoConfig.provider === provider && repoConfig.model === model;
   return {
     config: {
       ...repoConfig,
