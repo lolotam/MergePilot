@@ -32,7 +32,7 @@ import {
   makeRedactionFinding,
   buildPatchLineToNewLineMap,
 } from './patch-helpers.js';
-import { runBatchedPass, runSinglePass, type ReviewPassContext } from './review-pass.js';
+import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, type CappedBatches } from './split.js';
 import { SpendTracker } from './spend.js';
 import { runVerifyPass, VERIFY_MAX_OUTPUT_TOKENS } from './verify-pass.js';
@@ -96,6 +96,8 @@ export type ReviewRunResult =
       reason: string;
       /** Provider message, already secret-redacted by the adapter; for logs and the summary. */
       detail?: string | undefined;
+      /** Each answer that had no usable JSON (secret-redacted preview); for logs only, never the summary. */
+      answerAttempts?: AnswerAttempt[] | undefined;
     } & Partial<FallbackDisclosure>);
 
 // ── Pipeline ──
@@ -273,6 +275,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       status: 'failed',
       reason: pass.reason,
       ...(pass.detail ? { detail: pass.detail } : {}),
+      ...(pass.answerAttempts ? { answerAttempts: pass.answerAttempts } : {}),
       ...model.disclosure(knownSecrets),
     };
   }

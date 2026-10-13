@@ -115196,6 +115196,15 @@ async function recoverReviewTruncation(input2) {
   return { parseResult, totalUsage, incompleteReasons };
 }
 
+var ANSWER_PREVIEW_CHARS = 200;
+function answerAttemptOf(response, knownSecrets) {
+  return {
+    chars: response.text.length,
+    finishReason: response.finishReason,
+    ...response.usage ? { outputTokens: response.usage.outputTokens } : {},
+    preview: redactSecrets(response.text, [...knownSecrets]).text.slice(0, ANSWER_PREVIEW_CHARS)
+  };
+}
 function failedCall(err, knownSecrets) {
   if (err && typeof err === "object" && "code" in err) {
     const message = "message" in err ? String(err.message ?? "") : "";
@@ -115255,7 +115264,8 @@ async function runSinglePass(ctx) {
   const parsed = recovery.parseResult;
   if (!parsed.ok) {
     const detail = [...notes, ...recovery.incompleteReasons].join("; ");
-    return { ok: false, reason: parsed.error, ...detail ? { detail } : {} };
+    const answerAttempts = parsed.code === "invalid-json" ? [response, empty.response].filter((r2) => r2 !== void 0).map((r2) => answerAttemptOf(r2, ctx.knownSecrets)) : void 0;
+    return { ok: false, reason: parsed.error, ...detail ? { detail } : {}, ...answerAttempts ? { answerAttempts } : {} };
   }
   return {
     ok: true,
@@ -115724,6 +115734,7 @@ async function runReview(input2) {
       status: "failed",
       reason: pass.reason,
       ...pass.detail ? { detail: pass.detail } : {},
+      ...pass.answerAttempts ? { answerAttempts: pass.answerAttempts } : {},
       ...model.disclosure(knownSecrets)
     };
   }

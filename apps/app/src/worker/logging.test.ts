@@ -136,6 +136,48 @@ describe('Worker structured logging', () => {
     expect(allLogsText).not.toContain(fakeKey);
   });
 
+  it('logs at warn what the model said when it answered without JSON, but never in the run detail', async () => {
+    const { stream, lines } = createCapture();
+    const logger = createLogger({ service: 'worker', stream });
+    const prose = 'No issues found in this diff.';
+    const mockModel: ReviewModel = {
+      label: 'anthropic:claude-3-5-sonnet',
+      generate: vi.fn().mockResolvedValue({ text: prose, finishReason: 'stop' as const }),
+    };
+    const mockClient = {
+      getFileContent: async () => null,
+      listPullRequestFilesPage: async () => [
+        { filename: 'src/main.ts', status: 'modified', additions: 1, deletions: 0, changes: 1, patch: '@@ -1,1 +1,2 @@\n test\n+added' },
+      ],
+      getPullRequest: async () => ({ head: { sha: headSha } }),
+      listReviewsPage: async () => [],
+      createReview: async () => ({ id: 1000, html_url: 'https://github.com/acme/repo/pull/15#review-1000' }),
+      compareCommits: async () => null,
+    };
+    const deps: ProcessReviewDeps = {
+      store,
+      credentials: { resolve: vi.fn().mockResolvedValue(new Secret('sk-test-unused')) },
+      githubAppFactory: vi.fn().mockResolvedValue({
+        client: mockClient as unknown as import('@mergepilot/github').GitHubClient,
+        publisherLogin: 'mergepilot[bot]',
+      }),
+      createModelForProvider: vi.fn().mockResolvedValue(mockModel),
+      logger,
+    };
+
+    const result = await processReviewJob(job, deps);
+    expect(result.status).toBe('failed');
+
+    const answerLine = lines.find((l) => l.event === 'review.unusable-answer');
+    expect(answerLine?.level).toBe(40);
+    expect(answerLine?.provider).toBe('anthropic');
+    expect(answerLine?.attempts).toEqual([
+      { chars: prose.length, finishReason: 'stop', preview: prose },
+      { chars: prose.length, finishReason: 'stop', preview: prose },
+    ]);
+    expect(result.detail ?? '').not.toContain(prose);
+  });
+
   it('logs failures at error level with failure code and redacted message', async () => {
     const { stream, lines } = createCapture();
     const logger = createLogger({ service: 'worker', stream });
