@@ -32,6 +32,8 @@ export interface HarnessOptions {
   /** Use the real engine model (with these seams) instead of the fake model. */
   engine?: { customFetch: FetchLike; publicIp?: string };
   fakeModel?: ReviewModel;
+  /** Files at the base commit by path, e.g. `.mergepilot.yml`. */
+  repoFiles?: Record<string, string>;
 }
 
 /** A worker harness: one installation, workspace settings, a fake GitHub client and run store. */
@@ -72,7 +74,7 @@ export function createHarness(options: HarnessOptions) {
   };
   const reviews: CreateReviewParams[] = [];
   const client: GitHubClient & { listPullRequestFilesPage: ReturnType<typeof vi.fn> } = {
-    getFileContent: async () => null,
+    getFileContent: async (params) => options.repoFiles?.[params.path] ?? null,
     listPullRequestFilesPage: vi.fn(async () => [
       {
         filename: 'src/main.ts',

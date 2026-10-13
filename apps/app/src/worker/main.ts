@@ -176,12 +176,12 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     }
   };
 
-  // Daily run retention (ADR-0014). Started in the background: a slow Redis must not hold up reviews.
+  // Daily run retention (ADR-0014) and model price refresh (ADR-0016). Started in the background: a slow Redis must not hold up reviews.
   // `stop()` awaits this promise, so a scheduler that finishes starting during shutdown is closed too.
   const maintenanceStart: Promise<MaintenanceScheduler | undefined> = connection
     ? startMaintenanceScheduler(services.store, connection, workerLog).then(
         (scheduler) => {
-          workerLog.info({ event: 'worker.retention_scheduled' }, 'Daily run retention scheduled (03:00 UTC)');
+          workerLog.info({ event: 'worker.retention_scheduled' }, 'Daily run retention (03:00 UTC) and model price refresh (02:30 UTC) scheduled');
           return scheduler;
         },
         (err: unknown) => {

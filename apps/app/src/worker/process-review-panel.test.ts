@@ -191,3 +191,51 @@ describe('processReviewJob — separate mode, per-bot history', () => {
     expect(body(3).comments).toHaveLength(1);
   });
 });
+
+describe('processReviewJob — reviewer panel prices (ADR-0016)', () => {
+  it("an extra bot's run records its own result.pricing and its own cost from ITS model's catalog price", async () => {
+    const fetchedAt = new Date('2026-10-12T02:30:00.000Z');
+    const h = await panelSetup({ bots: [{ slot: 2 }] });
+    await h.store.replaceModelPrices(
+      'models.dev',
+      [
+        { provider: 'anthropic', model: 'main-model', inputPerMTok: 3, outputPerMTok: 15, source: 'models.dev' },
+        { provider: 'openai', model: 'bot2-model', inputPerMTok: 5, outputPerMTok: 25, source: 'models.dev' },
+      ],
+      fetchedAt,
+    );
+    await processReviewJob(h.job, h.deps);
+
+    const runs = await h.runs();
+    const costOf = (slot: number, input: number, output: number) => {
+      const usage = runs.find((r) => r.botSlot === slot)?.result?.usage;
+      expect(usage?.inputTokens).toBeGreaterThan(0);
+      return ((usage?.inputTokens ?? 0) * input + (usage?.outputTokens ?? 0) * output) / 1_000_000;
+    };
+    const [main, extra] = runs;
+    expect(extra).toMatchObject({ botSlot: 2, status: 'completed', provider: 'openai', model: 'bot2-model' });
+    expect(extra?.result?.pricing).toEqual({ source: 'catalog:models.dev', inputPerMTok: 5, outputPerMTok: 25, fetchedAt: fetchedAt.toISOString() });
+    expect(extra?.costUsd).toBeCloseTo(costOf(2, 5, 25), 12);
+    // The main bot keeps its own model's price.
+    expect(main?.result?.pricing).toMatchObject({ source: 'catalog:models.dev', inputPerMTok: 3, outputPerMTok: 15 });
+    expect(main?.costUsd).toBeCloseTo(costOf(1, 3, 15), 12);
+    // Each bot's model received its own price as `budget.pricing`.
+    const priced = h.createModelForProvider.mock.calls.map(([c]) => [c.model, c.budget.pricing?.inputPerMTok]);
+    expect(priced).toEqual(expect.arrayContaining([['main-model', 3], ['bot2-model', 5]]));
+  });
+
+  it('an extra bot whose model no source prices keeps a null cost and `unknown` pricing', async () => {
+    const h = await panelSetup({ bots: [{ slot: 2 }] });
+    await h.store.replaceModelPrices(
+      'models.dev',
+      [{ provider: 'anthropic', model: 'main-model', inputPerMTok: 3, outputPerMTok: 15, source: 'models.dev' }],
+      new Date('2026-10-12T02:30:00.000Z'),
+    );
+    await processReviewJob(h.job, h.deps);
+
+    const extra = (await h.runs()).find((r) => r.botSlot === 2);
+    expect(extra?.status).toBe('completed');
+    expect(extra?.costUsd).toBeNull();
+    expect(extra?.result?.pricing).toEqual({ source: 'unknown', inputPerMTok: null, outputPerMTok: null });
+  });
+});

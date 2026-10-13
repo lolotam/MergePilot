@@ -194,6 +194,27 @@ describe('runAudit', () => {
     expect(result.findings[0]?.path).toBe('src/b.ts');
   });
 
+  it('treats a chunk answered without a findings list as failed, never as "no findings"', async () => {
+    const fakeModel: ReviewModel = {
+      label: 'anthropic:claude-3-5-sonnet',
+      generate: vi.fn(async () => ({
+        text: JSON.stringify({ summary: 'Looked at it.' }),
+        finishReason: 'stop' as const,
+        usage: { inputTokens: 20, outputTokens: 10 },
+      })),
+    };
+    const result = await runAudit({
+      config: baseConfig,
+      rulesFiles: [],
+      readFile: async () => 'const a = 1;',
+      files: [{ path: 'src/a.ts', size: 100 }],
+      model: fakeModel,
+    });
+    expect(result.failedChunks).toHaveLength(1);
+    expect(result.summaryByChunk[0]?.error).toContain('without a findings list');
+    expect(result.findings).toEqual([]);
+  });
+
   it('caps merged findings at maxFindings * chunks.length (max 50)', async () => {
     const configWithLowFindings: MergePilotConfig = {
       ...baseConfig,

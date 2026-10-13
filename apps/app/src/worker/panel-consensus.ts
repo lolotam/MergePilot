@@ -51,6 +51,7 @@ export async function publishConsensus(
     jobId: job.deliveryId,
     runId: holder.br.run.id,
     fetch: ctx.deps.judgeFetch,
+    priceLookup: ctx.judgePrices,
   });
   knownSecrets.push(...judgeSetup.secrets);
   const judge = judgeSetup.judge;

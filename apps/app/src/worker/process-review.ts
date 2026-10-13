@@ -13,6 +13,7 @@ import {
   type ReviewRun,
 } from '../core/types.js';
 import { workerLogger } from '../core/logger.js';
+import { judgePriceLookup } from '../core/model-pricing.js';
 import { buildBotConfig } from './bot-config.js';
 import { pausedWithNotice, PAUSED_DETAIL } from './pause-check.js';
 import { changedLinesOf, chooseModel, fallbackChain } from './model-choice.js';
@@ -192,7 +193,14 @@ async function sharedSteps(
   if (mainChoice.heavy) deps.log?.(`Large PR (${changedLines} changed lines): using the heavy-duty model`);
 
   const repoConfigResult = await loadRepoConfig(client, { owner, repo, baseSha: job.baseSha });
-  const mainConfig = buildBotConfig(repoConfigResult, mainChoice, fallbackChain(settings.fallback ?? [], mainChoice), settings);
+  // Slot 1's config, priced for its model (the heavy-duty one when chosen; ADR-0016).
+  const mainConfig = await buildBotConfig(
+    repoConfigResult,
+    mainChoice,
+    fallbackChain(settings.fallback ?? [], mainChoice),
+    settings,
+    deps.store,
+  );
 
   if (settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined) {
     const now = deps.now ? deps.now() : new Date();
@@ -229,6 +237,9 @@ async function sharedSteps(
     }
   }
 
+  // Judge prices (workspace override, then catalog; ADR-0016), read once for every bot's judge.
+  const judgePrices = await judgePriceLookup(deps.store, settings);
+
   // The panel lists the PR's files once for every bot; a lone main bot lists them itself.
   const prFiles = panelActive
     ? (await listPullRequestFiles(client, { owner, repo, pull_number: job.pullNumber })).files
@@ -237,7 +248,7 @@ async function sharedSteps(
   return {
     ctx: {
       ...base, settings, owner, repo, client, publisherLogin, prTitle, prBody, repoConfigResult,
-      mainChoice, mainConfig, panelActive, prFiles, baseUrl: deps.baseUrl, startTime,
+      mainChoice, mainConfig, judgePrices, panelActive, prFiles, baseUrl: deps.baseUrl, startTime,
     },
   };
 }

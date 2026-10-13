@@ -1,4 +1,4 @@
-import type { Secret } from '@mergepilot/engine';
+import type { JudgePriceLookup, Secret } from '@mergepilot/engine';
 import type { GitHubClient, LoadRepoConfigResult, PullRequestFile } from '@mergepilot/github';
 import type { Logger } from 'pino';
 import type {
@@ -53,6 +53,8 @@ export interface PanelContext {
   /** Slot 1's model (the heavy-duty one for a large PR) and config. */
   mainChoice: ModelChoice;
   mainConfig: BotConfig;
+  /** Judge prices (ADR-0016), read once per job for every `workspaceJudge` call. */
+  judgePrices?: JudgePriceLookup | undefined;
   /** True when at least one extra bot is active: the panel's own behaviour applies. */
   panelActive: boolean;
   mode: PanelMode;

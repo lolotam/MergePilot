@@ -10,6 +10,9 @@ import type { Secret } from '../credentials/secret.js';
 import { LlmFailure } from '../llm/failure.js';
 import type { FetchLike } from '../providers/http.js';
 import { estimateTokens } from '../review/budget.js';
+
+/** Output tokens assumed per question in the budget preflight (a noul/choice/score answer is far smaller). */
+export const JUDGE_OUTPUT_TOKENS_PER_QUESTION = 64;
 import { callSystemOne, JUDGE_CALL_TIMEOUT_MS, JudgeResponseError } from './call.js';
 import { jevModelPrice, type JudgeProviderId } from './providers.js';
 import type { JudgeAttempt, JudgeDecision, JudgeRequest } from './types.js';
@@ -36,6 +39,15 @@ export interface JudgeEntry {
   apiKey?: Secret | undefined;
 }
 
+/** A judge model's price in USD per million tokens (Jev bills input; output is usually 0). */
+export interface JudgePrice {
+  inputPerMTok: number;
+  outputPerMTok?: number | undefined;
+}
+
+/** Catalog or workspace price for a judge model; undefined falls back to the static Jev table. */
+export type JudgePriceLookup = (provider: JudgeProviderId, model: string) => JudgePrice | undefined;
+
 /** One `judge.call` log line: never the state, never a key. */
 export interface JudgeCallEvent extends JudgeAttempt {
   questions: number;
@@ -51,6 +63,8 @@ export interface JudgeOptions {
   onCall?: ((event: JudgeCallEvent) => void) | undefined;
   now?: (() => number) | undefined;
   sleep?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
+  /** Tried before the static `jevModelPrice` table (ADR-0016); a cost the provider reports still wins. */
+  priceLookup?: JudgePriceLookup | undefined;
 }
 
 export interface JudgeAnsweredBy {
@@ -153,6 +167,12 @@ export function createJudge(options: JudgeOptions): Judge {
   let unavailable: string | undefined;
   // A fallback that answered stays in use for the rest of this review (ADR-0008).
   let startAt = 0;
+  const priceOf = (provider: JudgeProviderId, model: string): JudgePrice | undefined => {
+    const looked = options.priceLookup?.(provider, model);
+    if (looked) return looked;
+    const input = jevModelPrice(provider, model);
+    return input !== undefined ? { inputPerMTok: input } : undefined;
+  };
 
   const record = (attempt: JudgeAttempt, questions: number, fallbackIndex: number): void => {
     allAttempts.push(attempt);
@@ -164,6 +184,9 @@ export function createJudge(options: JudgeOptions): Judge {
     const deadline = now() + totalTimeoutMs;
     const attempts: JudgeAttempt[] = [];
     const estimate = estimateTokens(JSON.stringify({ state: request.state, questions: request.questions }));
+    // Jev answers are short typed values; this generous per-question allowance keeps the
+    // preflight conservative when a price has an output rate.
+    const outputEstimate = questions * JUDGE_OUTPUT_TOKENS_PER_QUESTION;
     let lastCode = 'no-key';
 
     for (let index = startAt; index < entries.length; index++) {
@@ -185,8 +208,10 @@ export function createJudge(options: JudgeOptions): Judge {
         skip('no-key');
         continue;
       }
-      const price = jevModelPrice(entry.provider, entry.model);
-      if (price !== undefined && request.maxUsd !== undefined && (estimate * price) / 1_000_000 > request.maxUsd) {
+      const price = priceOf(entry.provider, entry.model);
+      const worstCaseUsd =
+        price === undefined ? undefined : (estimate * price.inputPerMTok + outputEstimate * (price.outputPerMTok ?? 0)) / 1_000_000;
+      if (worstCaseUsd !== undefined && request.maxUsd !== undefined && worstCaseUsd > request.maxUsd) {
         skip('budget');
         continue;
       }
@@ -205,7 +230,11 @@ export function createJudge(options: JudgeOptions): Judge {
           sleep: options.sleep,
         });
         const ms = now() - started;
-        const cost = result.costUsd ?? (price !== undefined ? (result.usage.inputTokens * price) / 1_000_000 : undefined);
+        const cost =
+          result.costUsd ??
+          (price !== undefined
+            ? (result.usage.inputTokens * price.inputPerMTok + result.usage.outputTokens * (price.outputPerMTok ?? 0)) / 1_000_000
+            : undefined);
         const attempt: JudgeAttempt = {
           ...base,
           ok: true,

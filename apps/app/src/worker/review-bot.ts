@@ -1,12 +1,14 @@
 import { createReviewModel, redactSecrets, type ReviewModel, type Secret } from '@mergepilot/engine';
 import type { SemanticDedupeResult } from '@mergepilot/github';
 import {
+  MAIN_BOT_SLOT,
   WorkspaceDeletedError,
   type ApiProvider,
   type FinishReviewRunOptions,
   type ReviewRunResultPayload,
   type ReviewRunStatus,
 } from '../core/types.js';
+import type { RunPricing } from '../core/price-types.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { buildBotConfig } from './bot-config.js';
 import { reviewOnlyOutcome, runBotReview, type BotFiles, type ReviewOnlyOutcome } from './bot-review-run.js';
@@ -46,7 +48,11 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       fallbackList.map((f) => f.provider),
       deps.ssrfLookup,
     );
-    const { effectiveConfig, rulesFiles, configHash } = buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings);
+    // Slot 1's config (and its price) was built once by the shared steps; an extra bot prices its own model.
+    const { effectiveConfig, rulesFiles, configHash, pricing } =
+      slot === MAIN_BOT_SLOT
+        ? ctx.mainConfig
+        : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store);
 
     const primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret);
@@ -54,6 +60,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       jobId: job.deliveryId,
       runId: br.run.id,
       fetch: deps.judgeFetch,
+      priceLookup: ctx.judgePrices,
     });
     credStore.addKnownSecrets(judgeSetup.secrets);
 
@@ -99,7 +106,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         await runBotReview({ ...params, prFiles: consensus.prFiles, selection: consensus.selection }),
         { knownSecrets, judge: judgeSetup.judge },
       );
-      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote);
+      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing);
       return { slot, result: record.result, pending: { ...record, outcome, knownSecrets: credStore.getKnownSecrets() } };
     }
 
@@ -116,7 +123,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
           }
         : {}),
     });
-    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote);
+    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing);
     record.finish.reviewUrl = reviewResult.reviewUrl ?? null;
     await finishBotRun(ctx, br, record.finish, reviewResult.runResult);
     return { slot, result: record.result, findings: record.finish.findingsCount ?? 0 };
@@ -140,6 +147,7 @@ function recordOf(
   judgeSetup: WorkspaceJudge,
   knownSecrets: Secret[],
   skippedNote: string | undefined,
+  pricing: RunPricing,
 ): BotRecord {
   const status: ReviewRunStatus =
     review.outcome === 'completed'
@@ -157,16 +165,20 @@ function recordOf(
     const rr = review.runResult;
     const judged = judgeRunParts(judgeSetup, rr.usage, rr.judge, review.judgeSemantic);
     judgeNote = judged.note;
-    payload = prepareRunResult({
-      summary: rr.summary,
-      inlineFindings: rr.inline,
-      summaryOnlyFindings: rr.summaryOnly,
-      language: ctx.settings.language,
-      usage: judged.usage,
-      verification: rr.verification,
-      judge: judged.judge,
-      knownSecrets,
-    });
+    payload = {
+      ...prepareRunResult({
+        summary: rr.summary,
+        inlineFindings: rr.inline,
+        summaryOnlyFindings: rr.summaryOnly,
+        language: ctx.settings.language,
+        usage: judged.usage,
+        verification: rr.verification,
+        judge: judged.judge,
+        knownSecrets,
+      }),
+      // What priced this bot's own model (ADR-0016).
+      pricing,
+    };
     findingsCount = rr.inline.length + rr.summaryOnly.length;
   } else if (status === 'skipped') {
     findingsCount = 0;

@@ -1,71 +1,39 @@
-import { createHash } from 'node:crypto';
-import { MergePilotConfigSchema, type MergePilotConfig } from '@mergepilot/engine';
+import type { MergePilotConfig } from '@mergepilot/engine';
 import type { FileContent, LoadRepoConfigResult } from '@mergepilot/github';
+import { resolvePricing } from '../core/model-pricing.js';
+import type { ModelPriceStore, RunPricing } from '../core/price-types.js';
 import type { ApiProvider, WorkspaceSettings } from '../core/types.js';
+import { effectiveConfigFor } from './effective-config.js';
 import type { ModelChoice } from './model-choice.js';
 
 export interface BotConfig {
+  /** The bot's config, with `budget.pricing` set to its own model's price (ADR-0016). */
   effectiveConfig: MergePilotConfig;
   rulesFiles: FileContent[];
   /** Short hash in the review marker: a change makes the bot's next review a full one. */
   configHash: string;
+  /** `result.pricing` for the bot's run record: what priced its model, or `unknown`. */
+  pricing: RunPricing;
 }
 
 /**
- * One bot's review config: the workspace (or bot) model, effort, fallbacks and language over the
- * repository's `.mergepilot.yml` rules and settings. Throws on an invalid repository file.
+ * One bot's review config (`effectiveConfigFor`), priced for that bot's chosen provider and model
+ * (ADR-0016): workspace override, the repo's `budget.pricing` for the same model, the catalog,
+ * otherwise unknown (the run's cost then stays null). Throws on an invalid repository file.
  */
-export function buildBotConfig(
+export async function buildBotConfig(
   repoConfigResult: LoadRepoConfigResult,
   choice: Pick<ModelChoice, 'provider' | 'model' | 'effort'>,
   fallbackList: Array<{ provider: ApiProvider; model: string; effort?: string }>,
-  settings: Pick<WorkspaceSettings, 'language' | 'minSeverity'>,
-): BotConfig {
-  const { provider: chosenProvider, model: chosenModel, effort: chosenEffort } = choice;
-
-  if ('missing' in repoConfigResult) {
-    return {
-      effectiveConfig: MergePilotConfigSchema.parse({
-        provider: chosenProvider,
-        model: chosenModel,
-        ...(chosenEffort ? { effort: chosenEffort } : {}),
-        fallback: fallbackList,
-        language: settings.language,
-        review: { minSeverity: settings.minSeverity ?? 'medium' },
-      }),
-      rulesFiles: [],
-      configHash: createHash('sha256')
-        .update(JSON.stringify({ provider: chosenProvider, model: chosenModel, language: settings.language }))
-        .digest('hex')
-        .slice(0, 12),
-    };
-  }
-  if ('errors' in repoConfigResult) {
-    throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
-  }
-  // In the SaaS the workspace's dashboard settings choose the provider, model, effort, fallbacks
-  // and review language (the repo file may target the GitHub Action, e.g. `provider:
-  // claude-code`); the repo still supplies its review rules and other settings.
-  // A repo-provided baseUrl never reaches the effective config: a key must not be sent to a
-  // URL from repository content (ADR-0008 amendment). The custom base URL comes only from the
-  // workspace credential, through `customBaseUrl`.
-  const { baseUrl: _repoBaseUrl, effort: _repoEffort, ...repoConfig } = repoConfigResult.config;
-  const sameModel = repoConfig.provider === chosenProvider && repoConfig.model === chosenModel;
+  settings: Pick<WorkspaceSettings, 'language' | 'minSeverity' | 'priceOverrides'>,
+  store: Pick<ModelPriceStore, 'getModelPrice'>,
+): Promise<BotConfig> {
+  const built = effectiveConfigFor(repoConfigResult, choice, fallbackList, settings);
+  const pricing = await resolvePricing({ store, settings, repoPricing: built.repoPricing }, choice.provider, choice.model);
   return {
-    effectiveConfig: {
-      ...repoConfig,
-      provider: chosenProvider,
-      model: chosenModel,
-      ...(chosenEffort ? { effort: chosenEffort } : {}),
-      fallback: fallbackList,
-      language: settings.language,
-      review: {
-        ...repoConfig.review,
-        minSeverity: settings.minSeverity ?? repoConfig.review.minSeverity,
-      },
-      budget: sameModel ? repoConfig.budget : { ...repoConfig.budget, pricing: undefined },
-    },
-    rulesFiles: repoConfigResult.rulesFiles,
-    configHash: createHash('sha256').update(repoConfigResult.configText).digest('hex').slice(0, 12),
+    effectiveConfig: { ...built.config, budget: { ...built.config.budget, pricing: pricing.pricing } },
+    rulesFiles: built.rulesFiles,
+    configHash: built.configHash,
+    pricing: pricing.record,
   };
 }

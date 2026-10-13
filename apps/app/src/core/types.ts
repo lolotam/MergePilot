@@ -1,18 +1,14 @@
 import type {
-  ApiProviderId,
-  CredentialStore,
-  JudgeKeyOnlyProviderId,
-  JudgeMode,
-  JudgeProviderId,
-  MergePilotConfig,
-  ReviewModel,
+  ApiProviderId, CredentialStore, JudgeKeyOnlyProviderId, JudgeMode, JudgeProviderId, MergePilotConfig, ReviewModel,
   Severity,
 } from '@mergepilot/engine';
+import type { ModelPriceStore, PriceOverride, RunPricing } from './price-types.js';
 import type { BotLogo, PanelMode, ReviewerBotStore } from './bot-types.js';
 import type { RepoColorKey, RunMaintenanceStore } from './run-types.js';
 
 export * from './bot-types.js';
 export * from './run-types.js';
+export * from './price-types.js';
 
 /** Workspace roles (ADR-0007). Order matters: each role includes everything below it. */
 export const ROLES = ['member', 'admin', 'owner'] as const;
@@ -97,6 +93,8 @@ export interface WorkspaceSettings {
   repoColors?: Record<string, RepoColorKey> | undefined;
   /** The Jev judge (ADR-0015); null / undefined = never configured (off). */
   judge?: JudgeSettings | null | undefined;
+  /** Manual model prices (ADR-0016); stores read back [] by default, undefined on save keeps them. */
+  priceOverrides?: PriceOverride[] | undefined;
   /**
    * The reviewer panel (ADR-0017): the main bot's name and logo, and how the panel publishes.
    * Stores always read back a value (the defaults); undefined on save keeps the stored value.
@@ -161,6 +159,8 @@ export interface ReviewRunResultPayload {
   };
   /** What the Jev judge did on this run (ADR-0015); its tokens are also in `usage`. */
   judge?: ReviewRunJudge | undefined;
+  /** Which source priced the primary model (ADR-0016). */
+  pricing?: RunPricing | undefined;
 }
 
 export interface ReviewRunJudge {
@@ -262,7 +262,7 @@ export interface ListReviewRunsResult {
 }
 
 /** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
-export interface AppStore extends RunMaintenanceStore, ReviewerBotStore {
+export interface AppStore extends RunMaintenanceStore, ModelPriceStore, ReviewerBotStore {
   /** Returns false when this delivery id was already recorded (duplicate webhook). */
   recordDelivery(deliveryId: string, event: string): Promise<boolean>;
 

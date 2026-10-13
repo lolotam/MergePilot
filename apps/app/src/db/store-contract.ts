@@ -10,6 +10,7 @@ import { defineReviewRunLifecycleContract } from './store-contract-runs.js';
 import { defineRetryContract } from './store-contract-retry.js';
 import { defineActiveRunContract } from './store-contract-active-run.js';
 import { defineRetentionContract } from './store-contract-retention.js';
+import { definePricesContract } from './store-contract-prices.js';
 import { defineReviewerBotContract } from './store-contract-bots.js';
 
 /** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
@@ -372,6 +373,7 @@ export function describeStoreContract(
     defineRetryContract(createStore, cleanup);
     defineActiveRunContract(createStore, cleanup);
     defineRetentionContract(createStore, cleanup);
+    definePricesContract(createStore, cleanup);
     defineReviewerBotContract(createStore, cleanup);
   });
 }
