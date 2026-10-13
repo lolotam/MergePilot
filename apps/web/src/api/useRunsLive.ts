@@ -64,21 +64,19 @@ export function useRunsLive(workspaceId: string, options: RunsLiveOptions = {}):
           .then(() => queryClient.invalidateQueries({ queryKey }));
         return;
       }
-      // A first load already restarted once absorbs this refetch: refetch again once it settles.
-      const stillFirstLoading = queryClient
-        .getQueryCache()
-        .findAll({ queryKey })
-        .some((q) => q.state.data === undefined && q.state.fetchStatus === 'fetching');
-      if (stillFirstLoading) followUp = true;
+      // A first load already restarted once absorbs this refetch: refetch it again once it settles.
+      for (const q of queryClient.getQueryCache().findAll({ queryKey })) {
+        if (q.state.data === undefined && q.state.fetchStatus === 'fetching') followUps.add(q);
+      }
       void queryClient.invalidateQueries({ queryKey });
     };
-    let followUp = false;
+    // Tracked per query: a sibling settling first must not use up another query's follow-up, and
+    // refetching only the settled query keeps a still-loading sibling from absorbing it.
+    const followUps = new WeakSet<object>();
     const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
-      if (!followUp || event.type !== 'updated') return;
-      const key = event.query.queryKey;
-      if (!queryKey.every((part, i) => key[i] === part) || event.query.state.fetchStatus !== 'idle') return;
-      followUp = false;
-      void queryClient.invalidateQueries({ queryKey });
+      if (event.type !== 'updated' || !followUps.has(event.query) || event.query.state.fetchStatus !== 'idle') return;
+      followUps.delete(event.query);
+      void queryClient.invalidateQueries({ queryKey: event.query.queryKey, exact: true });
     });
 
     let source: EventSource | undefined;

@@ -75,4 +75,34 @@ describe('useRunsLive follow-ups', () => {
     await act(async () => { resolvers[1]!([]); for (let i = 0; i < 5; i++) await Promise.resolve(); });
     expect(queryFn).toHaveBeenCalledTimes(3);
   });
+
+  it('follows up every restarted first load, not only the first one to settle', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const listResolvers: Array<(v: string[]) => void> = [];
+    const reposResolvers: Array<(v: string[]) => void> = [];
+    const listFn = vi.fn(() => new Promise<string[]>((resolve) => listResolvers.push(resolve)));
+    const reposFn = vi.fn(() => new Promise<string[]>((resolve) => reposResolvers.push(resolve)));
+    const wrapper = ({ children }: { children: ReactNode }) => React.createElement(QueryClientProvider, { client: queryClient }, children);
+    renderHook(() => {
+      useQuery({ queryKey: ['workspaces', 'ws-1', 'runs', 'list'], queryFn: listFn });
+      useQuery({ queryKey: ['workspaces', 'ws-1', 'runs', 'repos'], queryFn: reposFn });
+      return useRunsLive('ws-1');
+    }, { wrapper });
+    const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+    await act(flush);
+
+    latest().open(); // restarts both slow first loads once
+    await act(flush);
+    expect([listFn.mock.calls.length, reposFn.mock.calls.length]).toEqual([2, 2]);
+
+    latest().emit(); // an event while both restarted loads are still in flight
+    await act(async () => { await vi.advanceTimersByTimeAsync(LIVE_DEBOUNCE_MS); });
+
+    // The list settles first: it gets its follow-up, and must not use up the repos follow-up.
+    await act(async () => { listResolvers[1]!([]); await flush(); });
+    expect(listFn).toHaveBeenCalledTimes(3);
+
+    await act(async () => { reposResolvers[1]!([]); await flush(); });
+    expect(reposFn).toHaveBeenCalledTimes(3);
+  });
 });
