@@ -149,6 +149,12 @@ describe('default thinking headroom (P0.1)', () => {
     expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-pro')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-omni')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2-flash')).toBe(false);
+    // Families after V2.5 think too: mimo-v2.6-pro returned no text when treated as non-reasoning.
+    expect(isCompatibleReasoningModel('xiaomi-token-plan', 'mimo-v2.6-pro')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2.6')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2.10')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v3-pro')).toBe(true);
+    expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2.4')).toBe(false);
   });
 
   it('adds default thinking headroom to requestedOutputTokens when effort is undefined', async () => {
@@ -191,5 +197,7 @@ describe('default thinking headroom (P0.1)', () => {
     expect(xiaomi.requestedOutputTokens({ model: 'mimo-v2-omni', maxOutputTokens: 4096 })).toBe(4096 + 8192);
     // Xiaomi mimo-v2-flash does not reason by default
     expect(xiaomi.requestedOutputTokens({ model: 'mimo-v2-flash', maxOutputTokens: 4096 })).toBe(4096);
+    const tokenPlan = new OpenAICompatibleAdapter({ provider: 'xiaomi-token-plan', apiKey: fakeKey });
+    expect(tokenPlan.requestedOutputTokens({ model: 'mimo-v2.6-pro', maxOutputTokens: 4096 })).toBe(4096 + 8192);
   });
 });
