@@ -16,6 +16,7 @@ import type {
   JudgeProvidersResponse,
 } from '@mergepilot/app/contract';
 
+export type { PricesResponse } from '@mergepilot/app/contract';
 export type {
   KeyProvider,
   JudgeProvidersResponse,

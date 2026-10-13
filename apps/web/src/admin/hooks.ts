@@ -78,33 +78,48 @@ export function useAdminDeleteWorkspaceMutation() {
   return useAdminDelete((workspaceId) => adminApi.deleteWorkspace(workspaceId), 'workspaceDeletedSuccess');
 }
 
-/** The retention job's last run; polls every 3 s while it is still running. */
+/** The maintenance jobs' last runs; polls every 3 s while the retention or the price refresh runs. */
 export function useAdminMaintenanceQuery() {
   return useQuery({
     queryKey: ['admin', 'maintenance'],
     queryFn: () => adminApi.getMaintenance(),
     refetchInterval: (query) => {
-      const last = query.state.data?.retention.lastRun;
-      return last && last.finishedAt === null ? 3000 : false;
+      const data = query.state.data;
+      const running = [data?.retention.lastRun, data?.prices?.lastRun].some((last) => last && last.finishedAt === null);
+      return running ? 3000 : false;
     },
   });
 }
 
-export function useRunRetentionMutation() {
+/** Starts a maintenance job now and refreshes the last runs; a 409 is explained with `busyKey`. */
+function useMaintenanceAction(
+  run: () => Promise<unknown>,
+  startedKey: 'adminRetentionStarted' | 'adminPricesStarted',
+  busyKey: 'adminRetentionBusy' | 'adminPricesBusy',
+) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: () => adminApi.runRetention(),
+    mutationFn: run,
     onSuccess: () => {
-      showToast(t('adminRetentionStarted'), 'success');
+      showToast(t(startedKey), 'success');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'maintenance'] });
     },
     onError: (err: Error) => {
       const busy = err instanceof ApiClientError && err.code === 'already_running';
-      showToast(busy ? t('adminRetentionBusy') : err.message || t('error'), 'error');
+      showToast(busy ? t(busyKey) : err.message || t('error'), 'error');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'maintenance'] });
     },
   });
+}
+
+export function useRunRetentionMutation() {
+  return useMaintenanceAction(() => adminApi.runRetention(), 'adminRetentionStarted', 'adminRetentionBusy');
+}
+
+/** "Refresh prices now" (ADR-0016). */
+export function useRefreshPricesMutation() {
+  return useMaintenanceAction(() => adminApi.refreshPrices(), 'adminPricesStarted', 'adminPricesBusy');
 }

@@ -1,6 +1,7 @@
 import { useI18n } from '../i18n/context.js';
 import { formatCount, formatUsd } from './format.js';
 import { useAdminOverviewQuery } from './hooks.js';
+import { PriceRefreshPanel } from './PriceRefreshPanel.js';
 import { RetentionPanel } from './RetentionPanel.js';
 import { StatCard, StateMessage, StatusBadge } from './ui.js';
 
@@ -55,7 +56,10 @@ export function OverviewTab() {
         )}
       </section>
 
-      <RetentionPanel />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <RetentionPanel />
+        <PriceRefreshPanel />
+      </div>
     </div>
   );
 }
