@@ -139,6 +139,7 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     credentials: services.credentials,
     githubAppFactory,
     logger: workerLog,
+    baseUrl: config.baseUrl,
     ...(options?.log ? { log: options.log } : {}),
   };
 

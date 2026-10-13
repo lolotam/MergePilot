@@ -1,5 +1,7 @@
 import type { Finding } from '@mergepilot/engine';
+import { renderBotIdentity, type BotIdentity } from './bot-identity.js';
 import type { JudgeSummaryInput } from './judge-summary.js';
+import { neutralize } from './text-safety.js';
 
 export type ReviewScope =
   | { mode: 'incremental'; sinceSha: string; commitCount?: number }
@@ -31,17 +33,8 @@ export interface ReviewSummaryInput {
   scope?: ReviewScope;
   /** The Jev judge's disclosure (ADR-0015): who answered, failures, filtered findings. */
   judge?: JudgeSummaryInput | undefined;
-}
-
-/**
- * Model and author text is untrusted: it must not forge our idempotency marker, close the
- * RTL wrapper, or @-mention (and so notify) real people or teams.
- */
-function neutralize(text: string): string {
-  return text
-    .replaceAll('<!--', '&lt;!--')
-    .replace(/<\/div/gi, '&lt;/div')
-    .replace(/(^|[^\w`])@(?=[A-Za-z0-9-])/g, '$1@\u200b');
+  /** The reviewer-panel bot (ADR-0017); when set, the summary starts with its identity line. */
+  identity?: BotIdentity | undefined;
 }
 
 function renderHeader(outcome: ReviewSummaryInput['outcome'], isArabic: boolean): string {
@@ -87,7 +80,8 @@ function renderFallbackLine(input: ReviewSummaryInput, isArabic: boolean): strin
     : `> ⚠️ Fallback model \`${used}\` was used because \`${from}\` failed (${code})`;
 }
 
-function renderScopeLine(scope: ReviewScope, isArabic: boolean): string {
+/** The review scope line (incremental since a commit, or a full review and why). */
+export function renderScopeLine(scope: ReviewScope, isArabic: boolean): string {
   if (scope.mode === 'incremental') {
     const count = scope.commitCount ?? 1;
     const shortSha = scope.sinceSha.slice(0, 7);
@@ -214,6 +208,7 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
   const isArabic = input.language === 'ar';
   const sections: string[] = [];
 
+  if (input.identity) sections.push(renderBotIdentity(input.identity));
   sections.push(renderHeader(input.outcome, isArabic));
 
   if (input.fallback) {

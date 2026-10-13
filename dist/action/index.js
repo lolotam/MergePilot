@@ -124945,10 +124945,14 @@ async function listPullRequestFiles(client, { owner, repo, pull_number }) {
   };
 }
 
-var MARKER_REGEX = /<!--\s*mergepilot:review\s+head=([^\s>]+)\s+config=([^\s>]+)(?:\s+status=(partial))?\s*-->/;
-function buildMarker({ headSha, configHash, status }) {
+var MAIN_BOT_SLOT = 1;
+var MARKER_REGEX = /<!--\s*mergepilot:review\s+head=([^\s>]+)\s+config=([^\s>]+)(?:\s+status=(partial))?(?:\s+bot=(\d{1,2}))?\s*-->/;
+var COMMENT_BOT_REGEX = /<!--\s*mergepilot:bot=(\d{1,2})\s*-->\s*$/;
+var isExtraSlot = (slot) => typeof slot === "number" && Number.isInteger(slot) && slot > MAIN_BOT_SLOT;
+function buildMarker({ headSha, configHash, status, bot }) {
   const statusPart = status ? ` status=${status}` : "";
-  return `<!-- mergepilot:review head=${headSha} config=${configHash}${statusPart} -->`;
+  const botPart = isExtraSlot(bot) ? ` bot=${bot}` : "";
+  return `<!-- mergepilot:review head=${headSha} config=${configHash}${statusPart}${botPart} -->`;
 }
 function parseMarker(body) {
   if (!body) {
@@ -124963,11 +124967,43 @@ function parseMarker(body) {
   if (!headSha || !configHash) {
     return null;
   }
+  const bot = match2[4] ? Number(match2[4]) : void 0;
   return {
     headSha,
     configHash,
-    ...match2[3] === "partial" ? { status: "partial" } : {}
+    ...match2[3] === "partial" ? { status: "partial" } : {},
+    ...isExtraSlot(bot) ? { bot } : {}
   };
+}
+function markerBotSlot(marker) {
+  return marker.bot ?? MAIN_BOT_SLOT;
+}
+function buildBotCommentMarker(slot) {
+  return isExtraSlot(slot) ? `<!-- mergepilot:bot=${slot} -->` : "";
+}
+function commentBotSlot(body) {
+  const match2 = body?.match(COMMENT_BOT_REGEX);
+  const slot = match2?.[1] ? Number(match2[1]) : void 0;
+  return isExtraSlot(slot) ? slot : MAIN_BOT_SLOT;
+}
+
+var LOGO_KEY = /^[a-z][a-z0-9-]{0,23}$/;
+var DEFAULT_LOGO = "pilot";
+function escapeInline(text) {
+  return text.replace(/[\r\n]+/g, " ").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/([\\`*_[\]~|#])/g, "\\$1").replace(/(^|[^\w])@(?=[A-Za-z0-9-])/g, "$1@\u200B").trim();
+}
+function renderBotLogo(baseUrl, logo) {
+  const base = (baseUrl ?? "").trim().replace(/\/+$/, "");
+  if (!/^https?:\/\/[^\s"'<>]+$/i.test(base))
+    return "";
+  const key = LOGO_KEY.test(logo) ? logo : DEFAULT_LOGO;
+  return `<img src="${base}/bots/${key}.svg" width="20" height="20" alt="">`;
+}
+function renderBotIdentity(identity) {
+  const logo = renderBotLogo(identity.baseUrl, identity.logo);
+  const name = `**${escapeInline(identity.name)}**`;
+  const model = `\`${identity.modelLabel.replace(/`/g, "")}\``;
+  return `${logo ? `${logo} ` : ""}${name} \xB7 ${model}`;
 }
 
 import { createHash } from "node:crypto";
@@ -125041,7 +125077,7 @@ function isMergePilotComment(comment, publisherLogin) {
 function rangesOverlap(r1, r2) {
   return r1.start <= r2.end && r1.end >= r2.start;
 }
-async function deduplicateFindings(client, { owner, repo, pull_number, publisherLogin, findings, judge, knownSecrets = [], maxUsd }) {
+async function deduplicateFindings(client, { owner, repo, pull_number, publisherLogin, findings, judge, knownSecrets = [], maxUsd, botSlot = MAIN_BOT_SLOT }) {
   if (findings.length === 0) {
     return { kept: [], dropped: [] };
   }
@@ -125064,7 +125100,7 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
       return { kept: [...findings], dropped: [], skipped: true };
     }
     for (const comment of comments) {
-      if (isMergePilotComment(comment, publisherLogin)) {
+      if (isMergePilotComment(comment, publisherLogin) && commentBotSlot(comment.body) === botSlot) {
         existingComments.push(comment);
       }
     }
@@ -125173,7 +125209,7 @@ function fence(text, info = "") {
 ${text}
 ${ticks}`;
 }
-function renderFindingComment(finding, { language, suggestionsAsCode }) {
+function renderFindingComment(finding, { language, suggestionsAsCode, botSlot }) {
   const labels = language === "ar" ? LABELS_AR : LABELS_EN;
   const sections = [
     `### ${finding.title}`,
@@ -125193,11 +125229,14 @@ ${finding.suggestion}`);
   }
   const fingerprint = computeFindingFingerprint(finding);
   sections.push(`<!-- mp:f=${fingerprint} -->`);
+  const botMarker = buildBotCommentMarker(botSlot);
+  if (botMarker)
+    sections.push(botMarker);
   return sections.join("\n\n");
 }
 
 var REVIEWS_PAGE_SIZE = 100;
-async function publishReview(client, { owner, repo, pull_number, expectedHeadSha, summaryMarkdown, inline, configHash, language, suggestionsAsCode, publisherLogin, partial: partial2, alreadyDeduplicated }) {
+async function publishReview(client, { owner, repo, pull_number, expectedHeadSha, summaryMarkdown, inline, configHash, language, suggestionsAsCode, publisherLogin, partial: partial2, alreadyDeduplicated, botSlot = MAIN_BOT_SLOT }) {
   const pr = await client.getPullRequest({ owner, repo, pull_number });
   if (pr.head.sha !== expectedHeadSha) {
     return { status: "skipped-stale" };
@@ -125214,7 +125253,7 @@ async function publishReview(client, { owner, repo, pull_number, expectedHeadSha
     for (const review of reviews) {
       if (review.body && review.user?.login === publisherLogin) {
         const marker2 = parseMarker(review.body);
-        if (marker2 && marker2.headSha === expectedHeadSha && marker2.status !== "partial") {
+        if (marker2 && marker2.headSha === expectedHeadSha && marker2.status !== "partial" && markerBotSlot(marker2) === botSlot) {
           return { status: "skipped-duplicate", reviewId: review.id };
         }
       }
@@ -125227,7 +125266,8 @@ async function publishReview(client, { owner, repo, pull_number, expectedHeadSha
   const marker = buildMarker({
     headSha: expectedHeadSha,
     configHash,
-    ...partial2 ? { status: "partial" } : {}
+    ...partial2 ? { status: "partial" } : {},
+    bot: botSlot
   });
   const trimmedSummary = summaryMarkdown.trimEnd();
   const body = trimmedSummary ? `${trimmedSummary}
@@ -125238,13 +125278,14 @@ ${marker}` : marker;
     repo,
     pull_number,
     publisherLogin,
-    findings: inline
+    findings: inline,
+    botSlot
   })).kept;
   const comments = dedupedInline.map((finding) => ({
     path: finding.path,
     line: finding.line,
     side: finding.side,
-    body: renderFindingComment(finding, { language, suggestionsAsCode })
+    body: renderFindingComment(finding, { language, suggestionsAsCode, botSlot })
   }));
   const createdReview = await client.createReview({
     owner,
@@ -125286,7 +125327,7 @@ async function readFilesAtRef(client, { owner, repo, ref, paths }) {
 
 var REVIEWS_PAGE_SIZE2 = 100;
 var MAX_COMPARE_FILES = 300;
-async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin }) {
+async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
   let page = 1;
   let lastMarker = null;
   while (true) {
@@ -125300,7 +125341,7 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
     for (const review of reviews) {
       if (review.body && review.user?.login === publisherLogin) {
         const marker = parseMarker(review.body);
-        if (marker?.headSha && marker.status !== "partial") {
+        if (marker?.headSha && marker.status !== "partial" && markerBotSlot(marker) === botSlot) {
           lastMarker = marker;
         }
       }
@@ -125312,12 +125353,13 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
   }
   return lastMarker;
 }
-async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash }) {
+async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot }) {
   const lastMarker = await findLastReviewedMarker(client, {
     owner,
     repo,
     pull_number,
-    publisherLogin
+    publisherLogin,
+    botSlot
   });
   if (lastMarker === null) {
     return {
@@ -125640,6 +125682,7 @@ async function executePauseCommand(client, params) {
 function neutralize2(text) {
   return text.replaceAll("<!--", "&lt;!--").replace(/<\/div/gi, "&lt;/div").replace(/(^|[^\w`])@(?=[A-Za-z0-9-])/g, "$1@\u200B");
 }
+
 function renderHeader(outcome, isArabic) {
   if (outcome === "completed") {
     return isArabic ? "## \u0645\u0631\u0627\u062C\u0639\u0629 MergePilot" : "## MergePilot review";
@@ -125783,6 +125826,8 @@ ${disclaimer}`;
 function renderReviewSummary(input2) {
   const isArabic = input2.language === "ar";
   const sections = [];
+  if (input2.identity)
+    sections.push(renderBotIdentity(input2.identity));
   sections.push(renderHeader(input2.outcome, isArabic));
   if (input2.fallback) {
     sections.push(renderFallbackLine(input2, isArabic));
