@@ -190,11 +190,6 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
                   <span className="font-mono truncate" dir="ltr">
                     {m.name || m.id}
                   </span>
-                  {m.efforts.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink-100 dark:bg-ink-700 text-ink-600 dark:text-ink-300 shrink-0">
-                      {t('effortsInModel')}: {m.efforts.join(', ')}
-                    </span>
-                  )}
                 </button>
               ))
             )}
