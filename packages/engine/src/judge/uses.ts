@@ -2,9 +2,8 @@
  * What the Jev judge is used for (ADR-0015 amendment «multi-use»): zero or more of
  * - `annotate`: a "Jev confidence" line on every posted finding the judge scored;
  * - `filter`: drop findings below the threshold (never critical/high);
- * - `dedupe`: the semantic duplicate check against existing comments;
- * - `consensus`: for the coming reviewer panel (are two bots' findings the same issue?). Stored and
- *   validated now; nothing reads it yet.
+ * - `dedupe`: the semantic duplicate check against the same bot's existing comments (ADR-0017);
+ * - `consensus`: in the reviewer panel's consensus mode, whether two bots' findings are the same issue.
  */
 export const JUDGE_USES = ['annotate', 'filter', 'dedupe', 'consensus'] as const;
 export type JudgeUse = (typeof JUDGE_USES)[number];
