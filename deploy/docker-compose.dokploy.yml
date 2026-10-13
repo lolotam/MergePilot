@@ -130,7 +130,7 @@ services:
     command: ["node", "dist/worker/main.js"]
     environment:
       <<: *app-env
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-8}
       WORKER_HEALTH_PORT: 3001
     depends_on:
       postgres: { condition: service_healthy }
@@ -145,7 +145,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 1G
     logging: *logging
     networks: [backend, egress]
 

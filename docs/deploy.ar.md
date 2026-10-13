@@ -90,7 +90,7 @@ GOOGLE_CLIENT_ID=<الـ Client ID من منصة جوجل>
 GOOGLE_CLIENT_SECRET=<الـ Client Secret من منصة جوجل>
 
 # 7. عدد معالجات الـ Worker المتزامنة
-WORKER_CONCURRENCY=2
+WORKER_CONCURRENCY=8
 ```
 
 احفظ المتغيرات بالنقر على **Save**.

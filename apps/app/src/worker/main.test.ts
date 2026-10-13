@@ -164,7 +164,7 @@ describe('worker/main', { timeout: 20000 }, () => {
   });
 
   describe('createReviewWorker and worker app', () => {
-    it('creates worker with concurrency 2 by default', () => {
+    it('creates worker with concurrency 8 by default', () => {
       const store = new MemoryStore();
       const deps: ProcessReviewDeps = {
         store,
@@ -177,7 +177,7 @@ describe('worker/main', { timeout: 20000 }, () => {
       });
 
       expect(worker.name).toBe('reviews');
-      expect(worker.opts.concurrency).toBe(2);
+      expect(worker.opts.concurrency).toBe(8);
     });
 
     it('creates full worker instance via createWorker with services and health server', async () => {
