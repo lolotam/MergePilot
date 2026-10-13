@@ -7,6 +7,7 @@
  */
 
 import type { Secret } from '../credentials/secret.js';
+import { estimateTokens } from './budget.js';
 import { LlmFailure } from '../llm/failure.js';
 import type { TokenUsage } from '../llm/types.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
@@ -172,7 +173,9 @@ export async function retryUnusableAnswer<P extends ParsedAnswer>(
 }
 
 async function retryForJsonOnly<P extends ParsedAnswer>(input: EmptyRetryInput<P>): Promise<EmptyRetryResult<P>> {
-  const { parsed, spend, promptTokens, requestedOutputTokens } = input;
+  const { parsed, spend, requestedOutputTokens } = input;
+  // The retry's prompt is longer by the reminder: gate and charge it at that size.
+  const promptTokens = input.promptTokens + estimateTokens(JSON_ONLY_REMINDER);
   if (!spend.canAfford(promptTokens, requestedOutputTokens)) {
     return { parsed, note: 'invalid-json retry skipped: budget limit reached', thinkingOff: false };
   }
@@ -180,8 +183,11 @@ async function retryForJsonOnly<P extends ParsedAnswer>(input: EmptyRetryInput<P
     const response = await input.model.generate({ ...input.request, user: `${input.request.user}${JSON_ONLY_REMINDER}` });
     spend.record(promptTokens, requestedOutputTokens, response.usage);
     const retried = input.parse(response);
-    if (!retried.ok && retried.code === 'invalid-json') {
-      return { parsed: { ...retried, error: `${retried.error} (also after asking for JSON only)` }, response, usage: response.usage, thinkingOff: false };
+    if (!retried.ok) {
+      // Terminal: whatever went wrong (prose again, a cut answer), no third call follows, so the
+      // result is reported as invalid-json and never handed to the truncation recovery.
+      const error = retried.code === 'invalid-json' ? retried.error : `invalid-json: ${retried.error}`;
+      return { parsed: { ...retried, code: 'invalid-json', error: `${error} (also after asking for JSON only)` }, response, usage: response.usage, thinkingOff: false };
     }
     return { parsed: retried, response, usage: response.usage, thinkingOff: false };
   } catch (err) {

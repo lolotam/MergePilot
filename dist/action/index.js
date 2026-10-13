@@ -114729,7 +114729,8 @@ async function retryUnusableAnswer(input2) {
   }
 }
 async function retryForJsonOnly(input2) {
-  const { parsed, spend, promptTokens, requestedOutputTokens: requestedOutputTokens2 } = input2;
+  const { parsed, spend, requestedOutputTokens: requestedOutputTokens2 } = input2;
+  const promptTokens = input2.promptTokens + estimateTokens(JSON_ONLY_REMINDER);
   if (!spend.canAfford(promptTokens, requestedOutputTokens2)) {
     return { parsed, note: "invalid-json retry skipped: budget limit reached", thinkingOff: false };
   }
@@ -114737,8 +114738,9 @@ async function retryForJsonOnly(input2) {
     const response = await input2.model.generate({ ...input2.request, user: `${input2.request.user}${JSON_ONLY_REMINDER}` });
     spend.record(promptTokens, requestedOutputTokens2, response.usage);
     const retried = input2.parse(response);
-    if (!retried.ok && retried.code === "invalid-json") {
-      return { parsed: { ...retried, error: `${retried.error} (also after asking for JSON only)` }, response, usage: response.usage, thinkingOff: false };
+    if (!retried.ok) {
+      const error62 = retried.code === "invalid-json" ? retried.error : `invalid-json: ${retried.error}`;
+      return { parsed: { ...retried, code: "invalid-json", error: `${error62} (also after asking for JSON only)` }, response, usage: response.usage, thinkingOff: false };
     }
     return { parsed: retried, response, usage: response.usage, thinkingOff: false };
   } catch (err) {

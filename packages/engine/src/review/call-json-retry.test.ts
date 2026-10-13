@@ -51,4 +51,27 @@ describe('retryUnusableAnswer — an answer without the JSON asked for', () => {
     expect(model.generate).not.toHaveBeenCalled();
     expect(result.note).toBe('invalid-json retry skipped: budget limit reached');
   });
+
+  it('is terminal: a cut retry answer is reported as invalid-json, never left for the truncation recovery', async () => {
+    const generate = vi.fn().mockResolvedValueOnce({ text: '{"summary": "cut', finishReason: 'max-tokens' });
+    const result = await retryUnusableAnswer({
+      parsed: prose, model: { label: 'fake', generate }, spend: new SpendTracker(undefined, 1), request: REQUEST,
+      promptTokens: 10, requestedOutputTokens: 100, parse,
+    });
+    expect(result.parsed.ok).toBe(false);
+    if (!result.parsed.ok) {
+      expect(result.parsed.code).toBe('invalid-json');
+      expect(result.parsed.error).toMatch(/^invalid-json: truncated .*\(also after asking for JSON only\)$/);
+    }
+  });
+
+  it('gates the retry on the prompt plus the reminder', async () => {
+    const model = modelReturning(json);
+    const canAfford = vi.spyOn(SpendTracker.prototype, 'canAfford');
+    await retryUnusableAnswer({
+      parsed: prose, model, spend: new SpendTracker(undefined, 1), request: REQUEST, promptTokens: 10, requestedOutputTokens: 100, parse,
+    });
+    expect(canAfford.mock.calls[0]?.[0]).toBeGreaterThan(10);
+    canAfford.mockRestore();
+  });
 });
