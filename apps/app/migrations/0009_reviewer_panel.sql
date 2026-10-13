@@ -44,6 +44,13 @@ ALTER TABLE review_runs
     CHECK (bot_slot BETWEEN 1 AND 5),
   ADD COLUMN IF NOT EXISTS bot_name text NULL;
 
+-- One job runs every bot of the panel, so a retry reuses only its own bot's run of that job
+-- (0003 allowed one reusable run per job).
+DROP INDEX IF EXISTS idx_review_runs_workspace_job_id_active;
+CREATE UNIQUE INDEX idx_review_runs_workspace_job_id_active
+  ON review_runs (workspace_id, job_id, bot_slot)
+  WHERE job_id IS NOT NULL AND status IN ('queued', 'running', 'failed');
+
 -- One queued/running run per workspace, repo, PR, head commit and bot slot.
 DROP INDEX IF EXISTS idx_review_runs_active_pr_head;
 CREATE UNIQUE INDEX idx_review_runs_active_pr_head

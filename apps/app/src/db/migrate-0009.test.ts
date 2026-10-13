@@ -54,6 +54,19 @@ describe('migration 0009_reviewer_panel', { timeout: 60000 }, () => {
       await insertRun(client, '00000000-0000-4000-8000-000000000005', 'failed', 2);
       await expect(insertRun(client, '00000000-0000-4000-8000-000000000006', 'failed', 6)).rejects.toThrow();
 
+      // One job runs every bot: a reusable run per job and bot slot, not per job.
+      const jobRun = (id: string, sha: string, slot: number) =>
+        client.query(
+          `INSERT INTO review_runs (id, workspace_id, job_id, installation_id, repo_full_name, pull_number, head_sha, status, bot_slot)
+           VALUES ($1, 'ws-1', 'job-9', 7, 'acme/api', 4, $2, 'running', $3);`,
+          [id, sha, slot],
+        );
+      await jobRun('00000000-0000-4000-8000-000000000007', 'sha-9', 1);
+      await jobRun('00000000-0000-4000-8000-000000000008', 'sha-9', 3);
+      await expect(jobRun('00000000-0000-4000-8000-000000000009', 'sha-10', 3)).rejects.toThrow(
+        /idx_review_runs_workspace_job_id_active/,
+      );
+
       const update = (set: string) => client.query(`UPDATE workspace_settings SET ${set} WHERE workspace_id = 'ws-1';`);
       await update(`bot_name = 'Owl', bot_logo = 'owl', panel_mode = 'consensus', panel_min_agreement = 3`);
       await expect(update(`panel_mode = 'vote'`)).rejects.toThrow();

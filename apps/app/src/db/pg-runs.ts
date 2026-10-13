@@ -154,7 +154,8 @@ async function insertOrReusePgReviewRun(db: AppDb, run: NewReviewRun): Promise<R
   return withLiveWorkspace(db, run.workspaceId, async (tx) => {
     const now = new Date();
     if (run.jobId) {
-      // Only a queued/running/failed run of this job is reused; completed and skipped runs stay.
+      // Only a queued/running/failed run of this job and bot is reused; completed and skipped
+      // runs stay, and one job's other bots keep their own rows (ADR-0017).
       const reused = await tx
         .update(reviewRuns)
         .set(startingValues(run, now))
@@ -162,6 +163,7 @@ async function insertOrReusePgReviewRun(db: AppDb, run: NewReviewRun): Promise<R
           and(
             eq(reviewRuns.workspaceId, run.workspaceId),
             eq(reviewRuns.jobId, run.jobId),
+            eq(reviewRuns.botSlot, run.botSlot ?? 1),
             inArray(reviewRuns.status, [...REUSABLE_RUN_STATUSES]),
           ),
         )

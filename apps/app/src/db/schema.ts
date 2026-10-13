@@ -138,8 +138,9 @@ export const reviewRuns = pgTable(
       table.workspaceId,
       table.createdAt.desc(),
     ),
+    // Migrations 0003 and 0009: one reusable run per job and bot slot.
     uniqueIndex('idx_review_runs_workspace_job_id_active')
-      .on(table.workspaceId, table.jobId)
+      .on(table.workspaceId, table.jobId, table.botSlot)
       .where(sql`job_id IS NOT NULL AND status IN ('queued', 'running', 'failed')`),
     index('idx_review_runs_active_updated_at')
       .on(table.updatedAt)

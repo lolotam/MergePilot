@@ -202,6 +202,7 @@ export class MemoryStore implements AppStore {
         if (
           existing.workspaceId === run.workspaceId &&
           existing.jobId === run.jobId &&
+          existing.botSlot === starting.botSlot &&
           REUSABLE_RUN_STATUSES.includes(existing.status)
         ) {
           reusable = existing;
