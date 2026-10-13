@@ -3,7 +3,9 @@ import {
   redactSecrets,
   runReview,
   type Finding,
+  type DefaultedKey,
   type MergePilotConfig,
+  type ParseConfigOptions,
   type ReviewModel,
   type Secret,
 } from '@mergepilot/engine';
@@ -23,16 +25,23 @@ import { publishReview, type PublishReviewResult } from './publish.js';
 import { renderReviewSummary } from './summary.js';
 
 export type LoadRepoConfigResult =
-  | { configText: string; config: MergePilotConfig; rulesFiles: FileContent[] }
+  | {
+      configText: string;
+      config: MergePilotConfig;
+      rulesFiles: FileContent[];
+      /** Keys the file left out and `defaults` filled: the file did not name them. */
+      defaulted?: DefaultedKey[];
+    }
   | { missing: true }
   | { errors: string[] };
 
 /**
  * Loads and parses .mergepilot.yml and its referenced rulesFiles from the base branch.
+ * `defaults` fills a file without `provider` (the SaaS App, which picks the provider and model itself).
  */
 export async function loadRepoConfig(
   client: GitHubClient,
-  params: { owner: string; repo: string; baseSha: string },
+  params: { owner: string; repo: string; baseSha: string; defaults?: ParseConfigOptions['defaults'] },
 ): Promise<LoadRepoConfigResult> {
   const configFiles = await readFilesAtRef(client, {
     owner: params.owner,
@@ -46,7 +55,7 @@ export async function loadRepoConfig(
     return { missing: true };
   }
 
-  const parseResult = parseConfig(configFile.content);
+  const parseResult = parseConfig(configFile.content, { defaults: params.defaults });
   if (!parseResult.ok) {
     return { errors: parseResult.errors };
   }
@@ -63,6 +72,7 @@ export async function loadRepoConfig(
     configText: configFile.content,
     config,
     rulesFiles,
+    ...(parseResult.defaulted ? { defaulted: parseResult.defaulted } : {}),
   };
 }
 

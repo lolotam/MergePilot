@@ -78,6 +78,31 @@ describe('parseConfig', () => {
     expect(expectErrors('   \n# only a comment\n')).toEqual(['provider: required']);
   });
 
+  it('fills a missing provider and model from defaults (the SaaS App) and keeps the rest of the file', () => {
+    const result = parseConfig('language: ar\nreview:\n  maxFindings: 5\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(result.ok && [result.config.provider, result.config.model]).toEqual(['openai', 'gpt-x']);
+    expect(result.ok && result.defaulted).toEqual(['provider', 'model']);
+    expect(result.ok && result.config.review.maxFindings).toBe(5);
+    expect(parseConfig('', { defaults: { provider: 'gemini', model: 'g' } }).ok).toBe(true);
+  });
+
+  it('fills each key on its own: a named provider without model, a model without provider', () => {
+    const noModel = parseConfig('provider: anthropic\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(noModel.ok && [noModel.config.provider, noModel.config.model, noModel.defaulted]).toEqual(['anthropic', 'gpt-x', ['model']]);
+    const noProvider = parseConfig('model: gpt-4o\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(noProvider.ok && [noProvider.config.provider, noProvider.config.model, noProvider.defaulted]).toEqual(['openai', 'gpt-4o', ['provider']]);
+    const both = parseConfig('provider: gemini\nmodel: g\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(both.ok && 'defaulted' in both).toBe(false);
+  });
+
+  it('never lets defaults replace a provider the file names, nor hide other errors', () => {
+    const named = parseConfig('provider: claude-code\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(named.ok && named.config.provider).toBe('claude-code');
+    const bad = parseConfig('review:\n  maxFindings: 21\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.errors[0]).toMatch(/^review\.maxFindings: /);
+  });
+
   it('returns a syntax error with a line number instead of throwing', () => {
     const errors = expectErrors('provider: openai\nmodel: [unclosed\n');
     expect(errors).toHaveLength(1);
