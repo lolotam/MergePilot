@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createJudge } from '../judge/judge.js';
+import type { JudgeUse } from '../judge/uses.js';
 import { judgeSecret, noSleep, noulReply } from '../judge/judge.fixtures.js';
 import { mockFetch, textResponse } from '../providers/fetch-mock.fixtures.js';
 import { makeConfig, makeModel, SIMPLE_PATCH, validFindingJson } from './pipeline.fixtures.js';
@@ -10,7 +11,7 @@ const answer = JSON.stringify({
   findings: [validFindingJson({ id: 'a', title: 'Real bug', line: 2 }), validFindingJson({ id: 'b', title: 'Nitpick', line: 3, severity: 'medium' })],
 });
 
-function review(fetch: Parameters<typeof createJudge>[0]['fetch'], mode: 'filter' | 'annotate' | 'off') {
+function review(fetch: Parameters<typeof createJudge>[0]['fetch'], uses: JudgeUse[]) {
   const judge = createJudge({ entries: [{ provider: 'typesafe', model: 'jev-latest', apiKey: judgeSecret() }], fetch, sleep: noSleep });
   return runReview({
     config: makeConfig({ review: { ...makeConfig().review, verify: false } }),
@@ -19,20 +20,20 @@ function review(fetch: Parameters<typeof createJudge>[0]['fetch'], mode: 'filter
     rulesFiles: [],
     model: makeModel(answer),
     knownSecrets: [],
-    judge: { judge, mode, threshold: 0.35 },
+    judge: { judge, uses, threshold: 0.35 },
   });
 }
 
 describe('runReview — Jev judge', () => {
   it('filters low-confidence findings after review and reports them', async () => {
     const { fetch, calls } = mockFetch(noulReply({ f1: 0.9, f2: 0.1 }));
-    const result = await review(fetch, 'filter');
+    const result = await review(fetch, ['filter', 'dedupe']);
     expect(calls).toHaveLength(1);
     expect(result.status).toBe('completed');
     if (result.status !== 'completed') return;
     expect([...result.inline, ...result.summaryOnly].map((f) => f.title)).toEqual(['Real bug']);
     expect(result.judge).toEqual({
-      mode: 'filter',
+      uses: ['filter', 'dedupe'],
       threshold: 0.35,
       checked: 2,
       filtered: [{ title: 'Nitpick', path: 'src/index.ts', line: 3, noul: 0.1 }],
@@ -42,16 +43,31 @@ describe('runReview — Jev judge', () => {
 
   it('proceeds unfiltered and discloses the code when the judge fails', async () => {
     const { fetch } = mockFetch(textResponse('down', 503));
-    const result = await review(fetch, 'filter');
+    const result = await review(fetch, ['filter']);
     if (result.status !== 'completed') throw new Error('expected completed');
     expect([...result.inline, ...result.summaryOnly]).toHaveLength(2);
     expect(result.judge?.unavailable).toBe('server');
   });
 
-  it('skips the judge in off mode', async () => {
-    const { fetch, calls } = mockFetch(noulReply({}));
-    const result = await review(fetch, 'off');
-    expect(calls).toHaveLength(0);
-    if (result.status === 'completed') expect(result.judge).toBeUndefined();
+  it('annotates and filters with ONE request when both uses are on', async () => {
+    const { fetch, calls } = mockFetch(noulReply({ f1: 0.9, f2: 0.1 }));
+    const result = await review(fetch, ['annotate', 'filter']);
+    expect(calls).toHaveLength(1);
+    if (result.status !== 'completed') throw new Error('expected completed');
+    const posted = [...result.inline, ...result.summaryOnly];
+    expect(posted.map((f) => f.title)).toEqual(['Real bug']);
+    expect(posted[0]?.body).toContain('Jev confidence: 0.90');
+    expect(result.judge?.uses).toEqual(['annotate', 'filter']);
+  });
+
+  it('sends no false-positive request for dedupe/consensus only, or for an enabled judge with no uses', async () => {
+    for (const uses of [['dedupe', 'consensus'], []] as JudgeUse[][]) {
+      const { fetch, calls } = mockFetch(noulReply({}));
+      const result = await review(fetch, uses);
+      expect(calls).toHaveLength(0);
+      if (result.status !== 'completed') throw new Error('expected completed');
+      expect(result.judge).toBeUndefined();
+      expect([...result.inline, ...result.summaryOnly]).toHaveLength(2);
+    }
   });
 });

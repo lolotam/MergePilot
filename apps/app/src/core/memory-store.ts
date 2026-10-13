@@ -99,7 +99,7 @@ export class MemoryStore implements AppStore {
       minSeverity: s.minSeverity ?? 'medium',
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
-      judge: s.judge ? { ...s.judge, fallback: [...s.judge.fallback] } : null,
+      judge: s.judge ? { ...s.judge, uses: [...s.judge.uses], fallback: [...s.judge.fallback] } : null,
       priceOverrides: (s.priceOverrides ?? []).map((o) => ({ ...o })),
       ...panelSettingsOrDefaults(s),
     };

@@ -185,7 +185,7 @@ export function describeStoreContract(
           enabled: true,
           provider: 'typesafe' as const,
           model: 'jev-latest',
-          mode: 'filter' as const,
+          uses: ['annotate' as const, 'filter' as const, 'dedupe' as const],
           threshold: 0.4,
           fallback: [{ provider: 'opencode-zen' as const, model: 'jev-1.13-free' }],
         };
@@ -193,6 +193,9 @@ export function describeStoreContract(
         expect((await store.getSettings('ws-settings-test'))?.judge).toEqual(judge);
         await store.saveSettings(updated);
         expect((await store.getSettings('ws-settings-test'))?.judge).toEqual(judge);
+        // An enabled judge with no uses (idle) round-trips as an empty set.
+        await store.saveSettings({ ...updated, judge: { ...judge, uses: [] } });
+        expect((await store.getSettings('ws-settings-test'))?.judge?.uses).toEqual([]);
         await store.saveSettings({ ...updated, judge: null });
         expect((await store.getSettings('ws-settings-test'))?.judge).toBeNull();
       } finally {

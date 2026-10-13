@@ -20,7 +20,7 @@ const catalog: client.JudgeProvidersResponse = {
   ],
 };
 
-const stored: JudgeSettings = { enabled: true, provider: 'typesafe', model: 'jev-latest', mode: 'filter', threshold: 0.35, fallback: [] };
+const stored: JudgeSettings = { enabled: true, provider: 'typesafe', model: 'jev-latest', uses: ['filter', 'dedupe'], threshold: 0.35, fallback: [] };
 
 function renderCard(options: { isMember?: boolean; keyed?: KeyProvider[]; judge?: JudgeSettings | null } = {}) {
   vi.spyOn(client.api, 'getJudgeProviders').mockResolvedValue(catalog);
@@ -99,6 +99,59 @@ describe('JudgeCard (Jev)', () => {
     });
   });
 
+  it('saves any combination of uses as one multi-select payload', async () => {
+    renderCard();
+    const annotate = (await screen.findByRole('checkbox', { name: /^Annotate/ })) as HTMLInputElement;
+    expect(annotate.checked).toBe(false);
+    expect((screen.getByRole('checkbox', { name: /^Filter/ }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(annotate);
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Consensus/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Duplicate check/ }));
+    expect(screen.getByText('Used by the review panel (coming soon) to tell whether two bots found the same issue.')).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save judge settings' }));
+    await waitFor(() => expect(putBodies()).toHaveLength(1));
+    expect(putBodies()[0]?.judge).toEqual({ ...stored, uses: ['annotate', 'filter', 'consensus'] });
+    expect(putBodies()[0]?.judge).not.toHaveProperty('mode');
+  });
+
+  it('enables the threshold only while Filter is ticked', async () => {
+    renderCard();
+    const threshold = (await screen.findByLabelText('Threshold')) as HTMLInputElement;
+    expect(threshold.disabled).toBe(false);
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Filter/ }));
+    expect(threshold.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Filter/ }));
+    expect(threshold.disabled).toBe(false);
+  });
+
+  it('pre-selects Annotate + Duplicate check when Enable is switched on with no uses', async () => {
+    renderCard({ judge: { ...stored, enabled: false, uses: [] } });
+    fireEvent.click(await screen.findByLabelText('Enable the Jev judge'));
+    expect((screen.getByRole('checkbox', { name: /^Annotate/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: /^Duplicate check/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: /^Filter/ }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText('Threshold') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByText(/has nothing to do/)).toBeNull();
+  });
+
+  it('warns when the judge is enabled with no uses (idle), and the owner may still untick them all', async () => {
+    renderCard({ judge: { ...stored, uses: ['dedupe'] } });
+    fireEvent.click(await screen.findByRole('checkbox', { name: /^Duplicate check/ }));
+    expect(screen.getByText('Jev is enabled but has nothing to do: pick at least one use.').getAttribute('role')).toBe('status');
+    fireEvent.click(screen.getByRole('button', { name: 'Save judge settings' }));
+    await waitFor(() => expect(putBodies()).toHaveLength(1));
+    expect(putBodies()[0]?.judge).toMatchObject({ enabled: true, uses: [] });
+  });
+
+  it('marks a fallback whose provider has no stored key', async () => {
+    renderCard({ judge: { ...stored, fallback: [{ provider: 'opencode-zen', model: 'jev-1.13-free' }, { provider: 'openrouter', model: 'typesafe/jev-1.13' }] } });
+    const first = (await screen.findByText('Fallback 1')).closest('li') as HTMLElement;
+    const second = screen.getByText('Fallback 2').closest('li') as HTMLElement;
+    expect(within(first).getByText('no key')).toBeDefined();
+    expect(within(second).queryByText('no key')).toBeNull();
+  });
+
   it('tests the judge and shows ok · model · ms', async () => {
     const testJudge = vi.spyOn(client.api, 'testJudge').mockResolvedValue({ ok: true, ms: 42, model: 'jev-latest' });
     renderCard();
@@ -112,7 +165,11 @@ describe('JudgeCard (Jev)', () => {
     const enabled = (await screen.findByLabelText('Enable the Jev judge')) as HTMLInputElement;
     expect(enabled.checked).toBe(false);
     expect(enabled.disabled).toBe(true);
-    expect((screen.getByLabelText('Mode') as HTMLSelectElement).value).toBe('off');
+    for (const name of [/^Annotate/, /^Filter/, /^Duplicate check/, /^Consensus/]) {
+      const box = screen.getByRole('checkbox', { name }) as HTMLInputElement;
+      expect(box.checked).toBe(false);
+      expect(box.disabled).toBe(true);
+    }
     expect((screen.getByRole('button', { name: 'Add fallback' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole('button', { name: /^Test/ })).toBeNull();
   });
