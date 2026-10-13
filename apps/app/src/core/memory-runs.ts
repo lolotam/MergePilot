@@ -6,12 +6,14 @@ import {
 } from './types.js';
 import { runDurationMs, runTokens, type RunFilters } from './run-types.js';
 
-/** The key of the one-active-run-per-head rule (migration 0004). */
+/** The key of the one-active-run-per-head-and-bot rule (migrations 0004, 0009). */
 export interface ActiveRunKey {
   workspaceId: string;
   repoFullName: string;
   pullNumber: number;
   headSha: string;
+  /** Undefined matches a run of any bot; runs without a slot are the main bot's (1). */
+  botSlot?: number | undefined;
 }
 
 /** The queued/running run for this key, ignoring `excludeId` (the run being reused). */
@@ -27,6 +29,7 @@ export function findActiveRun(
       r.repoFullName === key.repoFullName &&
       r.pullNumber === key.pullNumber &&
       r.headSha === key.headSha &&
+      (key.botSlot === undefined || (r.botSlot ?? 1) === key.botSlot) &&
       ACTIVE_RUN_STATUSES.includes(r.status)
     ) {
       return r;

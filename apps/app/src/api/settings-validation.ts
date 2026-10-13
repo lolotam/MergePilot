@@ -1,6 +1,13 @@
 import { isJevModel, jevModelIds } from '@mergepilot/engine';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
-import type { ApiProvider, AppStore, JudgeSettings, WorkspaceSettings } from '../core/types.js';
+import {
+  sameBotName,
+  type ApiProvider,
+  type AppStore,
+  type FallbackSetting,
+  type JudgeSettings,
+  type WorkspaceSettings,
+} from '../core/types.js';
 import type { Settings, SettingsUpdate } from './contract.js';
 
 /** Applies a PUT body to the stored settings: undefined keeps, null clears (see contract). */
@@ -34,6 +41,11 @@ export function mergeSettings(
     judge: update.judge !== undefined ? update.judge : (current?.judge ?? null),
     // Undefined keeps the stored manual prices; [] clears them (ADR-0016).
     priceOverrides: update.priceOverrides ?? current?.priceOverrides ?? [],
+    // The reviewer panel (ADR-0017): undefined keeps the stored value; the stores fill the defaults.
+    botName: update.botName ?? current?.botName,
+    botLogo: update.botLogo ?? current?.botLogo,
+    panelMode: update.panelMode ?? current?.panelMode,
+    panelMinAgreement: update.panelMinAgreement ?? current?.panelMinAgreement,
   };
 }
 
@@ -53,15 +65,7 @@ export async function validateSettings(
   workspaceId: string,
   settings: Settings | WorkspaceSettings,
 ): Promise<SettingsProblem | null> {
-  const keyProblem = async (provider: ApiProvider, code: string, role: string): Promise<SettingsProblem | null> => {
-    const cred = await store.getCredential(workspaceId, provider);
-    if (!cred) return { code, message: `Stored API key required for ${role} provider: ${provider}` };
-    if (provider === 'custom' && !cred.baseUrl) {
-      return { code, message: `The custom key for the ${role} model has no base URL; save the key again with its URL` };
-    }
-    return null;
-  };
-
+  const keyProblem = keyChecker(store, workspaceId);
   const { heavyProvider, heavyModel, heavyEffort } = settings;
   if (Boolean(heavyProvider) !== Boolean(heavyModel?.trim())) {
     return { code: 'validation_error', message: 'heavyProvider and heavyModel must be set together' };
@@ -74,8 +78,40 @@ export async function validateSettings(
     if (problem) return problem;
   }
 
-  const seen = new Set<string>([`${settings.provider}\u0000${settings.model}`]);
-  for (const entry of settings.fallback ?? []) {
+  const fallbackProblem = await validateFallback(store, workspaceId, settings, settings.fallback ?? []);
+  if (fallbackProblem) return fallbackProblem;
+  const priceProblem = validatePriceOverrides(settings.priceOverrides ?? []);
+  if (priceProblem) return priceProblem;
+  return settings.judge ? validateJudge(store, workspaceId, settings.judge) : null;
+}
+
+type KeyCheck = (provider: ApiProvider, code: string, role: string) => Promise<SettingsProblem | null>;
+
+/** A stored key for `provider` (a `custom` key also needs its stored base URL). */
+function keyChecker(store: AppStore, workspaceId: string): KeyCheck {
+  return async (provider, code, role) => {
+    const cred = await store.getCredential(workspaceId, provider);
+    if (!cred) return { code, message: `Stored API key required for ${role} provider: ${provider}` };
+    if (provider === 'custom' && !cred.baseUrl) {
+      return { code, message: `The custom key for the ${role} model has no base URL; save the key again with its URL` };
+    }
+    return null;
+  };
+}
+
+/**
+ * The fallback chain of a bot (the main bot or an extra one; ADR-0017): no entry repeats the bot's
+ * own model or another entry, and every entry has a stored key.
+ */
+export async function validateFallback(
+  store: AppStore,
+  workspaceId: string,
+  primary: { provider: ApiProvider; model: string },
+  fallback: readonly FallbackSetting[],
+): Promise<SettingsProblem | null> {
+  const keyProblem = keyChecker(store, workspaceId);
+  const seen = new Set<string>([`${primary.provider}\u0000${primary.model}`]);
+  for (const entry of fallback) {
     const id = `${entry.provider}\u0000${entry.model}`;
     if (seen.has(id)) {
       return {
@@ -87,9 +123,12 @@ export async function validateSettings(
     const problem = await keyProblem(entry.provider, 'fallback_key_missing', 'fallback');
     if (problem) return problem;
   }
-  const priceProblem = validatePriceOverrides(settings.priceOverrides ?? []);
-  if (priceProblem) return priceProblem;
-  return settings.judge ? validateJudge(store, workspaceId, settings.judge) : null;
+  return null;
+}
+
+/** True when an extra bot of the workspace already uses this name (ignoring case and spaces around it). */
+export async function botNameTakenByExtraBot(store: AppStore, workspaceId: string, name: string): Promise<boolean> {
+  return (await store.listReviewerBots(workspaceId)).some((bot) => sameBotName(bot.name, name));
 }
 
 /** One manual price per model: the schema checks each entry, this checks the list. */

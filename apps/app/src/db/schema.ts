@@ -9,6 +9,7 @@ import {
   numeric,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -67,6 +68,11 @@ export const workspaceSettings = pgTable('workspace_settings', {
   judgeFallback: jsonb('judge_fallback').notNull().default(sql`'[]'::jsonb`),
   /** Migration 0008: manual model prices (ADR-0016), at most 50. */
   priceOverrides: jsonb('price_overrides').notNull().default(sql`'[]'::jsonb`),
+  /** Migration 0009: the reviewer panel's main bot and output mode (ADR-0017). */
+  botName: text('bot_name').notNull().default('MergePilot'),
+  botLogo: text('bot_logo').notNull().default('pilot'),
+  panelMode: text('panel_mode').notNull().default('separate'),
+  panelMinAgreement: smallint('panel_min_agreement').notNull().default(1),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),
@@ -124,6 +130,9 @@ export const reviewRuns = pgTable(
     findingsCount: integer('findings_count'),
     result: jsonb('result'),
     reviewUrl: text('review_url'),
+    /** Migration 0009: the reviewer-panel bot (1 = main) and its name when the run was created. */
+    botSlot: smallint('bot_slot').notNull().default(1),
+    botName: text('bot_name'),
   },
   (table) => [
     index('idx_review_runs_workspace_id').on(table.workspaceId),
@@ -131,17 +140,43 @@ export const reviewRuns = pgTable(
       table.workspaceId,
       table.createdAt.desc(),
     ),
+    // Migrations 0003 and 0009: one reusable run per job and bot slot.
     uniqueIndex('idx_review_runs_workspace_job_id_active')
-      .on(table.workspaceId, table.jobId)
+      .on(table.workspaceId, table.jobId, table.botSlot)
       .where(sql`job_id IS NOT NULL AND status IN ('queued', 'running', 'failed')`),
     index('idx_review_runs_active_updated_at')
       .on(table.updatedAt)
       .where(sql`status IN ('queued', 'running')`),
     index('idx_review_runs_workspace_repo').on(table.workspaceId, table.repoFullName),
-    // Migration 0004: one queued/running run per workspace, repo, PR and head commit.
+    // Migrations 0004 and 0009: one queued/running run per workspace, repo, PR, head commit and bot.
     uniqueIndex('idx_review_runs_active_pr_head')
-      .on(table.workspaceId, table.repoFullName, table.pullNumber, table.headSha)
+      .on(table.workspaceId, table.repoFullName, table.pullNumber, table.headSha, table.botSlot)
       .where(sql`status IN ('queued', 'running')`),
+  ],
+);
+
+/**
+ * Migration 0009: the reviewer panel's extra bots, slots 2-5 (ADR-0017). `workspace_id` references
+ * the Better Auth organization with ON DELETE CASCADE (declared in the SQL migration only).
+ */
+export const reviewerBots = pgTable(
+  'reviewer_bots',
+  {
+    workspaceId: text('workspace_id').notNull(),
+    slot: smallint('slot').notNull(),
+    name: text('name').notNull(),
+    logo: text('logo').notNull(),
+    active: boolean('active').notNull().default(true),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    effort: text('effort'),
+    fallback: jsonb('fallback').notNull().default(sql`'[]'::jsonb`),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workspaceId, table.slot] }),
+    uniqueIndex('idx_reviewer_bots_workspace_name').on(table.workspaceId, sql`lower(${table.name})`),
   ],
 );
 

@@ -38,6 +38,8 @@ export function mapReviewRunRow(row: typeof reviewRuns.$inferSelect): ReviewRun 
     findingsCount: row.findingsCount !== null ? Number(row.findingsCount) : null,
     result: (row.result as ReviewRunResultPayload | null) ?? null,
     reviewUrl: row.reviewUrl ?? null,
+    botSlot: Number(row.botSlot ?? 1),
+    botName: row.botName ?? null,
   };
 }
 
@@ -115,10 +117,12 @@ function startingValues(run: NewReviewRun, now: Date) {
     findingsCount: run.findingsCount ?? null,
     result: run.result ?? null,
     reviewUrl: run.reviewUrl ?? null,
+    botSlot: run.botSlot ?? 1,
+    botName: run.botName ?? null,
   };
 }
 
-/** Name of migration 0004's partial unique index (one queued/running run per head). */
+/** Name of the partial unique index of migrations 0004/0009 (one queued/running run per head and bot). */
 export const ACTIVE_RUN_INDEX = 'idx_review_runs_active_pr_head';
 
 /** True when `error` (or a driver error it wraps) is a unique violation of ACTIVE_RUN_INDEX. */
@@ -141,7 +145,7 @@ export async function createPgReviewRun(db: AppDb, run: NewReviewRun): Promise<R
   try {
     return await insertOrReusePgReviewRun(db, run);
   } catch (error) {
-    if (isActiveRunConflict(error)) throw new ActiveRunExistsError(run.repoFullName, run.pullNumber);
+    if (isActiveRunConflict(error)) throw new ActiveRunExistsError(run.repoFullName, run.pullNumber, run.botSlot ?? 1);
     throw error;
   }
 }
@@ -150,7 +154,8 @@ async function insertOrReusePgReviewRun(db: AppDb, run: NewReviewRun): Promise<R
   return withLiveWorkspace(db, run.workspaceId, async (tx) => {
     const now = new Date();
     if (run.jobId) {
-      // Only a queued/running/failed run of this job is reused; completed and skipped runs stay.
+      // Only a queued/running/failed run of this job and bot is reused; completed and skipped
+      // runs stay, and one job's other bots keep their own rows (ADR-0017).
       const reused = await tx
         .update(reviewRuns)
         .set(startingValues(run, now))
@@ -158,6 +163,7 @@ async function insertOrReusePgReviewRun(db: AppDb, run: NewReviewRun): Promise<R
           and(
             eq(reviewRuns.workspaceId, run.workspaceId),
             eq(reviewRuns.jobId, run.jobId),
+            eq(reviewRuns.botSlot, run.botSlot ?? 1),
             inArray(reviewRuns.status, [...REUSABLE_RUN_STATUSES]),
           ),
         )
@@ -189,6 +195,7 @@ export async function findPgActiveReviewRun(
   repoFullName: string,
   pullNumber: number,
   headSha: string,
+  botSlot?: number,
 ): Promise<ReviewRun | null> {
   const rows = await db
     .select()
@@ -200,6 +207,7 @@ export async function findPgActiveReviewRun(
         eq(reviewRuns.pullNumber, pullNumber),
         eq(reviewRuns.headSha, headSha),
         inArray(reviewRuns.status, ['queued', 'running']),
+        botSlot === undefined ? undefined : eq(reviewRuns.botSlot, botSlot),
       ),
     )
     .limit(1);
@@ -243,6 +251,8 @@ export async function listPgLatestFailedRuns(
       findingsCount: reviewRuns.findingsCount,
       result: reviewRuns.result,
       reviewUrl: reviewRuns.reviewUrl,
+      botSlot: reviewRuns.botSlot,
+      botName: reviewRuns.botName,
       rn: sql<number>`row_number() over (partition by ${reviewRuns.repoFullName}, ${reviewRuns.pullNumber} order by ${reviewRuns.createdAt} desc, ${reviewRuns.id} desc)`.as('rn'),
     })
     .from(reviewRuns)
