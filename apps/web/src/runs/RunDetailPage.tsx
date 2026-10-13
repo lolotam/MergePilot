@@ -19,6 +19,7 @@ import type { I18nKey } from '../i18n/ar.js';
 import { RunProviderBadge, RunModelBadge } from './RunBadges.js';
 import { RunFindingsList } from './RunFindingsList.js';
 import { RunDuration } from './RunDuration.js';
+import { RunBotChip } from './RunBotChip.js';
 import type { ReviewRun } from '../api/client.js';
 
 export default function RunDetailPage() {
@@ -146,6 +147,7 @@ export default function RunDetailPage() {
               effort={run.effort}
               fallbackFrom={run.fallbackFrom}
             />
+            <RunBotChip run={run} />
           </div>
         </div>
 
