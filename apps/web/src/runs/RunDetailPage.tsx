@@ -19,6 +19,7 @@ import type { I18nKey } from '../i18n/ar.js';
 import { RunProviderBadge, RunModelBadge } from './RunBadges.js';
 import { RunFindingsList } from './RunFindingsList.js';
 import { RunDuration } from './RunDuration.js';
+import { RunCost } from './RunPriceSource.js';
 import { RunBotChip } from './RunBotChip.js';
 import type { ReviewRun } from '../api/client.js';
 
@@ -157,9 +158,7 @@ export default function RunDetailPage() {
             <Coins className="w-3 h-3 text-ink-400" />
             <span>{t('runCostCol')}</span>
           </span>
-          <div className="font-mono text-sm font-bold text-ink-900 dark:text-ink-100">
-            {run.costUsd !== null ? `$${run.costUsd.toFixed(4)}` : '—'}
-          </div>
+          <RunCost costUsd={run.costUsd} pricing={result?.pricing} />
           {result?.usage && (
             <span className="text-[10px] text-ink-400 font-mono" dir="ltr">
               {result.usage.inputTokens.toLocaleString()} in / {result.usage.outputTokens.toLocaleString()} out

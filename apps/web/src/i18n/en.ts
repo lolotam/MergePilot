@@ -3,6 +3,7 @@ import { enSettings } from './settings-en.js';
 import { enAdmin } from './admin-en.js';
 import { enRuns } from './runs-en.js';
 import { enJudge } from './judge-en.js';
+import { enPrices } from './prices-en.js';
 import { enBots } from './bots-en.js';
 
 export const en: I18nDictionary = {
@@ -10,6 +11,7 @@ export const en: I18nDictionary = {
   ...enAdmin,
   ...enRuns,
   ...enJudge,
+  ...enPrices,
   ...enBots,
   // App
   appName: 'MergePilot',

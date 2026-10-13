@@ -20,6 +20,7 @@ import { ReviewerPanel } from '../settings/bots/ReviewerPanel.js';
 import { RepoColorsCard } from '../settings/RepoColorsCard.js';
 import { RetentionCard } from '../settings/RetentionCard.js';
 import { JudgeCard } from '../settings/JudgeCard.js';
+import { PricesCard } from '../settings/PricesCard.js';
 import { JudgeTestButton } from '../settings/JudgeTestButton.js';
 import { TestKeyButton } from '../settings/TestKeyButton.js';
 import { isJudgeKeyOnly, useProviderLabel } from '../settings/providers.js';
@@ -98,6 +99,7 @@ export function SettingsPage() {
       />
 
       <JudgeCard workspaceId={workspaceId} isMember={isMember} keyedProviders={savedKeys} />
+      <PricesCard workspaceId={workspaceId} isMember={isMember} />
 
       <RetentionCard workspaceId={workspaceId} isMember={isMember} />
       <RepoColorsCard workspaceId={workspaceId} isMember={isMember} />
