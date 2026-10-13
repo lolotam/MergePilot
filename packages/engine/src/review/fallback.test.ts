@@ -1,3 +1,4 @@
+import { Secret } from '../credentials/secret.js';
 import { describe, expect, it } from 'vitest';
 import { LlmFailure } from '../llm/failure.js';
 import { FallbackChain, FALLBACK_TRIGGERS, failureKindOf } from './fallback.js';
@@ -151,6 +152,20 @@ describe('FallbackChain', () => {
         fallbackCode: 'quota',
         fallbackDetail: 'quota',
       });
+    });
+
+    it('redacts the disclosed detail with the secrets it is given, whatever its length', async () => {
+      const secret = 'placeholder-credential-for-test-only';
+      const primary = failingModel(
+        'primary:m1',
+        new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: 'primary', message: `${'x'.repeat(9000)} bad key ${secret}` }),
+      );
+      const chain = new FallbackChain(primary, [mockModel('fb:m2', 'ok')]);
+      await chain.generate(req);
+
+      const detail = chain.disclosure([new Secret(secret)]).fallbackDetail ?? '';
+      expect(detail).not.toContain(secret);
+      expect(detail.startsWith('x'.repeat(9000))).toBe(true);
     });
 
     it('keeps the first failure detail on one line, whole, for the caller to redact and cut', async () => {

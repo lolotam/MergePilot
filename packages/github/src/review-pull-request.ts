@@ -211,13 +211,9 @@ export async function reviewPullRequest(
   log?.(`Review completed with status: ${reviewResult.status}`);
 
   // ADR-0008: when an explicit fallback model answered, the summary names it and says why.
-  const fallbackSummary =
-    reviewResult.status !== 'skipped-budget' && reviewResult.fallbackFrom && reviewResult.fallbackCode
-      ? {
-          modelLabel: reviewResult.modelUsed ?? model.label,
-          fallback: fallbackReasonOf(reviewResult, knownSecrets)!,
-        }
-      : {};
+  const disclosure = reviewResult.status === 'skipped-budget' ? undefined : reviewResult;
+  const fallback = disclosure ? fallbackReasonOf(disclosure, knownSecrets) : undefined;
+  const fallbackSummary = fallback ? { modelLabel: disclosure?.modelUsed ?? model.label, fallback } : {};
 
   const scope = reviewScopeOf(selection);
 

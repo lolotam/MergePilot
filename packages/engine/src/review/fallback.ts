@@ -6,7 +6,9 @@
  * `fallbackCode`) so the review summary can disclose it. With no fallbacks configured the
  * chain is the primary model alone: the old "no fallback" behaviour.
  */
+import type { Secret } from '../credentials/secret.js';
 import { failureKind, type FailureKind, type LlmFailureCode } from '../llm/failure.js';
+import { redactSecrets } from '../security/redact.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse, SkippedFallback } from './model.js';
 
 export const FALLBACK_TRIGGERS: readonly FailureKind[] = ['quota', 'rate-limit', 'server', 'network', 'auth'];
@@ -39,9 +41,10 @@ export interface FallbackDisclosure {
   /** Why the primary model was left. */
   fallbackCode?: FailureKind;
   /**
-   * The primary model's error message on one line, so the summary and logs say what the provider
-   * answered, not only the category. Raw provider text: callers redact it, then cut it for display
-   * (`fallbackReasonOf` in @mergepilot/github), so a secret is never split before redaction.
+   * The primary model's whole error message on one line, so the summary and logs say what the
+   * provider answered, not only the category. `runReview` redacts it with every secret of the
+   * model chain; it is never cut here, so a secret is never split before redaction. Display
+   * callers cut it afterwards (`fallbackReasonOf` in @mergepilot/github).
    */
   fallbackDetail?: string;
   /** Configured fallbacks that could not take part (e.g. no key), with the reason. */
@@ -90,22 +93,19 @@ export class FallbackChain implements ReviewModel {
     }
   }
 
-  disclosure(): FallbackDisclosure {
+  /** What to disclose about the chain; the primary's error message is redacted with `secrets`. */
+  disclosure(secrets: Secret[] = []): FallbackDisclosure {
     const skipped = this.#models[0]?.skippedFallbacks ?? [];
     return {
       modelUsed: this.label,
       ...(this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {}),
-      ...(this.#from?.detail ? { fallbackDetail: this.#from.detail } : {}),
+      ...(this.#from?.detail ? { fallbackDetail: redactSecrets(this.#from.detail, secrets).text } : {}),
       ...(skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}),
     };
   }
 }
 
-// Only a bound on memory for a huge error page; display length is cut after redaction.
-const MAX_DETAIL_KEPT = 8000;
-
 function detailOf(error: unknown): string | undefined {
   const message = error instanceof Error ? error.message.replace(/\s+/g, ' ').trim() : '';
-  if (!message) return undefined;
-  return message.length > MAX_DETAIL_KEPT ? message.slice(0, MAX_DETAIL_KEPT) : message;
+  return message || undefined;
 }

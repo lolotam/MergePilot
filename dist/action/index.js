@@ -71680,22 +71680,20 @@ var FallbackChain = class {
       }
     }
   }
-  disclosure() {
+  /** What to disclose about the chain; the primary's error message is redacted with `secrets`. */
+  disclosure(secrets = []) {
     const skipped = this.#models[0]?.skippedFallbacks ?? [];
     return {
       modelUsed: this.label,
       ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {},
-      ...this.#from?.detail ? { fallbackDetail: this.#from.detail } : {},
+      ...this.#from?.detail ? { fallbackDetail: redactSecrets(this.#from.detail, secrets).text } : {},
       ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}
     };
   }
 };
-var MAX_DETAIL_KEPT = 8e3;
 function detailOf(error62) {
   const message = error62 instanceof Error ? error62.message.replace(/\s+/g, " ").trim() : "";
-  if (!message)
-    return void 0;
-  return message.length > MAX_DETAIL_KEPT ? message.slice(0, MAX_DETAIL_KEPT) : message;
+  return message || void 0;
 }
 
 function costUsd(usage, pricing) {
@@ -72992,7 +72990,7 @@ async function runReview(input2) {
       status: "failed",
       reason: pass.reason,
       ...pass.detail ? { detail: pass.detail } : {},
-      ...model.disclosure()
+      ...model.disclosure(knownSecrets)
     };
   }
   let totalUsage = pass.totalUsage;
@@ -73052,7 +73050,7 @@ async function runReview(input2) {
     complete,
     incompleteReasons
   };
-  const disclosure = model.disclosure();
+  const disclosure = model.disclosure(knownSecrets);
   let reviewCostUsd;
   if (budgetCfg.pricing && !disclosure.fallbackFrom) {
     reviewCostUsd = spend.spentUsd;
@@ -126154,10 +126152,9 @@ async function reviewPullRequest(ctx) {
     judge
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
-  const fallbackSummary = reviewResult.status !== "skipped-budget" && reviewResult.fallbackFrom && reviewResult.fallbackCode ? {
-    modelLabel: reviewResult.modelUsed ?? model.label,
-    fallback: fallbackReasonOf(reviewResult, knownSecrets)
-  } : {};
+  const disclosure = reviewResult.status === "skipped-budget" ? void 0 : reviewResult;
+  const fallback = disclosure ? fallbackReasonOf(disclosure, knownSecrets) : void 0;
+  const fallbackSummary = fallback ? { modelLabel: disclosure?.modelUsed ?? model.label, fallback } : {};
   const scope = reviewScopeOf(selection);
   const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";
   let summaryMarkdown;

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { Secret } from '@mergepilot/engine';
 import { fallbackReasonOf, MAX_FALLBACK_DETAIL } from './fallback-reason.js';
 
-const KEY = 'sk-zen-live-0123456789abcdefABCDEF';
+// Any string can be a known secret; this one matches no secret pattern on purpose.
+const KEY = 'placeholder-credential-for-test-only';
 
 describe('fallbackReasonOf', () => {
   it('is undefined when no fallback took over', () => {
