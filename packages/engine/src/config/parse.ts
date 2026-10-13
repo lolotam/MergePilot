@@ -4,6 +4,15 @@ import { MergePilotConfigSchema, type MergePilotConfig } from './schema.js';
 
 export type ConfigResult = { ok: true; config: MergePilotConfig } | { ok: false; errors: string[] };
 
+export interface ParseConfigOptions {
+  /**
+   * The provider and model used when the file leaves them out. The SaaS App passes the dashboard's
+   * choice (it picks the provider and model itself), so its repos need not name them; the GitHub
+   * Action passes nothing and `provider` stays required.
+   */
+  defaults?: { provider: string; model?: string | undefined } | undefined;
+}
+
 function valueAt(data: unknown, path: readonly PropertyKey[]): unknown {
   let current = data;
   for (const key of path) {
@@ -26,7 +35,7 @@ function formatIssue(issue: z.core.$ZodIssue, data: unknown): string {
  * come back as readable messages prefixed with the key path, so a shell can print them
  * as-is. Callers pass the text; the engine never reads files itself.
  */
-export function parseConfig(yamlText: string): ConfigResult {
+export function parseConfig(yamlText: string, options: ParseConfigOptions = {}): ConfigResult {
   const doc = parseDocument(yamlText, { prettyErrors: false });
   const syntaxError = doc.errors[0];
   if (syntaxError) {
@@ -39,7 +48,12 @@ export function parseConfig(yamlText: string): ConfigResult {
     return { ok: false, errors: ['config: must be a mapping of keys to values'] };
   }
 
-  const parsed = MergePilotConfigSchema.safeParse(data);
+  const defaults = options.defaults;
+  const withDefaults =
+    defaults && !('provider' in data)
+      ? { provider: defaults.provider, ...(defaults.model !== undefined && !('model' in data) ? { model: defaults.model } : {}), ...data }
+      : data;
+  const parsed = MergePilotConfigSchema.safeParse(withDefaults);
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((issue) => formatIssue(issue, data)) };
   }

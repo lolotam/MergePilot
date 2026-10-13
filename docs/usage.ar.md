@@ -235,8 +235,8 @@ jobs:
 
 | الحقل | النوع | الافتراضي | الوصف |
 |---|---|---|---|
-| `provider` | `enum` | *(إجباري)* | المزود: `anthropic` أو `openai` أو `gemini` أو `claude-code`. |
-| `model` | `string` | *(إجباري عدا claude-code)* | اسم النموذج (مثل `claude-3-7-sonnet-20250219` أو `gpt-4o` أو `gemini-2.5-flash`). اختياري فقط مع `claude-code`. |
+| `provider` | `enum` | *(إجباري في الـ Action)* | المزود: `anthropic` أو `openai` أو `gemini` أو `claude-code`. في الـ GitHub App اختياري: المزود والنموذج بييجوا من الداشبورد لكل بوت، وأي قيمة هنا بتتجاهل. |
+| `model` | `string` | *(إجباري عدا claude-code، واختياري في الـ App)* | اسم النموذج (مثل `claude-3-7-sonnet-20250219` أو `gpt-4o` أو `gemini-2.5-flash`). اختياري فقط مع `claude-code`. |
 | `language` | `ar \| en` | `ar` | لغة التعليقات والملخص (`ar` للعربية أو `en` للإنجليزية). |
 | `review.maxFindings` | `number` | `5` | الحد الأقصى للملاحظات المنشورة على السطور (بين 1 و 20). |
 | `review.maxPromptTokens` | `number` | `60000` | لو حجم الـ PR كله أكبر من كده، المراجعة تتقسم على دفعات من الأول بدل نداء واحد كبير. |

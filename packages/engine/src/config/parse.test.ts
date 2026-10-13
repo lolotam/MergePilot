@@ -78,6 +78,21 @@ describe('parseConfig', () => {
     expect(expectErrors('   \n# only a comment\n')).toEqual(['provider: required']);
   });
 
+  it('fills a missing provider and model from defaults (the SaaS App) and keeps the rest of the file', () => {
+    const result = parseConfig('language: ar\nreview:\n  maxFindings: 5\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(result.ok && [result.config.provider, result.config.model]).toEqual(['openai', 'gpt-x']);
+    expect(result.ok && result.config.review.maxFindings).toBe(5);
+    expect(parseConfig('', { defaults: { provider: 'gemini', model: 'g' } }).ok).toBe(true);
+  });
+
+  it('never lets defaults replace a provider the file names, nor hide other errors', () => {
+    const named = parseConfig('provider: claude-code\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(named.ok && named.config.provider).toBe('claude-code');
+    const bad = parseConfig('review:\n  maxFindings: 21\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.errors[0]).toMatch(/^review\.maxFindings: /);
+  });
+
   it('returns a syntax error with a line number instead of throwing', () => {
     const errors = expectErrors('provider: openai\nmodel: [unclosed\n');
     expect(errors).toHaveLength(1);

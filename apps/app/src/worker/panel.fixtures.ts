@@ -32,6 +32,8 @@ export interface PanelSetupOptions {
   reviews?: GitHubReview[];
   comments?: GitHubReviewComment[];
   monthlyCost?: number;
+  /** Repository files at the base commit, by path (e.g. `.mergepilot.yml`). */
+  repoFiles?: Record<string, string>;
 }
 
 export async function panelSetup(options: PanelSetupOptions = {}) {
@@ -63,7 +65,7 @@ export async function panelSetup(options: PanelSetupOptions = {}) {
   const created: CreateReviewParams[] = [];
   const reviews: GitHubReview[] = [...(options.reviews ?? [])];
   const client: GitHubClient = {
-    getFileContent: async () => null,
+    getFileContent: async ({ path }) => options.repoFiles?.[path] ?? null,
     listPullRequestFilesPage: vi.fn(async () => [
       { filename: 'src/app.ts', status: 'modified', additions: 1, deletions: 0, changes: 1, patch: '@@ -1,1 +1,2 @@\n context\n+added line' },
     ]),

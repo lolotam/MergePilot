@@ -4,6 +4,7 @@ import {
   runReview,
   type Finding,
   type MergePilotConfig,
+  type ParseConfigOptions,
   type ReviewModel,
   type Secret,
 } from '@mergepilot/engine';
@@ -29,10 +30,11 @@ export type LoadRepoConfigResult =
 
 /**
  * Loads and parses .mergepilot.yml and its referenced rulesFiles from the base branch.
+ * `defaults` fills a file without `provider` (the SaaS App, which picks the provider and model itself).
  */
 export async function loadRepoConfig(
   client: GitHubClient,
-  params: { owner: string; repo: string; baseSha: string },
+  params: { owner: string; repo: string; baseSha: string; defaults?: ParseConfigOptions['defaults'] },
 ): Promise<LoadRepoConfigResult> {
   const configFiles = await readFilesAtRef(client, {
     owner: params.owner,
@@ -46,7 +48,7 @@ export async function loadRepoConfig(
     return { missing: true };
   }
 
-  const parseResult = parseConfig(configFile.content);
+  const parseResult = parseConfig(configFile.content, { defaults: params.defaults });
   if (!parseResult.ok) {
     return { errors: parseResult.errors };
   }
