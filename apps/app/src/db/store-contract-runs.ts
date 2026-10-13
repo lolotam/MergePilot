@@ -48,6 +48,26 @@ export function defineReviewRunLifecycleContract(
     });
   }
 
+  it('keeps one run per bot when a job runs several bots, and a retry reuses only its own bot', async () => {
+    const store = await createStore();
+    try {
+      const jobId = 'job-panel';
+      const main = await store.createReviewRun(newRun({ jobId }));
+      const second = await store.createReviewRun(newRun({ jobId, botSlot: 2, botName: 'Owl' }));
+      expect(second.id).not.toBe(main.id);
+      expect([main.botSlot, second.botSlot]).toEqual([1, 2]);
+
+      await store.finishReviewRun(WS, second.id, { status: 'failed', costUsd: null, detail: 'boom' });
+      const retry = await store.createReviewRun(newRun({ jobId, botSlot: 2, botName: 'Owl' }));
+      expect(retry.id).toBe(second.id);
+      const runs = (await store.listReviewRuns(WS, 50)).filter((r) => r.jobId === jobId);
+      expect(runs.map((r) => r.botSlot).sort()).toEqual([1, 2]);
+      expect(runs.find((r) => r.botSlot === 1)?.id).toBe(main.id);
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   for (const status of ['completed', 'skipped'] as const satisfies readonly ReviewRunStatus[]) {
     it(`never overwrites a ${status} run with the same jobId; creates a new run`, async () => {
       const store = await createStore();

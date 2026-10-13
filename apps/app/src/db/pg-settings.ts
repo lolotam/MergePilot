@@ -1,10 +1,11 @@
 import { eq } from 'drizzle-orm';
 import { isJudgeUse, legacyJudgeMode, normalizeJudgeUses } from '@mergepilot/engine';
-import type { ApiProvider, JudgeSettings, WorkspaceSettings } from '../core/types.js';
+import { BotNameTakenError, sameBotName } from '../core/types.js';
+import type { ApiProvider, BotLogo, JudgeSettings, PanelMode, PriceOverride, WorkspaceSettings } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
-import { workspaceSettings } from './schema.js';
-import { withLiveWorkspace } from './workspace-lock.js';
+import { reviewerBots, workspaceSettings } from './schema.js';
+import { lockBotNames, withLiveWorkspace } from './workspace-lock.js';
 
 export async function getPgSettings(db: AppDb, workspaceId: string): Promise<WorkspaceSettings | null> {
   const rows = await db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
@@ -35,6 +36,11 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
           fallback: Array.isArray(row.judgeFallback) ? (row.judgeFallback as JudgeSettings['fallback']) : [],
         }
       : null,
+    priceOverrides: Array.isArray(row.priceOverrides) ? (row.priceOverrides as PriceOverride[]) : [],
+    botName: row.botName,
+    botLogo: row.botLogo as BotLogo,
+    panelMode: row.panelMode as PanelMode,
+    panelMinAgreement: Number(row.panelMinAgreement),
   };
 }
 
@@ -55,8 +61,11 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
 }
 
 /**
- * Upserts the settings. `runRetentionDays`, `repoColors` and `judge` left undefined keep the stored value
- * (a new row gets the column defaults: 30 days, no colors).
+ * Upserts the settings. `runRetentionDays`, `repoColors`, `judge`, `priceOverrides` and the panel
+ * fields (`botName`, `botLogo`, `panelMode`, `panelMinAgreement`) left undefined keep the stored
+ * value (a new row gets the column defaults: 30 days, no colors, no manual prices, the
+ * "MergePilot" bot, separate reviews).
+ * Throws BotNameTakenError when `botName` matches an extra bot's name.
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
   const budgetStr = settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined
@@ -78,7 +87,28 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
   if (settings.runRetentionDays !== undefined) values.runRetentionDays = settings.runRetentionDays;
   if (settings.repoColors !== undefined) values.repoColors = settings.repoColors;
   if (settings.judge !== undefined) Object.assign(values, judgeColumns(settings.judge));
+  if (settings.priceOverrides !== undefined) values.priceOverrides = settings.priceOverrides;
+  if (settings.botName !== undefined) values.botName = settings.botName;
+  if (settings.botLogo !== undefined) values.botLogo = settings.botLogo;
+  if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
+  if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
   await withLiveWorkspace(db, settings.workspaceId, async (tx) => {
+    const botName = settings.botName;
+    if (botName !== undefined) {
+      // A renamed main bot must differ from every extra bot's name, checked under the bot-name lock.
+      // An unchanged name is not re-checked, so saving other settings is never blocked by it.
+      await lockBotNames(tx, settings.workspaceId);
+      const stored = await tx
+        .select({ name: workspaceSettings.botName })
+        .from(workspaceSettings)
+        .where(eq(workspaceSettings.workspaceId, settings.workspaceId));
+      const renamed = !stored[0] || !sameBotName(stored[0].name, botName);
+      const extras = !renamed ? [] : await tx
+        .select({ name: reviewerBots.name })
+        .from(reviewerBots)
+        .where(eq(reviewerBots.workspaceId, settings.workspaceId));
+      if (extras.some((bot) => sameBotName(bot.name, botName))) throw new BotNameTakenError(botName);
+    }
     await tx
       .insert(workspaceSettings)
       .values({

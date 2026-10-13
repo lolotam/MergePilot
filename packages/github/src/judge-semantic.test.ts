@@ -208,4 +208,20 @@ describe('judge disclosure in the summary', () => {
     });
     expect(withJudgeUsage(undefined, undefined, { attempts: [], inputTokens: 0, outputTokens: 0 })).toEqual({});
   });
+
+  it('leaves the total cost unknown when the review or a billed judge call has no known price', () => {
+    const usage = { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    // A free Jev call ($0) must not turn an unpriced review into "$0".
+    const freeJudge = { attempts: [], inputTokens: 30, outputTokens: 0, costUsd: 0 };
+    expect(withJudgeUsage(undefined, usage, freeJudge)).toEqual({ inputTokens: 130, outputTokens: 20 });
+    // A priced review plus judge tokens of unknown price is not the review's cost alone.
+    const unpricedJudge = { attempts: [], inputTokens: 30, outputTokens: 0 };
+    expect(withJudgeUsage(0.01, usage, unpricedJudge)).toEqual({ inputTokens: 130, outputTokens: 20 });
+    // No judge tokens: the review's cost stands.
+    expect(withJudgeUsage(0.01, usage, { attempts: [], inputTokens: 0, outputTokens: 0 })).toEqual({
+      costUsd: 0.01,
+      inputTokens: 100,
+      outputTokens: 20,
+    });
+  });
 });

@@ -12,6 +12,7 @@ import { PgStore } from '../db/pg-store.js';
 import * as dbSchema from '../db/schema.js';
 import * as authSchema from '../auth/schema.js';
 import { registerAdminApi } from './routes.js';
+import type { FetchLike } from '@mergepilot/engine';
 
 // Test-only helpers for the platform admin tests (excluded from the build).
 
@@ -34,6 +35,8 @@ export async function createAdminTestDb(): Promise<AdminTestDb> {
     '0005_settings_models.sql',
     '0006_run_retention.sql',
     '0007_judge.sql',
+    '0008_model_prices.sql',
+    '0009_reviewer_panel.sql',
     '0010_judge_uses.sql',
   ]) {
     await client.exec(readFileSync(join(migrationsDir, file), 'utf-8'));
@@ -239,13 +242,13 @@ export interface SeededAdminApp {
 }
 
 /** A Fastify app with auth + admin API over a fresh seeded database. Close app and handle after. */
-export async function createSeededAdminApp(): Promise<SeededAdminApp> {
+export async function createSeededAdminApp(options: { priceFetch?: FetchLike } = {}): Promise<SeededAdminApp> {
   const config = adminTestConfig(['admin@mergepilot.com']);
   const handle = await createAdminTestDb();
   const auth = createAuth({ db: handle.db, config });
   const app = fastify();
   registerAuthRoutes(app, auth);
-  registerAdminApi(app, { auth, db: handle.db, config, store: handle.store });
+  registerAdminApi(app, { auth, db: handle.db, config, store: handle.store, priceFetch: options.priceFetch });
   await seedAdminFixtures(handle.db);
   await app.ready();
   return { app, handle, adminCookie: signedSessionCookie(fixtureToken('admin'), config.authSecret) };

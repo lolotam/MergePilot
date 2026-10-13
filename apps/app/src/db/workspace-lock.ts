@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { organization } from '../auth/schema.js';
 import { WorkspaceDeletedError } from '../core/types.js';
@@ -13,6 +13,20 @@ import {
 import type * as schema from './schema.js';
 
 export type AppTx = Parameters<Parameters<AppDb['transaction']>[0]>[0];
+
+/** Namespace (first key) of the two-key advisory locks guarding bot names; other locks never use it. */
+export const BOT_NAMES_LOCK_NAMESPACE = 17001;
+
+/**
+ * Serializes every write that can change a bot name in this workspace (the main bot's name in
+ * the settings, an extra bot's row) until the transaction ends, so the "names differ" check and
+ * the write are atomic across both tables (ADR-0017). The two-key form keeps these locks apart
+ * from the single-key migration lock; a 32-bit hash collision between two workspaces only makes
+ * them wait for each other briefly, never lets one workspace's writes run unserialized.
+ */
+export async function lockBotNames(tx: AppTx, workspaceId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(${BOT_NAMES_LOCK_NAMESPACE}, hashtext(${workspaceId}))`);
+}
 
 /**
  * The driver-neutral base of AppDb and AppTx. Some builder overloads (e.g. `returning({...})`)
@@ -43,8 +57,8 @@ export async function withLiveWorkspace<T>(
 }
 
 /**
- * Deletes a workspace inside the caller's transaction. The organization row goes first (members
- * and invitations cascade), so writes holding its share lock (withLiveWorkspace) finish before this
+ * Deletes a workspace inside the caller's transaction. The organization row goes first (members,
+ * invitations and reviewer bots cascade), so writes holding its share lock (withLiveWorkspace) finish before this
  * proceeds and later ones see it gone and throw WorkspaceDeletedError. Then the workspace-scoped
  * rows (no foreign key to the organization), including the monthly usage, are removed and its
  * installations unlinked.

@@ -69,3 +69,13 @@ does not allow, such as `\d` or `C:\Dev`. One of them used to fail the whole ans
 backslash that does not start a valid JSON escape is taken literally (doubled), then the text is
 parsed again. The repair runs only after `JSON.parse` has failed. Valid escapes, including `\`,
 are consumed pair by pair and left unchanged, so text that already parses is never altered.
+
+## Amendment (2026-10-13): an answer without a findings list
+
+Seen live on lolotam/MergePilot#97: `nvidia/nemotron-3-ultra-550b-a55b:free` answered with a `summary` and no `findings` key, and the whole review failed as `invalid-json`.
+
+**Parsing now accepts that answer.** A balanced object that has a `summary` and no `findings` key is kept, with no findings, under two conditions:
+- no candidate object in the reply has a findings list, so a later full answer still wins over an earlier summary-only draft;
+- the answer is disclosed. The review is marked incomplete with the reason "the model answered without a findings list", because the summary may describe problems that were never listed. It is never published as a clean review.
+
+A `findings` value that is present but is not a list is still `invalid-json`.

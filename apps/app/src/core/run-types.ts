@@ -87,7 +87,7 @@ export interface MonthlyUsage {
   outputTokens: number;
 }
 
-export type MaintenanceKind = 'retention';
+export type MaintenanceKind = 'retention' | 'refresh-prices';
 
 export interface MaintenanceRun {
   id: string;

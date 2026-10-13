@@ -59,8 +59,9 @@ export function judgeSummaryInput(
 }
 
 /**
- * The review's cost and tokens with every billed judge attempt added. A judge cost counts only
- * when known (Vercel reports it, a priced Jev model has it); unknown stays unknown.
+ * The review's cost and tokens with every billed judge attempt added. The total is known only
+ * when every part is: an unpriced review model, or billed judge tokens without a known judge cost,
+ * leave the cost unknown (never just the judge's share, e.g. $0 from a free Jev model).
  */
 export function withJudgeUsage(
   costUsd: number | undefined,
@@ -70,7 +71,8 @@ export function withJudgeUsage(
   const judgeIn = report?.inputTokens ?? 0;
   const judgeOut = report?.outputTokens ?? 0;
   const hasTokens = usage !== undefined || judgeIn + judgeOut > 0;
-  const cost = costUsd === undefined && report?.costUsd === undefined ? undefined : (costUsd ?? 0) + (report?.costUsd ?? 0);
+  const judgeCostUnknown = judgeIn + judgeOut > 0 && report?.costUsd === undefined;
+  const cost = costUsd === undefined || judgeCostUnknown ? undefined : costUsd + (report?.costUsd ?? 0);
   return {
     ...(cost !== undefined ? { costUsd: cost } : {}),
     ...(hasTokens

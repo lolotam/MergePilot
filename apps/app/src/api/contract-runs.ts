@@ -68,9 +68,13 @@ export type MaintenanceRunDto = z.infer<typeof MaintenanceRunSchema>;
 /** GET (platform admin) /api/admin/maintenance */
 export const AdminMaintenanceResponseSchema = z.object({
   retention: z.object({ lastRun: MaintenanceRunSchema.nullable() }),
+  /** The model price refresh (ADR-0016); `deletedCount` is the number of prices stored. */
+  prices: z.object({ lastRun: MaintenanceRunSchema.nullable() }).optional(),
 });
 export type AdminMaintenanceResponse = z.infer<typeof AdminMaintenanceResponseSchema>;
 
 /** POST (platform admin) /api/admin/maintenance/run-retention -> 202 { runId }; 409 when one is running. */
 export const RunRetentionResponseSchema = z.object({ runId: z.string() });
 export type RunRetentionResponse = z.infer<typeof RunRetentionResponseSchema>;
+/** POST (platform admin) /api/admin/maintenance/refresh-prices -> 202 { runId }; 409 when one is running. */
+export const RefreshPricesResponseSchema = RunRetentionResponseSchema;
