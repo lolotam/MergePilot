@@ -107,7 +107,7 @@ describe('JudgeCard (Jev)', () => {
     fireEvent.click(annotate);
     fireEvent.click(screen.getByRole('checkbox', { name: /^Consensus/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /^Duplicate check/ }));
-    expect(screen.getByText('Used by the review panel (coming soon) to tell whether two bots found the same issue.')).toBeDefined();
+    expect(screen.getByText('In consensus mode, the review panel uses it to tell whether two bots found the same issue, so it is posted once.')).toBeDefined();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save judge settings' }));
     await waitFor(() => expect(putBodies()).toHaveLength(1));
