@@ -25,11 +25,13 @@ const REDACT_PATHS: readonly string[] = [
   '*.token',
   '*.secret',
   '*.password',
+  '*.passphrase',
   '*.privateKey',
   'apiKey',
   'token',
   'secret',
   'password',
+  'passphrase',
   'privateKey',
 ];
 

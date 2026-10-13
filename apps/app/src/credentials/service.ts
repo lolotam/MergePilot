@@ -37,6 +37,19 @@ export class CredentialService {
   }
 
   async saveKey(params: SaveKeyParams): Promise<KeyMetadata> {
+    const credential = await this.sealKey(params, { validate: true });
+    await this.#store.saveCredential(credential);
+
+    const { ciphertext: _c, ...metadata } = credential;
+    return metadata;
+  }
+
+  /**
+   * Checks and vault-encrypts a key exactly like `saveKey`, without storing it. A settings restore
+   * (ADR-0018) stores the result in its own transaction and passes `validate: false`: restored keys
+   * are not re-tested against the provider.
+   */
+  async sealKey(params: SaveKeyParams, options: { validate: boolean }): Promise<StoredCredential> {
     const trimmed = params.apiKey.trim();
     if (trimmed.length === 0) {
       throw new Error('API key cannot be empty');
@@ -59,7 +72,7 @@ export class CredentialService {
       throw new Error('Only the custom provider takes a base URL');
     }
 
-    if (this.#validate) {
+    if (options.validate && this.#validate) {
       const valid = sanitizedBaseUrl
         ? await this.#validate(params.provider, trimmed, sanitizedBaseUrl)
         : await this.#validate(params.provider, trimmed);
@@ -73,7 +86,7 @@ export class CredentialService {
       provider: params.provider,
     });
 
-    const credential: StoredCredential = {
+    return {
       id: randomUUID(),
       workspaceId: params.workspaceId,
       provider: params.provider,
@@ -84,11 +97,6 @@ export class CredentialService {
       createdAt: new Date(),
       baseUrl: sanitizedBaseUrl,
     };
-
-    await this.#store.saveCredential(credential);
-
-    const { ciphertext: _c, ...metadata } = credential;
-    return metadata;
   }
 
   async listKeys(workspaceId: string): Promise<KeyMetadata[]> {

@@ -5,10 +5,11 @@ import {
 } from './types.js';
 import { compareRuns, filterRuns, findActiveRun, selectLatestFailedRuns } from './memory-runs.js';
 import {
-  deleteMemoryBot, deleteMemoryWorkspaceBots, keepPanelSettings, listMemoryBots, panelSettingsOrDefaults,
+  deleteMemoryBot, keepPanelSettings, listMemoryBots, panelSettingsOrDefaults,
   upsertMemoryBot,
 } from './memory-bots.js';
 import { BotNameTakenError, sameBotName, type ReviewerBot } from './bot-types.js';
+import { deleteMemoryWorkspace, restoreMemoryWorkspace } from './memory-workspace.js';
 import {
   addMemoryUsage, deleteMemoryRuns, finishMemoryMaintenance, groupMemoryRuns, latestMemoryMaintenance,
   memoryRetentionPolicies, pruneMemoryRuns, startMemoryMaintenance,
@@ -20,7 +21,8 @@ import type { ModelKey, StoredModelPrice } from './price-types.js';
 import type {
   KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
   ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
-  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StoredCredential, WorkspaceSettings,
+  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StoredCredential, WorkspaceRestore,
+  WorkspaceSettings,
 } from './types.js';
 
 /** In-memory AppStore for tests and local development. Same contract as the Postgres store. */
@@ -137,6 +139,11 @@ export class MemoryStore implements AppStore {
 
   async deleteReviewerBot(workspaceId: string, slot: number): Promise<boolean> {
     return deleteMemoryBot(this.bots, workspaceId, slot);
+  }
+
+  async restoreWorkspace(workspaceId: string, restore: WorkspaceRestore): Promise<void> {
+    this.assertLive(workspaceId);
+    await restoreMemoryWorkspace(this, workspaceId, restore);
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
@@ -370,28 +377,7 @@ export class MemoryStore implements AppStore {
   }
 
   async deleteWorkspace(workspaceId: string): Promise<{ organizationDeleted: boolean }> {
-    this.deletedWorkspaces.add(workspaceId);
-    for (const [key, cred] of this.credentials.entries()) {
-      if (cred.workspaceId === workspaceId) {
-        this.credentials.delete(key);
-      }
-    }
-    this.settings.delete(workspaceId);
-    deleteMemoryWorkspaceBots(this.bots, workspaceId);
-    for (const [key, run] of this.runs.entries()) {
-      if (run.workspaceId === workspaceId) {
-        this.runs.delete(key);
-      }
-    }
-    for (const [key, row] of this.usage.entries()) {
-      if (row.workspaceId === workspaceId) this.usage.delete(key);
-    }
-    for (const [id, inst] of this.installations.entries()) {
-      if ('workspaceId' in inst && inst.workspaceId === workspaceId) {
-        const { workspaceId: _, ...unlinked } = inst;
-        this.installations.set(id, unlinked);
-      }
-    }
+    deleteMemoryWorkspace(this, workspaceId);
     return { organizationDeleted: false };
   }
 }

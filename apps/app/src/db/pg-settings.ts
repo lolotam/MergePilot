@@ -4,7 +4,7 @@ import type { ApiProvider, BotLogo, JudgeSettings, PanelMode, PriceOverride, Wor
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
-import { lockBotNames, withLiveWorkspace } from './workspace-lock.js';
+import { lockBotNames, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
 export async function getPgSettings(db: AppDb, workspaceId: string): Promise<WorkspaceSettings | null> {
   const rows = await db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
@@ -63,6 +63,11 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
  * Throws BotNameTakenError when `botName` matches an extra bot's name.
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
+  await withLiveWorkspace(db, settings.workspaceId, (tx) => writePgSettings(tx, settings));
+}
+
+/** The body of savePgSettings, inside the caller's live-workspace transaction (also used by a restore). */
+export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings): Promise<void> {
   const budgetStr = settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined
     ? String(settings.monthlyBudgetUsd) : null;
   const values: Partial<typeof workspaceSettings.$inferInsert> & Pick<typeof workspaceSettings.$inferInsert, 'provider' | 'model' | 'language'> = {
@@ -87,30 +92,28 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
   if (settings.botLogo !== undefined) values.botLogo = settings.botLogo;
   if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
   if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
-  await withLiveWorkspace(db, settings.workspaceId, async (tx) => {
-    const botName = settings.botName;
-    if (botName !== undefined) {
-      // A renamed main bot must differ from every extra bot's name, checked under the bot-name lock.
-      // An unchanged name is not re-checked, so saving other settings is never blocked by it.
-      await lockBotNames(tx, settings.workspaceId);
-      const stored = await tx
-        .select({ name: workspaceSettings.botName })
-        .from(workspaceSettings)
-        .where(eq(workspaceSettings.workspaceId, settings.workspaceId));
-      const renamed = !stored[0] || !sameBotName(stored[0].name, botName);
-      const extras = !renamed ? [] : await tx
-        .select({ name: reviewerBots.name })
-        .from(reviewerBots)
-        .where(eq(reviewerBots.workspaceId, settings.workspaceId));
-      if (extras.some((bot) => sameBotName(bot.name, botName))) throw new BotNameTakenError(botName);
-    }
-    await tx
-      .insert(workspaceSettings)
-      .values({
-        workspaceId: settings.workspaceId,
-        runRetentionDays: DEFAULT_RUN_RETENTION_DAYS,
-        ...values,
-      })
-      .onConflictDoUpdate({ target: workspaceSettings.workspaceId, set: values });
-  });
+  const botName = settings.botName;
+  if (botName !== undefined) {
+    // A renamed main bot must differ from every extra bot's name, checked under the bot-name lock.
+    // An unchanged name is not re-checked, so saving other settings is never blocked by it.
+    await lockBotNames(tx, settings.workspaceId);
+    const stored = await tx
+      .select({ name: workspaceSettings.botName })
+      .from(workspaceSettings)
+      .where(eq(workspaceSettings.workspaceId, settings.workspaceId));
+    const renamed = !stored[0] || !sameBotName(stored[0].name, botName);
+    const extras = !renamed ? [] : await tx
+      .select({ name: reviewerBots.name })
+      .from(reviewerBots)
+      .where(eq(reviewerBots.workspaceId, settings.workspaceId));
+    if (extras.some((bot) => sameBotName(bot.name, botName))) throw new BotNameTakenError(botName);
+  }
+  await tx
+    .insert(workspaceSettings)
+    .values({
+      workspaceId: settings.workspaceId,
+      runRetentionDays: DEFAULT_RUN_RETENTION_DAYS,
+      ...values,
+    })
+    .onConflictDoUpdate({ target: workspaceSettings.workspaceId, set: values });
 }

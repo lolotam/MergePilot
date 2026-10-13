@@ -6,7 +6,8 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
   KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
   ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
-  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, ReviewerBot, StoredCredential, WorkspaceSettings, ModelKey,
+  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, ReviewerBot, StoredCredential, WorkspaceRestore,
+  WorkspaceSettings, ModelKey,
   StoredModelPrice,
 } from '../core/types.js';
 import type { PriceEntry, PriceSource } from '@mergepilot/engine';
@@ -15,6 +16,7 @@ import {
   deletePgReviewRuns, finishPgMaintenanceRun, getLatestPgMaintenanceRun, listPgRetentionPolicies, prunePgReviewRuns,
   startPgMaintenanceRun,
 } from './pg-maintenance.js';
+import { restorePgWorkspace, writePgCredential } from './pg-backup.js';
 import { deletePgReviewerBot, listPgReviewerBots, upsertPgReviewerBot } from './pg-bots.js';
 import { listPgRunGroups } from './pg-run-groups.js';
 import {
@@ -184,24 +186,11 @@ export class PgStore implements AppStore {
   }
 
   async saveCredential(credential: StoredCredential): Promise<void> {
-    const values = {
-      id: credential.id,
-      ciphertext: credential.ciphertext,
-      keyVersion: credential.keyVersion,
-      last4: credential.last4,
-      createdBy: credential.createdBy,
-      createdAt: credential.createdAt,
-      baseUrl: credential.baseUrl ?? null,
-    };
-    await withLiveWorkspace(this.db, credential.workspaceId, async (tx) => {
-      await tx
-        .insert(providerCredentials)
-        .values({ workspaceId: credential.workspaceId, provider: credential.provider, ...values })
-        .onConflictDoUpdate({
-          target: [providerCredentials.workspaceId, providerCredentials.provider],
-          set: values,
-        });
-    });
+    await withLiveWorkspace(this.db, credential.workspaceId, (tx) => writePgCredential(tx, credential));
+  }
+
+  async restoreWorkspace(workspaceId: string, restore: WorkspaceRestore): Promise<void> {
+    await restorePgWorkspace(this.db, workspaceId, restore);
   }
 
   async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {

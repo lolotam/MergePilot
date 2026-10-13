@@ -17,6 +17,30 @@ describe('CredentialService', () => {
     return { store, vault, validate, service };
   }
 
+  describe('sealKey (settings restore, ADR-0018)', () => {
+    it('checks and vault-encrypts like saveKey, but stores nothing and can skip the live check', async () => {
+      const { store, vault, service, validate } = createFixture();
+      const fakeKey = ['fake', 'restore', 'key', '4321'].join('-');
+
+      const sealed = await service.sealKey(
+        { workspaceId: 'ws-1', provider: 'openai', apiKey: `  ${fakeKey} `, userId: 'u-owner' },
+        { validate: false },
+      );
+      expect(validate).not.toHaveBeenCalled();
+      expect(await store.getCredential('ws-1', 'openai')).toBeNull();
+      expect(sealed).toMatchObject({ workspaceId: 'ws-1', provider: 'openai', last4: '4321', createdBy: 'u-owner', baseUrl: null });
+      expect(sealed.ciphertext).not.toContain(fakeKey);
+      expect(await vault.decrypt(sealed.ciphertext, { workspaceId: 'ws-1', provider: 'openai' })).toBe(fakeKey);
+
+      await expect(
+        service.sealKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: fakeKey, userId: 'u', baseUrl: 'https://x.example' }, { validate: false }),
+      ).rejects.toThrow(/Only the custom provider/);
+      await expect(
+        service.sealKey({ workspaceId: 'ws-1', provider: 'custom', apiKey: fakeKey, userId: 'u' }, { validate: false }),
+      ).rejects.toThrow(/Base URL is required/);
+    });
+  });
+
   describe('saveKey', () => {
     it('trims, validates, encrypts, and stores credential metadata', async () => {
       const { store, service, validate } = createFixture();

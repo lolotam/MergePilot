@@ -2,10 +2,12 @@ import type {
   ApiProviderId, CredentialStore, JudgeKeyOnlyProviderId, JudgeMode, JudgeProviderId, MergePilotConfig, ReviewModel,
   Severity,
 } from '@mergepilot/engine';
+import type { BackupRestoreStore } from './backup-types.js';
 import type { ModelPriceStore, PriceOverride, RunPricing } from './price-types.js';
 import type { BotLogo, PanelMode, ReviewerBotStore } from './bot-types.js';
 import type { RepoColorKey, RunMaintenanceStore } from './run-types.js';
 
+export * from './backup-types.js';
 export * from './bot-types.js';
 export * from './run-types.js';
 export * from './price-types.js';
@@ -262,7 +264,7 @@ export interface ListReviewRunsResult {
 }
 
 /** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
-export interface AppStore extends RunMaintenanceStore, ModelPriceStore, ReviewerBotStore {
+export interface AppStore extends RunMaintenanceStore, ModelPriceStore, ReviewerBotStore, BackupRestoreStore {
   /** Returns false when this delivery id was already recorded (duplicate webhook). */
   recordDelivery(deliveryId: string, event: string): Promise<boolean>;
 
