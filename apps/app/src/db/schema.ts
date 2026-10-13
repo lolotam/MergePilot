@@ -62,9 +62,12 @@ export const workspaceSettings = pgTable('workspace_settings', {
   judgeEnabled: boolean('judge_enabled').notNull().default(false),
   judgeProvider: text('judge_provider'),
   judgeModel: text('judge_model'),
+  /** Not read since migration 0010 (kept one release for rollback; written as the closest old mode). */
   judgeMode: text('judge_mode').notNull().default('off'),
   judgeThreshold: numeric('judge_threshold', { precision: 4, scale: 3 }).notNull().default('0.35'),
   judgeFallback: jsonb('judge_fallback').notNull().default(sql`'[]'::jsonb`),
+  /** Migration 0010: the judge's uses (ADR-0015 multi-use). */
+  judgeUses: text('judge_uses').array().notNull().default(sql`'{}'::text[]`),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),

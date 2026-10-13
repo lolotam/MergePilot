@@ -4,6 +4,7 @@ import type {
   JudgeKeyOnlyProviderId,
   JudgeMode,
   JudgeProviderId,
+  JudgeUse,
   MergePilotConfig,
   ReviewModel,
   Severity,
@@ -100,7 +101,8 @@ export interface JudgeSettings {
   enabled: boolean;
   provider: JudgeProviderId;
   model: string;
-  mode: JudgeMode;
+  /** Zero or more uses (ADR-0015 multi-use); empty with `enabled` = an idle judge. */
+  uses: JudgeUse[];
   threshold: number;
   fallback: Array<{ provider: JudgeProviderId; model: string }>;
 }
@@ -152,7 +154,10 @@ export interface ReviewRunResultPayload {
 }
 
 export interface ReviewRunJudge {
-  mode: JudgeMode;
+  /** The configured uses. Absent on runs recorded before multi-use, which carry `mode`. */
+  uses?: JudgeUse[] | undefined;
+  /** Only on runs recorded before multi-use. */
+  mode?: JudgeMode | undefined;
   threshold: number;
   checked: number;
   filtered: Array<{ title: string; path: string; line: number; noul: number }>;

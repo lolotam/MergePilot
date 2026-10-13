@@ -70896,8 +70896,28 @@ function hunkAround(patch, line) {
   return best.text.join("\n");
 }
 
-var NEVER_FILTERED = /* @__PURE__ */ new Set(["critical", "high"]);
+var JUDGE_USES = ["annotate", "filter", "dedupe", "consensus"];
 var JUDGE_MODES = ["off", "annotate", "filter"];
+function normalizeJudgeUses(uses) {
+  const set2 = new Set(uses);
+  return JUDGE_USES.filter((use) => set2.has(use));
+}
+function judgeUsesFromMode(mode) {
+  if (mode === "annotate")
+    return ["annotate", "dedupe"];
+  if (mode === "filter")
+    return ["filter", "dedupe"];
+  return ["dedupe"];
+}
+function hasJudgeUse(uses, use) {
+  return "has" in uses ? uses.has(use) : uses.includes(use);
+}
+function describeJudgeUses(uses) {
+  const list = normalizeJudgeUses(uses);
+  return list.length > 0 ? list.join(", ") : "none";
+}
+
+var NEVER_FILTERED = /* @__PURE__ */ new Set(["critical", "high"]);
 var DEFAULT_JUDGE_THRESHOLD = 0.35;
 var CRITERIA = {
   true: "The finding describes a real defect, risk or rule violation that is visible in the shown code.",
@@ -70908,16 +70928,19 @@ function confidenceLine(noulValue, language) {
   return language === "ar" ? `<sub>\u062B\u0642\u0629 Jev: ${value}</sub>` : `<sub>Jev confidence: ${value}</sub>`;
 }
 async function runFalsePositiveFilter(input2) {
-  const { findings, mode, threshold } = input2;
+  const { findings, threshold } = input2;
+  const uses = normalizeJudgeUses(input2.uses);
+  const annotate = uses.includes("annotate");
+  const filter = uses.includes("filter");
   const unchanged = (unavailable) => ({
     findings,
-    mode,
+    uses,
     threshold,
     checked: 0,
     filtered: [],
     ...unavailable ? { unavailable } : {}
   });
-  if (mode === "off" || findings.length === 0)
+  if (!annotate && !filter || findings.length === 0)
     return unchanged();
   const patches = new Map(input2.files.map((f3) => [f3.path, f3.patch]));
   const state2 = {};
@@ -70955,9 +70978,9 @@ async function runFalsePositiveFilter(input2) {
     const value = answer?.type === "noul" ? answer.noul : void 0;
     if (value === void 0) {
       kept.push(finding);
-    } else if (mode === "filter" && value < threshold && !NEVER_FILTERED.has(finding.severity)) {
+    } else if (filter && value < threshold && !NEVER_FILTERED.has(finding.severity)) {
       filtered.push({ title: finding.title, path: finding.path, line: finding.line, noul: value });
-    } else if (mode === "annotate" || mode === "filter" && value < threshold) {
+    } else if (annotate || filter && value < threshold) {
       kept.push({ ...finding, body: `${finding.body}
 
 ${confidenceLine(value, input2.language)}` });
@@ -70965,7 +70988,7 @@ ${confidenceLine(value, input2.language)}` });
       kept.push(finding);
     }
   });
-  return { findings: kept, mode, threshold, checked: findings.length, filtered };
+  return { findings: kept, uses, threshold, checked: findings.length, filtered };
 }
 
 var JudgeProviderSchema = external_exports.enum(JUDGE_PROVIDER_IDS);
@@ -70986,14 +71009,19 @@ var JudgeConfigSchema = external_exports.strictObject({
   provider: JudgeProviderSchema,
   /** Defaults to the provider's first Jev model. */
   model: external_exports.string().min(1).optional(),
-  mode: external_exports.enum(JUDGE_MODES).default("off"),
+  uses: external_exports.array(external_exports.enum(JUDGE_USES)).optional(),
+  /** Before multi-use: off | annotate | filter. Mapped to `uses`; ignored when `uses` is given. */
+  mode: external_exports.enum(JUDGE_MODES).optional(),
   threshold: external_exports.number().min(0).max(1).default(DEFAULT_JUDGE_THRESHOLD),
   /** Explicit, disclosed fallbacks tried in order when the judge before them fails. */
   fallback: external_exports.array(JudgeFallbackEntrySchema).max(MAX_JUDGE_FALLBACKS).default([])
 }).superRefine((judge, ctx) => {
   checkJevModel(judge, ctx, []);
   judge.fallback.forEach((entry, index) => checkJevModel(entry, ctx, ["fallback", index]));
-});
+}).transform(({ mode, uses, ...judge }) => ({
+  ...judge,
+  uses: normalizeJudgeUses(uses ?? judgeUsesFromMode(mode ?? "off"))
+}));
 function judgeChainOf(judge) {
   return [judge, ...judge.fallback].map((entry) => ({
     provider: entry.provider,
@@ -72950,7 +72978,8 @@ async function runReview(input2) {
     incompleteReasons.push(...verified.incompleteReasons);
   }
   let judge;
-  if (input2.judge && input2.judge.mode !== "off" && modelFindings.length > 0) {
+  const judgeChecks = input2.judge !== void 0 && (hasJudgeUse(input2.judge.uses, "annotate") || hasJudgeUse(input2.judge.uses, "filter"));
+  if (input2.judge && judgeChecks && modelFindings.length > 0) {
     const { findings: judged, ...summary } = await runFalsePositiveFilter({
       ...input2.judge,
       findings: modelFindings,
@@ -125728,6 +125757,10 @@ function renderJudge(judge, isArabic) {
   const lines = [];
   if (judge.answeredBy)
     lines.push(`> Jev: \`${neutralize2(judge.answeredBy)}\``);
+  if (judge.uses) {
+    const list = judge.uses.length > 0 ? judge.uses.map((use) => `\`${use}\``).join(isArabic ? "\u060C " : ", ") : "\u2014";
+    lines.push(isArabic ? `> \u0627\u0633\u062A\u062E\u062F\u0627\u0645\u0627\u062A Jev: ${list}` : `> Jev uses: ${list}`);
+  }
   if (judge.unavailable) {
     const code = neutralize2(judge.unavailable);
     lines.push(isArabic ? `> \u26A0\uFE0F \u062D\u064E\u0643\u064E\u0645 Jev \u063A\u064A\u0631 \u0645\u062A\u0627\u062D: ${code} \u2014 \u0646\u064F\u0634\u0631\u062A \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0646 \u063A\u064A\u0631 \u0641\u0644\u062A\u0631\u0629` : `> \u26A0\uFE0F Jev judge unavailable: ${code} \u2014 findings were published unfiltered`);
@@ -125820,13 +125853,18 @@ ${content}
   return content;
 }
 
-function judgeSummaryInput(report, filter) {
+function dedupeJudgeOf(judge) {
+  return judge && hasJudgeUse(judge.uses, "dedupe") ? judge.judge : void 0;
+}
+function judgeSummaryInput(report, filter, uses) {
   if (!report || report.attempts.length === 0)
     return void 0;
   const unavailable = filter?.unavailable;
   const duplicatesUnavailable = !unavailable ? report.unavailable : void 0;
+  const activeUses = uses ?? filter?.uses;
   return {
     ...report.answeredBy ? { answeredBy: describeAnsweredBy(report.answeredBy) } : {},
+    ...activeUses ? { uses: normalizeJudgeUses(activeUses) } : {},
     ...unavailable ? { unavailable } : {},
     ...duplicatesUnavailable ? { duplicatesUnavailable } : {},
     ...filter && filter.filtered.length > 0 ? { filtered: filter.filtered } : {}
@@ -125959,7 +125997,7 @@ async function reviewPullRequest(ctx) {
       pull_number: pullNumber,
       publisherLogin,
       findings: reviewResult.inline,
-      judge: judge?.judge,
+      judge: dedupeJudgeOf(judge),
       knownSecrets,
       maxUsd: judgeBudgetLeft(config2, reviewResult.costUsd, judge)
     });
@@ -125984,7 +126022,7 @@ async function reviewPullRequest(ctx) {
       ...fallbackSummary,
       scope,
       outcome: "completed",
-      judge: judgeSummaryInput(judgeReport, reviewResult.judge),
+      judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       ...totals.costUsd !== void 0 ? { costUsd: totals.costUsd } : {},
       ...totals.inputTokens !== void 0 ? { inputTokens: totals.inputTokens } : {},
       ...totals.outputTokens !== void 0 ? { outputTokens: totals.outputTokens } : {}
@@ -126317,8 +126355,9 @@ function actionJudge(config2, env2, log) {
     return { ...entry, apiKey };
   });
   const judge = createJudge({ entries, onCall: (event) => log(judgeCallLine(event)) });
-  log(`Jev judge: ${judge.label} (mode ${config2.judge.mode}, threshold ${config2.judge.threshold}, ${entries.length - 1} fallbacks)`);
-  return { judge: { judge, mode: config2.judge.mode, threshold: config2.judge.threshold }, secrets };
+  const { uses, threshold } = config2.judge;
+  log(`Jev judge: ${judge.label} (uses ${describeJudgeUses(uses)}, threshold ${threshold}, ${entries.length - 1} fallbacks)`);
+  return { judge: { judge, uses, threshold }, secrets };
 }
 
 // src/sandbox.ts

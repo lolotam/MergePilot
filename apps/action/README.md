@@ -95,7 +95,7 @@ A "System One" decision model ([TypeSafe Jev](https://docs.typesafe.ai/introduct
 judge:
   provider: openrouter        # typesafe | openrouter | vercel-gateway | opencode-zen
   model: ~typesafe/jev-latest # optional; defaults to the provider's first Jev model
-  mode: filter                # off (duplicate check only) | annotate | filter
+  uses: [annotate, filter, dedupe] # any of annotate | filter | dedupe | consensus; [] = idle
   threshold: 0.35             # filter: drop findings whose Jev confidence is below this
   fallback:                   # optional, at most 3, tried in order when the judge before fails
     - provider: opencode-zen
@@ -110,7 +110,13 @@ judge:
 | `opencode-zen` | `jev-1.13-free`, `jev-1.13` | `OPENCODE_API_KEY` |
 
 - Only Jev models are accepted, and the endpoints are fixed (`baseUrl` is rejected).
-- `annotate` adds `Jev confidence: 0.82` to each comment; `filter` drops findings below `threshold` and lists them under "Filtered by Jev (n)" in the summary.
+- `judge.uses` is a set; pick any combination (ADR-0015 multi-use):
+  - `annotate` adds `Jev confidence: 0.82` to every posted finding the judge scored.
+  - `filter` drops findings below `threshold` and lists them under "Filtered by Jev (n)" in the summary. Critical and high findings are never dropped; a low-confidence one that is kept gets the confidence line.
+  - `dedupe` skips a finding that repeats, in meaning, an existing MergePilot comment near it.
+  - `consensus` is reserved for the coming reviewer panel; it is accepted now and does nothing yet.
+- `annotate` and `filter` together still cost **one** Jev request per review: findings are filtered and every remaining one is annotated. Without either of them, no such request is sent; without `dedupe`, no duplicate-check request is sent. The summary names the active uses (`Jev uses: ...`).
+- The old `mode:` still works and maps to uses: `off` → `[dedupe]`, `annotate` → `[annotate, dedupe]`, `filter` → `[filter, dedupe]`. When both are set, `uses` wins; with neither, the judge runs the duplicate check only (the old default).
 - A fallback is used only after auth, rate limit / overload (after one retry), 5xx, network, timeout (20 s), or a wrong model id (422 / 404); a valid low-confidence answer is final. An entry without its key is skipped. All attempts share 60 s. The summary names the judge that answered, e.g. `Jev: opencode-zen:jev-1.13-free (fallback 1; openrouter failed: rate-limited)`.
 - If every entry fails, the review is published unfiltered and the summary says `Jev judge unavailable: <code>`.
 - Pass the keys as secrets, e.g. `OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}`. The log gets one `judge.call` line per attempt (provider, model, question count, time, result, tokens), never the code under review.

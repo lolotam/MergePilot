@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { isJudgeUse, legacyJudgeMode, normalizeJudgeUses } from '@mergepilot/engine';
 import type { ApiProvider, JudgeSettings, WorkspaceSettings } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
@@ -29,7 +30,7 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
           enabled: row.judgeEnabled,
           provider: row.judgeProvider as JudgeSettings['provider'],
           model: row.judgeModel ?? '',
-          mode: row.judgeMode as JudgeSettings['mode'],
+          uses: normalizeJudgeUses((row.judgeUses ?? []).filter(isJudgeUse)),
           threshold: Number(row.judgeThreshold),
           fallback: Array.isArray(row.judgeFallback) ? (row.judgeFallback as JudgeSettings['fallback']) : [],
         }
@@ -37,13 +38,17 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
   };
 }
 
-/** The judge columns for a save: null clears them back to the defaults (off). */
+/**
+ * The judge columns for a save: null clears them back to the defaults (off). `judge_mode` is no
+ * longer read; it gets the closest old mode so a rollback within one release still works.
+ */
 function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSettings.$inferInsert> {
   return {
     judgeEnabled: judge?.enabled ?? false,
     judgeProvider: judge?.provider ?? null,
     judgeModel: judge?.model ?? null,
-    judgeMode: judge?.mode ?? 'off',
+    judgeUses: judge ? normalizeJudgeUses(judge.uses) : [],
+    judgeMode: judge ? legacyJudgeMode(judge.uses) : 'off',
     judgeThreshold: String(judge?.threshold ?? 0.35),
     judgeFallback: judge?.fallback ?? [],
   };
