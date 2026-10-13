@@ -39,8 +39,9 @@ export interface FallbackDisclosure {
   /** Why the primary model was left. */
   fallbackCode?: FailureKind;
   /**
-   * The primary model's error message (at most 300 characters), so the summary and logs say what
-   * the provider answered, not only the category. Callers redact it before showing it.
+   * The primary model's error message on one line, so the summary and logs say what the provider
+   * answered, not only the category. Raw provider text: callers redact it, then cut it for display
+   * (`fallbackReasonOf` in @mergepilot/github), so a secret is never split before redaction.
    */
   fallbackDetail?: string;
   /** Configured fallbacks that could not take part (e.g. no key), with the reason. */
@@ -100,10 +101,11 @@ export class FallbackChain implements ReviewModel {
   }
 }
 
-const MAX_DETAIL = 300;
+// Only a bound on memory for a huge error page; display length is cut after redaction.
+const MAX_DETAIL_KEPT = 8000;
 
 function detailOf(error: unknown): string | undefined {
   const message = error instanceof Error ? error.message.replace(/\s+/g, ' ').trim() : '';
   if (!message) return undefined;
-  return message.length > MAX_DETAIL ? `${message.slice(0, MAX_DETAIL - 1)}…` : message;
+  return message.length > MAX_DETAIL_KEPT ? message.slice(0, MAX_DETAIL_KEPT) : message;
 }

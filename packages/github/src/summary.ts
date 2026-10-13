@@ -1,4 +1,5 @@
 import type { Finding } from '@mergepilot/engine';
+import type { FallbackReason } from './fallback-reason.js';
 import { renderBotIdentity, type BotIdentity } from './bot-identity.js';
 import type { JudgeSummaryInput } from './judge-summary.js';
 import { neutralize } from './text-safety.js';
@@ -28,7 +29,7 @@ export interface ReviewSummaryInput {
    * Set when an explicit fallback model answered instead of the configured one (ADR-0008);
    * `modelLabel` is then the fallback model. Always disclosed in the summary.
    */
-  fallback?: { from: string; code: string; detail?: string | undefined };
+  fallback?: FallbackReason;
   /** Review scope (incremental vs full). */
   scope?: ReviewScope;
   /** The Jev judge's disclosure (ADR-0015): who answered, failures, filtered findings. */
@@ -72,10 +73,15 @@ function renderNotCompletedNotice(
 }
 
 function renderFallbackLine(input: ReviewSummaryInput, isArabic: boolean): string {
-  const used = neutralize(input.modelLabel);
-  const from = neutralize(input.fallback?.from ?? '');
-  const code = neutralize(input.fallback?.code ?? '');
-  const detail = input.fallback?.detail ? neutralize(input.fallback.detail) : '';
+  return renderFallbackNotice(input.modelLabel, input.fallback ?? { from: '', code: '' }, isArabic);
+}
+
+/** «Fallback model X was used because Y failed (code: provider answer)», neutralized. */
+export function renderFallbackNotice(modelLabel: string, fallback: FallbackReason, isArabic: boolean): string {
+  const used = neutralize(modelLabel);
+  const from = neutralize(fallback.from);
+  const code = neutralize(fallback.code);
+  const detail = fallback.detail ? neutralize(fallback.detail) : '';
   const why = detail ? `${code}: ${detail}` : code;
   return isArabic
     ? `> ⚠️ استُخدم النموذج الاحتياطي \`${used}\` لأن \`${from}\` فشل (${why})`

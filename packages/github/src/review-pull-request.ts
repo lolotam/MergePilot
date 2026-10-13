@@ -18,6 +18,7 @@ import {
   reviewScopeOf,
   selectIncrementalFiles,
 } from './incremental.js';
+import { fallbackReasonOf } from './fallback-reason.js';
 import { dedupeJudgeOf, judgeSummaryInput, withJudgeUsage, type ReviewJudge } from './judge-summary.js';
 import { isPrPaused, postPauseNoticeOnce } from './pause.js';
 import { listPullRequestFiles } from './pr-files.js';
@@ -214,11 +215,7 @@ export async function reviewPullRequest(
     reviewResult.status !== 'skipped-budget' && reviewResult.fallbackFrom && reviewResult.fallbackCode
       ? {
           modelLabel: reviewResult.modelUsed ?? model.label,
-          fallback: {
-            from: reviewResult.fallbackFrom,
-            code: reviewResult.fallbackCode,
-            ...(reviewResult.fallbackDetail ? { detail: redactSecrets(reviewResult.fallbackDetail, knownSecrets).text } : {}),
-          },
+          fallback: fallbackReasonOf(reviewResult, knownSecrets)!,
         }
       : {};
 

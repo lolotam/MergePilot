@@ -153,7 +153,7 @@ describe('FallbackChain', () => {
       });
     });
 
-    it('keeps the first failure detail on one line and at most 300 characters', async () => {
+    it('keeps the first failure detail on one line, whole, for the caller to redact and cut', async () => {
       const primary = failingModel(
         'primary:m1',
         new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: 'primary', message: `HTTP 401:
@@ -162,10 +162,7 @@ describe('FallbackChain', () => {
       const chain = new FallbackChain(primary, [mockModel('fb:m2', 'ok')]);
       await chain.generate(req);
 
-      const detail = chain.disclosure().fallbackDetail ?? '';
-      expect(detail.startsWith('HTTP 401: xxx')).toBe(true);
-      expect(detail).toHaveLength(300);
-      expect(detail.endsWith('…')).toBe(true);
+      expect(chain.disclosure().fallbackDetail).toBe(`HTTP 401: ${'x'.repeat(400)}`);
       expect(chain.disclosure().fallbackCode).toBe('auth');
     });
 
