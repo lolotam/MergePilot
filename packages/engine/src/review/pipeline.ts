@@ -273,7 +273,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       status: 'failed',
       reason: pass.reason,
       ...(pass.detail ? { detail: pass.detail } : {}),
-      ...model.disclosure(),
+      ...model.disclosure(knownSecrets),
     };
   }
   let totalUsage = pass.totalUsage;
@@ -352,7 +352,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   };
 
   // Pricing belongs to the configured model; after a fallback the cost is unknown (tokens still count).
-  const disclosure = model.disclosure();
+  const disclosure = model.disclosure(knownSecrets);
   let reviewCostUsd: number | undefined;
   if (model.onlySubscriptionCalls) {
     reviewCostUsd = 0;

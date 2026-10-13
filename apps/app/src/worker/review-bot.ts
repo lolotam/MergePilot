@@ -110,6 +110,10 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         { knownSecrets, judge: judgeSetup.judge },
       );
       const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing);
+      if (outcome.fallback) {
+        const { from, code, detail: why } = outcome.fallback;
+        deps.log?.(`Fallback used: ${from} failed (${code})${why ? `: ${why}` : ''}`);
+      }
       return { slot, result: record.result, pending: { ...record, outcome, knownSecrets: credStore.getKnownSecrets() } };
     }
 

@@ -97,6 +97,7 @@ export {
   type PauseNoticeParams,
 } from './pause.js';
 export * from './summary.js';
+export * from './fallback-reason.js';
 export * from './judge-summary.js';
 export {
   loadRepoConfig,

@@ -142,6 +142,7 @@ function row(bot: PanelBot, outcome: BotOutcome | undefined): PanelBotRow {
     findings: finish?.findingsCount ?? null,
     costUsd: finish?.costUsd ?? null,
     summary: outcome?.pending?.outcome.runResult?.status === 'completed' ? outcome.pending.outcome.runResult.summary : undefined,
+    fallback: outcome?.pending?.outcome.fallback,
   };
 }
 

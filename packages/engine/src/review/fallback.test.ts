@@ -1,3 +1,4 @@
+import { Secret } from '../credentials/secret.js';
 import { describe, expect, it } from 'vitest';
 import { LlmFailure } from '../llm/failure.js';
 import { FallbackChain, FALLBACK_TRIGGERS, failureKindOf } from './fallback.js';
@@ -70,7 +71,7 @@ describe('FallbackChain', () => {
       const res = await chain.generate(req);
       expect(res.text).toBe('Hello');
       expect(primary.calls).toBe(1);
-      expect(chain.disclosure()).toEqual({
+      expect(chain.disclosure([])).toEqual({
         modelUsed: 'openai:gpt-5',
       });
     });
@@ -101,10 +102,11 @@ describe('FallbackChain', () => {
       expect(primary.calls).toBe(1);
       expect(fallback.calls).toBe(1);
       expect(chain.label).toBe('xai:grok-4');
-      expect(chain.disclosure()).toEqual({
+      expect(chain.disclosure([])).toEqual({
         modelUsed: 'xai:grok-4',
         fallbackFrom: 'openai:gpt-5',
         fallbackCode: 'rate-limit',
+        fallbackDetail: 'Too many requests',
       });
     });
 
@@ -144,11 +146,41 @@ describe('FallbackChain', () => {
       expect(primary.calls).toBe(1);
       expect(fallback1.calls).toBe(1);
       expect(fallback2.calls).toBe(1);
-      expect(chain.disclosure()).toEqual({
+      expect(chain.disclosure([])).toEqual({
         modelUsed: 'fb2:m3',
         fallbackFrom: 'primary:m1',
         fallbackCode: 'quota',
+        fallbackDetail: 'quota',
       });
+    });
+
+    it('redacts the raw detail before collapsing whitespace or bounding it', async () => {
+      // Built at run time so the source holds no literal that looks like a credential.
+      const credential = ['placeholder', 'credential	with  spaces', 'for', 'tests'].join('-');
+      const primary = failingModel(
+        'primary:m1',
+        new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: 'primary', message: `${'x'.repeat(1900)} bad key ${credential} end ${'y'.repeat(500)}` }),
+      );
+      const chain = new FallbackChain(primary, [mockModel('fb:m2', 'ok')]);
+      await chain.generate(req);
+
+      const detail = chain.disclosure([new Secret(credential)]).fallbackDetail ?? '';
+      expect(detail).not.toContain('placeholder-credential');
+      expect(detail).toContain('[REDACTED');
+      expect(detail.length).toBeLessThanOrEqual(2000);
+    });
+
+    it('puts the detail on one line for the caller to cut', async () => {
+      const primary = failingModel(
+        'primary:m1',
+        new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: 'primary', message: `HTTP 401:
+  ${'x'.repeat(400)}` }),
+      );
+      const chain = new FallbackChain(primary, [mockModel('fb:m2', 'ok')]);
+      await chain.generate(req);
+
+      expect(chain.disclosure([]).fallbackDetail).toBe(`HTTP 401: ${'x'.repeat(400)}`);
+      expect(chain.disclosure([]).fallbackCode).toBe('auth');
     });
 
     it('throws last error when all models in the chain fail', async () => {

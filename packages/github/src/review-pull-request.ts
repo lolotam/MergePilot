@@ -18,6 +18,7 @@ import {
   reviewScopeOf,
   selectIncrementalFiles,
 } from './incremental.js';
+import { fallbackReasonOf } from './fallback-reason.js';
 import { dedupeJudgeOf, judgeSummaryInput, withJudgeUsage, type ReviewJudge } from './judge-summary.js';
 import { isPrPaused, postPauseNoticeOnce } from './pause.js';
 import { listPullRequestFiles } from './pr-files.js';
@@ -210,13 +211,9 @@ export async function reviewPullRequest(
   log?.(`Review completed with status: ${reviewResult.status}`);
 
   // ADR-0008: when an explicit fallback model answered, the summary names it and says why.
-  const fallbackSummary =
-    reviewResult.status !== 'skipped-budget' && reviewResult.fallbackFrom && reviewResult.fallbackCode
-      ? {
-          modelLabel: reviewResult.modelUsed ?? model.label,
-          fallback: { from: reviewResult.fallbackFrom, code: reviewResult.fallbackCode },
-        }
-      : {};
+  const disclosure = reviewResult.status === 'skipped-budget' ? undefined : reviewResult;
+  const fallback = disclosure ? fallbackReasonOf(disclosure, knownSecrets) : undefined;
+  const fallbackSummary = fallback ? { modelLabel: disclosure?.modelUsed ?? model.label, fallback } : {};
 
   const scope = reviewScopeOf(selection);
 

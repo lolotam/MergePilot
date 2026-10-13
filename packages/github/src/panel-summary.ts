@@ -1,6 +1,7 @@
 import { escapeInline, renderBotLogo } from './bot-identity.js';
 import { foundByLabel, type ConsensusCluster, type MergePanelResult } from './consensus.js';
-import { renderScopeLine, type ReviewScope } from './summary.js';
+import type { FallbackReason } from './fallback-reason.js';
+import { renderFallbackNotice, renderScopeLine, type ReviewScope } from './summary.js';
 import { neutralize } from './text-safety.js';
 
 /** One bot's row in the consensus summary table (ADR-0017). */
@@ -15,6 +16,8 @@ export interface PanelBotRow {
   costUsd?: number | null | undefined;
   /** The bot's own summary, shown folded under the table. */
   summary?: string | undefined;
+  /** Why a fallback model answered for this bot (`modelLabel` is then the fallback model). */
+  fallback?: FallbackReason | undefined;
 }
 
 export interface PanelSummaryInput {
@@ -113,6 +116,10 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
 
   if (input.scope) sections.push(renderScopeLine(input.scope, isArabic));
   sections.push(renderTable(input, labels));
+  for (const bot of input.bots) {
+    // A failed bot's row already says it failed; the notice is for a fallback that answered.
+    if (bot.fallback && bot.status === 'completed') sections.push(`${renderFallbackNotice(bot.modelLabel, bot.fallback, isArabic)} — **${escapeInline(bot.name)}**`);
+  }
   if (input.minAgreement > 1) sections.push(labels.agreement(input.minAgreement, merge.total));
   if (input.judgeUnavailable) sections.push(labels.judgeUnavailable(neutralize(input.judgeUnavailable)));
 

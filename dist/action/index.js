@@ -114367,20 +114367,33 @@ var FallbackChain = class {
         const last = this.#index >= this.#models.length - 1;
         if (last || request2.signal?.aborted || !kind || !FALLBACK_TRIGGERS.includes(kind))
           throw error62;
-        this.#from ??= { label: model.label, code: kind };
+        this.#from ??= { label: model.label, code: kind, detail: detailOf(error62) };
         this.#index++;
       }
     }
   }
-  disclosure() {
+  /**
+   * What to disclose about the chain. `secrets` is required: the primary's raw error message is
+   * redacted with it first, and only then put on one line and bounded.
+   */
+  disclosure(secrets) {
     const skipped = this.#models[0]?.skippedFallbacks ?? [];
     return {
       modelUsed: this.label,
       ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {},
+      ...this.#from?.detail ? { fallbackDetail: disclosedDetail(this.#from.detail, secrets) } : {},
       ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}
     };
   }
 };
+function detailOf(error62) {
+  return error62 instanceof Error && error62.message.trim() ? error62.message : void 0;
+}
+var MAX_DISCLOSED_DETAIL = 2e3;
+function disclosedDetail(raw, secrets) {
+  const oneLine2 = redactSecrets(raw, secrets).text.replace(/\s+/g, " ").trim();
+  return oneLine2.length > MAX_DISCLOSED_DETAIL ? oneLine2.slice(0, MAX_DISCLOSED_DETAIL) : oneLine2;
+}
 
 function costUsd(usage, pricing) {
   const cacheReadPerMTok = pricing.cacheReadPerMTok ?? pricing.inputPerMTok;
@@ -114676,8 +114689,8 @@ var ReviewDeadline = class {
   }
 };
 function describePaths(paths, max = 10, maxLength = 60) {
-  const shorten = (path11) => path11.length <= maxLength ? path11 : `\u2026${path11.slice(path11.length - maxLength + 1)}`;
-  const shown = paths.slice(0, max).map(shorten).join(", ");
+  const shorten2 = (path11) => path11.length <= maxLength ? path11 : `\u2026${path11.slice(path11.length - maxLength + 1)}`;
+  const shown = paths.slice(0, max).map(shorten2).join(", ");
   return paths.length > max ? `${shown} +${paths.length - max} more` : shown;
 }
 async function retryEmptyWithoutThinking(input2) {
@@ -115685,7 +115698,7 @@ async function runReview(input2) {
       status: "failed",
       reason: pass.reason,
       ...pass.detail ? { detail: pass.detail } : {},
-      ...model.disclosure()
+      ...model.disclosure(knownSecrets)
     };
   }
   let totalUsage = pass.totalUsage;
@@ -115745,7 +115758,7 @@ async function runReview(input2) {
     complete,
     incompleteReasons
   };
-  const disclosure = model.disclosure();
+  const disclosure = model.disclosure(knownSecrets);
   let reviewCostUsd;
   if (model.onlySubscriptionCalls) {
     reviewCostUsd = 0;
@@ -168504,10 +168517,15 @@ function renderNotCompletedNotice(outcome, reason, isArabic) {
 > No code was reviewed.`;
 }
 function renderFallbackLine(input2, isArabic) {
-  const used = neutralize2(input2.modelLabel);
-  const from = neutralize2(input2.fallback?.from ?? "");
-  const code = neutralize2(input2.fallback?.code ?? "");
-  return isArabic ? `> \u26A0\uFE0F \u0627\u0633\u062A\u064F\u062E\u062F\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \`${used}\` \u0644\u0623\u0646 \`${from}\` \u0641\u0634\u0644 (${code})` : `> \u26A0\uFE0F Fallback model \`${used}\` was used because \`${from}\` failed (${code})`;
+  return renderFallbackNotice(input2.modelLabel, input2.fallback ?? { from: "", code: "" }, isArabic);
+}
+function renderFallbackNotice(modelLabel, fallback, isArabic) {
+  const used = neutralize2(modelLabel);
+  const from = neutralize2(fallback.from);
+  const code = neutralize2(fallback.code);
+  const detail = fallback.detail ? neutralize2(fallback.detail) : "";
+  const why = detail ? `${code}: ${detail}` : code;
+  return isArabic ? `> \u26A0\uFE0F \u0627\u0633\u062A\u064F\u062E\u062F\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \`${used}\` \u0644\u0623\u0646 \`${from}\` \u0641\u0634\u0644 (${why})` : `> \u26A0\uFE0F Fallback model \`${used}\` was used because \`${from}\` failed (${why})`;
 }
 function renderScopeLine(scope, isArabic) {
   if (scope.mode === "incremental") {
@@ -168662,6 +168680,19 @@ ${content}
   return content;
 }
 
+var MAX_FALLBACK_DETAIL = 300;
+function fallbackReasonOf(disclosure, knownSecrets) {
+  if (!disclosure.fallbackFrom || !disclosure.fallbackCode)
+    return void 0;
+  const detail = disclosure.fallbackDetail ? shorten(redactSecrets(disclosure.fallbackDetail, knownSecrets).text) : "";
+  return { from: disclosure.fallbackFrom, code: disclosure.fallbackCode, ...detail ? { detail } : {} };
+}
+function shorten(text) {
+  const clean = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
+  const chars = Array.from(clean);
+  return chars.length > MAX_FALLBACK_DETAIL ? `${chars.slice(0, MAX_FALLBACK_DETAIL - 1).join("")}\u2026` : clean;
+}
+
 function dedupeJudgeOf(judge) {
   return judge && hasJudgeUse(judge.uses, "dedupe") ? judge.judge : void 0;
 }
@@ -168791,10 +168822,9 @@ async function reviewPullRequest(ctx) {
     judge
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
-  const fallbackSummary = reviewResult.status !== "skipped-budget" && reviewResult.fallbackFrom && reviewResult.fallbackCode ? {
-    modelLabel: reviewResult.modelUsed ?? model.label,
-    fallback: { from: reviewResult.fallbackFrom, code: reviewResult.fallbackCode }
-  } : {};
+  const disclosure = reviewResult.status === "skipped-budget" ? void 0 : reviewResult;
+  const fallback = disclosure ? fallbackReasonOf(disclosure, knownSecrets) : void 0;
+  const fallbackSummary = fallback ? { modelLabel: disclosure?.modelUsed ?? model.label, fallback } : {};
   const scope = reviewScopeOf(selection);
   const envVar = PROVIDER_ENV_MAP2[config2.provider] ?? "API key";
   let summaryMarkdown;
