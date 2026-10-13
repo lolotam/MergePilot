@@ -78,6 +78,10 @@ each, and later asked for a fallback chain so a failed judge provider does not l
      `judge_threshold` and `judge_fallback` (jsonb, at most 3).
    - **Keys.** `typesafe` and `vercel-gateway` are key-only providers. They are stored and
      encrypted like every key, but they are never review providers.
+     *Note (2026-10-13):* `vercel-gateway` is no longer key-only. It is a full review provider
+     (ADR-0008 amendment, س31), so its one stored key serves review models on `/v1` and the judge,
+     like `openrouter` and `opencode-zen`. The judge still offers only `typesafe-ai/jev` for it,
+     and `typesafe` is now the only key-only provider.
    - **Settings.** They take a `judge` object, which the API validates against the Jev-only table.
      An enabled judge needs its own key; a fallback may lack a key and is skipped at run time.
    - **Routes.** `GET /judge/providers` (members) serves the table, and `POST /judge/test` (admins)

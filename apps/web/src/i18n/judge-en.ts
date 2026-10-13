@@ -1,7 +1,6 @@
 /** The Jev judge settings card and its key types (ADR-0015). */
 export const enJudge = {
   providerTypesafe: 'TypeSafe (Jev only)',
-  providerVercelGateway: 'Vercel AI Gateway (Jev only)',
   judgeCardTitle: 'Judge (Jev)',
   judgeCardDesc:
     'A cheap decision model that checks each finding before it is published (filters false positives) and spots comments that repeat an existing one. Billed on input tokens only.',

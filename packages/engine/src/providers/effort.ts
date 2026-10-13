@@ -203,7 +203,8 @@ export function isCompatibleReasoningModel(
   if (provider === 'nvidia' && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
     return true;
   }
-  if (provider === 'openrouter') {
+  // Vercel AI Gateway uses the same creator/model ids as OpenRouter.
+  if (provider === 'openrouter' || provider === 'vercel-gateway') {
     if (
       lowerModel.includes(':thinking') ||
       /nemotron|qwq|deepseek-r1/.test(lowerModel) ||

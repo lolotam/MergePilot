@@ -64,3 +64,15 @@
 3. عامل الـ SaaS (`process-review.ts`) بيشيل أي `baseUrl` جاي من المستودع من الإعداد الفعلي (الرئيسي وعناصر `fallback`).
 
 **مصدر `.mergepilot.yml`:** مراجعة الـ PR في الـ Action وفي الـ SaaS بتقرأ الملف من **base sha** (مش من فرع الـ PR)، والـ audit بيقرأه من `GITHUB_SHA` (الفرع اللي اتشغّل عليه بإذن كتابة). القرار ده يحمي حتى لو اتغيّر المصدر ده مستقبلًا.
+
+## تعديل (2026-10-13): Vercel AI Gateway مزود مراجعة كامل (س31)
+
+**السياق:** `vercel-gateway` كان نوع مفتاح للحَكَم Jev بس (ADR-0015). صاحب المشروع عايزه مزود مراجعة عادي زي OpenRouter: المفتاح يتحفظ مرة واحدة، والنموذج الرئيسي والاحتياطي والنموذج التقيل يعرضوا كل نماذج المحادثة بتاعته، والحَكَم يفضل يعرض Jev بس.
+
+**القرار:**
+1. `vercel-gateway` اتضاف لسجل المزودين (`API_PROVIDER_IDS` و`PROVIDER_REGISTRY`) كمزود `openai-compatible`، بعنوان ثابت `https://ai-gateway.vercel.sh/v1` زي باقي الـ presets (نفس قاعدة التعديل اللي فوق: `resolveBaseUrl` بيتجاهل أي override، والـ schema بيرفض `baseUrl` له). الإعدادات: `thinkingStyle: reasoning_effort`، النموذج المقترح `anthropic/claude-sonnet-4.5`، المفتاح من `AI_GATEWAY_API_KEY` (نفس متغير الحَكَم)، و`streamUsage: true` (بيطلب `stream_options.include_usage`).
+2. قايمة النماذج من `GET /v1/models`: بناخد `type: 'language'` بس، وبنشيل النسخ اللي آخرها `-batch` (للدفعات بس)، وبنشيل `typesafe-ai/jev` صراحة لأنه مش نموذج محادثة (بيتخدم على `/typesafe/v1/systemone` بس). النوع `evaluation` بقى من الأنواع اللي مش محادثة لكل المزودين. مستويات التفكير بتيجي من `supported_parameters` (فيها `reasoning`) زي OpenRouter.
+3. اختبار المفتاح قبل الحفظ لـ `vercel-gateway` بقى `GET /v1/models` بالمفتاح زي باقي المزودين. اختبار الحَكَم (`POST /judge/test`) ماتغيرش.
+4. `vercel-gateway` خرج من `JUDGE_KEY_ONLY_PROVIDER_IDS`، فبقى زي `openrouter` و`opencode-zen`: مفتاح واحد بيخدم المراجعة والحَكَم. جدول نماذج الحَكَم ماتغيرش: Vercel بيعرض `typesafe-ai/jev` بس، وعنوان الحَكَم الثابت `https://ai-gateway.vercel.sh/typesafe` زي ما هو.
+
+**النتائج:** مفيش migration، لأن معرّف المزود نص عادي. أي مفتاح Vercel متخزن قبل كده كنوع للحَكَم بس بقى يشتغل للمراجعة كمان من غير ما يتحفظ تاني.

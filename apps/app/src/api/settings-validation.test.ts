@@ -45,6 +45,36 @@ describe('PUT settings validation and key base URLs (J2)', { timeout: 25000 }, (
     expect(await errorCode({ heavyProvider: 'openai', heavyModel: 'gpt-5' })).toBe('heavy_key_missing');
   });
 
+  it('accepts Vercel AI Gateway as the main provider, a fallback and the heavy model once its key is stored', async () => {
+    const saved = await h.app.inject({
+      method: 'PUT',
+      url: '/api/workspaces/ws-1/keys/vercel-gateway',
+      headers: { cookie: h.adminCookie() },
+      payload: { apiKey: keyFor('vg') },
+    });
+    expect(saved.statusCode).toBe(200);
+    const settings = {
+      provider: 'vercel-gateway',
+      model: 'anthropic/claude-sonnet-4.5',
+      effort: 'high',
+      heavyProvider: 'vercel-gateway',
+      heavyModel: 'openai/gpt-5',
+      heavyThresholdLines: 900,
+      fallback: [
+        { provider: 'vercel-gateway', model: 'google/gemini-3-flash', effort: null },
+        { provider: 'anthropic', model: 'claude-opus-5' },
+      ],
+    };
+    expect((await put(settings)).statusCode).toBe(200);
+    const read = await h.app.inject({ method: 'GET', url: '/api/workspaces/ws-1/settings', headers: { cookie: h.memberCookie() } });
+    expect(read.json().settings).toMatchObject(settings);
+    // Its key also serves the Jev judge, with the Jev model only.
+    expect((await put({ judge: { enabled: true, provider: 'vercel-gateway', model: 'typesafe-ai/jev', mode: 'filter', threshold: 0.4 } })).statusCode).toBe(200);
+    expect(await errorCode({ judge: { enabled: true, provider: 'vercel-gateway', model: 'openai/gpt-5', mode: 'filter', threshold: 0.4 } })).toBe(
+      'judge_model_invalid',
+    );
+  });
+
   it('keeps the heavy model all-or-nothing', async () => {
     expect(await errorCode({ heavyProvider: 'anthropic' })).toBe('validation_error');
     expect(await errorCode({ heavyModel: 'claude-opus-5' })).toBe('validation_error');

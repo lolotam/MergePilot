@@ -1,4 +1,10 @@
-import { isJudgeKeyOnlyProviderId, resolveBaseUrl, testJudgeConnection, type FetchLike } from '@mergepilot/engine';
+import {
+  isJudgeKeyOnlyProviderId,
+  resolveBaseUrl,
+  testJudgeConnection,
+  type FetchLike,
+  type JudgeKeyOnlyProviderId,
+} from '@mergepilot/engine';
 import type { KeyProvider } from '../core/types.js';
 
 export class ValidateKeyError extends Error {
@@ -9,8 +15,9 @@ export class ValidateKeyError extends Error {
 }
 
 /**
- * A cheap "list models" call that proves a key works before it is saved. For `custom` the
- * caller MUST pass the SSRF-guarded fetch (core/safe-fetch.ts) with the already-checked URL.
+ * A cheap "list models" call that proves a key works before it is saved (review providers,
+ * Vercel AI Gateway included, on their fixed `/models`). For `custom` the caller MUST pass the
+ * SSRF-guarded fetch (core/safe-fetch.ts) with the already-checked URL.
  */
 export async function validateKey(
   provider: KeyProvider,
@@ -92,7 +99,7 @@ export async function validateKey(
 const KEY_ACCEPTED_CODES = new Set(['invalid-request', 'model-not-found', 'rate-limited', 'quota']);
 
 /** A Jev-only key (ADR-0015) is proven with one tiny `noul` question: auth failure = invalid key. */
-async function validateJudgeKey(provider: 'typesafe' | 'vercel-gateway', apiKey: string, fetchFn: FetchLike): Promise<void> {
+async function validateJudgeKey(provider: JudgeKeyOnlyProviderId, apiKey: string, fetchFn: FetchLike): Promise<void> {
   const result = await testJudgeConnection(provider, apiKey, { fetch: fetchFn });
   if (result.ok || KEY_ACCEPTED_CODES.has(result.code)) return;
   if (result.code === 'auth') throw new ValidateKeyError(`invalid key for ${provider}`);

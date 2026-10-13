@@ -1,5 +1,5 @@
 /**
- * Any OpenAI-compatible Chat Completions endpoint: xAI, DeepSeek, NVIDIA NIM, OpenRouter,
+ * Any OpenAI-compatible Chat Completions endpoint: xAI, DeepSeek, NVIDIA NIM, OpenRouter, Vercel AI Gateway,
  * OpenCode Zen/Go, Z.ai GLM, or a custom server. Ported from the owner's Browser-controle
  * extension (`src/providers/openai-compatible.js`), reduced to one streamed text answer:
  * the agent parts (tools, notebook, screenshots, message compaction) are not ported.
