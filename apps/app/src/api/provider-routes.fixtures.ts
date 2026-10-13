@@ -41,6 +41,9 @@ const config: AppConfig = {
 export interface ProviderHarness {
   app: FastifyInstance;
   credentials: CredentialService;
+  store: PgStore;
+  /** Adds a workspace with `u-admin` as its admin (and no member). */
+  addWorkspace: (id: string) => Promise<void>;
   adminCookie: () => string;
   memberCookie: () => string;
   /** The addresses the fake DNS answers with; change it to simulate DNS rebinding. */
@@ -94,6 +97,11 @@ export async function createProviderHarness(customFetch?: FetchLike): Promise<Pr
   return {
     app,
     credentials,
+    store,
+    addWorkspace: async (id) => {
+      await db.insert(authSchema.organization).values([{ id, name: `Workspace ${id}`, slug: id }]);
+      await db.insert(authSchema.member).values([{ id: `m-admin-${id}`, organizationId: id, userId: 'u-admin', role: 'admin' }]);
+    },
     adminCookie: () => signedSessionCookie('t-adm', config.authSecret),
     memberCookie: () => signedSessionCookie('t-mem', config.authSecret),
     dns,

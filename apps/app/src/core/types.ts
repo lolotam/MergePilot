@@ -8,8 +8,10 @@ import type {
   ReviewModel,
   Severity,
 } from '@mergepilot/engine';
+import type { BotLogo, PanelMode, ReviewerBotStore } from './bot-types.js';
 import type { RepoColorKey, RunMaintenanceStore } from './run-types.js';
 
+export * from './bot-types.js';
 export * from './run-types.js';
 
 /** Workspace roles (ADR-0007). Order matters: each role includes everything below it. */
@@ -37,12 +39,14 @@ export class WorkspaceDeletedError extends Error {
 }
 
 /**
- * Thrown by AppStore.createReviewRun when another run for the same workspace, repo, PR and head
- * commit is already `queued` or `running` (one active run per head; ADR-0009 amendment).
+ * Thrown by AppStore.createReviewRun when another run for the same workspace, repo, PR, head
+ * commit and bot slot is already `queued` or `running` (one active run per head and bot; ADR-0009
+ * amendment, ADR-0017).
  */
 export class ActiveRunExistsError extends Error {
-  constructor(repoFullName: string, pullNumber: number) {
-    super(`a review run for ${repoFullName}#${pullNumber} at this commit is already queued or running`);
+  constructor(repoFullName: string, pullNumber: number, readonly botSlot = 1) {
+    const bot = botSlot === 1 ? '' : ` (bot ${botSlot})`;
+    super(`a review run for ${repoFullName}#${pullNumber}${bot} at this commit is already queued or running`);
     this.name = 'ActiveRunExistsError';
   }
 }
@@ -93,6 +97,14 @@ export interface WorkspaceSettings {
   repoColors?: Record<string, RepoColorKey> | undefined;
   /** The Jev judge (ADR-0015); null / undefined = never configured (off). */
   judge?: JudgeSettings | null | undefined;
+  /**
+   * The reviewer panel (ADR-0017): the main bot's name and logo, and how the panel publishes.
+   * Stores always read back a value (the defaults); undefined on save keeps the stored value.
+   */
+  botName?: string | undefined;
+  botLogo?: BotLogo | undefined;
+  panelMode?: PanelMode | undefined;
+  panelMinAgreement?: number | undefined;
 }
 
 /** The Jev judge of a workspace: the configured provider plus up to three explicit fallbacks. */
@@ -187,6 +199,10 @@ export interface ReviewRun {
   findingsCount?: number | null | undefined;
   result?: ReviewRunResultPayload | null | undefined;
   reviewUrl?: string | null | undefined;
+  /** The reviewer-panel bot (ADR-0017): 1-5, 1 = the main bot. Stores read back 1 by default. */
+  botSlot?: number | undefined;
+  /** The bot's name when the run was created; null when not recorded. */
+  botName?: string | null | undefined;
 }
 
 /** A run as the worker records it; the store assigns id and timestamps. */
@@ -246,7 +262,7 @@ export interface ListReviewRunsResult {
 }
 
 /** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
-export interface AppStore extends RunMaintenanceStore {
+export interface AppStore extends RunMaintenanceStore, ReviewerBotStore {
   /** Returns false when this delivery id was already recorded (duplicate webhook). */
   recordDelivery(deliveryId: string, event: string): Promise<boolean>;
 
@@ -274,7 +290,7 @@ export interface AppStore extends RunMaintenanceStore {
    */
   /**
    * Also throws ActiveRunExistsError when the new (or reused) run would be a second queued/running
-   * run for the same workspace, repo, PR and head commit.
+   * run for the same workspace, repo, PR, head commit and bot slot (`botSlot` defaults to 1).
    */
   createReviewRun(run: NewReviewRun): Promise<ReviewRun>;
   /** Refreshes the heartbeat of a queued/running run; finished runs are left untouched. */
@@ -297,12 +313,16 @@ export interface AppStore extends RunMaintenanceStore {
     limitOrOptions?: number | ListReviewRunsOptions,
   ): Promise<ReviewRun[] | ListReviewRunsResult>;
   listReviewRunRepos(workspaceId: string): Promise<string[]>;
-  /** Finds an active review run ('queued' or 'running') matching repo, PR, and headSha. */
+  /**
+   * Finds an active review run ('queued' or 'running') matching repo, PR and headSha, of the given
+   * bot slot; with no slot, of any bot.
+   */
   findActiveReviewRun(
     workspaceId: string,
     repoFullName: string,
     pullNumber: number,
     headSha: string,
+    botSlot?: number,
   ): Promise<ReviewRun | null>;
   /**
    * For each (repo, PR), takes its latest run over all of the PR's runs; returns those latest runs

@@ -27,6 +27,8 @@ export function toRunDto(r: ReviewRun): ReviewRunDto {
     inputTokens: tokens.inputTokens,
     outputTokens: tokens.outputTokens,
     durationMs: runDurationMs(r),
+    botSlot: r.botSlot ?? 1,
+    botName: r.botName ?? null,
   };
 }
 

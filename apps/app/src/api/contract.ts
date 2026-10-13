@@ -9,15 +9,23 @@ import { z } from 'zod';
  * `:workspaceId` and enforce the role noted next to them (ADR-0007).
  */
 
-import { API_PROVIDER_IDS, SeveritySchema } from '@mergepilot/engine';
+import { SeveritySchema } from '@mergepilot/engine';
+import { BotLogoSchema, BotNameSchema, PanelMinAgreementSchema, PanelModeSchema } from './contract-bots.js';
 import { JudgeRunSchema, JudgeSettingsSchema, KeyProviderSchema } from './contract-judge.js';
+import {
+  ApiProviderSchema,
+  EffortSchema,
+  FallbackEntrySchema,
+  MAX_FALLBACK_MODELS,
+  ModelIdSchema,
+} from './contract-models.js';
 import { RepoColorsSchema, RunRetentionDaysSchema } from './contract-runs.js';
 
+export * from './contract-bots.js';
+export * from './contract-models.js';
 export * from './contract-runs.js';
 export * from './contract-judge.js';
 
-export const ApiProviderSchema = z.enum(API_PROVIDER_IDS);
-export type ApiProvider = z.infer<typeof ApiProviderSchema>;
 export type Severity = z.infer<typeof SeveritySchema>;
 
 export const ErrorBodySchema = z.object({
@@ -40,19 +48,6 @@ export const MeResponseSchema = z.object({
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 
-/** A thinking effort as providers name it (off / on / minimal / low / medium / high / xhigh / max ...). */
-export const EffortSchema = z.string().regex(/^[a-z0-9_-]{1,24}$/, 'Invalid effort');
-const ModelIdSchema = z.string().trim().min(1).max(200);
-
-export const MAX_FALLBACK_MODELS = 3;
-
-export const FallbackEntrySchema = z.object({
-  provider: ApiProviderSchema,
-  model: ModelIdSchema,
-  effort: EffortSchema.nullable().optional(),
-});
-export type FallbackEntry = z.infer<typeof FallbackEntrySchema>;
-
 /** GET (member) / PUT (admin) /api/workspaces/:workspaceId/settings */
 export const SettingsSchema = z.object({
   provider: ApiProviderSchema,
@@ -73,6 +68,12 @@ export const SettingsSchema = z.object({
   repoColors: RepoColorsSchema.optional(),
   /** The Jev judge (ADR-0015); null = off and cleared. Left out on PUT keeps the stored judge. */
   judge: JudgeSettingsSchema.nullable().optional(),
+  /** The reviewer panel (ADR-0017): main bot name (unique among the bots) and logo, output mode. Left out keeps them. */
+  botName: BotNameSchema.optional(),
+  botLogo: BotLogoSchema.optional(),
+  panelMode: PanelModeSchema.optional(),
+  /** Consensus only: bots that must find a finding to keep it (critical and high are always kept). */
+  panelMinAgreement: PanelMinAgreementSchema.optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -244,6 +245,9 @@ export const ReviewRunSchema = z.object({
   outputTokens: z.number().nullable().optional(),
   /** finishedAt - createdAt in ms; null while queued/running or when unknown. */
   durationMs: z.number().nullable().optional(),
+  /** The reviewer-panel bot that ran it (1 = main) and its name then (ADR-0017). */
+  botSlot: z.number().int().optional(),
+  botName: z.string().nullable().optional(),
 });
 export type ReviewRun = z.infer<typeof ReviewRunSchema>;
 
