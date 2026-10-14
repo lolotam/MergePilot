@@ -220,11 +220,18 @@ describe('processReviewJob — API-equivalent cost of subscription and token-pla
   it('completes the run without an equivalent when the display-only price lookup fails', async () => {
     const h = createHarness({ settings: {}, fakeModel: subscribed() });
     await h.store.replaceModelPrices('models.dev', [catalogEntry], FETCHED);
+    // The price store goes down once the bot's model is built: the config is already priced, so
+    // only the equivalent's lookup (which follows) meets the failure.
     const real = h.store.getModelPrice.bind(h.store);
-    let calls = 0;
+    const buildModel = h.deps.createModelForProvider!;
+    let modelBuilt = false;
+    h.deps.createModelForProvider = async (...args) => {
+      const built = await buildModel(...args);
+      modelBuilt = true;
+      return built;
+    };
     vi.spyOn(h.store, 'getModelPrice').mockImplementation(async (provider, model) => {
-      // The first lookup prices the bot's config; the second is the equivalent's.
-      if (++calls === 2) throw new Error('price store down');
+      if (modelBuilt) throw new Error('price store down');
       return real(provider, model);
     });
 
