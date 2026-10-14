@@ -61,4 +61,13 @@ describe('withDeadline', () => {
       new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)))) as typeof fetch;
     await expect(withDeadline(stalled, 20)('https://example.test')).rejects.toThrow(/timeout|aborted/i);
   });
+
+  it('keeps a signal the caller passed', async () => {
+    const stalled = ((_input: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)))) as typeof fetch;
+    const caller = new AbortController();
+    const request = withDeadline(stalled, 60_000)('https://example.test', { signal: caller.signal });
+    caller.abort(new Error('caller stopped'));
+    await expect(request).rejects.toThrow('caller stopped');
+  });
 });

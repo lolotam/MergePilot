@@ -202,45 +202,53 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, releaseCommit, problems, deployed });
 }
 
-async function rollBack(
-  cfg: ReleaseConfig,
-  ports: ReleasePorts,
-  dokploy: DokployPort,
-  failed: { sha: string; imageRef: string; releaseCommit: string; problems: string[]; deployed: Deployed },
-): Promise<ReleaseOutcome> {
+interface FailedRelease {
+  sha: string;
+  imageRef: string;
+  releaseCommit: string;
+  problems: string[];
+  deployed: Deployed;
+}
+
+/** Outcome of the rollback attempt: not attempted (with why), or the problems of the rolled-back release. */
+type RollbackResult = { attempted: false; reason: string } | { attempted: true; problems: string[] };
+
+async function attemptRollback(cfg: ReleaseConfig, ports: ReleasePorts, dokploy: DokployPort, failed: FailedRelease): Promise<RollbackResult> {
   const { github: gh, log } = ports;
   const previousSha = failed.deployed.sourceSha;
-  const report = [`Release of \`${failed.sha}\` (\`${failed.imageRef}\`) failed verification:`, ...failed.problems.map((p) => `- ${p}`)];
-  const openHold = () => gh.openHold(`Release hold: ${failed.sha.slice(0, 7)} failed verification`, report.join('\n'));
-
-  // The hold is what stops the next release, so no rollback error may skip it: every step that
-  // can throw runs here, and an error is written into the hold report instead of escaping.
-  let rollbackProblems: string[];
-  try {
-    const migrations = previousSha ? rollbackEligible(await gh.changedMigrations(previousSha, failed.sha)) : { eligible: false, migrations: [] };
-    if (!previousSha || !migrations.eligible) {
-      report.push('', previousSha
-        ? `Automatic rollback NOT attempted: migrations changed (${migrations.migrations.join(', ')}). Decide manually; do not restore the database automatically.`
-        : 'Automatic rollback NOT attempted: the previous release is unknown.');
-      return { kind: 'failed', detail: failed.problems.join('; '), hold: await openHold() };
-    }
-
-    const previousCompose = rewritePin(await gh.fileAt(previousSha, cfg.composePath), failed.deployed.imageRef);
-    const message = releaseMessage({ sourceCommit: previousSha, imageRef: failed.deployed.imageRef, previousSourceCommit: failed.sha, previousImageRef: failed.imageRef }, true);
-    await gh.writeReleaseCommit({ branch: cfg.releaseBranch, parentSha: previousSha, path: cfg.composePath, content: previousCompose, message, expectedHead: failed.releaseCommit });
-    log(`rolling back to ${failed.deployed.imageRef}`);
-    rollbackProblems = await deployAndVerify(ports, cfg, dokploy, { imageRef: failed.deployed.imageRef, sourceSha: previousSha }, `rollback to ${previousSha.slice(0, 7)}`);
-  } catch (err) {
-    rollbackProblems = [`rollback aborted: ${err instanceof Error ? err.message : String(err)}`];
-    report.push('', `Automatic rollback ABORTED: ${rollbackProblems[0]}. The release branch may still name the failed release; fix it by hand.`);
-    return { kind: 'failed', detail: [...failed.problems, ...rollbackProblems].join('; '), hold: await openHold() };
+  if (!previousSha) return { attempted: false, reason: 'the previous release is unknown' };
+  const migrations = rollbackEligible(await gh.changedMigrations(previousSha, failed.sha));
+  if (!migrations.eligible) {
+    return { attempted: false, reason: `migrations changed (${migrations.migrations.join(', ')}). Decide manually; do not restore the database automatically` };
   }
 
-  report.push('', rollbackProblems.length === 0
-    ? `Rolled back to \`${failed.deployed.imageRef}\`, verified healthy.`
-    : ['Rollback ALSO failed verification:', ...rollbackProblems.map((p) => `- ${p}`)].join('\n'));
-  const hold = await openHold();
-  return rollbackProblems.length === 0
-    ? { kind: 'rolled-back', detail: failed.problems.join('; '), hold }
-    : { kind: 'failed', detail: [...failed.problems, ...rollbackProblems].join('; '), hold };
+  const previousCompose = rewritePin(await gh.fileAt(previousSha, cfg.composePath), failed.deployed.imageRef);
+  const message = releaseMessage({ sourceCommit: previousSha, imageRef: failed.deployed.imageRef, previousSourceCommit: failed.sha, previousImageRef: failed.imageRef }, true);
+  await gh.writeReleaseCommit({ branch: cfg.releaseBranch, parentSha: previousSha, path: cfg.composePath, content: previousCompose, message, expectedHead: failed.releaseCommit });
+  log(`rolling back to ${failed.deployed.imageRef}`);
+  const problems = await deployAndVerify(ports, cfg, dokploy, { imageRef: failed.deployed.imageRef, sourceSha: previousSha }, `rollback to ${previousSha.slice(0, 7)}`);
+  return { attempted: true, problems };
+}
+
+/**
+ * Rolls back when it is safe, then always opens the hold issue that stops the next release. A
+ * rollback error is written into the hold report instead of escaping; the hold is opened once,
+ * outside that error handling, so failing to open it is never mistaken for a rollback error.
+ */
+async function rollBack(cfg: ReleaseConfig, ports: ReleasePorts, dokploy: DokployPort, failed: FailedRelease): Promise<ReleaseOutcome> {
+  const report = [`Release of \`${failed.sha}\` (\`${failed.imageRef}\`) failed verification:`, ...failed.problems.map((p) => `- ${p}`)];
+  let result: RollbackResult;
+  try {
+    result = await attemptRollback(cfg, ports, dokploy, failed);
+    if (!result.attempted) report.push('', `Automatic rollback NOT attempted: ${result.reason}.`);
+    else if (result.problems.length === 0) report.push('', `Rolled back to \`${failed.deployed.imageRef}\`, verified healthy.`);
+    else report.push('', ['Rollback ALSO failed verification:', ...result.problems.map((p) => `- ${p}`)].join('\n'));
+  } catch (err) {
+    result = { attempted: true, problems: [`rollback aborted: ${err instanceof Error ? err.message : String(err)}`] };
+    report.push('', `Automatic rollback ABORTED: ${result.problems[0]}. The release branch may still name the failed release; fix it by hand.`);
+  }
+
+  const hold = await ports.github.openHold(`Release hold: ${failed.sha.slice(0, 7)} failed verification`, report.join('\n'));
+  if (result.attempted && result.problems.length === 0) return { kind: 'rolled-back', detail: failed.problems.join('; '), hold };
+  return { kind: 'failed', detail: [...failed.problems, ...(result.attempted ? result.problems : [])].join('; '), hold };
 }

@@ -9,10 +9,15 @@ type Fetch = typeof fetch;
 /** Longest any single request (headers and body) may take, so a stalled call cannot outlive the poll deadlines. */
 export const REQUEST_TIMEOUT_MS = 60_000;
 
-/** `fetchImpl` with a per-request deadline; the abort also covers reading the response body. */
+/**
+ * `fetchImpl` with a per-request deadline; the abort also covers reading the response body. A
+ * signal the caller passes still aborts the request too.
+ */
 export function withDeadline(fetchImpl: Fetch, timeoutMs = REQUEST_TIMEOUT_MS): Fetch {
-  return ((input: Parameters<Fetch>[0], init?: Parameters<Fetch>[1]) =>
-    fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) })) as Fetch;
+  return ((input: Parameters<Fetch>[0], init?: Parameters<Fetch>[1]) => {
+    const deadline = AbortSignal.timeout(timeoutMs);
+    return fetchImpl(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline });
+  }) as Fetch;
 }
 
 async function json<T>(res: Response, what: string): Promise<T> {

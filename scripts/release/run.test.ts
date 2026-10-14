@@ -240,6 +240,14 @@ describe('runRelease deploy, verification and rollback', () => {
     expect(vi.mocked(write.github.openHold).mock.calls[0]?.[1]).toContain('Automatic rollback ABORTED');
   });
 
+  it('a failure to open the hold is reported as such, not as a rollback error, and opened once', async () => {
+    const { cfg, ports, github } = setup({ deploymentStatus: 'error', migrations: ['apps/app/migrations/0011_x.sql'] });
+    vi.mocked(github.openHold).mockRejectedValue(new Error('open release hold answered HTTP 502'));
+    await expect(runRelease(cfg, ports)).rejects.toThrow('open release hold answered HTTP 502');
+    expect(github.openHold).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(github.openHold).mock.calls[0]?.[1]).not.toContain('ABORTED');
+  });
+
   it('fails verification on a wrong public health answer even if containers look right', async () => {
     const { cfg, ports } = setup();
     vi.mocked(ports.health).mockResolvedValue({ status: 502, body: 'Bad Gateway' });
