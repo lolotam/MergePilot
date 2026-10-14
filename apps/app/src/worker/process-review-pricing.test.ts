@@ -218,20 +218,19 @@ describe('processReviewJob — API-equivalent cost of subscription and token-pla
   });
 
   it('completes the run without an equivalent when the display-only price lookup fails', async () => {
-    const h = createHarness({ settings: {}, fakeModel: subscribed() });
-    await h.store.replaceModelPrices('models.dev', [catalogEntry], FETCHED);
-    // The price store goes down once the bot's model is built: the config is already priced, so
-    // only the equivalent's lookup (which follows) meets the failure.
+    // A token plan's equivalent is the only lookup of the plain `zai` provider in a run, so only it fails.
+    const h = createHarness({ settings: { provider: 'zai-coding', model: 'glm-5.3' } });
+    await h.store.replaceModelPrices(
+      'models.dev',
+      [
+        { provider: 'zai-coding', model: 'glm-5.3', inputPerMTok: 0, outputPerMTok: 0, source: 'models.dev' },
+        { provider: 'zai', model: 'glm-5.3', inputPerMTok: 1.4, outputPerMTok: 4.4, source: 'models.dev' },
+      ],
+      FETCHED,
+    );
     const real = h.store.getModelPrice.bind(h.store);
-    const buildModel = h.deps.createModelForProvider!;
-    let modelBuilt = false;
-    h.deps.createModelForProvider = async (...args) => {
-      const built = await buildModel(...args);
-      modelBuilt = true;
-      return built;
-    };
     vi.spyOn(h.store, 'getModelPrice').mockImplementation(async (provider, model) => {
-      if (modelBuilt) throw new Error('price store down');
+      if (provider === 'zai') throw new Error('price store down');
       return real(provider, model);
     });
 
@@ -239,7 +238,7 @@ describe('processReviewJob — API-equivalent cost of subscription and token-pla
     const run = await h.latestRun();
 
     expect(result.status).toBe('completed');
-    expect(run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 });
+    expect(run?.costUsd).toBe(0);
+    expect(run?.result?.pricing?.apiEquivalentUsd).toBeUndefined();
   });
-
 });
