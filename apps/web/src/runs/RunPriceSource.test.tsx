@@ -37,4 +37,13 @@ describe('run detail cost with its pricing source', () => {
     renderCost({ costUsd: 0.01 });
     expect(screen.getByTestId('run-cost').textContent).toBe('$0.0100');
   });
+  it('shows what a subscription run would have cost at the API price, under its $0 cost', () => {
+    renderCost({
+      costUsd: 0,
+      pricing: { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0, apiEquivalentUsd: 0.0123, apiEquivalentSource: 'catalog:models.dev' },
+    });
+    expect(screen.getByTestId('run-cost').textContent).toContain('$0.0000 · covered by the subscription');
+    expect(screen.getByTestId('run-api-equivalent').textContent).toBe('≈ $0.0123 API-equivalent');
+  });
+
 });

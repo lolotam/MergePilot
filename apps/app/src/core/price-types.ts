@@ -55,8 +55,11 @@ export function findOverride(overrides: readonly PriceOverride[] | undefined, pr
   return pickPrice(overrides ?? [], provider, model);
 }
 
-/** Which source priced a model: `static` is the judge's built-in Jev table (the last resort). */
-export type PricingSource = 'override' | 'repo' | `catalog:${PriceSource}` | 'static' | 'unknown';
+/**
+ * Which source priced a model: `subscription` = covered by a connected consumer subscription
+ * (ADR-0020), `static` = the judge's built-in Jev table (the last resort).
+ */
+export type PricingSource = 'override' | 'repo' | `catalog:${PriceSource}` | 'subscription' | 'static' | 'unknown';
 
 /** `result.pricing` of a run: what priced its primary model; null prices when unknown. */
 export interface RunPricing {
@@ -65,4 +68,12 @@ export interface RunPricing {
   outputPerMTok: number | null;
   /** ISO time the catalog price was fetched (catalog sources only). */
   fetchedAt?: string | undefined;
+  /**
+   * What the same tokens would have cost at the model's API price, for a run whose real cost does
+   * not reflect them: a subscription or a flat-rate token plan (ADR-0024). Display only: never part
+   * of `cost_usd`, the monthly budget or the GitHub summary. Absent when that price is unknown.
+   */
+  apiEquivalentUsd?: number | undefined;
+  /** Where that API price came from (`override`, `catalog:…`), when `apiEquivalentUsd` is set. */
+  apiEquivalentSource?: PricingSource | undefined;
 }

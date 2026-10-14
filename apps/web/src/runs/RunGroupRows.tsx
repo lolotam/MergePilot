@@ -5,7 +5,7 @@ import { useI18n } from '../i18n/context.js';
 import { RunActionCell } from './RunActionCell.js';
 import { RunBotChip, showsRunBot } from './RunBotChip.js';
 import { RunModelBadge, RunProviderBadge, RunSeverityChips } from './RunBadges.js';
-import { RunDate, RunStatusBadge, RunTokens, formatCost, isDeletable } from './RunCells.js';
+import { RunDate, RunStatusBadge, RunTokens, isDeletable, RunCostCell } from './RunCells.js';
 import { RunDuration } from './RunDuration.js';
 import { RepoChip } from './RepoColorPicker.js';
 import type { RepoColor } from './repo-colors.js';
@@ -72,7 +72,7 @@ function RunDetailCells({ run, ctx, showBot }: { run: ReviewRun; ctx: RunRowsCon
       <td className={`${td} font-mono tabular-nums whitespace-nowrap`}><RunTokens value={run.inputTokens} /></td>
       <td className={`${td} font-mono tabular-nums whitespace-nowrap`}><RunTokens value={run.outputTokens} /></td>
       <td className={`${td} font-mono tabular-nums whitespace-nowrap`} data-testid="run-duration"><RunDuration run={run} /></td>
-      <td className={`${td} font-mono text-ink-900 dark:text-ink-100 whitespace-nowrap`}>{formatCost(run.costUsd)}</td>
+      <td className={`${td} font-mono text-ink-900 dark:text-ink-100 whitespace-nowrap`}><RunCostCell costUsd={run.costUsd} apiEquivalentUsd={run.apiEquivalentUsd} /></td>
       <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}><RunDate value={run.createdAt} /></td>
       <td className={`${td} text-center`} onClick={(e) => e.stopPropagation()}>
         <RunActionCell run={run} isMember={ctx.isMember} onRetry={ctx.onRetry} isRetrying={ctx.retryingId === run.id} />
@@ -200,7 +200,7 @@ export function RunGroupRows({ group, number, color, shortRepo, expanded, onTogg
         <td className={`${td} font-mono tabular-nums font-semibold whitespace-nowrap`}><RunTokens value={group.outputTokens} /></td>
         {/* Like status, provider and model: the latest run's duration, not a sum. */}
         <td className={`${td} font-mono tabular-nums whitespace-nowrap`} data-testid="run-duration"><RunDuration run={latest} /></td>
-        <td className={`${td} font-mono font-semibold text-ink-900 dark:text-ink-100 whitespace-nowrap`}>{formatCost(group.costUsd)}</td>
+        <td className={`${td} font-mono font-semibold text-ink-900 dark:text-ink-100 whitespace-nowrap`}><RunCostCell costUsd={group.costUsd} apiEquivalentUsd={group.apiEquivalentUsd} /></td>
         <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}><RunDate value={latest.createdAt} /></td>
         <td className={`${td} text-center text-ink-300 dark:text-ink-600`}>—</td>
       </ClickableRow>

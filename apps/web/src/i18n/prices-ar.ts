@@ -3,7 +3,7 @@ export const arPrices = {
   pricesCardTitle: 'أسعار النماذج',
   pricesCardDesc: 'سعر كل نموذج تستخدمه مساحة العمل، بالدولار لكل مليون توكن.',
   pricesNote:
-    'تُجلب الأسعار تلقائيًا من OpenRouter وVercel وmodels.dev وتُحدَّث يوميًا. تظهر خطط التوكن بسعر $0 لأن الاشتراك يغطيها. «غير معروف» يعني أن تكلفة المراجعة ستظهر «—» حتى تحدد سعرًا.',
+    'تُجلب الأسعار تلقائيًا من OpenRouter وVercel وmodels.dev وتُحدَّث يوميًا. تظهر خطط التوكن والاشتراكات بسعر $0 لأن الخطة تغطيها، وتعرض مراجعاتها أيضًا ما كانت ستكلفه التوكنات بسعر الـ API. «غير معروف» يعني أن تكلفة المراجعة ستظهر «—» حتى تحدد سعرًا.',
   pricesNone: 'لا توجد نماذج لتسعيرها بعد. احفظ إعدادات المراجعة أعلاه أولًا.',
   pricesLoadError: 'تعذر تحميل أسعار النماذج.',
   pricesRoleCol: 'الدور',
@@ -23,6 +23,7 @@ export const arPrices = {
   pricesSourceOverride: 'يدوي',
   pricesSourceRepo: 'ملف المستودع',
   pricesSourceStatic: 'مدمج',
+  pricesSourceSubscription: 'اشتراك',
   pricesSourceUnknown: 'غير معروف',
   pricesCacheRead: 'قراءة الكاش: {price} لكل مليون',
   pricesLastRefresh: 'آخر تحديث',
@@ -42,6 +43,9 @@ export const arPrices = {
   runPriceOverride: 'سعر يدوي',
   runPriceRepo: 'سعر ملف المستودع',
   runPriceStatic: 'سعر مدمج',
+  runPriceSubscription: 'يغطيه الاشتراك',
+  runApiEquivalent: '≈ {cost} مكافئ API',
+  runApiEquivalentTitle: 'ما كانت ستكلفه هذه التوكنات بسعر الـ API. غير محسوبة عليك، ولا تدخل في الميزانية.',
   runPriceUnknown: 'السعر غير معروف',
   runPriceOther: 'سعر {source}',
   // Admin: price refresh

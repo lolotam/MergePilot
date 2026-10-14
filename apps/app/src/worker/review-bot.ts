@@ -19,6 +19,7 @@ import type { BotOutcome, BotRun, PanelContext } from './panel-types.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewResult } from './types.js';
+import { apiEquivalentFields, apiEquivalentPrice, type ApiEquivalentPrice } from './api-equivalent.js';
 
 export const WORKSPACE_DELETED = 'workspace_deleted';
 
@@ -75,9 +76,15 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
           : {}),
       });
     }
+    // A subscription covers the model, so the run's real cost is $0; the API price its config was
+    // resolved with is kept for the display-only equivalent (ADR-0024).
     const pricing: RunPricing = model.includedInSubscription
-      ? { source: 'static', inputPerMTok: 0, outputPerMTok: 0 }
+      ? { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 }
       : configuredPricing;
+    const apiPrice = await apiEquivalentPrice(deps.store, settings, model, choice, {
+      pricing: effectiveConfig.budget.pricing,
+      record: configuredPricing,
+    });
     // A configured fallback left out (no key, or a custom URL that failed the SSRF check) is
     // disclosed in the log and on the run record; it is never called.
     const skippedNote = skippedFallbacksNote(model);
@@ -110,7 +117,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         await runBotReview({ ...params, prFiles: consensus.prFiles, selection: consensus.selection }),
         { knownSecrets, judge: judgeSetup.judge },
       );
-      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing);
+      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice);
       if (outcome.fallback) {
         const { from, code, detail: why } = outcome.fallback;
         deps.log?.(`Fallback used: ${from} failed (${code})${why ? `: ${why}` : ''}`);
@@ -131,7 +138,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
           }
         : {}),
     });
-    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing);
+    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice);
     record.finish.reviewUrl = reviewResult.reviewUrl ?? null;
     await finishBotRun(ctx, br, record.finish, reviewResult.runResult);
     return { slot, result: record.result, findings: record.finish.findingsCount ?? 0 };
@@ -156,6 +163,7 @@ function recordOf(
   knownSecrets: Secret[],
   skippedNote: string | undefined,
   pricing: RunPricing,
+  apiPrice?: ApiEquivalentPrice | undefined,
 ): BotRecord {
   const status: ReviewRunStatus =
     review.outcome === 'completed'
@@ -184,8 +192,9 @@ function recordOf(
         judge: judged.judge,
         knownSecrets,
       }),
-      // What priced this bot's own model (ADR-0016).
-      pricing,
+      // What priced this bot's own model (ADR-0016), plus the display-only API-equivalent of a
+      // subscription or token-plan run (ADR-0024), from its own usage before the judge's tokens.
+      pricing: { ...pricing, ...apiEquivalentFields(rr.usage, review.fallbackFrom ? undefined : apiPrice) },
     };
     findingsCount = rr.inline.length + rr.summaryOnly.length;
   } else if (status === 'skipped') {

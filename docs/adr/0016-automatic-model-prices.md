@@ -3,7 +3,7 @@
 - **Status:** Accepted (2026-10-13)
 - **Related to:** ADR-0008, ADR-0014, ADR-0015, docs/decisions.ar.md (batch 10, Q29)
 
-**Amendment — ADR-0020:** a connected consumer subscription overrides API-token price estimates with zero incremental API cost and records `source: 'static'`. Its token usage remains recorded. API-key, judge, and unknown-cost-after-fallback rules below remain applicable to those calls.
+**Amendment — ADR-0020:** a connected consumer subscription overrides API-token price estimates with zero incremental API cost and records `source: 'subscription'` (`'static'` before ADR-0024) and, when the model's API price is known, a display-only `apiEquivalentUsd` (ADR-0024). Its token usage remains recorded. API-key, judge, and unknown-cost-after-fallback rules below remain applicable to those calls.
 
 ## Context
 
@@ -35,7 +35,7 @@ anything. The owner asked to fetch prices automatically from the providers that 
    - **Tiers ignored.** models.dev `tiers` and `context_over_200k` are ignored: the base price
      applies. Long-context requests are therefore slightly underpriced.
    - **Token plans.** Plans such as `zai-coding-plan` and `xiaomi-token-plan-*` are priced at 0 by
-     the catalog. A run on them costs $0, which is what the customer pays per token.
+     the catalog. A run on them costs $0, which is what the customer pays per token; since ADR-0024 it also records what the tokens would cost at the plain API price, for display only.
 2. **Fetching.**
    - **Requests.** Plain GETs to the fixed URLs. No key, cookie or auth header is ever sent.
    - **Limits.** Each source has a 30 s timeout that covers the body too, and a 25 MB body cap

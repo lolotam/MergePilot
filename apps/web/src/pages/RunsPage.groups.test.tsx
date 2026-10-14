@@ -191,4 +191,16 @@ describe('RunsPage grouped by PR', () => {
     expect(texts[2]).toContain('web');
     expect(texts[2]).not.toContain('team-a/web');
   });
+  it('shows the API-equivalent of subscription runs under the cost, summed on the parent row', () => {
+    const group = makeGroup([
+      makeRun({ id: 's2', pullNumber: 11, costUsd: 0, apiEquivalentUsd: 0.02 }),
+      makeRun({ id: 's1', pullNumber: 11, costUsd: 0, apiEquivalentUsd: 0.01 }),
+    ]);
+    renderRunsPage({ groups: [group] });
+    expect(cellTexts(rows()[0]!)).toContain('$0.0000≈ $0.0300');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the runs of acme/backend#11' }));
+    expect(cellTexts(screen.getAllByTestId('run-sub-row')[0]!)).toContain('$0.0000≈ $0.0200');
+  });
+
 });

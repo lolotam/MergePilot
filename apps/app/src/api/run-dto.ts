@@ -4,6 +4,14 @@ import { computeSeverityCounts, type ReviewRun as ReviewRunDto, type RunGroup } 
 
 const iso = (d: Date | string) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
 
+/** Like the store's group sums: null when no run has a value. */
+const sumOrNull = (values: Array<number | null>): number | null => {
+  const known = values.filter((v): v is number => v !== null);
+  return known.length === 0 ? null : known.reduce((a, b) => a + b, 0);
+};
+
+const apiEquivalentOf = (r: ReviewRun): number | null => r.result?.pricing?.apiEquivalentUsd ?? null;
+
 /** A run as the runs list returns it (no result payload; tokens, severity counts and duration from it). */
 export function toRunDto(r: ReviewRun): ReviewRunDto {
   const tokens = runTokens(r);
@@ -14,6 +22,7 @@ export function toRunDto(r: ReviewRun): ReviewRunDto {
     headSha: r.headSha,
     status: r.status,
     costUsd: r.costUsd,
+    apiEquivalentUsd: apiEquivalentOf(r),
     detail: r.detail,
     createdAt: iso(r.createdAt),
     finishedAt: r.finishedAt ? iso(r.finishedAt) : null,
@@ -38,6 +47,7 @@ export function toRunGroupDto(g: ReviewRunGroup): RunGroup {
     pullNumber: g.pullNumber,
     runCount: g.runCount,
     costUsd: g.costUsd,
+    apiEquivalentUsd: sumOrNull(g.runs.map(apiEquivalentOf)),
     inputTokens: g.inputTokens,
     outputTokens: g.outputTokens,
     runs: g.runs.map(toRunDto),

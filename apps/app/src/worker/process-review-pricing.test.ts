@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PriceEntry } from '@mergepilot/engine';
+import type { PriceEntry, ReviewModel } from '@mergepilot/engine';
 import type { JudgeSettings } from '../core/types.js';
-import { createHarness, type HarnessOptions } from './model-settings.fixtures.js';
+import { createHarness, WORKSPACE_ID, type HarnessOptions } from './model-settings.fixtures.js';
 import { processReviewJob } from './process-review.js';
 
 const FETCHED = new Date('2026-10-13T02:30:00.000Z');
@@ -110,5 +110,73 @@ describe('processReviewJob — automatic model prices (ADR-0016)', () => {
     await processReviewJob(h.job, h.deps);
     const run = await h.latestRun();
     expect(run?.result?.judge?.costUsd).toBeCloseTo((1000 * 0.5) / 1_000_000, 12);
+  });
+});
+
+describe('processReviewJob — API-equivalent cost of subscription and token-plan runs (ADR-0024)', () => {
+  const answer = (findings: unknown[] = []) =>
+    vi.fn(async () => ({
+      text: JSON.stringify({ summary: 'LGTM', findings }),
+      finishReason: 'stop' as const,
+      usage: { inputTokens: 50, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    }));
+  const subscribed = (findings: unknown[] = []): ReviewModel => ({ label: 'anthropic:claude-3-5-sonnet', includedInSubscription: true, generate: answer(findings) });
+  const monthStart = () => { const now = new Date(); return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)); };
+
+  it('keeps a subscription run at $0, records what its tokens would cost at the API price, and leaves the monthly spend at $0', async () => {
+    const { run, store } = await review({ catalog: [catalogEntry], fakeModel: subscribed() });
+
+    expect(run?.costUsd).toBe(0);
+    expect(run?.result?.pricing).toMatchObject({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0, apiEquivalentSource: 'catalog:models.dev' });
+    expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo((50 * 3 + 20 * 15) / 1_000_000, 9);
+    expect(await store.monthCostUsd(WORKSPACE_ID, monthStart())).toBe(0);
+  });
+
+  it('shows no equivalent at all (never $0) when the API price of the subscription model is unknown', async () => {
+    const { run } = await review({ fakeModel: subscribed() });
+
+    expect(run?.costUsd).toBe(0);
+    expect(run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 });
+  });
+
+  it('prices a $0 token-plan run as the same model on the plain API provider', async () => {
+    const { run } = await review({
+      settings: { provider: 'zai-coding', model: 'glm-5.3' },
+      catalog: [
+        { provider: 'zai-coding', model: 'glm-5.3', inputPerMTok: 0, outputPerMTok: 0, source: 'models.dev' },
+        { provider: 'zai', model: 'glm-5.3', inputPerMTok: 1.4, outputPerMTok: 4.4, source: 'models.dev' },
+      ],
+    });
+
+    expect(run?.costUsd).toBe(0);
+    expect(run?.result?.pricing).toMatchObject({ source: 'catalog:models.dev', inputPerMTok: 0, outputPerMTok: 0, apiEquivalentSource: 'catalog:models.dev' });
+    expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo((50 * 1.4 + 20 * 4.4) / 1_000_000, 9);
+  });
+
+  it("computes the equivalent from the model's own usage, not the judge's tokens added to the run", async () => {
+    const judge: JudgeSettings = { enabled: true, provider: 'opencode-zen', model: 'jev-1.13', uses: ['annotate', 'dedupe'], threshold: 0.35, fallback: [] };
+    const finding = { path: 'src/main.ts', line: 2, side: 'RIGHT', title: 'Bug', body: 'Bug body', severity: 'medium', category: 'correctness', evidence: 'b', confidence: 0.9 };
+    const model = subscribed([finding]);
+    const h = createHarness({ settings: { judge, minSeverity: 'low' }, fakeModel: model });
+    await h.store.replaceModelPrices(
+      'models.dev',
+      [catalogEntry, { provider: 'opencode-zen', model: 'jev-1.13', inputPerMTok: 0.5, outputPerMTok: 0, source: 'models.dev' }],
+      FETCHED,
+    );
+    h.deps.judgeFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { questions: Record<string, unknown> };
+      const answers = Object.fromEntries(Object.keys(body.questions).map((id) => [id, { type: 'noul', noul: 0.9 }]));
+      return new Response(JSON.stringify({ answers, usage: { input_tokens: 1000, output_tokens: 0 } }));
+    });
+
+    await processReviewJob(h.job, h.deps);
+    const run = await h.latestRun();
+
+    // Every call of the review model (the review and its verify pass) is 50 in / 20 out; the judge's
+    // 1,000 input tokens are in the stored usage but not in the equivalent.
+    const calls = vi.mocked(model.generate).mock.calls.length;
+    expect(run?.result?.usage?.inputTokens).toBe(calls * 50 + 1000);
+    expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo((calls * 50 * 3 + calls * 20 * 15) / 1_000_000, 9);
+    expect(run?.costUsd).toBeCloseTo((1000 * 0.5) / 1_000_000, 12);
   });
 });

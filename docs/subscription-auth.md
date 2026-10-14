@@ -20,7 +20,7 @@ Access tokens, refresh tokens, expiry, and provider-specific account data are st
 
 Expired tokens are refreshed under a workspace/provider-specific Postgres advisory lock. Fresh credentials use a lock-free read. Duplicate refreshes share one promise, and at most two refresh transactions run per process to leave database connections available for ordinary requests. Login, API-key replacement, backup restore, deletion, and refresh use the same lock, including across web and worker processes. Failed refresh preserves the stored credential and asks the user to sign in again. Tokens are resolved again before model calls during a review.
 
-Subscription model calls report token usage but have **$0 incremental API cost**; the subscription itself is billed separately by the provider. Paid API fallbacks retain the existing unknown-cost-after-fallback behavior, and judge calls keep their own prices.
+Subscription model calls report token usage but have **$0 incremental API cost**; the subscription itself is billed separately by the provider. The run record also keeps a display-only **API-equivalent** of that usage (`result.pricing.apiEquivalentUsd`, ADR-0024) that never enters `cost_usd`, the monthly budget or the GitHub summary. Paid API fallbacks retain the existing unknown-cost-after-fallback behavior, and judge calls keep their own prices.
 
 Credential-inclusive backups passphrase-encrypt the entire subscription envelope. A restored account can require a new login if its refresh token has subsequently rotated or been revoked.
 

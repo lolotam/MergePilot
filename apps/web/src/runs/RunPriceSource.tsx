@@ -20,6 +20,15 @@ export function RunCost({ costUsd, pricing }: RunCostProps) {
           {runPriceLabel(pricing.source, t)}
         </span>
       ) : null}
+      {pricing?.apiEquivalentUsd !== undefined ? (
+        <div
+          data-testid="run-api-equivalent"
+          className="font-sans text-[11px] font-normal text-ink-500 dark:text-ink-400"
+          title={t('runApiEquivalentTitle')}
+        >
+          {t('runApiEquivalent', { cost: `$${pricing.apiEquivalentUsd.toFixed(4)}` })}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -68,6 +68,21 @@ export function formatCost(value: number | null | undefined): string {
   return value === null || value === undefined ? '—' : `$${value.toFixed(4)}`;
 }
 
+/** The cost cell: the real cost and, under it, what a subscription run's tokens would cost at the API price (ADR-0024). */
+export function RunCostCell({ costUsd, apiEquivalentUsd }: { costUsd: number | null | undefined; apiEquivalentUsd?: number | null | undefined }) {
+  const { t } = useI18n();
+  return (
+    <>
+      {formatCost(costUsd)}
+      {apiEquivalentUsd !== null && apiEquivalentUsd !== undefined ? (
+        <div className="text-[10px] font-normal text-ink-500 dark:text-ink-400" title={t('runApiEquivalentTitle')}>
+          ≈ {formatCost(apiEquivalentUsd)}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /** Queued and running runs are never deleted (the server skips them too). */
 export function isDeletable(run: Pick<ReviewRun, 'status'>): boolean {
   return run.status !== 'queued' && run.status !== 'running';

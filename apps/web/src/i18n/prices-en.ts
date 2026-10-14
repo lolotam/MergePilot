@@ -3,7 +3,7 @@ export const enPrices = {
   pricesCardTitle: 'Model prices',
   pricesCardDesc: 'The price of every model this workspace uses, in USD per million tokens.',
   pricesNote:
-    'Prices come automatically from OpenRouter, Vercel and models.dev and are refreshed daily. Token plans show $0 because the subscription covers them. "Unknown" means the run cost shows "—" until you set a price.',
+    'Prices come automatically from OpenRouter, Vercel and models.dev and are refreshed daily. Token plans and subscriptions show $0 because the plan covers them; their runs also show what the tokens would cost at the API price. "Unknown" means the run cost shows "—" until you set a price.',
   pricesNone: 'No models to price yet. Save the review settings above first.',
   pricesLoadError: 'Could not load the model prices.',
   pricesRoleCol: 'Role',
@@ -23,6 +23,7 @@ export const enPrices = {
   pricesSourceOverride: 'Manual',
   pricesSourceRepo: 'Repo file',
   pricesSourceStatic: 'Built-in',
+  pricesSourceSubscription: 'Subscription',
   pricesSourceUnknown: 'Unknown',
   pricesCacheRead: 'Cache read: {price} per 1M',
   pricesLastRefresh: 'Last refresh',
@@ -42,6 +43,9 @@ export const enPrices = {
   runPriceOverride: 'manual price',
   runPriceRepo: 'repo file price',
   runPriceStatic: 'built-in price',
+  runPriceSubscription: 'covered by the subscription',
+  runApiEquivalent: '≈ {cost} API-equivalent',
+  runApiEquivalentTitle: 'What these tokens would cost at the API price. Not charged, and not counted in the budget.',
   runPriceUnknown: 'price unknown',
   runPriceOther: '{source} price',
   // Admin: price refresh

@@ -44,7 +44,7 @@ export const PriceFieldsSchema = z.object({
   cacheWritePerMTok: z.number().optional(),
 });
 
-/** `override`, `repo` (runs only), `catalog:<source>`, `static` (the judge's Jev table) or `unknown`. */
+/** `override`, `repo` (runs only), `catalog:<source>`, `subscription` (runs only), `static` (the judge's Jev table) or `unknown`. */
 export const PricingSourceSchema = z.string();
 
 /** `result.pricing` of a run: which source priced its primary model. */
@@ -53,6 +53,9 @@ export const RunPricingSchema = z.object({
   inputPerMTok: z.number().nullable(),
   outputPerMTok: z.number().nullable(),
   fetchedAt: z.string().optional(),
+  /** Display-only API-equivalent of a subscription or token-plan run (ADR-0024); absent when unknown. */
+  apiEquivalentUsd: z.number().optional(),
+  apiEquivalentSource: PricingSourceSchema.optional(),
 });
 
 export const PRICED_MODEL_ROLES = ['primary', 'heavy', 'fallback', 'judge', 'judge-fallback'] as const;
