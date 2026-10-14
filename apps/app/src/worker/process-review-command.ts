@@ -2,11 +2,15 @@ import { isAuthorizedToControlPause, replyReviewCommandRejected, type ReviewComm
 import { workerLogger } from '../core/logger.js';
 import { isPrClosedOrMerged, type PullRequestDetails } from '../core/pull-request-state.js';
 import type { ReviewCommandJob } from '../core/types.js';
-import { processReviewJob } from './process-review.js';
+import { DUPLICATE, processReviewJob } from './process-review.js';
 import type { ProcessReviewDeps } from './types.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
 
-export type ReviewCommandOutcome = 'reviewed' | ReviewCommandRejection | 'skipped';
+/**
+ * `reviewed`: the forced review completed. `review_failed` / `review_skipped`: it ran but did not
+ * complete (the run row has the detail). `skipped`: the installation is unknown or suspended.
+ */
+export type ReviewCommandOutcome = 'reviewed' | 'review_failed' | 'review_skipped' | ReviewCommandRejection | 'skipped';
 
 /**
  * Runs a queued `@mergepilot review` request (ADR-0012 amendment): a commenter with write access
@@ -49,7 +53,7 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
 
   logger.info({ event: 'review_command.accepted', ...base, headSha: headSha.slice(0, 7), workspace: installation.workspaceId },
     `Review requested on ${job.repoFullName}#${job.pullNumber} by a write-access user`);
-  await processReviewJob({
+  const result = await processReviewJob({
     deliveryId: `review-${job.deliveryId}`,
     installationId: job.installationId,
     repoFullName: job.repoFullName,
@@ -58,5 +62,15 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
     baseSha: details.base?.sha ?? '',
     force: true,
   }, deps);
-  return 'reviewed';
+  // A push can claim the head between the check above and the run's creation (the store's
+  // unique active run per head decides): the request lost that race and is answered as such.
+  if (result.status === 'skipped' && result.detail === DUPLICATE) return reject('running');
+
+  const outcome: ReviewCommandOutcome =
+    result.status === 'completed' ? 'reviewed' : result.status === 'failed' ? 'review_failed' : 'review_skipped';
+  logger[result.status === 'failed' ? 'warn' : 'info'](
+    { event: 'review_command.finished', ...base, outcome, status: result.status, detail: result.detail ?? null, workspace: installation.workspaceId },
+    `Review requested on ${job.repoFullName}#${job.pullNumber} finished: ${result.status}`,
+  );
+  return outcome;
 }

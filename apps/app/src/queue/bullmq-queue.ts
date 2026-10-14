@@ -2,8 +2,12 @@ import { Queue, type ConnectionOptions } from 'bullmq';
 import { Redis } from 'ioredis';
 import type { CommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
 
-/** Job name of a PR comment command on the shared 'reviews' queue (reviews use 'review'). */
+/**
+ * Job names of the PR comment commands on the shared 'reviews' queue (reviews use 'review'). Each
+ * kind has its own name, so a worker that does not know a kind never misreads it as another.
+ */
 export const PAUSE_COMMAND_JOB_NAME = 'pause-command';
+export const REVIEW_COMMAND_JOB_NAME = 'review-command';
 
 export type QueueJobData = ReviewJob | CommandJob;
 
@@ -60,7 +64,8 @@ export class BullMqReviewQueue implements ReviewQueue {
   }
 
   async enqueueCommand(job: CommandJob): Promise<void> {
-    await this.queue.add(PAUSE_COMMAND_JOB_NAME, job, {
+    const name = job.kind === 'review_command' ? REVIEW_COMMAND_JOB_NAME : PAUSE_COMMAND_JOB_NAME;
+    await this.queue.add(name, job, {
       jobId: `cmd-${job.deliveryId}`,
       attempts: 3,
       backoff: { type: 'exponential', delay: 1000 },

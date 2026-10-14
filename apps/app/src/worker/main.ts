@@ -5,8 +5,8 @@ import { loadAppConfig, type AppConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
 import { MemoryRunEventBus } from '../core/run-events.js';
 import { withRunEvents } from '../core/run-events-store.js';
-import type { CommandJob, ReviewJob } from '../core/types.js';
-import { createQueueConnection, PAUSE_COMMAND_JOB_NAME, type QueueJobData } from '../queue/bullmq-queue.js';
+import type { PauseCommandJob, ReviewCommandJob, ReviewJob } from '../core/types.js';
+import { createQueueConnection, PAUSE_COMMAND_JOB_NAME, REVIEW_COMMAND_JOB_NAME, type QueueJobData } from '../queue/bullmq-queue.js';
 import { createGitHubAppFactory } from './github-app-factory.js';
 import { processPauseCommandJob } from './process-pause-command.js';
 import { processReviewCommandJob } from './process-review-command.js';
@@ -62,11 +62,13 @@ export function createReviewWorker(
   const worker = new Worker<QueueJobData>(
     'reviews',
     async (job: Job<QueueJobData>) => {
-      // PR comment commands share the queue under their own job name (ADR-0012).
+      // PR comment commands share the queue, each kind under its own job name (ADR-0012).
       if (job.name === PAUSE_COMMAND_JOB_NAME) {
-        const command = job.data as CommandJob;
-        if (command.kind === 'review_command') await processReviewCommandJob(command, deps);
-        else await processPauseCommandJob(command, deps);
+        await processPauseCommandJob(job.data as PauseCommandJob, deps);
+        return;
+      }
+      if (job.name === REVIEW_COMMAND_JOB_NAME) {
+        await processReviewCommandJob(job.data as ReviewCommandJob, deps);
         return;
       }
       const reviewJob = job.data as ReviewJob;

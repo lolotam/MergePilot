@@ -114,6 +114,35 @@ describe('processReviewCommandJob — @mergepilot review', () => {
     expect(env.model.generate).not.toHaveBeenCalled();
     expect(env.issueComments[0]?.body).toContain('already running');
   });
+
+  it('answers "running" when a push claimed the head between the check and the review', async () => {
+    const env = await setup();
+    // The push's run appears right after the active-run check said there was none.
+    const check = env.store.findActiveReviewRun.bind(env.store);
+    vi.spyOn(env.store, 'findActiveReviewRun').mockImplementationOnce(async (...args) => {
+      const active = await check(...args);
+      await env.store.createReviewRun({
+        workspaceId: 'ws-1', installationId: 7, repoFullName: 'acme/repo', pullNumber: 12, headSha: 'head-1',
+        status: 'running', jobId: 'push-job',
+      });
+      return active;
+    });
+
+    expect(await processReviewCommandJob(env.command, env.deps)).toBe('running');
+
+    expect(env.model.generate).not.toHaveBeenCalled();
+    expect(env.client.createReview).not.toHaveBeenCalled();
+    expect(env.issueComments).toHaveLength(1);
+    expect(env.issueComments[0]?.body).toContain('already running');
+  });
+
+  it('reports a review that ran but failed, instead of calling it reviewed', async () => {
+    const env = await setup();
+    vi.mocked(env.model.generate).mockResolvedValue({ text: 'not json', finishReason: 'stop' });
+
+    expect(await processReviewCommandJob(env.command, env.deps)).toBe('review_failed');
+    expect(env.issueComments).toEqual([]);
+  });
 });
 
 describe('processReviewJob — a push with nothing new to review', () => {
