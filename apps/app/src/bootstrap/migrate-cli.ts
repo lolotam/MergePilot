@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { runMigrations } from '../db/index.js';
+import { isEntryPoint } from '../core/entry-point.js';
 
 export async function runMigrateCli(
   env: Record<string, string | undefined> = process.env,
@@ -24,7 +25,7 @@ export async function runMigrateCli(
   }
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
+if (isEntryPoint(import.meta.url)) {
   runMigrateCli().catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`Migration failed: ${message}\n`);
