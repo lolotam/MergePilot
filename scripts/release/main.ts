@@ -2,7 +2,7 @@
 // repository variable: anything but "enabled" is a dry run that changes nothing.
 import { appendFileSync } from 'node:fs';
 import { dokployAdapter, ghcrAdapter, githubAdapter } from './adapters.ts';
-import { exitCodeOf, runRelease } from './run.ts';
+import { assertFitsJob, exitCodeOf, runRelease } from './run.ts';
 
 const MINUTE = 60_000;
 
@@ -39,17 +39,20 @@ async function main(): Promise<number> {
   };
   log(`mode: ${live ? 'LIVE' : 'dry run (set MERGEPILOT_AUTO_RELEASE=enabled to deploy)'}; candidate ${sha}`);
 
+  const cfg = {
+    sha,
+    live,
+    repository,
+    releaseBranch: env('RELEASE_BRANCH', 'production'),
+    composePath: env('COMPOSE_PATH', 'deploy/docker-compose.dokploy.yml'),
+    deployTimeoutMs: minutes('DEPLOY_TIMEOUT_MINUTES', 35),
+    verifyTimeoutMs: minutes('VERIFY_TIMEOUT_MINUTES', 10),
+    intervalMs: 15_000,
+  };
+  assertFitsJob(cfg, minutes('JOB_TIMEOUT_MINUTES', 120));
+
   const outcome = await runRelease(
-    {
-      sha,
-      live,
-      repository,
-      releaseBranch: env('RELEASE_BRANCH', 'production'),
-      composePath: env('COMPOSE_PATH', 'deploy/docker-compose.dokploy.yml'),
-      deployTimeoutMs: minutes('DEPLOY_TIMEOUT_MINUTES', 35),
-      verifyTimeoutMs: minutes('VERIFY_TIMEOUT_MINUTES', 10),
-      intervalMs: 15_000,
-    },
+    cfg,
     {
       github: githubAdapter({ repository, token: env('GITHUB_TOKEN') }),
       registry: ghcrAdapter(),

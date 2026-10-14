@@ -73,6 +73,20 @@ export function exitCodeOf(outcome: ReleaseOutcome): number {
   return outcome.kind === 'failed' || outcome.kind === 'rolled-back' ? 1 : 0;
 }
 
+/** Time kept free in the job for checkout, registry reads and opening the hold issue. */
+export const JOB_SETUP_RESERVE_MS = 10 * 60_000;
+
+/**
+ * Throws when a release could outlast its job: a failed release deploys and verifies twice
+ * (forward, then rollback), and a job cancelled mid-rollback would never open the hold issue.
+ */
+export function assertFitsJob(cfg: Pick<ReleaseConfig, 'deployTimeoutMs' | 'verifyTimeoutMs'>, jobTimeoutMs: number): void {
+  const worst = 2 * (cfg.deployTimeoutMs + cfg.verifyTimeoutMs) + JOB_SETUP_RESERVE_MS;
+  if (worst > jobTimeoutMs) {
+    throw new Error(`deploy and verify timeouts need up to ${worst / 60_000} min with a rollback; the job allows ${jobTimeoutMs / 60_000} min`);
+  }
+}
+
 interface Deployed {
   sourceSha: string | null;
   imageRef: string;

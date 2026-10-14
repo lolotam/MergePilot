@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type CheckRun, parseReleaseMessage, releaseMessage } from './core.ts';
-import { type DokployPort, type GitHubPort, type ReleaseConfig, type ReleasePorts, exitCodeOf, runRelease } from './run.ts';
+import { type DokployPort, type GitHubPort, type ReleaseConfig, type ReleasePorts, assertFitsJob, exitCodeOf, runRelease } from './run.ts';
 import type { Clock, ContainerSnapshot } from './verify.ts';
 
 const NEW = 'a'.repeat(40);
@@ -229,5 +229,17 @@ describe('runRelease deploy, verification and rollback', () => {
     const { cfg, ports } = setup();
     vi.mocked(ports.health).mockResolvedValue({ status: 502, body: 'Bad Gateway' });
     expect(await runRelease(cfg, ports)).toMatchObject({ kind: 'failed' });
+  });
+});
+
+describe('assertFitsJob', () => {
+  const min = 60_000;
+  it('accepts the default timeouts in the 120-minute job: 2 x (35 + 10) + 10 = 100 min', () => {
+    expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 120 * min)).not.toThrow();
+  });
+
+  it('refuses timeouts whose forward deploy plus rollback could outlast the job', () => {
+    expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 60 * min)).toThrow(/need up to 100 min .* allows 60 min/);
+    expect(() => assertFitsJob({ deployTimeoutMs: 50 * min, verifyTimeoutMs: 10 * min }, 120 * min)).toThrow(/130 min/);
   });
 });

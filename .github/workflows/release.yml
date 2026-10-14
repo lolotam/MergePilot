@@ -35,7 +35,9 @@ jobs:
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Must cover a deploy and a rollback in full: 2 x (deploy + verify timeouts) plus setup.
+    # main.ts refuses timeouts that do not fit JOB_TIMEOUT_MINUTES, so keep the two equal.
+    timeout-minutes: 120
     permissions:
       contents: write # release commit on the release branch (never main)
       issues: write # release-hold issue on a failed release
@@ -61,4 +63,6 @@ jobs:
           DOKPLOY_APP_NAME: ${{ vars.DOKPLOY_APP_NAME }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           DEPLOY_TIMEOUT_MINUTES: ${{ vars.DEPLOY_TIMEOUT_MINUTES }}
+          VERIFY_TIMEOUT_MINUTES: ${{ vars.VERIFY_TIMEOUT_MINUTES }}
+          JOB_TIMEOUT_MINUTES: 120
         run: node --experimental-strip-types scripts/release/main.ts
