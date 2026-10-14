@@ -55,9 +55,6 @@ export function startHealthServer(port: number): Promise<http.Server> {
   });
 }
 
-/**
- * Creates a BullMQ worker for the 'reviews' queue with `DEFAULT_WORKER_CONCURRENCY` by default.
- */
 /** The handlers a queue job is routed to; injectable so the routing is tested without the queue. */
 export interface QueueJobHandlers {
   review: typeof processReviewJob;
@@ -97,6 +94,9 @@ export async function dispatchQueueJob(
   }
   throw new Error(`Unknown queue job name: ${job.name}`);
 }
+/**
+ * Creates a BullMQ worker for the 'reviews' queue with `DEFAULT_WORKER_CONCURRENCY` by default.
+ */
 export function createReviewWorker(
   deps: ProcessReviewDeps,
   options?: ReviewWorkerOptions,
