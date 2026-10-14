@@ -30,9 +30,13 @@ export async function apiEquivalentPrice(
   if (model.includedInSubscription) {
     apiProvider = choice.provider;
   } else {
-    // An unpriced plan has no real cost to compare with, and a priced one is charged for real.
-    if (configured.inputPerMTok !== 0 || configured.outputPerMTok !== 0) return undefined;
     apiProvider = TOKEN_PLAN_API_PROVIDER[choice.provider];
+    if (!apiProvider) return undefined;
+    // Only a plan the catalog itself prices at $0 (a zero-rate manual or repo price is not that),
+    // and only while nothing prices the run for real.
+    const plan = await store.getModelPrice(choice.provider, choice.model);
+    if (!plan || plan.inputPerMTok !== 0 || plan.outputPerMTok !== 0) return undefined;
+    if (configured.inputPerMTok !== 0 || configured.outputPerMTok !== 0) return undefined;
   }
   if (!apiProvider) return undefined;
   const resolved = await resolvePricing({ store, settings }, apiProvider, choice.model);

@@ -81,7 +81,14 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     const pricing: RunPricing = model.includedInSubscription
       ? { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 }
       : configuredPricing;
-    const apiPrice = await apiEquivalentPrice(deps.store, settings, model, choice, configuredPricing);
+    const apiPrice = await apiEquivalentPrice(deps.store, settings, model, choice, configuredPricing).catch((error: unknown) => {
+      // Display only: a price lookup that fails leaves the run without an equivalent, never failed.
+      logger.warn(
+        { event: 'review.api_equivalent_failed', jobId: job.deliveryId, runId: br.run.id, error: error instanceof Error ? error.name : 'unknown' },
+        'Could not price the API-equivalent; the run shows none',
+      );
+      return undefined;
+    });
     // A configured fallback left out (no key, or a custom URL that failed the SSRF check) is
     // disclosed in the log and on the run record; it is never called.
     const skippedNote = skippedFallbacksNote(model);

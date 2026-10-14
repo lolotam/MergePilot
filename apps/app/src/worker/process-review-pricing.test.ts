@@ -200,4 +200,39 @@ describe('processReviewJob — API-equivalent cost of subscription and token-pla
     expect(run?.result?.pricing).toEqual({ source: 'unknown', inputPerMTok: null, outputPerMTok: null });
   });
 
+  it('grants no equivalent to a plan whose catalog price is not $0, nor to an unpriced plan given a zero-rate manual price', async () => {
+    const zaiRow: PriceEntry = { provider: 'zai', model: 'glm-5.3', inputPerMTok: 1.4, outputPerMTok: 4.4, source: 'models.dev' };
+
+    const priced = await review({
+      settings: { provider: 'zai-coding', model: 'glm-5.3' },
+      catalog: [{ provider: 'zai-coding', model: 'glm-5.3', inputPerMTok: 0.5, outputPerMTok: 1, source: 'models.dev' }, zaiRow],
+    });
+    expect(priced.run?.costUsd).toBeCloseTo((50 * 0.5 + 20 * 1) / 1_000_000, 9);
+    expect(priced.run?.result?.pricing?.apiEquivalentUsd).toBeUndefined();
+
+    const zeroOverride = await review({
+      settings: { provider: 'zai-coding', model: 'glm-5.3', priceOverrides: [{ provider: 'zai-coding', model: 'glm-5.3', inputPerMTok: 0, outputPerMTok: 0 }] },
+      catalog: [zaiRow],
+    });
+    expect(zeroOverride.run?.result?.pricing).toEqual({ source: 'override', inputPerMTok: 0, outputPerMTok: 0 });
+  });
+
+  it('completes the run without an equivalent when the display-only price lookup fails', async () => {
+    const h = createHarness({ settings: {}, fakeModel: subscribed() });
+    await h.store.replaceModelPrices('models.dev', [catalogEntry], FETCHED);
+    const real = h.store.getModelPrice.bind(h.store);
+    let calls = 0;
+    vi.spyOn(h.store, 'getModelPrice').mockImplementation(async (provider, model) => {
+      // The first lookup prices the bot's config; the second is the equivalent's.
+      if (++calls === 2) throw new Error('price store down');
+      return real(provider, model);
+    });
+
+    const result = await processReviewJob(h.job, h.deps);
+    const run = await h.latestRun();
+
+    expect(result.status).toBe('completed');
+    expect(run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 });
+  });
+
 });
