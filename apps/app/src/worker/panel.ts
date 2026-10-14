@@ -132,6 +132,7 @@ export async function runPanel(ctx: PanelContext, runs: BotRun[], noKey: PanelBo
         log: ctx.deps.log,
         botSlot: MAIN_BOT_SLOT,
         prFiles: ctx.prFiles,
+        ...(ctx.job.force ? { force: true } : {}),
       })
     : undefined;
 

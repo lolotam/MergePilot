@@ -123,6 +123,7 @@ export async function publishConsensus(
     partial: incompleteReasons.length > 0,
     alreadyDeduplicated: true,
     botSlot: MAIN_BOT_SLOT,
+    ...(job.force ? { force: true } : {}),
   });
   ctx.deps.log?.(`Review panel publication outcome: ${publish.status}`);
   const findings = deduped.kept.length + merge.kept.filter((c) => c.kind === 'summaryOnly').length;

@@ -28,7 +28,12 @@ export interface SelectIncrementalFilesOptions {
    * are left out (ADR-0012 amendment); without it every hunk of the range is reviewed.
    */
   baseSha?: string | undefined;
+  /** `@mergepilot review` asked for it: the whole PR is reviewed, whatever was reviewed before. */
+  force?: boolean | undefined;
 }
+
+/** The scope reason shown when a review was asked for with `@mergepilot review`. */
+export const REVIEW_REQUESTED_REASON = 'review requested';
 
 export type SelectIncrementalFilesResult =
   | { mode: 'full'; files: PullRequestFile[]; reason: string }
@@ -113,8 +118,11 @@ export async function selectIncrementalFiles(
     configHash,
     botSlot,
     baseSha,
+    force,
   }: SelectIncrementalFilesOptions,
 ): Promise<SelectIncrementalFilesResult> {
+  if (force) return { mode: 'full', files: prFiles, reason: REVIEW_REQUESTED_REASON };
+
   const lastMarker = await findLastReviewedMarker(client, {
     owner,
     repo,

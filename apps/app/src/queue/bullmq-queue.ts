@@ -1,11 +1,11 @@
 import { Queue, type ConnectionOptions } from 'bullmq';
 import { Redis } from 'ioredis';
-import type { PauseCommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
+import type { CommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
 
-/** Job name of a pause/resume command on the shared 'reviews' queue (reviews use 'review'). */
+/** Job name of a PR comment command on the shared 'reviews' queue (reviews use 'review'). */
 export const PAUSE_COMMAND_JOB_NAME = 'pause-command';
 
-export type QueueJobData = ReviewJob | PauseCommandJob;
+export type QueueJobData = ReviewJob | CommandJob;
 
 /**
  * Creates an ioredis client configured for BullMQ (maxRetriesPerRequest: null).
@@ -59,7 +59,7 @@ export class BullMqReviewQueue implements ReviewQueue {
     });
   }
 
-  async enqueueCommand(job: PauseCommandJob): Promise<void> {
+  async enqueueCommand(job: CommandJob): Promise<void> {
     await this.queue.add(PAUSE_COMMAND_JOB_NAME, job, {
       jobId: `cmd-${job.deliveryId}`,
       attempts: 3,

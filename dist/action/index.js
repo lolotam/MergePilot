@@ -168014,13 +168014,13 @@ ${finding.suggestion}`);
 }
 
 var REVIEWS_PAGE_SIZE = 100;
-async function publishReview(client, { owner, repo, pull_number, expectedHeadSha, summaryMarkdown, inline, configHash, language, suggestionsAsCode, publisherLogin, partial: partial2, alreadyDeduplicated, botSlot = MAIN_BOT_SLOT }) {
+async function publishReview(client, { owner, repo, pull_number, expectedHeadSha, summaryMarkdown, inline, configHash, language, suggestionsAsCode, publisherLogin, partial: partial2, alreadyDeduplicated, botSlot = MAIN_BOT_SLOT, force }) {
   const pr = await client.getPullRequest({ owner, repo, pull_number });
   if (pr.head.sha !== expectedHeadSha) {
     return { status: "skipped-stale" };
   }
   let page = 1;
-  while (true) {
+  while (!force) {
     const reviews = await client.listReviewsPage({
       owner,
       repo,
@@ -168148,6 +168148,7 @@ function withoutBaseHunks(comparePatch, basePatch, prPatch) {
   return kept.length > 0 ? kept.join("\n") : void 0;
 }
 
+var REVIEW_REQUESTED_REASON = "review requested";
 var REVIEWS_PAGE_SIZE2 = 100;
 var MAX_COMPARE_FILES = 300;
 async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
@@ -168176,7 +168177,9 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
   }
   return lastMarker;
 }
-async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot, baseSha }) {
+async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot, baseSha, force }) {
+  if (force)
+    return { mode: "full", files: prFiles, reason: REVIEW_REQUESTED_REASON };
   const lastMarker = await findLastReviewedMarker(client, {
     owner,
     repo,

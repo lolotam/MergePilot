@@ -1,11 +1,20 @@
-import { parsePauseCommandWithLanguage } from '@mergepilot/github';
+import { parsePauseCommandWithLanguage, parseReviewCommand } from '@mergepilot/github';
 import { z } from 'zod';
-import type { AppStore, PauseCommandJob, ReviewQueue } from '../core/types.js';
+import type { AppStore, CommandJob, ReviewQueue } from '../core/types.js';
 
-/** Result of an `issue_comment` delivery that carried a pause/resume command. */
+/** Result of an `issue_comment` delivery that carried a pause/resume/review command. */
 export interface CommandQueuedResult {
   status: 'command_queued';
-  job: PauseCommandJob;
+  job: CommandJob;
+}
+
+type ParsedCommand = { command: CommandJob['command']; language: 'ar' | 'en' };
+
+function parseCommand(body: string | null | undefined): ParsedCommand | null {
+  const pause = parsePauseCommandWithLanguage(body);
+  if (pause) return pause;
+  const review = parseReviewCommand(body);
+  return review ? { command: 'review', language: review.language } : null;
 }
 
 export type IssueCommentResult = CommandQueuedResult | { status: 'ignored'; reason: string };
@@ -26,7 +35,7 @@ const IssueCommentPayloadSchema = z.object({
 
 /**
  * Routes an `issue_comment` webhook (ADR-0012): only a newly created comment on a pull request
- * whose body is `@mergepilot pause|resume` (or an Arabic alias) is queued; everything else is
+ * whose body is `@mergepilot pause|resume|review` (or an Arabic alias) is queued; everything else is
  * ignored. The handler makes no GitHub call, so the webhook is acknowledged fast; the worker
  * checks the commenter's write access before changing anything.
  */
@@ -50,7 +59,7 @@ export async function handleIssueCommentEvent(
     return { status: 'ignored', reason: 'bot_comment' };
   }
 
-  const parsedCommand = parsePauseCommandWithLanguage(comment.body);
+  const parsedCommand = parseCommand(comment.body);
   if (!parsedCommand) return { status: 'ignored', reason: 'not_a_command' };
 
   const storedInstallation = await store.getInstallation(installation.id);
@@ -58,16 +67,17 @@ export async function handleIssueCommentEvent(
   if (storedInstallation.suspended) return { status: 'ignored', reason: 'installation_suspended' };
   if (!queue.enqueueCommand) return { status: 'ignored', reason: 'command_queue_unavailable' };
 
-  const job: PauseCommandJob = {
-    kind: 'pause_command',
+  const common = {
     deliveryId,
     installationId: installation.id,
     repoFullName: repository.full_name,
     pullNumber: issue.number,
-    command: parsedCommand.command,
     commenterLogin: login,
     language: parsedCommand.language,
   };
+  const job: CommandJob = parsedCommand.command === 'review'
+    ? { ...common, kind: 'review_command', command: 'review' }
+    : { ...common, kind: 'pause_command', command: parsedCommand.command };
   await queue.enqueueCommand(job);
   return { status: 'command_queued', job };
 }

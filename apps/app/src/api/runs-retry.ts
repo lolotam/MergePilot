@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { requireRole } from '../auth/guard.js';
+import { isPrClosedOrMerged, type PullRequestDetails } from '../core/pull-request-state.js';
 import { ActiveRunExistsError } from '../core/types.js';
 import { createRetryJobId, enqueueReviewJob } from '../queue/enqueue.js';
 import { createGitHubAppFactory } from '../worker/github-app-factory.js';
@@ -13,14 +14,6 @@ import type {
 import { sendError } from './helpers.js';
 import { parseRetryFailedBody } from './runs-query.js';
 import type { DashboardApiDeps } from './routes.js';
-
-interface PullRequestDetails {
-  state?: string;
-  merged?: boolean;
-  merged_at?: string | null;
-  head: { sha: string };
-  base?: { sha: string };
-}
 
 /** What a retry starts from: a failed or skipped run's PR. */
 interface RetrySource {
@@ -61,11 +54,6 @@ export function recordRetryFailedCall(workspaceId: string, now = Date.now()): vo
 
 export function resetRetryRateLimits(): void {
   retryFailedTimestamps.clear();
-}
-
-export function isPrClosedOrMerged(pr: unknown): boolean {
-  const details = pr as PullRequestDetails;
-  return details.state === 'closed' || Boolean(details.merged) || Boolean(details.merged_at);
 }
 
 /** Checks the PR can be retried now and returns its current head and base. Read-only. */

@@ -78,3 +78,21 @@
 - a merge-only push leaves nothing new to review;
 - a merge plus a real change reviews only the real change;
 - with no base commit, or when the second comparison fails, every hunk is reviewed as before.
+
+## Amendment (2026-10-14): `@mergepilot review` and the no-new-changes note
+
+**The problem.** Seen on lolotam/PayPos.systems#215: the pushes `742c3bf` and `629b1e2` only merged main into the PR. Every bot found nothing new and skipped, which is correct, but nothing appeared on the PR. People and agents read that as MergePilot not running. A comment `@mergepilot review` was ignored as `not_a_command`, because only pause and resume existed.
+
+**What changes (hosted app only; the Action still knows pause and resume only).**
+- **The note:** when every bot that ran a job skipped it as `no new changes since the last review`, the worker posts one issue comment saying so in the workspace language. It points to `@mergepilot review`, quoted in backticks so it never runs. The marker is `<!-- mergepilot:nothing-new head=<sha> -->`, from the publisher only, so the note is posted once per head. A failed note is logged (`review.nothing_new_note_failed`) and never fails the job. If any bot reviewed, its review is the answer and no note is posted.
+- **The command:** `@mergepilot review` or `@mergepilot مراجعة`. The parsing rules are those of pause/resume: a standalone word, bots and edited comments ignored. The webhook queues a `review_command` job under the existing `pause-command` job name; `job.kind` routes it.
+- **The worker:**
+  - It checks write access with the pause rule.
+  - It reads the PR. A closed or merged PR is refused.
+  - A review already running on this head is refused.
+  - Each refusal gets one short reply. An accepted request gets no reply, because the reviews themselves answer it.
+  - It then runs the review job in place with `force: true`:
+    - every active bot reviews the whole PR (scope reason `review requested`);
+    - the "already reviewed this head" check in `publishReview` is skipped;
+    - a paused PR is reviewed too, because pause stops automatic reviews only and the label stays.
+  - Findings already posted are still dropped by the duplicate check, and the monthly budget still applies.
