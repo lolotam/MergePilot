@@ -40,9 +40,10 @@ function replyMarker(deliveryId: string): string {
 }
 
 /**
- * Replies to a `@mergepilot review` request that was not run, saying why. Idempotent per request:
- * the reply carries the request's delivery id in a hidden marker and is not posted again when the
- * publisher already posted it, so a queue retry never duplicates it.
+ * Replies to a `@mergepilot review` request that was not run, saying why. The reply carries the
+ * request's delivery id in a hidden marker and is skipped when the publisher already posted it, so
+ * a sequential retry of the same request does not post it again (two attempts running at the same
+ * moment could still both post: the check is not atomic).
  */
 export async function replyReviewCommandRejected(
   client: GitHubClient,

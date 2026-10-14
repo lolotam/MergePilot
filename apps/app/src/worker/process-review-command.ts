@@ -35,22 +35,24 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
   const { client: rawClient, publisherLogin } = await deps.githubAppFactory(job.installationId);
   const client = guardWritesForWorkspace(rawClient, deps.store, job.installationId, installation.workspaceId);
   const pr = { owner, repo, pull_number: job.pullNumber };
-  // The reply is idempotent per request (a hidden marker with the delivery id), so a queue retry
-  // never posts it twice. A failure is logged with the reason the reply was for, then rethrown.
+  // A reply that failed is retried by failing the job only when that is safe and useful: a
+  // transient GitHub error (no status, 429 or 5xx), for a refusal whose outcome cannot change on a
+  // retry (not `running`: once that run finished, a retry would start an unrequested review). The
+  // reply skips itself when a sequential retry finds it already posted. Every failure is logged.
   const replyRejected = async (reason: ReviewCommandRejection): Promise<void> => {
     try {
       await replyReviewCommandRejected(client, { ...pr, reason, language: job.language, deliveryId: job.deliveryId, publisherLogin });
     } catch (error) {
       const status = (error as { status?: unknown }).status;
+      const httpStatus = typeof status === 'number' ? status : null;
       logger.warn(
-        { event: 'review_command.reply_failed', ...base, reason, error: error instanceof Error ? error.name : 'unknown', status: typeof status === 'number' ? status : null },
+        { event: 'review_command.reply_failed', ...base, reason, error: error instanceof Error ? error.name : 'unknown', status: httpStatus },
         `Could not post the refusal reply on ${job.repoFullName}#${job.pullNumber}`,
       );
-      throw error;
+      const transient = httpStatus === null || httpStatus === 429 || httpStatus >= 500;
+      if (transient && reason !== 'running') throw error;
     }
   };
-  // Before any review ran, a failed reply fails the job so the queue retries it: the retry only
-  // repeats the checks, and the reply cannot be duplicated.
   const reject = async (reason: ReviewCommandRejection): Promise<ReviewCommandOutcome> => {
     await replyRejected(reason);
     logger.info({ event: 'review_command.rejected', ...base, reason, workspace: installation.workspaceId },
@@ -88,8 +90,7 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
     { event: 'review_command.finished', ...base, outcome, status: result.status, detail: result.detail ?? null, workspace: installation.workspaceId },
     `Review requested on ${job.repoFullName}#${job.pullNumber} finished: ${result.status}`,
   );
-  // After the review ran, a failed reply must not fail the job: a retry would run the whole
-  // command again, and once the winning run has finished it would start a second review.
-  if (raceLost) await replyRejected('running').catch(() => undefined);
+  // After the review ran, the `running` reply never fails the job (see replyRejected).
+  if (raceLost) await replyRejected('running');
   return outcome;
 }

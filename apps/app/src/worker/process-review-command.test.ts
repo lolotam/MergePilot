@@ -174,11 +174,25 @@ describe('processReviewJob — a push with nothing new to review', () => {
     expect(env.issueComments[0]?.body).toContain('`@mergepilot review`');
     expect(env.issueComments[0]?.body).toContain('<!-- mergepilot:nothing-new head=head-1 -->');
   });
-  it('lets a refusal reply that cannot be posted before any review fail the job, so the queue retries it', async () => {
-    const env = await setup({ permission: 'read' });
-    env.client.createIssueComment = vi.fn(async () => { throw new Error('GitHub 502'); });
+  const httpError = (status: number) => Object.assign(new Error(`GitHub ${status}`), { status });
 
-    await expect(processReviewCommandJob(env.command, env.deps)).rejects.toThrow('GitHub 502');
+  it.each([
+    { name: 'a transient 502 on an unauthorized refusal', options: { permission: 'read' }, status: 502, retried: true },
+    { name: 'a permanent 403 (locked conversation)', options: { permission: 'read' }, status: 403, retried: false },
+    { name: 'a transient 502 on a "running" refusal, whose outcome a retry could change', options: {}, status: 502, retried: false },
+  ])('fails the job for a retry only on $name', async ({ options, status, retried }) => {
+    const env = await setup(options);
+    if (!('permission' in options)) {
+      await env.store.createReviewRun({
+        workspaceId: 'ws-1', installationId: 7, repoFullName: 'acme/repo', pullNumber: 12, headSha: 'head-1',
+        status: 'running', jobId: 'other',
+      });
+    }
+    env.client.createIssueComment = vi.fn(async () => { throw httpError(status); });
+
+    const run = processReviewCommandJob(env.command, env.deps);
+    if (retried) await expect(run).rejects.toThrow(`GitHub ${status}`);
+    else await expect(run).resolves.toBe('permission' in options ? 'unauthorized' : 'running');
     expect(env.model.generate).not.toHaveBeenCalled();
   });
 
