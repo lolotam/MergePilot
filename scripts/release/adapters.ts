@@ -6,6 +6,15 @@ import type { DokployPort, GitHubPort, RegistryPort } from './run.ts';
 
 type Fetch = typeof fetch;
 
+/** Longest any single request (headers and body) may take, so a stalled call cannot outlive the poll deadlines. */
+export const REQUEST_TIMEOUT_MS = 60_000;
+
+/** `fetchImpl` with a per-request deadline; the abort also covers reading the response body. */
+export function withDeadline(fetchImpl: Fetch, timeoutMs = REQUEST_TIMEOUT_MS): Fetch {
+  return ((input: Parameters<Fetch>[0], init?: Parameters<Fetch>[1]) =>
+    fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) })) as Fetch;
+}
+
 async function json<T>(res: Response, what: string): Promise<T> {
   if (!res.ok) throw new Error(`${what} answered HTTP ${res.status}`);
   return (await res.json()) as T;
@@ -15,7 +24,7 @@ export const HOLD_LABEL = 'release-hold';
 const MIGRATIONS_DIR = 'apps/app/migrations';
 
 export function githubAdapter(opts: { repository: string; token: string; fetchImpl?: Fetch }): GitHubPort {
-  const f = opts.fetchImpl ?? fetch;
+  const f = withDeadline(opts.fetchImpl ?? fetch);
   const base = `https://api.github.com/repos/${opts.repository}`;
   const headers = { authorization: `Bearer ${opts.token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' };
   const get = <T>(path: string, what: string) => f(`${base}${path}`, { headers }).then((r) => json<T>(r, what));
@@ -86,12 +95,16 @@ export function githubAdapter(opts: { repository: string; token: string; fetchIm
     writeReleaseCommit: async ({ branch, parentSha, path, content, message, expectedHead }) => {
       const parent = await get<{ tree: { sha: string } }>(`/git/commits/${parentSha}`, `commit ${parentSha}`);
       const tree = await send<{ sha: string }>('POST', '/git/trees', { base_tree: parent.tree.sha, tree: [{ path, mode: '100644', type: 'blob', content }] }, 'create tree');
-      const created = await send<{ sha: string }>('POST', '/git/commits', { message, tree: tree.sha, parents: [parentSha] }, 'create commit');
+      // The previous release head is a second parent, so moving the branch is a fast-forward of
+      // exactly `expectedHead`. GitHub refuses a non-fast-forward (force: false) atomically, which
+      // makes the update a compare-and-swap even if another writer moves the branch meanwhile.
+      const parents = expectedHead ? [parentSha, expectedHead] : [parentSha];
+      const created = await send<{ sha: string }>('POST', '/git/commits', { message, tree: tree.sha, parents }, 'create commit');
       const head = await branchHead(branch);
       if ((head?.sha ?? null) !== expectedHead) {
         throw new Error(`${branch} moved to ${head?.sha ?? 'nothing'} (expected ${expectedHead ?? 'nothing'}); another release ran`);
       }
-      if (head) await send('PATCH', `/git/refs/heads/${branch}`, { sha: created.sha, force: true }, `move ${branch}`);
+      if (head) await send('PATCH', `/git/refs/heads/${branch}`, { sha: created.sha, force: false }, `move ${branch} (fast-forward only)`);
       else await send('POST', '/git/refs', { ref: `refs/heads/${branch}`, sha: created.sha }, `create ${branch}`);
       return created.sha;
     },
@@ -106,7 +119,8 @@ const MANIFEST_TYPES = [
 ].join(', ');
 
 /** Reads a public GHCR image anonymously: the pinned digest and the revision label of its linux/amd64 config. */
-export function ghcrAdapter(fetchImpl: Fetch = fetch): RegistryPort {
+export function ghcrAdapter(baseFetch: Fetch = fetch): RegistryPort {
+  const fetchImpl = withDeadline(baseFetch);
   return {
     resolve: async (repository, sha) => {
       const name = repository.replace(/^ghcr\.io\//, '');
@@ -155,7 +169,7 @@ export function snapshotOf(config: DockerConfig): ContainerSnapshot | null {
 
 /** Dokploy v0.30 REST API for one compose service (`x-api-key` auth). */
 export function dokployAdapter(opts: { url: string; apiKey: string; composeId: string; appName: string; fetchImpl?: Fetch }): DokployPort {
-  const f = opts.fetchImpl ?? fetch;
+  const f = withDeadline(opts.fetchImpl ?? fetch);
   const api = opts.url.replace(/\/+$/, '');
   const headers = { 'x-api-key': opts.apiKey, accept: 'application/json' };
   const get = <T>(path: string, what: string) => f(`${api}${path}`, { headers }).then((r) => json<T>(r, what));

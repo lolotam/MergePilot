@@ -20,7 +20,7 @@ describe('.github/workflows/release.yml', () => {
 
   it('gives the job room for a full deploy plus rollback and tells the script the same limit', () => {
     const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(release)?.[1]);
-    expect(job).toBeGreaterThanOrEqual(2 * (35 + 10) + 10);
+    expect(job).toBeGreaterThanOrEqual(2 * (35 + 10) + 20);
     expect(release).toContain(`JOB_TIMEOUT_MINUTES: ${job}`);
   });
 

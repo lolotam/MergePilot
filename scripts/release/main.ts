@@ -1,7 +1,7 @@
 // Entry point of .github/workflows/release.yml. Mode comes from the MERGEPILOT_AUTO_RELEASE
 // repository variable: anything but "enabled" is a dry run that changes nothing.
 import { appendFileSync } from 'node:fs';
-import { dokployAdapter, ghcrAdapter, githubAdapter } from './adapters.ts';
+import { dokployAdapter, ghcrAdapter, githubAdapter, withDeadline } from './adapters.ts';
 import { assertFitsJob, exitCodeOf, runRelease } from './run.ts';
 
 const MINUTE = 60_000;
@@ -58,7 +58,7 @@ async function main(): Promise<number> {
       registry: ghcrAdapter(),
       dokploy,
       health: async () => {
-        const res = await fetch(`${productionUrl}/health`, { headers: { 'cache-control': 'no-cache' } });
+        const res = await withDeadline(fetch)(`${productionUrl}/health`, { headers: { 'cache-control': 'no-cache' } });
         return { status: res.status, body: await res.text() };
       },
       log,

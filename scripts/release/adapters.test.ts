@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { githubAdapter } from './adapters.ts';
+import { githubAdapter, withDeadline } from './adapters.ts';
 
 const SHA = 'a'.repeat(40);
 
@@ -28,5 +28,37 @@ describe('githubAdapter.commitFiles', () => {
   it('refuses a commit larger than the API can list instead of guessing', async () => {
     const { fetchImpl } = commitFetch(3000);
     await expect(githubAdapter({ repository: 'o/r', token: 't', fetchImpl }).commitFiles(SHA)).rejects.toThrow(/more files than the API lists/);
+  });
+});
+
+describe('githubAdapter.writeReleaseCommit', () => {
+  it('moves the release branch as a fast-forward of the expected head, never a forced update', async () => {
+    const sent: { method: string; path: string; body: Record<string, unknown> }[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname.replace('/repos/o/r', '');
+      const method = init?.method ?? 'GET';
+      if (method !== 'GET') sent.push({ method, path, body: JSON.parse(String(init?.body)) });
+      const body =
+        path.startsWith('/git/commits/') ? { tree: { sha: 't0' } }
+        : path === '/git/trees' ? { sha: 't1' }
+        : path === '/git/commits' ? { sha: 'c1' }
+        : path === '/branches/production' ? { commit: { sha: 'h0', commit: { message: 'm' } } }
+        : {};
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as typeof fetch;
+
+    const sha = await githubAdapter({ repository: 'o/r', token: 't', fetchImpl })
+      .writeReleaseCommit({ branch: 'production', parentSha: SHA, path: 'deploy/c.yml', content: 'x', message: 'm', expectedHead: 'h0' });
+    expect(sha).toBe('c1');
+    expect(sent.find((s) => s.path === '/git/commits')?.body.parents).toEqual([SHA, 'h0']);
+    expect(sent.find((s) => s.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/git/refs/heads/production', body: { sha: 'c1', force: false } });
+  });
+});
+
+describe('withDeadline', () => {
+  it('aborts a request that stalls past its deadline', async () => {
+    const stalled = ((_input: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)))) as typeof fetch;
+    await expect(withDeadline(stalled, 20)('https://example.test')).rejects.toThrow(/timeout|aborted/i);
   });
 });

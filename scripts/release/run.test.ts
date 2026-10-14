@@ -225,6 +225,21 @@ describe('runRelease deploy, verification and rollback', () => {
     expect(github.openHold).toHaveBeenCalledTimes(1);
   });
 
+  it('still opens the hold when the rollback itself errors (migration check or rollback commit)', async () => {
+    const broken = (ref: string) => (ref === NEW_REF ? healthy(ref, NEW).map((c) => (c.service === 'web' ? { ...c, health: 'unhealthy' } : c)) : healthy(ref, OLD));
+
+    const lookup = setup({ containers: broken });
+    vi.mocked(lookup.github.changedMigrations).mockRejectedValue(new Error('compare answered HTTP 502'));
+    expect(await runRelease(lookup.cfg, lookup.ports)).toMatchObject({ kind: 'failed', hold: 77, detail: expect.stringContaining('rollback aborted: compare answered HTTP 502') });
+
+    const write = setup({ containers: broken });
+    const first = write.github.writeReleaseCommit;
+    let calls = 0;
+    write.github.writeReleaseCommit = vi.fn(async (input) => (++calls === 1 ? first(input) : Promise.reject(new Error('production moved'))));
+    expect(await runRelease(write.cfg, write.ports)).toMatchObject({ kind: 'failed', hold: 77, detail: expect.stringContaining('rollback aborted: production moved') });
+    expect(vi.mocked(write.github.openHold).mock.calls[0]?.[1]).toContain('Automatic rollback ABORTED');
+  });
+
   it('fails verification on a wrong public health answer even if containers look right', async () => {
     const { cfg, ports } = setup();
     vi.mocked(ports.health).mockResolvedValue({ status: 502, body: 'Bad Gateway' });
@@ -234,12 +249,12 @@ describe('runRelease deploy, verification and rollback', () => {
 
 describe('assertFitsJob', () => {
   const min = 60_000;
-  it('accepts the default timeouts in the 120-minute job: 2 x (35 + 10) + 10 = 100 min', () => {
+  it('accepts the default timeouts in the 120-minute job: 2 x (35 + 10) + 20 = 110 min', () => {
     expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 120 * min)).not.toThrow();
   });
 
   it('refuses timeouts whose forward deploy plus rollback could outlast the job', () => {
-    expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 60 * min)).toThrow(/need up to 100 min .* allows 60 min/);
-    expect(() => assertFitsJob({ deployTimeoutMs: 50 * min, verifyTimeoutMs: 10 * min }, 120 * min)).toThrow(/130 min/);
+    expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 60 * min)).toThrow(/need up to 110 min .* allows 60 min/);
+    expect(() => assertFitsJob({ deployTimeoutMs: 50 * min, verifyTimeoutMs: 10 * min }, 120 * min)).toThrow(/140 min/);
   });
 });

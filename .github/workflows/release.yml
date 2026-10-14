@@ -35,7 +35,7 @@ jobs:
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    # Must cover a deploy and a rollback in full: 2 x (deploy + verify timeouts) plus setup.
+    # Must cover a deploy and a rollback in full: 2 x (deploy + verify timeouts) plus a 20-minute reserve.
     # main.ts refuses timeouts that do not fit JOB_TIMEOUT_MINUTES, so keep the two equal.
     timeout-minutes: 120
     permissions:
