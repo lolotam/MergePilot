@@ -10,6 +10,8 @@ import { guardWritesForWorkspace } from './workspace-guard.js';
  * `reviewed`: the forced review completed. `review_failed` / `review_skipped`: it ran but did not
  * complete (the run row has the detail). `skipped`: the installation is unknown or suspended.
  */
+export type ReviewCommandOutcome = 'reviewed' | 'review_failed' | 'review_skipped' | ReviewCommandRejection | 'skipped';
+
 /**
  * A GitHub write that may succeed if tried again: no HTTP status (network), 429, 5xx, or a 403
  * that is a primary or secondary rate limit (`x-ratelimit-remaining: 0`, `retry-after`, or a
@@ -22,8 +24,6 @@ function isTransientGitHubError(error: unknown, status: number | null): boolean 
   const message = error instanceof Error ? error.message : '';
   return headers['x-ratelimit-remaining'] === '0' || headers['retry-after'] !== undefined || /rate limit/i.test(message);
 }
-
-export type ReviewCommandOutcome = 'reviewed' | 'review_failed' | 'review_skipped' | ReviewCommandRejection | 'skipped';
 
 /**
  * Runs a queued `@mergepilot review` request (ADR-0012 amendment): a commenter with write access
