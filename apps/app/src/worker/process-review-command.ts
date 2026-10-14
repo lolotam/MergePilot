@@ -35,15 +35,10 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
   const { client: rawClient } = await deps.githubAppFactory(job.installationId);
   const client = guardWritesForWorkspace(rawClient, deps.store, job.installationId, installation.workspaceId);
   const pr = { owner, repo, pull_number: job.pullNumber };
-  // A reply that cannot be posted never fails the job: a retry would run the whole command again.
-  const replyRejected = async (reason: ReviewCommandRejection): Promise<void> => {
-    try {
-      await replyReviewCommandRejected(client, { ...pr, reason, language: job.language });
-    } catch (error) {
-      logger.warn({ event: 'review_command.reply_failed', ...base, reason, error: error instanceof Error ? error.name : 'unknown' },
-        `Could not post the refusal reply on ${job.repoFullName}#${job.pullNumber}`);
-    }
-  };
+  const replyRejected = (reason: ReviewCommandRejection) =>
+    replyReviewCommandRejected(client, { ...pr, reason, language: job.language });
+  // Before any review ran, a reply that cannot be posted fails the job on purpose: the queue
+  // retries it, and the retry costs nothing but the same checks.
   const reject = async (reason: ReviewCommandRejection): Promise<ReviewCommandOutcome> => {
     await replyRejected(reason);
     logger.info({ event: 'review_command.rejected', ...base, reason, workspace: installation.workspaceId },
@@ -81,6 +76,18 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
     { event: 'review_command.finished', ...base, outcome, status: result.status, detail: result.detail ?? null, workspace: installation.workspaceId },
     `Review requested on ${job.repoFullName}#${job.pullNumber} finished: ${result.status}`,
   );
-  if (raceLost) await replyRejected('running');
+  // After the review ran, a reply that cannot be posted must not fail the job: a retry would run
+  // the whole command again, and once the winning run has finished it would start a second review.
+  if (raceLost) {
+    try {
+      await replyRejected('running');
+    } catch (error) {
+      const status = (error as { status?: unknown }).status;
+      logger.warn(
+        { event: 'review_command.reply_failed', ...base, reason: 'running', error: error instanceof Error ? error.name : 'unknown', status: typeof status === 'number' ? status : null },
+        `Could not post the refusal reply on ${job.repoFullName}#${job.pullNumber}`,
+      );
+    }
+  }
   return outcome;
 }
