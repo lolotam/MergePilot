@@ -216,6 +216,15 @@ describe('runRelease deploy, verification and rollback', () => {
     expect(github.openHold).toHaveBeenCalledTimes(1);
   });
 
+  it('a refused deploy call after the release commit still rolls the record back and holds releases', async () => {
+    const { cfg, ports, dokploy, github, branch } = setup();
+    vi.mocked(dokploy.deploy).mockRejectedValueOnce(new Error('Dokploy compose.deploy answered HTTP 401'));
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'rolled-back', hold: 77, detail: expect.stringContaining('HTTP 401') });
+    expect(parseReleaseMessage(branch.head?.message ?? '')?.sourceCommit).toBe(OLD);
+    expect(github.openHold).toHaveBeenCalledTimes(1);
+  });
+
   it('fails verification on a wrong public health answer even if containers look right', async () => {
     const { cfg, ports } = setup();
     vi.mocked(ports.health).mockResolvedValue({ status: 502, body: 'Bad Gateway' });

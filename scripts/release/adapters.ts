@@ -25,8 +25,20 @@ export function githubAdapter(opts: { repository: string; token: string; fetchIm
   type Commit = { commit: { message: string }; files?: { filename: string }[] };
   const commits = new Map<string, Promise<Commit>>();
   const commit = (sha: string) => {
-    if (!commits.has(sha)) commits.set(sha, get<Commit>(`/commits/${sha}?per_page=3000`, `commit ${sha}`));
+    if (!commits.has(sha)) commits.set(sha, get<Commit>(`/commits/${sha}`, `commit ${sha}`));
     return commits.get(sha) as Promise<Commit>;
+  };
+  // GitHub pages a commit's files 300 at a time (3000 at most); a truncated list could make an
+  // image-building commit look docs-only, so every page is read and an over-limit commit refuses.
+  const FILE_PAGE = 300;
+  const allCommitFiles = async (sha: string) => {
+    const files: string[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const batch = (await get<Commit>(`/commits/${sha}?per_page=${FILE_PAGE}&page=${page}`, `commit ${sha} files`)).files ?? [];
+      files.push(...batch.map((file) => file.filename));
+      if (batch.length < FILE_PAGE) return files;
+    }
+    throw new Error(`commit ${sha} changes more files than the API lists; release it by hand`);
   };
   const branchHead = async (branch: string) => {
     const res = await f(`${base}/branches/${encodeURIComponent(branch)}`, { headers });
@@ -43,7 +55,7 @@ export function githubAdapter(opts: { repository: string; token: string; fetchIm
 
   return {
     commitMessage: async (sha) => (await commit(sha)).commit.message,
-    commitFiles: async (sha) => ((await commit(sha)).files ?? []).map((file) => file.filename),
+    commitFiles: allCommitFiles,
     changedMigrations: async (from, to) => {
       const [a, b] = await Promise.all([migrations(from), migrations(to)]);
       return [...new Set([...a.keys(), ...b.keys()])].filter((path) => a.get(path) !== b.get(path)).sort();

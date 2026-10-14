@@ -103,10 +103,12 @@ async function deployAndVerify(
   title: string,
 ): Promise<string[]> {
   const clock = ports.clock ?? systemClock;
-  const before = await dokploy.deploymentIds();
-  await dokploy.deploy(title, `Source-Commit: ${expected.sourceSha}`);
   let finished: { id: string; status: string };
+  // The release commit is already written, so a refused deploy call must also end in a hold
+  // (and a rollback of the record), never in an exception that leaves the record ahead of production.
   try {
+    const before = await dokploy.deploymentIds();
+    await dokploy.deploy(title, `Source-Commit: ${expected.sourceSha}`);
     finished = await pollUntil(
       async () => {
         const d = await dokploy.newDeployment(before);
