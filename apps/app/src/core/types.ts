@@ -378,6 +378,8 @@ export interface ReviewJob {
   pullNumber: number;
   headSha: string;
   baseSha: string;
+  /** Asked for with `@mergepilot review`: every bot reviews the whole head, paused or not. */
+  force?: boolean | undefined;
 }
 
 /**
@@ -395,10 +397,27 @@ export interface PauseCommandJob {
   language: 'ar' | 'en';
 }
 
+/**
+ * A `@mergepilot review` PR comment (ADR-0012 amendment): the worker checks the commenter's write
+ * access and the PR, then runs a forced review of the current head.
+ */
+export interface ReviewCommandJob {
+  kind: 'review_command';
+  deliveryId: string;
+  installationId: number;
+  repoFullName: string;
+  pullNumber: number;
+  command: 'review';
+  commenterLogin: string;
+  language: 'ar' | 'en';
+}
+
+export type CommandJob = PauseCommandJob | ReviewCommandJob;
+
 export interface ReviewQueue {
   enqueue(job: ReviewJob): Promise<void>;
-  /** Queues a pause/resume command; optional so queues that cannot carry one leave it ignored. */
-  enqueueCommand?(job: PauseCommandJob): Promise<void>;
+  /** Queues a PR comment command; optional so queues that cannot carry one leave it ignored. */
+  enqueueCommand?(job: CommandJob): Promise<void>;
 }
 
 /** The authenticated caller of a dashboard request. */

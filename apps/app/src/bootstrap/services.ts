@@ -4,7 +4,7 @@ import { createAuth, type Auth } from '../auth/index.js';
 import type { AppConfig } from '../core/config.js';
 import { MemoryStore } from '../core/memory-store.js';
 import { MemoryRunEventBus, type RunEventBus } from '../core/run-events.js';
-import type { AppStore, PauseCommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
+import type { AppStore, CommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
 import { CredentialService } from '../credentials/index.js';
 import { createDb, runMigrations } from '../db/index.js';
 import * as dbSchema from '../db/schema.js';
@@ -15,13 +15,13 @@ import { EnvelopeVault } from '../vault/index.js';
 export class InMemoryReviewQueue implements ReviewQueue {
   readonly jobs: ReviewJob[] = [];
 
-  readonly commandJobs: PauseCommandJob[] = [];
+  readonly commandJobs: CommandJob[] = [];
 
   async enqueue(job: ReviewJob): Promise<void> {
     this.jobs.push(job);
   }
 
-  async enqueueCommand(job: PauseCommandJob): Promise<void> {
+  async enqueueCommand(job: CommandJob): Promise<void> {
     this.commandJobs.push(job);
   }
 

@@ -239,6 +239,7 @@ export async function executeReview(
     partial: !(outcome === 'completed' && reviewResult.status === 'completed' && reviewResult.complete),
     alreadyDeduplicated: true,
     ...(botSlot !== undefined ? { botSlot } : {}),
+    ...(params.force ? { force: true } : {}),
   });
   log?.(`Review publication outcome: ${publish.status}`);
 

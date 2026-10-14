@@ -96,6 +96,13 @@ export {
   type CheckPauseParams,
   type PauseNoticeParams,
 } from './pause.js';
+export {
+  parseReviewCommand,
+  replyReviewCommandRejected,
+  postNothingNewNoteOnce,
+  type ReviewCommandRejection,
+  type NothingNewNoteParams,
+} from './review-command.js';
 export * from './summary.js';
 export * from './fallback-reason.js';
 export * from './judge-summary.js';

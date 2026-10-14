@@ -19,6 +19,7 @@ import { judgePriceLookup } from '../core/model-pricing.js';
 import { buildBotConfig } from './bot-config.js';
 import { pausedWithNotice, PAUSED_DETAIL } from './pause-check.js';
 import { changedLinesOf, chooseModel, fallbackChain } from './model-choice.js';
+import { noteNothingNew } from './nothing-new-note.js';
 import { closeRuns, panelBots, runPanel, startBotRuns, type StartedRuns } from './panel.js';
 import type { BotRun, PanelContext } from './panel-types.js';
 import { failBotRun, WORKSPACE_DELETED } from './review-bot.js';
@@ -148,6 +149,7 @@ export async function processReviewJob(
     }
 
     const results = await runPanel(ctx, runs, started.noKey);
+    await noteNothingNew(ctx, results);
     return results.get(MAIN_BOT_SLOT) ?? duplicate;
   } finally {
     for (const br of runs) br.stopHeartbeat();
@@ -184,7 +186,8 @@ async function sharedSteps(
 
   const pr = await client.getPullRequest({ owner, repo, pull_number: job.pullNumber });
   const pauseParams = { owner, repo, pullNumber: job.pullNumber, publisherLogin, labels: pr.labels, language: settings.language };
-  if (await pausedWithNotice(client, pauseParams)) {
+  // Pause stops automatic reviews only: an explicit `@mergepilot review` still runs.
+  if (!job.force && (await pausedWithNotice(client, pauseParams))) {
     await closeRuns(base, runs, PAUSED_DETAIL);
     logSkip('paused', `Skipping job ${job.deliveryId}: ${PAUSED_DETAIL}`, { runId: lead.run.id });
     return { result: { status: 'skipped', detail: PAUSED_DETAIL } };

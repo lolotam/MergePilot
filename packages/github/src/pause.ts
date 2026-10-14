@@ -103,7 +103,7 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
-async function fetchAllIssueComments(
+export async function fetchAllIssueComments(
   client: GitHubClient,
   params: { owner: string; repo: string; pull_number: number },
 ): Promise<GitHubIssueComment[]> {

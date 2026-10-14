@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MemoryStore } from '../core/memory-store.js';
-import type { PauseCommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
+import type { CommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
 import { webhookOutcomeFields, webhookPayloadFields } from '../server/webhook-log.js';
 import { handleWebhook } from './handle.js';
 
 class FakeQueue implements ReviewQueue {
   readonly jobs: ReviewJob[] = [];
-  readonly commands: PauseCommandJob[] = [];
+  readonly commands: CommandJob[] = [];
   async enqueue(job: ReviewJob): Promise<void> {
     this.jobs.push(job);
   }
-  async enqueueCommand(job: PauseCommandJob): Promise<void> {
+  async enqueueCommand(job: CommandJob): Promise<void> {
     this.commands.push(job);
   }
 }
@@ -51,6 +51,35 @@ describe('handleWebhook — issue_comment pause/resume commands', () => {
       repositorySelection: 'all',
       suspended: false,
     });
+  });
+
+  it.each([
+    { body: '@mergepilot review', language: 'en' },
+    { body: 'بعد الـ merge: @mergepilot مراجعة', language: 'ar' },
+  ])('queues a review command for "$body" and logs it as queued', async ({ body, language }) => {
+    const result = await send(commentPayload({ body }));
+
+    expect(result.status).toBe('command_queued');
+    expect(queue.commands).toEqual([
+      {
+        kind: 'review_command',
+        deliveryId: `d-${delivery}`,
+        installationId: 101,
+        repoFullName: 'test-org/repo-1',
+        pullNumber: 42,
+        command: 'review',
+        commenterLogin: 'alice',
+        language,
+      },
+    ]);
+    expect(webhookOutcomeFields(result)).toEqual({ outcome: 'queued', command: 'review' });
+  });
+
+  it('ignores a quoted `@mergepilot review` (as in MergePilot\'s own notes) and look-alike words', async () => {
+    for (const body of ['comment `@mergepilot review` to review again', '@mergepilot reviewer please']) {
+      expect(await send(commentPayload({ body }))).toEqual({ status: 'ignored', reason: 'not_a_command' });
+    }
+    expect(queue.commands).toHaveLength(0);
   });
 
   it('queues a pause command on a PR and logs it as queued', async () => {

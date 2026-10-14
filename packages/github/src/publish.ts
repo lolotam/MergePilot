@@ -28,6 +28,8 @@ export interface PublishReviewParams {
    * comments count, and slots 2-5 mark the review and its inline comments with their slot.
    */
   botSlot?: number | undefined;
+  /** `@mergepilot review` asked for it: published even when this bot already reviewed this head. */
+  force?: boolean | undefined;
 }
 
 export type PublishReviewResult =
@@ -59,6 +61,7 @@ export async function publishReview(
     partial,
     alreadyDeduplicated,
     botSlot = MAIN_BOT_SLOT,
+    force,
   }: PublishReviewParams,
 ): Promise<PublishReviewResult> {
   const pr = await client.getPullRequest({ owner, repo, pull_number });
@@ -67,7 +70,7 @@ export async function publishReview(
   }
 
   let page = 1;
-  while (true) {
+  while (!force) {
     const reviews = await client.listReviewsPage({
       owner,
       repo,

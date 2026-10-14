@@ -51,6 +51,8 @@ export interface BotReviewParams {
    * used only together with `prFiles`.
    */
   selection?: SelectIncrementalFilesResult | undefined;
+  /** `@mergepilot review`: the whole PR, published even when this head was already reviewed. */
+  force?: boolean | undefined;
 }
 
 export type BotReviewRun =
@@ -68,7 +70,7 @@ export interface BotFiles {
 
 /** The PR files a bot reviews: listed (unless given), then narrowed since its last review. */
 export async function selectBotFiles(
-  params: Pick<BotReviewParams, 'client' | 'owner' | 'repo' | 'pullNumber' | 'headSha' | 'baseSha' | 'configHash' | 'publisherLogin' | 'log' | 'botSlot' | 'prFiles'>,
+  params: Pick<BotReviewParams, 'client' | 'owner' | 'repo' | 'pullNumber' | 'headSha' | 'baseSha' | 'configHash' | 'publisherLogin' | 'log' | 'botSlot' | 'prFiles' | 'force'>,
 ): Promise<BotFiles> {
   const { client, owner, repo, pullNumber, headSha, configHash, log, botSlot } = params;
   let prFiles = params.prFiles;
@@ -88,6 +90,7 @@ export async function selectBotFiles(
     configHash,
     baseSha: params.baseSha,
     ...(botSlot !== undefined ? { botSlot } : {}),
+    ...(params.force ? { force: true } : {}),
   });
   return { prFiles, selection };
 }

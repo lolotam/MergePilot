@@ -102,6 +102,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       ...(deps.log ? { log: deps.log } : {}),
       judge: judgeSetup.judge,
       ...(ctx.panelActive ? { botSlot: slot, prFiles: ctx.prFiles } : {}),
+      ...(job.force ? { force: true } : {}),
     };
 
     if (consensus) {
