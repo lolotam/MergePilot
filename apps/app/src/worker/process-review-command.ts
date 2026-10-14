@@ -64,13 +64,14 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
   }, deps);
   // A push can claim the head between the check above and the run's creation (the store's
   // unique active run per head decides): the request lost that race and is answered as such.
-  if (result.status === 'skipped' && result.detail === DUPLICATE) return reject('running');
-
-  const outcome: ReviewCommandOutcome =
-    result.status === 'completed' ? 'reviewed' : result.status === 'failed' ? 'review_failed' : 'review_skipped';
+  const raceLost = result.status === 'skipped' && result.detail === DUPLICATE;
+  const outcome: ReviewCommandOutcome = raceLost
+    ? 'running'
+    : result.status === 'completed' ? 'reviewed' : result.status === 'failed' ? 'review_failed' : 'review_skipped';
   logger[result.status === 'failed' ? 'warn' : 'info'](
     { event: 'review_command.finished', ...base, outcome, status: result.status, detail: result.detail ?? null, workspace: installation.workspaceId },
     `Review requested on ${job.repoFullName}#${job.pullNumber} finished: ${result.status}`,
   );
+  if (raceLost) await replyReviewCommandRejected(client, { ...pr, reason: 'running', language: job.language });
   return outcome;
 }
