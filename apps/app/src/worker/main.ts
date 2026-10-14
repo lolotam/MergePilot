@@ -19,6 +19,7 @@ import { processReviewCommandJob } from './process-review-command.js';
 import { processReviewJob } from './process-review.js';
 import { startMaintenanceScheduler, type MaintenanceScheduler } from './retention-schedule.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
+import { isEntryPoint } from '../core/entry-point.js';
 
 /** Review jobs one worker runs at once. A review mostly waits on model calls, so 8 is cheap. */
 export const DEFAULT_WORKER_CONCURRENCY = 8;
@@ -315,7 +316,7 @@ export async function startWorker(options?: WorkerOptions): Promise<WorkerInstan
   return instance;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
+if (isEntryPoint(import.meta.url)) {
   startWorker().catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`Fatal error starting worker: ${message}\n`);

@@ -11,6 +11,7 @@ import { withRunEvents } from '../core/run-events-store.js';
 import type { AppStore, ReviewQueue } from '../core/types.js';
 import { createServer, type ServerProbes } from './create-server.js';
 import { registerStatic } from './static.js';
+import { isEntryPoint } from '../core/entry-point.js';
 
 export interface ServerInstance {
   app: FastifyInstance;
@@ -240,7 +241,7 @@ export async function main(options?: MainOptions): Promise<ServerInstance> {
   return instance;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
+if (isEntryPoint(import.meta.url)) {
   main().catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`Fatal error starting server: ${message}\n`);
