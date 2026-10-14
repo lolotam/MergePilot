@@ -174,11 +174,11 @@ describe('processReviewJob — a push with nothing new to review', () => {
     expect(env.issueComments[0]?.body).toContain('`@mergepilot review`');
     expect(env.issueComments[0]?.body).toContain('<!-- mergepilot:nothing-new head=head-1 -->');
   });
-  it('lets a refusal reply that cannot be posted before any review fail the job, so the queue retries it', async () => {
+  it('still refuses (and never retries the comment) when the refusal reply cannot be posted before any review', async () => {
     const env = await setup({ permission: 'read' });
     env.client.createIssueComment = vi.fn(async () => { throw new Error('GitHub 502'); });
 
-    await expect(processReviewCommandJob(env.command, env.deps)).rejects.toThrow('GitHub 502');
+    await expect(processReviewCommandJob(env.command, env.deps)).resolves.toBe('unauthorized');
     expect(env.model.generate).not.toHaveBeenCalled();
   });
 });
