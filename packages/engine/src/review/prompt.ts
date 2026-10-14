@@ -139,7 +139,7 @@ reply starts with "{" and ends with "}", with no markdown fence around it.
   "findings": [
     {
       "path": "<string — a file path shown below, exactly as printed>",
-      "line": <integer — a line number printed in that file's patch; prefer a "+" line>,
+      "line": <integer — the number printed before that line in the patch; prefer a "+" line>,
       "side": "<LEFT|RIGHT — RIGHT (default) for added and context lines; LEFT only when a removed line is itself the problem>",
       "title": "<string — under 12 words naming the defect, not the symptom>",
       "body": "<string — what breaks, when, and the consequence>",
@@ -157,9 +157,9 @@ Keys and the severity, category and side values are spelled exactly as above, wh
 const WHAT_YOU_SEE = `\
 WHAT YOU SEE: the pull request's title and description, the owner's rules, sometimes library docs, \
 and the diff of each changed file: the changed lines with a few lines of context, each printed with \
-its new-file line number. You do not see the rest of the repository, the tests, or the program \
-running. A finding that depends on code you cannot see is a guess: omit it, or name the assumption \
-in "body" and keep "confidence" at or below 0.6.`;
+its line number (new-file numbers for added and context lines, old-file numbers for removed lines). \
+You do not see the rest of the repository, any file or test outside this diff, or the program \
+running. A finding that depends on code you cannot see is a guess: do not report it.`;
 
 const METHOD = `\
 METHOD: first work out what the change is trying to do. Then, for every hunk, look for:
@@ -190,7 +190,7 @@ will surface;
 
 const CONFIDENCE_SCALE = `\
 CONFIDENCE: 0.9 or more when the quoted evidence alone proves the problem; 0.7-0.89 when it is very \
-likely given everything shown; 0.5-0.69 when it is plausible but depends on something not shown \
+likely given everything shown; 0.5-0.69 when it is plausible from what is shown but not proven by it \
 (say what would confirm it). Below 0.5: do not report it.`;
 
 const REPORTING_RULES = `\

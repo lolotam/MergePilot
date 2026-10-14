@@ -17,7 +17,7 @@ Two parsing facts were also unstated. A finding whose `line` is not printed in t
 
 The system prompt keeps its JSON contract and trust rules and gains five short sections, all English in both languages (only the role sentence is localized):
 
-1. **What you see** — the inputs listed above, and the rule for code you cannot see: omit the finding, or name the assumption in `body` and keep `confidence` at or below 0.6.
+1. **What you see** — the inputs listed above (added and context lines carry new-file numbers, removed lines old-file numbers; tests are seen only when they are part of the diff), and the rule for code you cannot see: the finding is not reported.
 2. **Method** — understand the change first, then per hunk a checklist per category: correctness, security, data loss, project rules, library usage, performance (only when clearly significant), maintainability (only when it hides a likely bug). Style is ignored unless a rule requires it; what another part of the diff handles is not reported.
 3. **Severity scale** — impact × likelihood, independent of confidence, never inflated:
    - `critical`: once merged, normal use causes data loss, a security breach or an outage;
@@ -25,7 +25,7 @@ The system prompt keeps its JSON contract and trust rules and gains five short s
    - `medium`: a bug on an edge case, a rule violation with consequences, or a defect the next change will surface;
    - `low`: minor, unlikely or cosmetic in effect;
    - `info`: an observation needing no action.
-4. **Confidence bands** — ≥ 0.9: the quoted evidence alone proves it; 0.7–0.89: very likely given everything shown; 0.5–0.69: plausible but depends on something not shown (say what would confirm it); below 0.5: not reported.
+4. **Confidence bands** — ≥ 0.9: the quoted evidence alone proves it; 0.7–0.89: very likely given everything shown; 0.5–0.69: plausible from what is shown but not proven by it (say what would confirm it); below 0.5: not reported.
 5. **Reporting rules** — one finding per root cause; `line` is a number printed in the patch (never guessed); `evidence` is a verbatim excerpt (the verifier checks it); an empty findings list is a valid answer, said so in the summary.
 
 The contract itself now says the whole reply starts with `{` and ends with `}` with no fence, and that keys and the `severity`/`category`/`side` values keep their exact spelling whatever language the text fields use. The field descriptions were tightened (`title` names the defect, `summary` is 2–4 sentences and never a findings list, `side: LEFT` only when a removed line is itself the problem).
@@ -33,7 +33,7 @@ The contract itself now says the whole reply starts with `{` and ends with `}` w
 ## Consequences
 
 - Severity and confidence mean the same thing for every bot, so Jev's threshold, the `critical`/`high` bypasses and consensus agreement compare like with like.
-- Fewer findings about unseen code reach the verify pass and Jev, which saves their calls.
+- Findings about unseen code are not produced, so the verify pass no longer pays to reject them.
 - The system prompt roughly triples, to about 5,200 characters (an estimated 1,300 tokens), on every call, batch and JSON-only retry; next to a PR diff this is marginal. `maxFindings` stays near the end so the stable prefix caches well.
 - The verify and Jev prompts are unchanged; aligning their wording with these scales is a separate decision.
 - Whether reviews actually improve can only be measured on real PRs: `@mergepilot review` on a PR already reviewed with the old prompt gives a same-diff comparison of inline vs summary-only findings and `findingsCount`.
