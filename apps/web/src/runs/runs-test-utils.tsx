@@ -47,6 +47,7 @@ export function makeGroup(runs: ReviewRun[]): RunGroup {
     pullNumber: runs[0]!.pullNumber,
     runCount: runs.length,
     costUsd: sum((r) => r.costUsd),
+    apiEquivalentUsd: sum((r) => r.apiEquivalentUsd),
     inputTokens: sum((r) => r.inputTokens),
     outputTokens: sum((r) => r.outputTokens),
     runs,

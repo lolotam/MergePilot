@@ -16,7 +16,7 @@ Login attempts are bound to the initiating user/workspace, cancellable and limit
 
 Credential writes, restores, deletion and refresh share a Postgres advisory lock per workspace/provider. Refresh failures preserve the old encrypted credential. Individual tokens are redacted from prompts, output and errors.
 
-Model discovery, connection tests, primary/heavy/fallback choices and reviewer-panel models use the provider's active method. Subscription requests report token usage with zero incremental API cost; the subscription itself is billed separately. Paid API fallback costs retain the existing unknown-after-fallback behavior. Credential-inclusive backups seal the complete envelope with the backup passphrase.
+Model discovery, connection tests, primary/heavy/fallback choices and reviewer-panel models use the provider's active method. Subscription requests report token usage with zero incremental API cost; the subscription itself is billed separately. Since ADR-0024 the run also carries a display-only API-equivalent of that usage, never counted as spend. Paid API fallback costs retain the existing unknown-after-fallback behavior. Credential-inclusive backups seal the complete envelope with the backup passphrase.
 
 ## Consequences
 

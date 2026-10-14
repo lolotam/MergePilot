@@ -15,6 +15,7 @@ const SOURCE_KEYS: Record<string, I18nKey> = {
   'catalog:models.dev': 'pricesSourceModelsDev',
   override: 'pricesSourceOverride',
   repo: 'pricesSourceRepo',
+  subscription: 'pricesSourceSubscription',
   static: 'pricesSourceStatic',
   unknown: 'pricesSourceUnknown',
 };
@@ -30,6 +31,7 @@ const RUN_SOURCE_KEYS: Record<string, I18nKey> = {
   'catalog:models.dev': 'runPriceModelsDev',
   override: 'runPriceOverride',
   repo: 'runPriceRepo',
+  subscription: 'runPriceSubscription',
   static: 'runPriceStatic',
   unknown: 'runPriceUnknown',
 };

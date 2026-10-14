@@ -26,7 +26,7 @@ MergePilot reviews pull requests through a shared TypeScript engine, a GitHub Ac
 - The dashboard supports API keys and consumer subscriptions for OpenAI/Codex, Anthropic/Claude, and xAI/Grok. Each workspace has one active credential per provider; saving either method replaces the other.
 - Delegate OAuth protocol details to the pi-ai provider library. Use device codes for Codex/Grok and copy-code login for Claude on the web server.
 - Store subscription envelopes through the existing vault. Login, replacement, restore, disconnect, and token refresh must share the workspace/provider credential lock across web and worker processes.
-- Subscription calls retain token usage and report zero incremental API cost. Judge calls and paid API fallbacks keep their own accounting rules.
+- Subscription calls retain token usage and report zero incremental API cost; they may carry a display-only API-equivalent figure (`result.pricing.apiEquivalentUsd`, ADR-0024) that never enters `cost_usd`, the budget or the GitHub summary. Judge calls and paid API fallbacks keep their own accounting rules.
 
 ## Validation and delivery
 

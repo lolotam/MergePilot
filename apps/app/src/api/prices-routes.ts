@@ -60,7 +60,7 @@ export function registerPricesRoutes(app: FastifyInstance, deps: DashboardApiDep
               return { price: j.price, source: j.source, fetchedAt: j.fetchedAt ? j.fetchedAt.toISOString() : null };
             })()
            : subscriptions.has(provider as import('../core/types.js').KeyProvider)
-             ? { price: { inputPerMTok: 0, outputPerMTok: 0 }, source: 'static' as const, fetchedAt: null }
+             ? { price: { inputPerMTok: 0, outputPerMTok: 0 }, source: 'subscription' as const, fetchedAt: null }
              : reviewModelPrice(rows, overrides, provider, model);
       return { provider, model, role, ...found, overridden: found.source === 'override' };
     });

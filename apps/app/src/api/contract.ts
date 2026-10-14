@@ -238,6 +238,8 @@ export const ReviewRunSchema = z.object({
   headSha: z.string(),
   status: z.enum(['queued', 'running', 'completed', 'skipped', 'failed']),
   costUsd: z.number().nullable(),
+  /** What a subscription or token-plan run's tokens would cost at the API price (ADR-0024); null otherwise. */
+  apiEquivalentUsd: z.number().nullable().optional(),
   detail: z.string().nullable(),
   createdAt: z.string(),
   finishedAt: z.string().nullable(),
@@ -272,6 +274,7 @@ export const RunGroupSchema = z.object({
   pullNumber: z.number().int(),
   runCount: z.number().int(),
   costUsd: z.number().nullable(),
+  apiEquivalentUsd: z.number().nullable().optional(),
   inputTokens: z.number().nullable(),
   outputTokens: z.number().nullable(),
   runs: z.array(ReviewRunSchema),
