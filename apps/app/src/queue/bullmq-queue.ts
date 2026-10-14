@@ -6,6 +6,7 @@ import type { CommandJob, ReviewJob, ReviewQueue } from '../core/types.js';
  * Job names of the PR comment commands on the shared 'reviews' queue (reviews use 'review'). Each
  * kind has its own name, so a worker that does not know a kind never misreads it as another.
  */
+export const REVIEW_JOB_NAME = 'review';
 export const PAUSE_COMMAND_JOB_NAME = 'pause-command';
 export const REVIEW_COMMAND_JOB_NAME = 'review-command';
 
@@ -52,7 +53,7 @@ export class BullMqReviewQueue implements ReviewQueue {
   }
 
   async enqueue(job: ReviewJob): Promise<void> {
-    await this.queue.add('review', job, {
+    await this.queue.add(REVIEW_JOB_NAME, job, {
       jobId: job.deliveryId,
       attempts: 3,
       backoff: {
