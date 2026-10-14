@@ -10,6 +10,19 @@ import { guardWritesForWorkspace } from './workspace-guard.js';
  * `reviewed`: the forced review completed. `review_failed` / `review_skipped`: it ran but did not
  * complete (the run row has the detail). `skipped`: the installation is unknown or suspended.
  */
+/**
+ * A GitHub write that may succeed if tried again: no HTTP status (network), 429, 5xx, or a 403
+ * that is a primary or secondary rate limit (`x-ratelimit-remaining: 0`, `retry-after`, or a
+ * "rate limit" message) rather than a permission refusal.
+ */
+function isTransientGitHubError(error: unknown, status: number | null): boolean {
+  if (status === null || status === 429 || status >= 500) return true;
+  if (status !== 403) return false;
+  const headers = (error as { response?: { headers?: Record<string, unknown> } }).response?.headers ?? {};
+  const message = error instanceof Error ? error.message : '';
+  return headers['x-ratelimit-remaining'] === '0' || headers['retry-after'] !== undefined || /rate limit/i.test(message);
+}
+
 export type ReviewCommandOutcome = 'reviewed' | 'review_failed' | 'review_skipped' | ReviewCommandRejection | 'skipped';
 
 /**
@@ -36,7 +49,7 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
   const client = guardWritesForWorkspace(rawClient, deps.store, job.installationId, installation.workspaceId);
   const pr = { owner, repo, pull_number: job.pullNumber };
   // A reply that failed is retried by failing the job only when that is safe and useful: a
-  // transient GitHub error (no status, 429 or 5xx), for a refusal whose outcome cannot change on a
+  // transient GitHub error (see isTransientGitHubError), for a refusal whose outcome cannot change on a
   // retry (not `running`: once that run finished, a retry would start an unrequested review). The
   // reply skips itself when a sequential retry finds it already posted. Every failure is logged.
   const replyRejected = async (reason: ReviewCommandRejection): Promise<void> => {
@@ -49,8 +62,7 @@ export async function processReviewCommandJob(job: ReviewCommandJob, deps: Proce
         { event: 'review_command.reply_failed', ...base, reason, error: error instanceof Error ? error.name : 'unknown', status: httpStatus },
         `Could not post the refusal reply on ${job.repoFullName}#${job.pullNumber}`,
       );
-      const transient = httpStatus === null || httpStatus === 429 || httpStatus >= 500;
-      if (transient && reason !== 'running') throw error;
+      if (isTransientGitHubError(error, httpStatus) && reason !== 'running') throw error;
     }
   };
   const reject = async (reason: ReviewCommandRejection): Promise<ReviewCommandOutcome> => {

@@ -174,13 +174,17 @@ describe('processReviewJob — a push with nothing new to review', () => {
     expect(env.issueComments[0]?.body).toContain('`@mergepilot review`');
     expect(env.issueComments[0]?.body).toContain('<!-- mergepilot:nothing-new head=head-1 -->');
   });
-  const httpError = (status: number) => Object.assign(new Error(`GitHub ${status}`), { status });
+  const httpError = (status: number, headers: Record<string, string> = {}) =>
+    Object.assign(new Error(`GitHub ${status}`), { status, response: { headers } });
 
   it.each([
     { name: 'a transient 502 on an unauthorized refusal', options: { permission: 'read' }, status: 502, retried: true },
     { name: 'a permanent 403 (locked conversation)', options: { permission: 'read' }, status: 403, retried: false },
+    { name: 'a 403 secondary rate limit (retry-after)', options: { permission: 'read' }, status: 403, headers: { 'retry-after': '60' }, retried: true },
+    { name: 'a 403 primary rate limit (no requests left)', options: { permission: 'read' }, status: 403, headers: { 'x-ratelimit-remaining': '0' }, retried: true },
     { name: 'a transient 502 on a "running" refusal, whose outcome a retry could change', options: {}, status: 502, retried: false },
-  ])('fails the job for a retry only on $name', async ({ options, status, retried }) => {
+  ] as Array<{ name: string; options: { permission?: string }; status: number; headers?: Record<string, string>; retried: boolean }>)(
+    'fails the job for a retry only on $name', async ({ options, status, headers, retried }) => {
     const env = await setup(options);
     if (!('permission' in options)) {
       await env.store.createReviewRun({
@@ -188,7 +192,7 @@ describe('processReviewJob — a push with nothing new to review', () => {
         status: 'running', jobId: 'other',
       });
     }
-    env.client.createIssueComment = vi.fn(async () => { throw httpError(status); });
+    env.client.createIssueComment = vi.fn(async () => { throw httpError(status, headers); });
 
     const run = processReviewCommandJob(env.command, env.deps);
     if (retried) await expect(run).rejects.toThrow(`GitHub ${status}`);
