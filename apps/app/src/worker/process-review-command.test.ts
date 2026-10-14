@@ -143,6 +143,22 @@ describe('processReviewCommandJob — @mergepilot review', () => {
     expect(await processReviewCommandJob(env.command, env.deps)).toBe('review_failed');
     expect(env.issueComments).toEqual([]);
   });
+
+  it('still answers "running" when the refusal reply cannot be posted, instead of failing the job', async () => {
+    const env = await setup();
+    const check = env.store.findActiveReviewRun.bind(env.store);
+    vi.spyOn(env.store, 'findActiveReviewRun').mockImplementationOnce(async (...args) => {
+      const active = await check(...args);
+      await env.store.createReviewRun({
+        workspaceId: 'ws-1', installationId: 7, repoFullName: 'acme/repo', pullNumber: 12, headSha: 'head-1',
+        status: 'running', jobId: 'push-job',
+      });
+      return active;
+    });
+    env.client.createIssueComment = vi.fn(async () => { throw new Error('GitHub 502'); });
+
+    await expect(processReviewCommandJob(env.command, env.deps)).resolves.toBe('running');
+  });
 });
 
 describe('processReviewJob — a push with nothing new to review', () => {
