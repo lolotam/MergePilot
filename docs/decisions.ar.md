@@ -507,6 +507,20 @@
 - الـ GitHub Action زي ما هو: pause وresume بس.
 - مفيش migration.
 
+### س38: تحسين الـ system prompt بتاع المراجعة (ADR-0023)
+
+**طلب صاحب المشروع (بنصّه):**
+«work as the best code PR CI reviewer prompt manager work as prompt manager for 20 years also as contexet manager for 10 years generate the best surprised and astonished reviewing prompt to make the bot give the accurate best real review organized»
+
+وقبلها، لما سأل الموديل بيقرا إيه بالظبط: «what is the system prompt. for my app?»، واتفق على الاقتراح: «تعريف واضح لكل مستوى severity (critical وhigh وmedium)، عشان البوتات تحكم بنفس المقياس» و«تعليمات "متفترضش حاجة عن كود مش قدامك"، لأن الموديل شايف الـ diff بس».
+
+**القرار والنتيجة (ADR-0023):**
+- الـ prompt فضل بنفس عقد الـ JSON ونفس قواعد الثقة، واتضافله 5 أجزاء قصيرة: الموديل بيشوف إيه (الـ diff بس، ومن غير افتراضات عن كود مش ظاهر)، وطريقة المراجعة لكل نوع مشكلة، ومقياس الـ severity، ومقياس الـ confidence، وقواعد كتابة الملاحظة (ملاحظة واحدة لكل سبب، والسطر لازم يكون مطبوع في الـ diff، والدليل منسوخ بالحرف).
+- الرد لازم يبدأ بـ `{` وينتهي بـ `}`، لأن موديلات الاشتراك مش بتوصلها schema من الـ adapter.
+- قيم `severity` و`category` و`side` بتفضل بالإنجليزي حتى في المراجعة العربية، عشان الـ parser ما يرفضهاش.
+- الجزء العربي الوحيد هو جملة الدور. الـ prompt كبر لحوالي 1,300 token (تقدير)، وده قليل جنب حجم الـ diff.
+- prompt الـ Verify وJev زي ما هما. مفيش migration.
+
 ### س39: تكلفة مكافئة لموديلات الاشتراك (ADR-0024)
 
 **طلب صاحب المشروع (بنصّه):**

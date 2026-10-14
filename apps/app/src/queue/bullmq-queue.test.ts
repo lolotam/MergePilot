@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ReviewJob } from '../core/types.js';
+import type { CommandJob, ReviewJob } from '../core/types.js';
 import { BullMqReviewQueue, createQueueConnection } from './bullmq-queue.js';
 import type { Queue } from 'bullmq';
 
@@ -41,6 +41,21 @@ describe('BullMqReviewQueue', () => {
       },
       removeOnComplete: 1000,
     });
+  });
+
+  it.each([
+    { kind: 'pause_command' as const, command: 'pause' as const, name: 'pause-command' },
+    { kind: 'review_command' as const, command: 'review' as const, name: 'review-command' },
+  ])('enqueues a $kind under its own job name, keyed by cmd-<deliveryId>', async ({ kind, command, name }) => {
+    const addMock = vi.fn().mockResolvedValue({ id: 'cmd-d-1' });
+    const fakeQueue = { name: 'reviews', add: addMock } as unknown as Queue<ReviewJob>;
+    const job: CommandJob = {
+      kind, command, deliveryId: 'd-1', installationId: 456, repoFullName: 'org/repo', pullNumber: 10, commenterLogin: 'alice', language: 'en',
+    } as CommandJob;
+
+    await new BullMqReviewQueue({ queue: fakeQueue }).enqueueCommand(job);
+
+    expect(addMock).toHaveBeenCalledWith(name, job, expect.objectContaining({ jobId: 'cmd-d-1', attempts: 3 }));
   });
 
   it('ready probe checks waitUntilReady resolution', async () => {

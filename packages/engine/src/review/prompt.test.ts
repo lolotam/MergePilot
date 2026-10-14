@@ -33,6 +33,14 @@ describe('buildReviewPrompt', () => {
     expect(system).not.toContain('Read them as <<<');
   });
 
+  it.each(['en', 'ar'])('in %s, pins the JSON envelope and the enum spelling the parser needs', (language) => {
+    // Subscription backends get no response schema, and an Arabic review may translate enum
+    // values: the prompt is the only thing holding the answer to what answer.ts accepts.
+    const { system } = buildReviewPrompt({ ...MINIMAL_INPUT, language });
+    expect(system).toContain('starts with "{" and ends with "}"');
+    expect(system).toContain('spelled exactly as above, whatever language the text fields use');
+  });
+
   it('returns non-empty system and user strings', () => {
     const { system, user } = buildReviewPrompt(MINIMAL_INPUT);
     expect(system.length).toBeGreaterThan(0);

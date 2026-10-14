@@ -4,7 +4,7 @@ import { selectIncrementalFiles } from './incremental.js';
 import { buildMarker } from './marker.js';
 import type { PullRequestFile } from './pr-files.js';
 import { publishReview } from './publish.js';
-import { postNothingNewNoteOnce } from './review-command.js';
+import { postNothingNewNoteOnce, replyReviewCommandRejected } from './review-command.js';
 
 const PUBLISHER = 'mergepilot[bot]';
 const prFiles: PullRequestFile[] = [
@@ -77,4 +77,26 @@ describe('postNothingNewNoteOnce', () => {
     expect(comments[0]?.body).toContain('<div dir="rtl">');
     expect(comments[0]?.body).toContain('`@mergepilot مراجعة`');
   });
+
+describe('replyReviewCommandRejected', () => {
+  it('posts the refusal once per request, so a retried job does not repeat it', async () => {
+    const comments: GitHubIssueComment[] = [];
+    const client: GitHubClient = {
+      ...reviewedClient(),
+      listIssueCommentsPage: async () => comments,
+      createIssueComment: async ({ body }) => {
+        comments.push({ id: comments.length + 1, body, user: { login: PUBLISHER } });
+        return { id: comments.length };
+      },
+    };
+    const reply = { owner: 'o', repo: 'r', pull_number: 1, reason: 'closed' as const, language: 'en' as const, publisherLogin: PUBLISHER };
+
+    await replyReviewCommandRejected(client, { ...reply, deliveryId: 'd-1' });
+    await replyReviewCommandRejected(client, { ...reply, deliveryId: 'd-1' });
+    await replyReviewCommandRejected(client, { ...reply, deliveryId: 'd-2' });
+
+    expect(comments).toHaveLength(2);
+    expect(comments[0]?.body).toContain('<!-- mergepilot:review-command-reply delivery=d-1 -->');
+  });
+});
 });

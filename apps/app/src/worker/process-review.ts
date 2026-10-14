@@ -26,7 +26,8 @@ import { failBotRun, WORKSPACE_DELETED } from './review-bot.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
 import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
 
-const DUPLICATE = 'duplicate';
+/** Run detail when another job already holds an active run for this head (and bot). */
+export const DUPLICATE = 'duplicate';
 const BUDGET_REACHED = 'monthly budget reached';
 
 /**

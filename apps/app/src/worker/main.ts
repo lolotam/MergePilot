@@ -6,7 +6,13 @@ import { createLogger } from '../core/logger.js';
 import { MemoryRunEventBus } from '../core/run-events.js';
 import { withRunEvents } from '../core/run-events-store.js';
 import type { CommandJob, ReviewJob } from '../core/types.js';
-import { createQueueConnection, PAUSE_COMMAND_JOB_NAME, type QueueJobData } from '../queue/bullmq-queue.js';
+import {
+  createQueueConnection,
+  PAUSE_COMMAND_JOB_NAME,
+  REVIEW_COMMAND_JOB_NAME,
+  REVIEW_JOB_NAME,
+  type QueueJobData,
+} from '../queue/bullmq-queue.js';
 import { createGitHubAppFactory } from './github-app-factory.js';
 import { processPauseCommandJob } from './process-pause-command.js';
 import { processReviewCommandJob } from './process-review-command.js';
@@ -49,6 +55,45 @@ export function startHealthServer(port: number): Promise<http.Server> {
   });
 }
 
+/** The handlers a queue job is routed to; injectable so the routing is tested without the queue. */
+export interface QueueJobHandlers {
+  review: typeof processReviewJob;
+  pauseCommand: typeof processPauseCommandJob;
+  reviewCommand: typeof processReviewCommandJob;
+}
+
+const DEFAULT_HANDLERS: QueueJobHandlers = {
+  review: processReviewJob,
+  pauseCommand: processPauseCommandJob,
+  reviewCommand: processReviewCommandJob,
+};
+
+/**
+ * Routes one job of the 'reviews' queue (ADR-0012). PR comment commands are routed by their
+ * payload kind under either command name: a review command queued before it had its own name
+ * still carries 'pause-command' and must never run as a pause/resume. A name this worker does not
+ * know (a newer producer, mid-deploy) fails the job explicitly, so it is retried, never run as a
+ * review.
+ */
+export async function dispatchQueueJob(
+  job: Pick<Job<QueueJobData>, 'name' | 'data'>,
+  deps: ProcessReviewDeps,
+  handlers: QueueJobHandlers = DEFAULT_HANDLERS,
+): Promise<void> {
+  if (job.name === REVIEW_JOB_NAME) {
+    const reviewJob = job.data as ReviewJob;
+    deps.log?.(`Processing review job ${reviewJob.deliveryId} for #${reviewJob.pullNumber}`);
+    await handlers.review(reviewJob, deps);
+    return;
+  }
+  if (job.name === PAUSE_COMMAND_JOB_NAME || job.name === REVIEW_COMMAND_JOB_NAME) {
+    const command = job.data as CommandJob;
+    if (command.kind === 'review_command') await handlers.reviewCommand(command, deps);
+    else await handlers.pauseCommand(command, deps);
+    return;
+  }
+  throw new Error(`Unknown queue job name: ${job.name}`);
+}
 /**
  * Creates a BullMQ worker for the 'reviews' queue with `DEFAULT_WORKER_CONCURRENCY` by default.
  */
@@ -61,18 +106,7 @@ export function createReviewWorker(
 
   const worker = new Worker<QueueJobData>(
     'reviews',
-    async (job: Job<QueueJobData>) => {
-      // PR comment commands share the queue under their own job name (ADR-0012).
-      if (job.name === PAUSE_COMMAND_JOB_NAME) {
-        const command = job.data as CommandJob;
-        if (command.kind === 'review_command') await processReviewCommandJob(command, deps);
-        else await processPauseCommandJob(command, deps);
-        return;
-      }
-      const reviewJob = job.data as ReviewJob;
-      deps.log?.(`Processing review job ${reviewJob.deliveryId} for #${reviewJob.pullNumber}`);
-      await processReviewJob(reviewJob, deps);
-    },
+    (job: Job<QueueJobData>) => dispatchQueueJob(job, deps),
     {
       concurrency,
       connection,
