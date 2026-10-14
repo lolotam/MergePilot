@@ -39,7 +39,7 @@ export const IMAGE_PATHS = [
 
 function globToRegExp(glob: string): RegExp {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-  const pattern = escaped.replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*');
+  const pattern = escaped.split('**').map((part) => part.replace(/\*/g, '[^/]*')).join('.*');
   return new RegExp(`^${pattern}$`);
 }
 
