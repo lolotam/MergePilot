@@ -9,6 +9,7 @@ import {
   createGitHubAppFactory,
   createReviewWorker,
   createWorker,
+  dispatchQueueJob,
   startHealthServer,
 } from './main.js';
 import type { ProcessReviewDeps } from './types.js';
@@ -160,6 +161,34 @@ describe('worker/main', { timeout: 20000 }, () => {
       } finally {
         await new Promise<void>((resolve) => healthServer.close(() => resolve()));
       }
+    });
+  });
+
+  describe('dispatchQueueJob', () => {
+    const deps: ProcessReviewDeps = { store: new MemoryStore(), credentials: { resolve: vi.fn() }, githubAppFactory: vi.fn() };
+    const command = (kind: 'pause_command' | 'review_command') => ({
+      kind, command: kind === 'review_command' ? 'review' : 'pause', deliveryId: 'd-1', installationId: 1,
+      repoFullName: 'o/r', pullNumber: 1, commenterLogin: 'alice', language: 'en',
+    });
+    const handlers = () => ({ review: vi.fn(), pauseCommand: vi.fn(), reviewCommand: vi.fn() });
+
+    it.each([
+      { name: 'review', data: { deliveryId: 'd-1', pullNumber: 1 }, handler: 'review' },
+      { name: 'pause-command', data: command('pause_command'), handler: 'pauseCommand' },
+      // Queued by the version before review commands had their own name: never a pause/resume.
+      { name: 'pause-command', data: command('review_command'), handler: 'reviewCommand' },
+      { name: 'review-command', data: command('review_command'), handler: 'reviewCommand' },
+    ] as const)('routes a "$name" job carrying $data.kind to $handler', async ({ name, data, handler }) => {
+      const h = handlers();
+      await dispatchQueueJob({ name, data } as never, deps, h);
+      for (const [key, fn] of Object.entries(h)) expect(fn).toHaveBeenCalledTimes(key === handler ? 1 : 0);
+    });
+
+    it('fails a job whose name it does not know instead of running it as a review', async () => {
+      const h = handlers();
+      await expect(dispatchQueueJob({ name: 'later-command', data: command('review_command') } as never, deps, h))
+        .rejects.toThrow('Unknown queue job name: later-command');
+      for (const fn of Object.values(h)) expect(fn).not.toHaveBeenCalled();
     });
   });
 

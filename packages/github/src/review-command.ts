@@ -35,16 +35,36 @@ const REJECTION_TEXT: Record<ReviewCommandRejection, { en: string; ar: string }>
   },
 };
 
-/** Replies once to a `@mergepilot review` request that was not run, saying why. */
+function replyMarker(deliveryId: string): string {
+  return `<!-- mergepilot:review-command-reply delivery=${deliveryId} -->`;
+}
+
+/**
+ * Replies to a `@mergepilot review` request that was not run, saying why. The reply carries the
+ * request's delivery id in a hidden marker and is skipped when the publisher already posted it, so
+ * a sequential retry of the same request does not post it again (two attempts running at the same
+ * moment could still both post: the check is not atomic).
+ */
 export async function replyReviewCommandRejected(
   client: GitHubClient,
-  params: { owner: string; repo: string; pull_number: number; reason: ReviewCommandRejection; language: 'ar' | 'en' },
+  params: {
+    owner: string;
+    repo: string;
+    pull_number: number;
+    reason: ReviewCommandRejection;
+    language: 'ar' | 'en';
+    deliveryId: string;
+    publisherLogin: string;
+  },
 ): Promise<void> {
   if (!client.createIssueComment) return;
+  const marker = replyMarker(params.deliveryId);
+  const comments = await fetchAllIssueComments(client, params);
+  if (comments.some((c) => c.user?.login === params.publisherLogin && c.body?.includes(marker))) return;
   const text = REJECTION_TEXT[params.reason];
   const body = params.language === 'ar'
-    ? `<div dir="rtl">\n\n> ${text.ar}\n\n</div>`
-    : `> ${text.en}`;
+    ? `<div dir="rtl">\n\n> ${text.ar}\n\n</div>\n\n${marker}`
+    : `> ${text.en}\n\n${marker}`;
   await client.createIssueComment({ owner: params.owner, repo: params.repo, issue_number: params.pull_number, body });
 }
 

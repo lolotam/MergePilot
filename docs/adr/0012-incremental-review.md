@@ -85,12 +85,12 @@
 
 **What changes (hosted app only; the Action still knows pause and resume only).**
 - **The note:** when every bot that ran a job skipped it as `no new changes since the last review`, the worker posts one issue comment saying so in the workspace language. It points to `@mergepilot review`, quoted in backticks so it never runs. The marker is `<!-- mergepilot:nothing-new head=<sha> -->`, from the publisher only, so the note is posted once per head. A failed note is logged (`review.nothing_new_note_failed`) and never fails the job. If any bot reviewed, its review is the answer and no note is posted.
-- **The command:** `@mergepilot review` or `@mergepilot مراجعة`. The parsing rules are those of pause/resume: a standalone word, bots and edited comments ignored. The webhook queues a `review_command` job under the existing `pause-command` job name; `job.kind` routes it.
+- **The command:** `@mergepilot review` or `@mergepilot مراجعة`. The parsing rules are those of pause/resume: a standalone word, bots and edited comments ignored. The webhook queues a `review_command` job under its own job name, `review-command`. The worker routes both command names by the payload's `kind`, so a review command queued by the version that still used `pause-command` drains as a review and never as a pause/resume; a job name the worker does not know fails explicitly (and is retried) rather than running as a review.
 - **The worker:**
   - It checks write access with the pause rule.
   - It reads the PR. A closed or merged PR is refused.
-  - A review already running on this head is refused.
-  - Each refusal gets one short reply. An accepted request gets no reply, because the reviews themselves answer it.
+  - A review already running on this head is refused. A push that claims the head between that check and the run's creation (the store allows one active run per head and bot) makes the request lose the race: it is refused the same way.
+  - Each refusal gets one short reply. An accepted request gets no reply, because the reviews themselves answer it; its outcome (`reviewed`, `review_failed`, `review_skipped`) is logged as `review_command.finished`.
   - It then runs the review job in place with `force: true`:
     - every active bot reviews the whole PR (scope reason `review requested`);
     - the "already reviewed this head" check in `publishReview` is skipped;
