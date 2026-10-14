@@ -106,6 +106,14 @@ describe('runRelease gates', () => {
     expect(await runRelease(cfg, ports)).toEqual({ kind: 'blocked', detail: 'release hold open: #77' });
   });
 
+  it('blocks a commit that is not on main before reading any check (PR head, fork, other branch)', async () => {
+    const { cfg, ports, github, dokploy } = setup();
+    const stray = 'c'.repeat(40);
+    expect(await runRelease({ ...cfg, sha: stray }, ports)).toEqual({ kind: 'blocked', detail: `${stray} is not on main` });
+    expect(github.checkRuns).not.toHaveBeenCalled();
+    expect(dokploy.deploy).not.toHaveBeenCalled();
+  });
+
   it('waits on pending checks and blocks on failed ones, without deploying', async () => {
     const { cfg, ports, github, dokploy } = setup();
     vi.mocked(github.checkRuns).mockResolvedValueOnce(green(NEW).slice(0, 2));

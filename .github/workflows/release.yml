@@ -1,0 +1,64 @@
+name: Release
+
+# Gated production release (ADR-0025). Runs after CI, Integration Tests or Docker Image finishes on a
+# main push and releases that exact commit only when all of its required checks succeeded and its
+# image is pushed. Dry run (no commit, no deploy) unless the repository variable
+# MERGEPILOT_AUTO_RELEASE is "enabled"; deleting that variable disables releases again.
+on:
+  workflow_run:
+    workflows: [CI, Integration Tests, Docker Image]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA on main to (re)evaluate for release
+        required: true
+        type: string
+
+permissions: {}
+
+# One production release at a time. A queued run is never cancelled mid-deploy; a newer queued run
+# replaces an older queued one, and the release script refuses to deploy anything older than what runs.
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release to production
+    # Only main pushes from this repository; never pull requests, forks or other branches.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # release commit on the release branch (never main)
+      issues: write # release-hold issue on a failed release
+      checks: read # required checks of the candidate commit
+    steps:
+      # The release code always comes from main, never from the candidate's own tree.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Release
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || inputs.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+          MERGEPILOT_AUTO_RELEASE: ${{ vars.MERGEPILOT_AUTO_RELEASE }}
+          RELEASE_BRANCH: ${{ vars.RELEASE_BRANCH || 'production' }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://mergepilot.walidmohamed.com' }}
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_COMPOSE_ID: ${{ vars.DOKPLOY_COMPOSE_ID }}
+          DOKPLOY_APP_NAME: ${{ vars.DOKPLOY_APP_NAME }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DEPLOY_TIMEOUT_MINUTES: ${{ vars.DEPLOY_TIMEOUT_MINUTES }}
+        run: node --experimental-strip-types scripts/release/main.ts

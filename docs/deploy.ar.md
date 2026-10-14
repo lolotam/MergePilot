@@ -62,7 +62,7 @@ MERGEPILOT_BASE_URL=https://mergepilot.walidmohamed.com
 PORT=3000
 
 # 2. صورة Docker المنشورة من مستودع GitHub Packages (GHCR)
-# استبدل COMMIT_SHA برقم الـ commit المراد نشره، مثل: ghcr.io/lolotam/mergepilot:5008209
+# الصورة مش متغيّر هنا: بتتحدد في سطر x-image في ملف الـ compose (شوف الخطوة 7)
 
 # 3. قواعد البيانات والخدمات الداخلية (ضمن شبكة Dokploy الداخلية)
 DATABASE_URL=postgres://postgres:StrongDbPasswordHere@postgres:5432/mergepilot
@@ -147,19 +147,40 @@ WORKER_CONCURRENCY=8
 
 ---
 
-## الخطوة 7: التحديث والتراجع السريع بنقرة واحدة (Update & Rollback)
+## الخطوة 7: التحديث والتراجع (Update & Rollback)
 
-عندما يدفع فريق التطوير كوداً جديداً إلى المستودع:
-1. تقوم الـ GitHub Actions تلقائياً ببناء صورة جديدة ورفعها إلى:
-   `ghcr.io/lolotam/mergepilot:<COMMIT_SHA>`
-2. **للتحديث:**
-   - ادخل إلى Dokploy وافتح تبويب **Environment**.
-   - عدّل سطر `x-image` في ملف الـ compose إلى الـ SHA الجديد، مثلاً:
-     `x-image: &image ghcr.io/lolotam/mergepilot:abcdef12`
-   - احفظ واضغط **Deploy**.
-3. **للتراجع الفوري (Rollback):**
-   - إذا حدث أي طارئ في الإصدار الجديد، كل ما عليك فعله هو إعادة سطر `x-image` إلى الـ SHA السابق الذي كان يعمل بنجاح.
-   - اضغط **Deploy** وسيعود النظام فوراً للإصدار السابق بدون توقف للخدمة.
+كل push على `main` بيبني صورة `ghcr.io/lolotam/mergepilot:<COMMIT_SHA>` الكاملة (40 حرف) عن طريق GitHub Actions.
+
+### الطريقة الحالية: يدوي (لحد ما صاحب المشروع يفعّل النشر التلقائي)
+
+1. **للتحديث:** عدّل سطر `x-image` في `deploy/docker-compose.dokploy.yml` للـ SHA الكامل الجديد (ويُفضّل مع الـ digest)، مثلاً:
+   `x-image: &image ghcr.io/lolotam/mergepilot:<SHA>@sha256:<DIGEST>`
+   وبعد ما يوصل `main` اضغط **Deploy** في Dokploy.
+2. **للتراجع:** رجّع سطر `x-image` للإصدار اللي كان شغال واضغط **Deploy**. ده بيرجّع الصورة بس، مش قاعدة البيانات: لو الإصدار الجديد فيه migration، التراجع محتاج قرار يدوي.
+3. النشر **مش zero-downtime**: Compose بيعيد إنشاء `web` و`worker`، والطلبات أو المراجعات اللي شغالة وقتها ممكن تتقطع.
+
+### النشر التلقائي المشروط (ADR-0025، متطبّق بس مش مفعّل)
+
+الـ workflow `.github/workflows/release.yml` بيشتغل بعد ما `CI` و`Integration Tests` و`Docker Image` يخلصوا على push لـ `main`، أو يدوي من تبويب Actions بـ SHA كامل. من غير تفعيل بيعمل **dry run** بس: بيكتب الخطة في ملخص الـ job ومش بيغيّر حاجة.
+
+لما يتفعّل، بينشر الـ commit بس لو:
+- الـ checks التلاتة (`check` و`integration` و`Build and Push Docker Image`) نجحت على **نفس الـ SHA**، والـ commit موجود على `main`.
+- الصورة بتاعة الـ SHA ده مرفوعة، والـ label `org.opencontainers.image.revision` فيها بيساوي الـ SHA.
+- الـ commit أحدث من اللي شغال، ومفيش issue مفتوح عليه label `release-hold`.
+
+commit فيه تغيير توثيق بس بيتخطّى (مفيش صورة جديدة). بعدها بيكتب release commit على فرع `production` فيه الـ pin بالـ digest، ويطلب من Dokploy عمل deploy عن طريق الـ Compose API، ويتأكد إن `migrate` خلص بـ exit 0، و`postgres` و`redis` جاهزين، و`web` و`worker` healthy على نفس الصورة والـ SHA، و`/health` بيرجّع 200 و`{"ok":true}`.
+
+**لو التحقق فشل:** بيفتح issue عليه `release-hold` (وده بيوقف أي نشر بعده لحد ما يتقفل)، ويرجع تلقائياً للإصدار السابق **بس لو مفيش ملف اتغيّر تحت `apps/app/migrations/`**. مش بيمسح volumes، ومش بيعمل downgrade أو restore لقاعدة البيانات أبداً.
+
+**خطوات التفعيل (صاحب المشروع بس):**
+1. يعمل فرع `production` على الـ commit الشغال حالياً، ويحوّل مصدر الـ compose في Dokploy لفرع `production` ويقفل autoDeploy.
+2. يعمل مستخدم API مخصّص في Dokploy، ويحط مفتاحه في secret اسمه `DOKPLOY_API_KEY` في إعدادات الريبو.
+3. يحط الـ variables دي: `DOKPLOY_URL` و`DOKPLOY_COMPOSE_ID` و`DOKPLOY_APP_NAME` (واختياري `PRODUCTION_URL` و`RELEASE_BRANCH` و`DEPLOY_TIMEOUT_MINUTES`).
+4. يعمل label اسمه `release-hold` في الريبو.
+5. يختار مدة `WORKER_STOP_GRACE_PERIOD` في Environment بتاع Dokploy (الافتراضي 10s، ودي مدة الـ worker عشان يخلّص المراجعات الشغالة قبل ما Docker يقفله).
+6. يحط الـ variable `MERGEPILOT_AUTO_RELEASE` = `enabled`.
+
+**الإيقاف:** امسح الـ variable `MERGEPILOT_AUTO_RELEASE` (أو غيّر قيمته)، والـ workflow يرجع dry run. ولإيقاف مؤقت من غير ما تلمس الإعدادات، افتح issue عليه `release-hold`.
 
 ---
 

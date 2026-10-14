@@ -7,13 +7,14 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r typecheck && tsc -p scripts/release/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
     "test:integration": "vitest run -c vitest.integration.config.ts",
     "build": "pnpm -r build",
     "bundle": "pnpm --filter @mergepilot/action bundle",
-    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "release": "node --experimental-strip-types scripts/release/main.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -142,6 +142,8 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   if (isReleaseCommit(await gh.commitMessage(sha))) return { kind: 'skipped', detail: `${sha} is a release commit` };
   const holds = await gh.openHolds();
   if (holds.length > 0) return { kind: 'blocked', detail: `release hold open: #${holds.join(', #')}` };
+  // Before the checks: a pull request head, a fork or another branch is refused, not left waiting.
+  if (!(await gh.isAncestor(sha, 'main'))) return { kind: 'blocked', detail: `${sha} is not on main` };
 
   const gate = evaluateChecks(sha, await gh.checkRuns(sha), await gh.commitFiles(sha));
   if (gate.kind === 'pending') return { kind: 'waiting', detail: `waiting for ${gate.waiting.join(', ')}` };
@@ -154,7 +156,7 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   const decision = decideRelease({
     sourceSha: sha,
     deployedSha,
-    onMain: await gh.isAncestor(sha, 'main'),
+    onMain: true,
     sourceIsAncestorOfDeployed: deployedSha !== null && (await gh.isAncestor(sha, deployedSha)),
     deployedIsAncestorOfSource: deployedSha !== null && (await gh.isAncestor(deployedSha, sha)),
   });
