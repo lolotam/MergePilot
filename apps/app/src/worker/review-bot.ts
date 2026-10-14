@@ -76,15 +76,12 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
           : {}),
       });
     }
-    // A subscription covers the model, so the run's real cost is $0; the API price its config was
-    // resolved with is kept for the display-only equivalent (ADR-0024).
+    // A subscription covers the model, so the run's real cost is $0; what the tokens would cost
+    // at the API price is kept for the display-only equivalent (ADR-0024).
     const pricing: RunPricing = model.includedInSubscription
       ? { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 }
       : configuredPricing;
-    const apiPrice = await apiEquivalentPrice(deps.store, settings, model, choice, {
-      pricing: effectiveConfig.budget.pricing,
-      record: configuredPricing,
-    });
+    const apiPrice = await apiEquivalentPrice(deps.store, settings, model, choice, configuredPricing);
     // A configured fallback left out (no key, or a custom URL that failed the SSRF check) is
     // disclosed in the log and on the run record; it is never called.
     const skippedNote = skippedFallbacksNote(model);

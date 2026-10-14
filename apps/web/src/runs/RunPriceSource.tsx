@@ -26,7 +26,8 @@ export function RunCost({ costUsd, pricing }: RunCostProps) {
           className="font-sans text-[11px] font-normal text-ink-500 dark:text-ink-400"
           title={t('runApiEquivalentTitle')}
         >
-          {t('runApiEquivalent', { cost: `$${pricing.apiEquivalentUsd.toFixed(4)}` })}
+          {t('runApiEquivalent', { cost: `${pricing.apiEquivalentUsd.toFixed(4)}` })}
+          {pricing.apiEquivalentSource ? ` · ${runPriceLabel(pricing.apiEquivalentSource, t)}` : ''}
         </div>
       ) : null}
     </div>

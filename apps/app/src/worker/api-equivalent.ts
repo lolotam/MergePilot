@@ -13,8 +13,9 @@ export interface ApiEquivalentPrice {
 
 /**
  * The API price of a run's model when its real cost does not reflect the tokens (ADR-0024): a
- * consumer subscription (the price the bot's config was already resolved with) or a flat-rate
- * token plan (the same model under the plain API provider, the workspace's manual price first).
+ * consumer subscription, or a flat-rate token plan the catalog prices at a known $0 (the same
+ * model under the plain API provider). The price is the workspace's manual one, then the catalog
+ * row; never the repository's `budget.pricing`, which a repo file could set to anything.
  * Undefined when the run is priced for real or that price is unknown, so the dashboard shows no
  * equivalent rather than a $0 one.
  */
@@ -23,14 +24,17 @@ export async function apiEquivalentPrice(
   settings: Pick<WorkspaceSettings, 'priceOverrides'>,
   model: Pick<ReviewModel, 'includedInSubscription'>,
   choice: { provider: string; model: string },
-  configured: { pricing?: ModelPricing | undefined; record: RunPricing },
+  configured: Pick<RunPricing, 'inputPerMTok' | 'outputPerMTok'>,
 ): Promise<ApiEquivalentPrice | undefined> {
+  let apiProvider: string | undefined;
   if (model.includedInSubscription) {
-    return configured.pricing ? { pricing: configured.pricing, source: configured.record.source } : undefined;
+    apiProvider = choice.provider;
+  } else {
+    // An unpriced plan has no real cost to compare with, and a priced one is charged for real.
+    if (configured.inputPerMTok !== 0 || configured.outputPerMTok !== 0) return undefined;
+    apiProvider = TOKEN_PLAN_API_PROVIDER[choice.provider];
   }
-  const apiProvider = TOKEN_PLAN_API_PROVIDER[choice.provider];
-  // A plan the catalog prices above $0 is charged for real: its cost needs no equivalent.
-  if (!apiProvider || (configured.record.inputPerMTok ?? 0) > 0 || (configured.record.outputPerMTok ?? 0) > 0) return undefined;
+  if (!apiProvider) return undefined;
   const resolved = await resolvePricing({ store, settings }, apiProvider, choice.model);
   return resolved.pricing ? { pricing: resolved.pricing, source: resolved.record.source } : undefined;
 }

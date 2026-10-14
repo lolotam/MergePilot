@@ -43,7 +43,7 @@ describe('run detail cost with its pricing source', () => {
       pricing: { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0, apiEquivalentUsd: 0.0123, apiEquivalentSource: 'catalog:models.dev' },
     });
     expect(screen.getByTestId('run-cost').textContent).toContain('$0.0000 · covered by the subscription');
-    expect(screen.getByTestId('run-api-equivalent').textContent).toBe('≈ $0.0123 API-equivalent');
+    expect(screen.getByTestId('run-api-equivalent').textContent).toBe('≈ $0.0123 API-equivalent · models.dev price');
   });
 
 });

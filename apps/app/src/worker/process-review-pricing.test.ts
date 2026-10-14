@@ -179,4 +179,25 @@ describe('processReviewJob — API-equivalent cost of subscription and token-pla
     expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo((calls * 50 * 3 + calls * 20 * 15) / 1_000_000, 9);
     expect(run?.costUsd).toBeCloseTo((1000 * 0.5) / 1_000_000, 12);
   });
+  it("never takes the subscription's equivalent from the repository's budget.pricing", async () => {
+    const { run } = await review({
+      catalog: [catalogEntry],
+      repoFiles: { '.mergepilot.yml': repoFile('anthropic', 'claude-3-5-sonnet') },
+      fakeModel: subscribed(),
+    });
+
+    expect(run?.result?.pricing).toMatchObject({ source: 'subscription', apiEquivalentSource: 'catalog:models.dev' });
+    expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo((50 * 3 + 20 * 15) / 1_000_000, 9);
+  });
+
+  it('gives an unpriced token-plan run no equivalent, even when the plain API price is known', async () => {
+    const { run } = await review({
+      settings: { provider: 'zai-coding', model: 'glm-5.3' },
+      catalog: [{ provider: 'zai', model: 'glm-5.3', inputPerMTok: 1.4, outputPerMTok: 4.4, source: 'models.dev' }],
+    });
+
+    expect(run?.costUsd).toBeNull();
+    expect(run?.result?.pricing).toEqual({ source: 'unknown', inputPerMTok: null, outputPerMTok: null });
+  });
+
 });
