@@ -217,7 +217,39 @@ describe('processReviewJob — API-equivalent cost of subscription and token-pla
     expect(zeroOverride.run?.result?.pricing).toEqual({ source: 'override', inputPerMTok: 0, outputPerMTok: 0 });
   });
 
-  it('completes the run without an equivalent when the display-only price lookup fails', async () => {
+  it('completes a subscription run without an equivalent when its price lookup fails', async () => {
+    // Once the bot's model is built, the run's only getModelPrice call is the equivalent's (the
+    // config is priced before, the judge's prices come from listModelPrices): fail just that key,
+    // and check it was hit exactly once.
+    const h = createHarness({ settings: {}, fakeModel: subscribed() });
+    await h.store.replaceModelPrices('models.dev', [catalogEntry], FETCHED);
+    const real = h.store.getModelPrice.bind(h.store);
+    const buildModel = h.deps.createModelForProvider!;
+    let modelBuilt = false;
+    h.deps.createModelForProvider = async (...args) => {
+      const built = await buildModel(...args);
+      modelBuilt = true;
+      return built;
+    };
+    let failures = 0;
+    vi.spyOn(h.store, 'getModelPrice').mockImplementation(async (provider, model) => {
+      if (modelBuilt && provider === catalogEntry.provider && model === catalogEntry.model) {
+        failures += 1;
+        throw new Error('price store down');
+      }
+      return real(provider, model);
+    });
+
+    const result = await processReviewJob(h.job, h.deps);
+    const run = await h.latestRun();
+
+    expect(failures).toBe(1);
+    expect(result.status).toBe('completed');
+    expect(run?.costUsd).toBe(0);
+    expect(run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 });
+  });
+
+  it('completes a token-plan run without an equivalent when its price lookup fails', async () => {
     // A token plan's equivalent is the only lookup of the plain `zai` provider in a run, so only it fails.
     const h = createHarness({ settings: { provider: 'zai-coding', model: 'glm-5.3' } });
     await h.store.replaceModelPrices(
@@ -239,6 +271,6 @@ describe('processReviewJob — API-equivalent cost of subscription and token-pla
 
     expect(result.status).toBe('completed');
     expect(run?.costUsd).toBe(0);
-    expect(run?.result?.pricing?.apiEquivalentUsd).toBeUndefined();
+    expect(run?.result?.pricing).toEqual({ source: 'catalog:models.dev', inputPerMTok: 0, outputPerMTok: 0, fetchedAt: FETCHED.toISOString() });
   });
 });
