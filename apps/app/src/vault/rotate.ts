@@ -1,4 +1,25 @@
-import { WorkspaceDeletedError, type AppStore, type Vault } from '../core/types.js';
+import { isMultiKeyProvider } from '../credentials/multi-key.js';
+import {
+  WorkspaceDeletedError,
+  type AppStore,
+  type StoredCredential,
+  type StoredProviderKey,
+  type Vault,
+} from '../core/types.js';
+
+function parentFromSlot(slot: StoredProviderKey): StoredCredential {
+  return {
+    id: slot.id,
+    workspaceId: slot.workspaceId,
+    provider: slot.provider,
+    ciphertext: slot.ciphertext,
+    keyVersion: slot.keyVersion,
+    last4: slot.last4,
+    createdBy: slot.createdBy,
+    createdAt: slot.createdAt,
+    baseUrl: null,
+  };
+}
 
 export interface RotateResult {
   reencrypted: number;
@@ -20,44 +41,79 @@ export async function reencryptAll(
   for (const workspaceId of workspaceIds) {
     const credList = await store.listCredentials(workspaceId);
     for (const item of credList) {
-      if (item.keyVersion === vault.keyVersion) {
-        skipped++;
-        continue;
+      const multi = isMultiKeyProvider(item.provider);
+      const slotRows = multi ? await store.listProviderKeys(workspaceId, item.provider) : [];
+      const multiWithSlots = multi && slotRows.length > 0;
+
+      if (!multiWithSlots) {
+        if (item.keyVersion === vault.keyVersion) {
+          skipped++;
+        } else {
+          const full = await store.getCredential(workspaceId, item.provider);
+          if (full && full.keyVersion !== vault.keyVersion) {
+            const plaintext = await vault.decrypt(full.ciphertext, {
+              workspaceId,
+              provider: full.provider,
+            });
+            const newCiphertext = await vault.encrypt(plaintext, {
+              workspaceId,
+              provider: full.provider,
+            });
+            try {
+              await store.saveCredential({
+                ...full,
+                ciphertext: newCiphertext,
+                keyVersion: vault.keyVersion,
+              });
+            } catch (error) {
+              // The workspace was deleted mid-rotation: its credentials are gone, nothing to rewrite.
+              if (error instanceof WorkspaceDeletedError) break;
+              throw error;
+            }
+            reencrypted++;
+          } else if (full) {
+            skipped++;
+          }
+        }
       }
 
-      const full = await store.getCredential(workspaceId, item.provider);
-      if (!full) {
-        continue;
-      }
+      if (!multi || slotRows.length === 0) continue;
 
-      if (full.keyVersion === vault.keyVersion) {
-        skipped++;
-        continue;
-      }
-
-      const plaintext = await vault.decrypt(full.ciphertext, {
-        workspaceId,
-        provider: full.provider,
-      });
-
-      const newCiphertext = await vault.encrypt(plaintext, {
-        workspaceId,
-        provider: full.provider,
-      });
-
+      let slotReencrypted = 0;
+      let slotSkipped = 0;
       try {
-        await store.saveCredential({
-          ...full,
-          ciphertext: newCiphertext,
-          keyVersion: vault.keyVersion,
+        await store.modifyProviderKeys(workspaceId, item.provider, async (current) => {
+          slotReencrypted = 0;
+          slotSkipped = 0;
+          if (current.length === 0) {
+            return { keys: [], parent: null };
+          }
+          const updated: StoredProviderKey[] = [];
+          for (const slot of current) {
+            if (slot.keyVersion === vault.keyVersion) {
+              updated.push(slot);
+              slotSkipped++;
+              continue;
+            }
+            const plaintext = await vault.decrypt(slot.ciphertext, { workspaceId, provider: slot.provider });
+            updated.push({
+              ...slot,
+              ciphertext: await vault.encrypt(plaintext, { workspaceId, provider: slot.provider }),
+              keyVersion: vault.keyVersion,
+            });
+            slotReencrypted++;
+          }
+          const sorted = [...updated].sort((a, b) => a.position - b.position);
+          const first = sorted[0];
+          if (!first) return { keys: [], parent: null };
+          return { keys: sorted, parent: parentFromSlot(first) };
         });
       } catch (error) {
-        // The workspace was deleted mid-rotation: its credentials are gone, nothing to rewrite.
         if (error instanceof WorkspaceDeletedError) break;
         throw error;
       }
-
-      reencrypted++;
+      reencrypted += slotReencrypted;
+      skipped += slotSkipped;
     }
   }
 

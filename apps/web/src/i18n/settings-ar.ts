@@ -91,4 +91,11 @@ export const arSettings = {
   testReasonInvalidResponse: 'رد المزود بدون نص',
   testReasonOther: 'فشل الاتصال',
   testNotRun: 'لم يُختبر بعد',
+  addKeyField: 'إضافة مفتاح API آخر',
+  removeKeyField: 'إزالة هذا المفتاح',
+  keyFieldLimit: 'يمكن حفظ 20 مفتاح API كحد أقصى لكل مزود.',
+  testKeyOutcomeValid: 'المفتاح صالح وفيه حصة متبقية',
+  testKeyOutcomeInvalid: 'المفتاح غير صالح',
+  testKeyOutcomeQuota: 'نفدت حصة هذا المفتاح',
+  testKeyOutcomeUnverified: 'تعذّر التحقق الآن (حدّ الطلبات أو الاتصال). حاول مرة أخرى',
 };

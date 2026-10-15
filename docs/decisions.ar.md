@@ -558,3 +558,19 @@
 «do all by your own by using ssh-musalam-2-mcp and dokploy-musalam-2-mcp»
 
 الخطوات اتوقفت عند رفض صلاحيات Claude Code لإنشاء فرع `production` وتعديل إعدادات الريبو وDokploy. ومفتاح `DOKPLOY_API_KEY` ومدة `WORKER_STOP_GRACE_PERIOD` بيفضلوا على صاحب المشروع، عشان الأسرار ما تعدّيش على الموديل.
+
+## الدفعة 17 — 2026-10-15
+
+### س41: أكتر من مفتاح API لنفس المزوّد، والتبديل لما الحصة تخلص (ADR-0026)
+
+**طلب صاحب المشروع (بنصّه):**
+«The application currently supports only a single API key per provider (Gemini, OpenRouter, OpenCode ZEN) for accessing free-quota services. The goal is to extend the "Add New API Key" form so that users can store multiple secret API keys per provider (up to 10-20 keys). At runtime the app must automatically rotate through the stored keys, using the first key until its quota is exhausted, then falling back to the next key, and so on, until a key with remaining quota is found.»
+
+المطلوب في نفس الطلب: زر + في فورم «Add New API Key»، اختبار لكل حقل، حذف قبل الحفظ، حد 20 مفتاح، تشفير المفاتيح، ترتيب محفوظ، تبديل تلقائي عند 429 أو رسالة نفاد الحصة، تخزين آخر مفتاح نجح، وخطأ واضح لو كل المفاتيح خلصت، من غير ما السر يطلع للواجهة أو للوجات.
+
+**القرار والنتيجة (ADR-0026):**
+- Gemini وOpenRouter وOpenCode Zen بس بيحفظوا قائمة مرتبة من 1 لـ 20 مفتاح. الاشتراكات (Codex وClaude وGrok) وباقي المزوّدين فاضلين بمفتاح واحد زي ما هم.
+- ده مش fallback بتاع ADR-0008: المزوّد والنموذج ما بيتغيروش، المفتاح بس. التبديل بيتسجل في نتيجة الـ run (رقم المفتاح وعدد اللي اتتخطى) من غير السر.
+- المفتاح اللي بعده بيتجرّب بس لو الفشل مصنّف quota أو rate limit. خطأ المصادقة و5xx والمهلة بترجع زي ما هي من غير تجربة مفتاح تاني. لو كله خلص، خطأ واحد كوده `QUOTA_EXHAUSTED_ALL_KEYS`، وبعده fallback النموذج المظبوط لسه شغال لأن نوع الفشل quota.
+- التشفير هو نفس الـ vault الحالي. المفتاح القديم بيتحط في الموضع 0 من غير ما المستخدم يدخله تاني. النسخة الاحتياطية بتشيل القائمة المختومة، ومن غير ما رقم نسخة النسخة الاحتياطية يتغير.
+- آخر مفتاح نجح متسجل في قاعدة البيانات لكل مساحة عمل ومزوّد، مش في ذاكرة عملية واحدة، عشان الويب والـ worker يشوفوا نفس الرقم.

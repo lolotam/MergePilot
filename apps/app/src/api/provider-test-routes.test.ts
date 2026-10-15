@@ -32,7 +32,7 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 120, model: 'gpt-5', reply: 'OK' });
     await saveOpenAi();
     const res = await test('openai', h.adminCookie(), { model: 'gpt-5', effort: 'high' });
-    expect(res.json()).toEqual({ ok: true, ms: 120, model: 'gpt-5' });
+    expect(res.json()).toEqual({ ok: true, ms: 120, model: 'gpt-5', quotaStatus: 'valid' });
     const call = vi.mocked(testConnection).mock.calls[0];
     expect(call?.[1]).toBe(keyFor('o'));
     expect(call?.[3]).toEqual({ effort: 'high', timeoutMs: 30000 });
@@ -42,14 +42,14 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: false, ms: 45, code: 'auth', message: `bad key ${keyFor('o')}` });
     await saveOpenAi();
     const res = await test('openai', h.adminCookie());
-    expect(res.json()).toEqual({ ok: false, code: 'auth', message: 'bad key [REDACTED]', ms: 45 });
+    expect(res.json()).toEqual({ ok: false, code: 'auth', message: 'bad key [REDACTED]', ms: 45, quotaStatus: 'invalid' });
   });
 
   it('tests an unsaved key before saving, without storing or echoing it', async () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 9, model: 'glm-5', reply: 'OK' });
     const key = keyFor('zai');
     const res = await test('zai-coding', h.adminCookie(), { apiKey: key, model: 'glm-5' });
-    expect(res.json()).toEqual({ ok: true, ms: 9, model: 'glm-5' });
+    expect(res.json()).toEqual({ ok: true, ms: 9, model: 'glm-5', quotaStatus: 'valid' });
     expect(res.body).not.toContain(key);
     expect(vi.mocked(testConnection).mock.calls[0]?.[1]).toBe(key);
     expect(await h.credentials.getCredential('ws-1', 'zai-coding')).toBeNull();

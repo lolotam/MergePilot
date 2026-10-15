@@ -10,9 +10,11 @@ import {
   type KeyProvider,
   type ReviewerBot,
   type StoredCredential,
+  type StoredProviderKey,
   type WorkspaceRestore,
   type WorkspaceSettings,
 } from '../core/types.js';
+import { isMultiKeyProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
 import type { CredentialService } from '../credentials/service.js';
 import { ReviewerBotInputSchema, SaveKeyRequestSchema, SettingsUpdateSchema } from './contract.js';
 import {
@@ -97,16 +99,39 @@ function parseFile(raw: unknown): BackupFile {
   return parsed.data;
 }
 
+function slotFromCredential(credential: StoredCredential, position: number): StoredProviderKey {
+  return {
+    id: credential.id,
+    workspaceId: credential.workspaceId,
+    provider: credential.provider,
+    position,
+    ciphertext: credential.ciphertext,
+    keyVersion: credential.keyVersion,
+    last4: credential.last4,
+    createdBy: credential.createdBy,
+    createdAt: credential.createdAt,
+    lastTestStatus: null,
+    lastTestedAt: null,
+  };
+}
+
 /** Decrypts, checks and vault-encrypts the file's keys; keys left out of the file are skipped. */
-async function planCredentials(deps: RestoreDeps, req: RestoreRequest, file: BackupFile): Promise<StoredCredential[]> {
-  const sealed = file.credentials.flatMap((c, index) => (c.key ? [{ ...c, key: c.key as SealedKey, index }] : []));
-  if (sealed.length === 0) return [];
+async function planCredentials(
+  deps: RestoreDeps,
+  req: RestoreRequest,
+  file: BackupFile,
+): Promise<{ credentials: StoredCredential[]; providerKeys: StoredProviderKey[] }> {
+  const sealed = file.credentials.flatMap((c, index) =>
+    c.key || (c.keys && c.keys.length > 0) ? [{ ...c, index }] : [],
+  );
+  if (sealed.length === 0) return { credentials: [], providerKeys: [] };
   if (!req.passphrase) throw new RestoreProblem(400, 'passphrase_required', 'This file has encrypted keys: type its passphrase', 'passphrase');
   const passphrase = req.passphrase;
 
   const seen = new Set<KeyProvider>();
   const derived = new Map<string, Promise<Buffer>>();
   const out: StoredCredential[] = [];
+  const providerKeys: StoredProviderKey[] = [];
   for (const entry of sealed) {
     const field = `credentials[${entry.index}]`;
     if (seen.has(entry.provider)) throw new RestoreProblem(400, 'validation_error', `${field}.provider: ${entry.provider} appears twice`, `${field}.provider`);
@@ -119,44 +144,68 @@ async function planCredentials(deps: RestoreDeps, req: RestoreRequest, file: Bac
       throw new RestoreProblem(400, 'base_url_not_allowed', 'Only the custom provider takes a base URL', `${field}.baseUrl`);
     }
 
-    let apiKey: string;
-    try {
-      const salt = sealedKeySalt(entry.key);
-      const cacheKey = salt.toString('base64url');
-      if (!derived.has(cacheKey)) derived.set(cacheKey, deriveBackupKey(passphrase, salt));
-      apiKey = openBackupKey(entry.key, await (derived.get(cacheKey) as Promise<Buffer>), { provider: entry.provider, baseUrl });
-    } catch (err) {
-      if (err instanceof BadPassphraseError) throw new RestoreProblem(400, 'bad_passphrase', 'Wrong passphrase, or the file was changed');
-      throw err;
+    const sources: SealedKey[] = entry.keys && entry.keys.length > 0 ? [...entry.keys] : entry.key ? [entry.key] : [];
+    if (sources.length > MAX_PROVIDER_KEYS) {
+      throw new RestoreProblem(400, 'too_many_keys', `This provider accepts at most ${MAX_PROVIDER_KEYS} API keys`, field);
+    }
+    if (!isMultiKeyProvider(entry.provider) && entry.keys && entry.keys.length > 0) {
+      throw new RestoreProblem(400, 'single_key_provider', 'This provider stores one credential', field);
     }
 
-    // The key route's request rules (length, a URL), then its SSRF guard (ADR-0010).
-    const keySchema = apiKey.startsWith(SUBSCRIPTION_PREFIX)
-      ? SaveKeyRequestSchema.extend({ apiKey: SaveKeyRequestSchema.shape.apiKey.max(20_000) })
-      : SaveKeyRequestSchema;
-    const shape = keySchema.safeParse({ apiKey: apiKey.trim(), ...(baseUrl ? { baseUrl } : {}) });
-    if (!shape.success) throw zodProblem(field, shape.error, apiKey);
-    if (baseUrl) {
+    const openSealed = async (sealedKey: SealedKey, keyField: string): Promise<StoredCredential> => {
+      let apiKey: string;
       try {
-        await assertSafeBaseUrl(baseUrl, deps.ssrfLookup);
+        const salt = sealedKeySalt(sealedKey);
+        const cacheKey = salt.toString('base64url');
+        if (!derived.has(cacheKey)) derived.set(cacheKey, deriveBackupKey(passphrase, salt));
+        apiKey = openBackupKey(sealedKey, await (derived.get(cacheKey) as Promise<Buffer>), { provider: entry.provider, baseUrl });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Base URL is not allowed';
-        throw new RestoreProblem(400, 'ssrf_validation_error', message, `${field}.baseUrl`);
+        if (err instanceof BadPassphraseError) throw new RestoreProblem(400, 'bad_passphrase', 'Wrong passphrase, or the file was changed');
+        throw err;
       }
-    }
-    try {
-      out.push(
-        await deps.credentials.sealKey(
+      const keySchema = apiKey.startsWith(SUBSCRIPTION_PREFIX)
+        ? SaveKeyRequestSchema.extend({ apiKey: SaveKeyRequestSchema.shape.apiKey.max(20_000) })
+        : SaveKeyRequestSchema;
+      const shape = keySchema.safeParse({ apiKey: apiKey.trim(), ...(baseUrl ? { baseUrl } : {}) });
+      if (!shape.success) throw zodProblem(keyField, shape.error, apiKey);
+      // The key route checks the shape, then the SSRF guard, and only then seals (ADR-0010).
+      // A changed base URL already failed above as a bad passphrase, because the seal is bound to it.
+      if (baseUrl) {
+        try {
+          await assertSafeBaseUrl(baseUrl, deps.ssrfLookup);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Base URL is not allowed';
+          throw new RestoreProblem(400, 'ssrf_validation_error', message, `${field}.baseUrl`);
+        }
+      }
+      try {
+        return await deps.credentials.sealKey(
           { workspaceId: req.workspaceId, provider: entry.provider, apiKey, userId: req.userId, baseUrl },
           { validate: false },
-        ),
-      );
-    } catch (err) {
-      const message = (err instanceof Error ? err.message : 'Key rejected').replaceAll(apiKey, '[REDACTED]');
-      throw new RestoreProblem(400, 'credential_rejected', message, `${field}.key`);
+        );
+      } catch (err) {
+        const message = (err instanceof Error ? err.message : 'Key rejected').replaceAll(apiKey, '[REDACTED]');
+        throw new RestoreProblem(400, 'credential_rejected', message, keyField);
+      }
+    };
+
+    if (isMultiKeyProvider(entry.provider)) {
+      const sealedCreds: StoredCredential[] = [];
+      for (const [position, sealedKey] of sources.entries()) {
+        sealedCreds.push(await openSealed(sealedKey, `${field}.${entry.keys && entry.keys.length > 0 ? 'keys' : 'key'}`));
+        const credential = sealedCreds[position];
+        if (credential) providerKeys.push(slotFromCredential(credential, position));
+      }
+      const first = sealedCreds[0];
+      if (first) out.push(first);
+      continue;
     }
+
+    const only = sources[0];
+    if (!only) continue;
+    out.push(await openSealed(only, `${field}.key`));
   }
-  return out;
+  return { credentials: out, providerKeys };
 }
 
 /**
@@ -245,7 +294,10 @@ export async function planRestore(deps: RestoreDeps, req: RestoreRequest): Promi
   const restore: WorkspaceRestore = {};
   const ws = req.workspaceId;
 
-  const credentials = sections.includes('credentials') ? await planCredentials(deps, req, file) : [];
+  const planned = sections.includes('credentials')
+    ? await planCredentials(deps, req, file)
+    : { credentials: [], providerKeys: [] };
+  const credentials = planned.credentials;
   const incomingBots = sections.includes('bots') ? file.bots : undefined;
   const previous = await deps.store.getSettings(ws);
   const checkStore = overlayStore(deps.store, credentials);
@@ -265,7 +317,10 @@ export async function planRestore(deps: RestoreDeps, req: RestoreRequest): Promi
   if (incomingBots) {
     restore.bots = await planBots(checkStore, ws, incomingBots, mainName);
   }
-  if (sections.includes('credentials')) restore.credentials = credentials;
+  if (sections.includes('credentials')) {
+    restore.credentials = credentials;
+    if (planned.providerKeys.length > 0) restore.providerKeys = planned.providerKeys;
+  }
 
   const preview: RestorePlan['preview'] = {
     sections: [...sections],

@@ -42,6 +42,8 @@ describe.skipIf(!hasIntegrationEnv)('migrations integration on real Postgres', (
       expect(tables.has('installations')).toBe(true);
       expect(tables.has('workspace_settings')).toBe(true);
       expect(tables.has('provider_credentials')).toBe(true);
+      expect(tables.has('provider_api_keys')).toBe(true);
+      expect(tables.has('provider_key_cursors')).toBe(true);
       expect(tables.has('review_runs')).toBe(true);
       expect(tables.has('user')).toBe(true);
       expect(tables.has('session')).toBe(true);

@@ -105,6 +105,52 @@ export const providerCredentials = pgTable(
   ],
 );
 
+/** Migration 0011: ordered API keys for gemini, openrouter and opencode-zen (ADR-0026). */
+export const providerApiKeys = pgTable(
+  'provider_api_keys',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    provider: text('provider').notNull(),
+    position: integer('position').notNull(),
+    ciphertext: text('ciphertext').notNull(),
+    keyVersion: integer('key_version').notNull(),
+    last4: text('last4').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    lastTestStatus: text('last_test_status'),
+    lastTestedAt: timestamp('last_tested_at', { withTimezone: true, mode: 'date' }),
+  },
+  (table) => [
+    uniqueIndex('provider_api_keys_workspace_provider_position').on(
+      table.workspaceId,
+      table.provider,
+      table.position,
+    ),
+    index('idx_provider_api_keys_workspace_provider').on(
+      table.workspaceId,
+      table.provider,
+      table.position,
+    ),
+  ],
+);
+
+/** Migration 0011: last successful key index, shared by the web and worker processes. */
+export const providerKeyCursors = pgTable(
+  'provider_key_cursors',
+  {
+    workspaceId: text('workspace_id').notNull(),
+    provider: text('provider').notNull(),
+    position: integer('position').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.provider] })],
+);
+
 export const reviewRuns = pgTable(
   'review_runs',
   {

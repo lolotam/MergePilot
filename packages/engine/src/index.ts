@@ -25,6 +25,7 @@ export * from './providers/openai/index.js';
 export * from './providers/anthropic/index.js';
 export * from './providers/gemini/index.js';
 export * from './providers/factory.js';
+export * from './providers/key-rotation.js';
 export * from './providers/ids.js';
 export * from './providers/effort.js';
 export * from './providers/registry.js';

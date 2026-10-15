@@ -12,10 +12,10 @@ import {
 } from '@mergepilot/engine';
 import { requireRole } from '../auth/guard.js';
 import { DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
-import type { WorkspaceSettings } from '../core/types.js';
+import type { KeyQuotaStatus, WorkspaceSettings } from '../core/types.js';
 import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } from './contract.js';
 import { sendError } from './helpers.js';
-import { engineOptions, storedTarget, unsavedTarget, type TargetResult } from './provider-target.js';
+import { engineOptions, storedKeyById, storedTarget, unsavedTarget, type TargetResult } from './provider-target.js';
 import type { DashboardApiDeps } from './routes.js';
 
 /**
@@ -32,6 +32,13 @@ const RATE_WINDOW_MS = 60 * 1000;
 export const TEST_LIMIT = 10;
 const UNSAVED_MODELS_LIMIT = 20;
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+/** Only a definite answer is stored: transient failures (rate limit, server, network) keep the prior status. */
+function quotaStatusOf(ok: boolean, code: string | undefined): KeyQuotaStatus | null {
+  if (ok) return 'valid';
+  if (code === 'quota') return 'quota-exhausted';
+  return code === 'auth' ? 'invalid' : null;
+}
 
 /** Test helper: forget every cached model list and rate-limit bucket. */
 export function resetProviderTestRateLimits(): void {
@@ -284,10 +291,13 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       }
 
       const apiKey = body.apiKey?.trim();
+      const keyId = body.keyId;
       const signal = routeSignal(reply);
       const result = apiKey
         ? await unsavedTarget(deps, provider, apiKey, body.baseUrl, signal)
-        : await storedTarget(deps, workspaceId, provider, signal);
+        : keyId
+          ? await storedKeyById(deps, workspaceId, provider, keyId, signal)
+          : await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
       const { target } = result;
 
@@ -319,12 +329,18 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const effort = body.effort?.trim();
 
       const start = Date.now();
+      const remember = async (status: KeyQuotaStatus | null): Promise<void> => {
+        if (!keyId || !status) return;
+        await deps.credentials.recordKeyTest(workspaceId, provider, keyId, status, new Date());
+      };
       try {
         const outcome = await testConnection(provider, target.apiKey, model, {
           ...engineOptions(target),
           timeoutMs: DASHBOARD_FETCH_LIMITS.timeoutMs,
           ...(effort ? { effort } : {}),
         });
+        const quotaStatus = quotaStatusOf(outcome.ok, outcome.ok ? undefined : outcome.code);
+        await remember(quotaStatus);
         if (outcome.ok) {
           request.log.info(
             {
@@ -333,10 +349,11 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
               model: outcome.model ?? model,
               ok: true,
               ms: outcome.ms,
+              quotaStatus,
             },
             'Provider connection tested',
           );
-          return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model });
+          return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model, quotaStatus });
         }
         request.log.info(
           {
@@ -346,6 +363,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
             ok: false,
             code: outcome.code,
             ms: outcome.ms,
+            quotaStatus,
           },
           'Provider connection test failed',
         );
@@ -354,6 +372,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           code: outcome.code,
           message: redact(outcome.message, target.apiKey),
           ms: outcome.ms,
+          ...(quotaStatus ? { quotaStatus } : {}),
         });
       } catch (err) {
         const ms = Date.now() - start;
@@ -369,7 +388,12 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           },
           'Provider connection test failed',
         );
-        return reply.status(200).send({ ok: false, code: 'network', message: redact(msg, target.apiKey) });
+        return reply.status(200).send({
+          ok: false,
+          code: 'network',
+          message: redact(msg, target.apiKey),
+          ms,
+        });
       }
     },
   );

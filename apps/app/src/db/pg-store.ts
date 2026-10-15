@@ -5,8 +5,9 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
   KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
-  ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
-  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, ReviewerBot, StoredCredential, WorkspaceRestore,
+  KeyQuotaStatus, ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
+  MonthlyUsage, NewReviewRun, ProviderKeyChange, RetentionPolicy, ReviewRun, ReviewerBot, StoredCredential,
+  StoredProviderKey, WorkspaceRestore,
   WorkspaceSettings, ModelKey,
   StaleRunRef,
   StoredModelPrice,
@@ -18,6 +19,11 @@ import {
   startPgMaintenanceRun,
 } from './pg-maintenance.js';
 import { restorePgWorkspace, writePgCredential } from './pg-backup.js';
+import { deletePgProviderKeyRows } from './pg-provider-keys.js';
+import {
+  listStoredProviderKeys, listWorkspaceStoredProviderKeys, modifyStoredProviderKeys, readStoredKeyCursor,
+  recordStoredProviderKeyTest, writeStoredKeyCursor,
+} from './pg-key-roster.js';
 import { deletePgReviewerBot, listPgReviewerBots, upsertPgReviewerBot } from './pg-bots.js';
 import { listPgRunGroups } from './pg-run-groups.js';
 import {
@@ -201,8 +207,11 @@ export class PgStore implements AppStore {
       const next = await change(current);
       signal?.throwIfAborted();
       if (next && next !== current) await writePgCredential(tx, next);
-      else if (!next) await tx.delete(providerCredentials)
-        .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
+      else if (!next) {
+        await tx.delete(providerCredentials)
+          .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
+        await deletePgProviderKeyRows(tx, workspaceId, provider);
+      }
       // Cancellation during the SQL write aborts this transaction before COMMIT.
       signal?.throwIfAborted();
       return next;
@@ -261,6 +270,30 @@ export class PgStore implements AppStore {
 
   async deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void> {
     await this.modifyCredential(workspaceId, provider, async () => null);
+  }
+
+  async listProviderKeys(workspaceId: string, provider: KeyProvider): Promise<StoredProviderKey[]> {
+    return listStoredProviderKeys(this.db, workspaceId, provider);
+  }
+
+  async listWorkspaceProviderKeys(workspaceId: string): Promise<StoredProviderKey[]> {
+    return listWorkspaceStoredProviderKeys(this.db, workspaceId);
+  }
+
+  async modifyProviderKeys(workspaceId: string, provider: KeyProvider, change: (current: StoredProviderKey[]) => Promise<ProviderKeyChange>): Promise<StoredProviderKey[]> {
+    return modifyStoredProviderKeys(this.db, workspaceId, provider, change);
+  }
+
+  async getKeyCursor(workspaceId: string, provider: KeyProvider): Promise<number> {
+    return readStoredKeyCursor(this.db, workspaceId, provider);
+  }
+
+  async setKeyCursor(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void> {
+    await writeStoredKeyCursor(this.db, workspaceId, provider, keyId);
+  }
+
+  async recordProviderKeyTest(workspaceId: string, provider: KeyProvider, keyId: string, status: KeyQuotaStatus, testedAt: Date): Promise<boolean> {
+    return recordStoredProviderKeyTest(this.db, workspaceId, provider, { keyId, status, testedAt });
   }
 
   async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {

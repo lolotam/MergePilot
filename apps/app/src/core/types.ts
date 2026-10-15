@@ -132,6 +132,36 @@ export interface StoredCredential {
   baseUrl?: string | null | undefined;
 }
 
+/** Last provider test of one stored API key (ADR-0026). Never a secret. */
+export type KeyQuotaStatus = 'valid' | 'invalid' | 'quota-exhausted';
+
+/** One encrypted key in a provider's ordered list. Position 0 is also the parent credential. */
+export interface StoredProviderKey {
+  id: string;
+  workspaceId: string;
+  provider: KeyProvider;
+  position: number;
+  /** Same vault envelope as `StoredCredential.ciphertext`. Never the plaintext. */
+  ciphertext: string;
+  keyVersion: number;
+  last4: string;
+  createdBy: string;
+  createdAt: Date;
+  lastTestStatus: KeyQuotaStatus | null;
+  lastTestedAt: Date | null;
+}
+
+/**
+ * One locked update of a provider's key list. `parent` upserts the parent credential,
+ * null deletes it, and undefined leaves it. `cursor` is clamped into range; undefined
+ * clamps a stored cursor and leaves a missing one missing.
+ */
+export interface ProviderKeyChange {
+  keys: StoredProviderKey[];
+  parent?: StoredCredential | null | undefined;
+  cursor?: number | undefined;
+}
+
 export type ReviewRunStatus = 'queued' | 'running' | 'completed' | 'skipped' | 'failed';
 
 export interface ReviewRunFinding {
@@ -164,6 +194,8 @@ export interface ReviewRunResultPayload {
   judge?: ReviewRunJudge | undefined;
   /** Which source priced the primary model (ADR-0016). */
   pricing?: RunPricing | undefined;
+  /** Which API key answered, and how many were skipped for quota (ADR-0026). Never the key. */
+  keyRotation?: Array<{ provider: string; keyIndex: number; skipped: number }> | undefined;
 }
 
 export interface ReviewRunJudge {
@@ -290,6 +322,32 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
   getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null>;
   listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>>;
   deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void>;
+
+  /** Ordered keys for one provider. Empty when that provider has no slot rows. */
+  listProviderKeys(workspaceId: string, provider: KeyProvider): Promise<StoredProviderKey[]>;
+  /** Every slot row of the workspace, for listing and vault rotation. */
+  listWorkspaceProviderKeys(workspaceId: string): Promise<StoredProviderKey[]>;
+  /**
+   * Replaces the slot list under the same lock as `modifyCredential`. When `change` throws,
+   * nothing is written. A null parent deletes the parent credential as well.
+   */
+  modifyProviderKeys(
+    workspaceId: string,
+    provider: KeyProvider,
+    change: (current: StoredProviderKey[]) => Promise<ProviderKeyChange>,
+  ): Promise<StoredProviderKey[]>;
+  /** 0 when missing, when there are no slots, or when the stored index is outside the list. */
+  getKeyCursor(workspaceId: string, provider: KeyProvider): Promise<number>;
+  /** Stores the 0-based index of `keyId` in the current slot list. No-op when the id is absent. */
+  setKeyCursor(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void>;
+  /** Writes the last test of one stored key. False when that id is not in the list (no write). */
+  recordProviderKeyTest(
+    workspaceId: string,
+    provider: KeyProvider,
+    keyId: string,
+    status: KeyQuotaStatus,
+    testedAt: Date,
+  ): Promise<boolean>;
 
   /**
    * Throws WorkspaceDeletedError when the workspace is gone, so a late worker cannot write orphan rows.

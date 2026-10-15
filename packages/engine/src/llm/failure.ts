@@ -8,7 +8,8 @@ export type LlmFailureCode =
   | 'SERVER'
   | 'BAD_REQUEST'
   | 'ABORTED'
-  | 'UNKNOWN';
+  | 'UNKNOWN'
+  | 'QUOTA_EXHAUSTED_ALL_KEYS';
 
 export interface LlmFailureInit {
   code: LlmFailureCode;
@@ -118,6 +119,7 @@ export type FailureKind = 'quota' | 'auth' | 'server' | 'network' | 'rate-limit'
 
 const KIND_BY_CODE: Readonly<Record<LlmFailureCode, FailureKind>> = {
   QUOTA: 'quota',
+  QUOTA_EXHAUSTED_ALL_KEYS: 'quota',
   INVALID_CREDENTIAL: 'auth',
   RATE_LIMIT: 'rate-limit',
   SERVER: 'server',
@@ -142,7 +144,7 @@ export type FailureClass = 'transient' | 'exhausted' | 'fatal';
 
 export function classifyFailure(code: LlmFailureCode): FailureClass {
   if (code === 'RATE_LIMIT' || code === 'SERVER' || code === 'TIMEOUT' || code === 'NETWORK') return 'transient';
-  if (code === 'QUOTA') return 'exhausted';
+  if (code === 'QUOTA' || code === 'QUOTA_EXHAUSTED_ALL_KEYS') return 'exhausted';
   return 'fatal';
 }
 

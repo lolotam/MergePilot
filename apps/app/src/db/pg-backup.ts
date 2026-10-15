@@ -5,11 +5,14 @@ import {
   InvalidBotSlotError,
   isExtraBotSlot,
   sameBotName,
+  type KeyProvider,
   type StoredCredential,
+  type StoredProviderKey,
   type WorkspaceRestore,
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { writePgSettings } from './pg-settings.js';
+import { replacePgProviderKeys, writePgKeyCursor } from './pg-provider-keys.js';
 import { providerCredentials, reviewerBots, workspaceSettings } from './schema.js';
 import { lockBotNames, lockCredential, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
@@ -76,6 +79,18 @@ export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore
     if (restore.bots) await replacePgBots(tx, workspaceId, restore.bots);
     for (const credential of [...(restore.credentials ?? [])].sort((a, b) => a.provider.localeCompare(b.provider))) {
       await writePgCredential(tx, { ...credential, workspaceId });
+    }
+    const groups = new Map<KeyProvider, StoredProviderKey[]>();
+    for (const key of restore.providerKeys ?? []) {
+      const list = groups.get(key.provider) ?? [];
+      list.push({ ...key, workspaceId });
+      groups.set(key.provider, list);
+    }
+    for (const [provider, keys] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const ordered = [...keys].sort((a, b) => a.position - b.position);
+      await lockCredential(tx, workspaceId, provider);
+      await replacePgProviderKeys(tx, workspaceId, provider, ordered);
+      await writePgKeyCursor(tx, workspaceId, provider, ordered.length === 0 ? null : 0);
     }
   });
 }

@@ -11,6 +11,16 @@ import type { DnsLookupFn } from '../core/ssrf.js';
 
 export interface ProcessReviewCredentials {
   resolve(workspaceId: string, provider: KeyProvider): Promise<Secret>;
+  /**
+   * Ordered keys for gemini, openrouter and opencode-zen (ADR-0026). Null when that provider
+   * stores one credential. Optional so existing test fakes that only resolve one key still compile.
+   */
+  resolveKeyRoster?(
+    workspaceId: string,
+    provider: KeyProvider,
+  ): Promise<{ secrets: Secret[]; keyIds: string[]; startIndex: number } | null>;
+  /** Persists the cursor at the current position of this key id. Optional on the same test fakes. */
+  rememberSuccessfulKey?(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void>;
 }
 
 export type GitHubAppClientFactory = (installationId: number) => Promise<{

@@ -38,6 +38,7 @@ export async function createAdminTestDb(): Promise<AdminTestDb> {
     '0008_model_prices.sql',
     '0009_reviewer_panel.sql',
     '0010_judge_uses.sql',
+    '0011_provider_api_keys.sql',
   ]) {
     await client.exec(readFileSync(join(migrationsDir, file), 'utf-8'));
   }

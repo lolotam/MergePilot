@@ -6,12 +6,14 @@ import {
   type JudgeFilterSummary,
   type JudgePriceLookup,
   type JudgeReport,
+  type KeyRotationEvent,
   type Secret,
   type TokenUsage,
 } from '@mergepilot/engine';
 import type { ReviewJudge, SemanticDedupeResult } from '@mergepilot/github';
 import type { Logger } from 'pino';
 import type { ReviewRunJudge, WorkspaceSettings } from '../core/types.js';
+import { isMultiKeyProvider } from '../credentials/multi-key.js';
 import type { ProcessReviewCredentials } from './types.js';
 
 export interface WorkspaceJudge {
@@ -34,7 +36,13 @@ export async function workspaceJudge(
   workspaceId: string,
   credentials: ProcessReviewCredentials,
   logger: Logger,
-  context: { jobId: string; runId: string; fetch?: FetchLike | undefined; priceLookup?: JudgePriceLookup | undefined },
+  context: {
+    jobId: string;
+    runId: string;
+    fetch?: FetchLike | undefined;
+    priceLookup?: JudgePriceLookup | undefined;
+    makeRotationHandler?: ((keyIds: Readonly<Record<string, readonly string[]>>) => (event: KeyRotationEvent) => void) | undefined;
+  },
 ): Promise<WorkspaceJudge> {
   const config = settings.judge;
   if (!config?.enabled) return { secrets: [] };
@@ -42,6 +50,32 @@ export async function workspaceJudge(
   const entries: JudgeEntry[] = [];
   for (const entry of [{ provider: config.provider, model: config.model }, ...config.fallback]) {
     try {
+      if (credentials.resolveKeyRoster && isMultiKeyProvider(entry.provider)) {
+        const roster = await credentials.resolveKeyRoster(workspaceId, entry.provider).catch((error: unknown) => {
+          // One unreadable key must not leave the judge keyless: fall back to the single credential.
+          logger.warn(
+            { event: 'credential.key_roster_failed', provider: entry.provider, error: error instanceof Error ? error.name : 'unknown' },
+            'Could not load the API key roster for a judge provider',
+          );
+          return null;
+        });
+        if (roster && roster.secrets.length > 0) {
+          secrets.push(...roster.secrets);
+          const start = roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;
+          const apiKey = roster.secrets[start];
+          const keyIdsSnapshot = { [entry.provider]: roster.keyIds };
+          entries.push({
+            ...entry,
+            ...(apiKey ? { apiKey } : {}),
+            keys: roster.secrets,
+            startIndex: start,
+            ...(context.makeRotationHandler
+              ? { onKeyRotation: context.makeRotationHandler(keyIdsSnapshot) }
+              : {}),
+          });
+          continue;
+        }
+      }
       const apiKey = await credentials.resolve(workspaceId, entry.provider);
       secrets.push(apiKey);
       entries.push({ ...entry, apiKey });

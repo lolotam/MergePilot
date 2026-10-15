@@ -46,6 +46,15 @@ export interface MeResponseWithAdmin extends MeResponse {
   isPlatformAdmin?: boolean | undefined;
 }
 
+export interface KeySlotItem {
+  id: string;
+  position: number;
+  last4: string;
+  createdAt: string;
+  lastTestStatus: 'valid' | 'invalid' | 'quota-exhausted' | null;
+  lastTestedAt: string | null;
+}
+
 export interface KeyItem {
   provider: KeyProvider;
   authMethod?: 'api-key' | 'subscription' | 'unknown';
@@ -53,6 +62,8 @@ export interface KeyItem {
   createdAt: string;
   createdBy: string;
   baseUrl?: string | null;
+  /** Present for gemini, openrouter and opencode-zen. Never includes the secret. */
+  keys?: KeySlotItem[] | undefined;
 }
 
 export interface CatalogModel {
@@ -72,6 +83,7 @@ export interface TestConnectionResponse {
   model?: string;
   code?: string;
   message?: string;
+  quotaStatus?: 'valid' | 'invalid' | 'quota-exhausted' | undefined;
 }
 
 export interface KeysResponse {
@@ -240,6 +252,12 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
     }),
+  /** Replaces the ordered list. Sends `apiKeys` only, never mixed with `apiKey`. */
+  saveKeys: (workspaceId: string, provider: KeyProvider, apiKeys: readonly string[]) =>
+    fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys/${encodeURIComponent(provider)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ apiKeys: [...apiKeys] }),
+    }),
   getModels: (workspaceId: string, provider: ApiProvider, refresh = false) =>
     fetchApi<ModelsResponse>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(provider)}/models${refresh ? '?refresh=true' : ''}`,
@@ -255,7 +273,7 @@ export const api = {
   testConnection: (
     workspaceId: string,
     provider: ApiProvider,
-    options?: { apiKey?: string | undefined; baseUrl?: string | undefined; model?: string | undefined; effort?: string | undefined } | undefined,
+    options?: { apiKey?: string | undefined; keyId?: string | undefined; baseUrl?: string | undefined; model?: string | undefined; effort?: string | undefined } | undefined,
   ) =>
     fetchApi<TestConnectionResponse>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/credentials/${encodeURIComponent(provider)}/test`,

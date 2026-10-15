@@ -142,3 +142,28 @@ describe('createJudge — fallback chain', () => {
     expect(judge.report().costUsd).toBe(0.002);
   });
 });
+
+describe('createJudge — key rotation and the time budget', () => {
+  it('stops rotating keys once the total budget is spent instead of reusing the first remaining time', async () => {
+    let clock = 0;
+    const urls: string[] = [];
+    const fetch = (async (url: string | URL | Request) => {
+      urls.push(String(url));
+      clock += 600;
+      return textResponse('{"error":{"message":"insufficient credits"}}', 402);
+    }) as typeof globalThis.fetch;
+    const rotating: JudgeEntry = {
+      ...primary,
+      keys: [judgeSecret('k1'), judgeSecret('k2'), judgeSecret('k3')],
+      startIndex: 0,
+    };
+    const judge = createJudge({ entries: [rotating], fetch, sleep: noSleep, now: () => clock, totalTimeoutMs: 1_000 });
+
+    const error = await judge.decide(request).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(JudgeUnavailableError);
+    // Key 1 at t=0 and key 2 at t=600 are tried; at t=1200 the budget is gone, so key 3 is not.
+    expect(urls).toHaveLength(2);
+  });
+});
+

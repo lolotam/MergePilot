@@ -14,7 +14,14 @@ import { GeminiAdapter } from './gemini/adapter.js';
 import type { FetchLike } from './http.js';
 import { isApiProviderId, type ApiProviderId } from './ids.js';
 import { OpenAIAdapter } from './openai/adapter.js';
+import { callWithKeyRotation, type KeyRotationEvent } from './key-rotation.js';
 import { providerEntry } from './registry.js';
+
+/** Ordered keys for one provider. `startIndex` is 0-based and advances after a successful call. */
+export interface KeyRoster {
+  keys: readonly Secret[];
+  startIndex: number;
+}
 
 export interface CreateReviewModelOptions {
   cwd: string;
@@ -31,6 +38,20 @@ export interface CreateReviewModelOptions {
    * its users (the SaaS) passes a guarded fetch here that re-checks the address on every call
    * and never follows redirects (SSRF / DNS rebinding). Presets always use the global fetch.
    */
+  customFetch?: FetchLike | undefined;
+  /**
+   * Ordered API keys per provider (ADR-0026). Absent, or an empty list, keeps today's single key.
+   * The engine does not load them: the app passes the roster in.
+   */
+  keyRosters?: Readonly<Record<string, KeyRoster>> | undefined;
+  /** Key index used and how many keys were skipped. Never receives the key. */
+  onKeyRotation?: ((event: KeyRotationEvent) => void) | undefined;
+}
+
+interface RotationContext {
+  rosters?: Readonly<Record<string, KeyRoster>> | undefined;
+  onKeyRotation?: ((event: KeyRotationEvent) => void) | undefined;
+  customBaseUrl?: string | undefined;
   customFetch?: FetchLike | undefined;
 }
 
@@ -67,6 +88,65 @@ export function createAdapter(
   if (provider === 'anthropic') return new AnthropicAdapter({ apiKey });
   if (provider === 'openai') return new OpenAIAdapter({ apiKey });
   return new GeminiAdapter({ apiKey });
+}
+
+function rosterFor(rotation: RotationContext | undefined, provider: string): KeyRoster | undefined {
+  const roster = rotation?.rosters?.[provider];
+  return roster && roster.keys.length > 0 ? roster : undefined;
+}
+
+function notifyRotation(onKeyRotation: RotationContext['onKeyRotation'], event: KeyRotationEvent): void {
+  try {
+    onKeyRotation?.(event);
+  } catch {
+    // Disclosure must not fail a call that already succeeded.
+  }
+}
+
+/** One adapter per key, outside `withRetry`, so a rate-limit retry stays on the same key. */
+function rotatingReviewModel(
+  provider: ApiProviderId,
+  model: string,
+  effort: string | undefined,
+  roster: KeyRoster,
+  rotation: RotationContext,
+  resolveSubscriptionSecret?: () => Promise<Secret>,
+): ReviewModel {
+  let cursor = roster.startIndex;
+  const sample = withRetries(
+    createAdapter(provider, roster.keys[0], rotation.customBaseUrl, rotation.customFetch, resolveSubscriptionSecret),
+    model,
+    effort,
+  );
+  return {
+    label: sample.label,
+    ...(sample.outputTokensFor ? { outputTokensFor: sample.outputTokensFor } : {}),
+    async generate(request) {
+      const outcome = await callWithKeyRotation({
+        provider,
+        keyCount: roster.keys.length,
+        startIndex: cursor,
+        call: (index) => {
+          const key = roster.keys[index];
+          if (!key) {
+            throw new LlmFailure({
+              code: 'INVALID_CREDENTIAL',
+              provider,
+              message: `no API key is configured for ${provider}`,
+            });
+          }
+          return withRetries(
+            createAdapter(provider, key, rotation.customBaseUrl, rotation.customFetch, resolveSubscriptionSecret),
+            model,
+            effort,
+          ).generate(request);
+        },
+      });
+      cursor = outcome.index;
+      notifyRotation(rotation.onKeyRotation, { provider, index: outcome.index, skipped: outcome.skipped });
+      return outcome.value;
+    },
+  };
 }
 
 /** Wraps a model so each call is retried by the adapter's own policy before anything else. */
@@ -122,6 +202,7 @@ export async function resolveFallbacks(
   store: AnyCredentialStore,
   customBaseUrl?: string,
   customFetch?: FetchLike,
+  rotation?: Pick<RotationContext, 'rosters' | 'onKeyRotation'>,
 ): Promise<ResolvedFallbacks> {
   const resolved: ResolvedFallbacks = { models: [], secrets: [], skipped: [] };
   for (const entry of config.fallback ?? []) {
@@ -134,13 +215,24 @@ export async function resolveFallbacks(
       continue;
     }
     if (key) resolved.secrets.push(key);
+    const roster = rosterFor(rotation, entry.provider);
+    if (roster) {
+      for (const secret of roster.keys) resolved.secrets.push(secret);
+    }
     if (entry.provider === 'custom' && !customBaseUrl?.trim()) {
       resolved.skipped.push({ label, reason: 'no trusted base URL is configured (CUSTOM_LLM_BASE_URL)' });
       continue;
     }
+    const resolveSecret = () => store.resolve({ provider: entry.provider }, 'review');
     try {
-      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch,
-        () => store.resolve({ provider: entry.provider }, 'review')), entry.model, entry.effort));
+      resolved.models.push(roster
+        ? rotatingReviewModel(entry.provider, entry.model, entry.effort, roster, {
+            rosters: rotation?.rosters,
+            onKeyRotation: rotation?.onKeyRotation,
+            customBaseUrl,
+            customFetch,
+          }, resolveSecret)
+        : withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch, resolveSecret), entry.model, entry.effort));
     } catch {
       resolved.skipped.push({ label, reason: 'the provider could not be set up' });
     }
@@ -163,10 +255,17 @@ export async function resolveReviewSecrets(config: MergePilotConfig, store: AnyC
 }
 
 /** What rides along on the primary model: fallbacks, every key to redact, and skipped entries. */
-function attachments(primaryKey: Secret | undefined, fallbacks: ResolvedFallbacks) {
+function attachments(primaryKey: Secret | undefined, fallbacks: ResolvedFallbacks, extra: readonly Secret[] = []) {
+  const seen = new Set<Secret>();
+  const secrets: Secret[] = [];
+  for (const secret of [...(primaryKey ? [primaryKey] : []), ...fallbacks.secrets, ...extra]) {
+    if (seen.has(secret)) continue;
+    seen.add(secret);
+    secrets.push(secret);
+  }
   return {
     ...(fallbacks.models.length > 0 ? { fallbacks: fallbacks.models } : {}),
-    secrets: [...(primaryKey ? [primaryKey] : []), ...fallbacks.secrets],
+    secrets,
     ...(fallbacks.skipped.length > 0 ? { skippedFallbacks: fallbacks.skipped } : {}),
   };
 }
@@ -181,6 +280,12 @@ export async function createReviewModel(
   store: AnyCredentialStore,
   opts: CreateReviewModelOptions,
 ): Promise<ReviewModel> {
+  const rotation: RotationContext = {
+    rosters: opts.keyRosters,
+    onKeyRotation: opts.onKeyRotation,
+    customBaseUrl: opts.customBaseUrl,
+    customFetch: opts.customFetch,
+  };
   if (config.provider === 'claude-code') {
     const token = await store.resolve({ provider: 'claude-code' }, 'review');
     const runner = new ClaudeCodeRunner({
@@ -189,7 +294,10 @@ export async function createReviewModel(
       ...(config.model ? { model: config.model } : {}),
       ...(opts.configDir ? { configDir: opts.configDir } : {}),
     });
-    return Object.assign(runner, attachments(token, await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch)));
+    return Object.assign(
+      runner,
+      attachments(token, await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch, rotation)),
+    );
   }
 
   if (!isApiProviderId(config.provider)) {
@@ -199,12 +307,14 @@ export async function createReviewModel(
   const apiKey =
     provider === 'custom' ? await resolveKey(store, provider) : await store.resolve({ provider }, 'review');
   // `config.baseUrl` is deliberately NOT read: it comes from the repository (ADR-0008 amendment).
-  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch,
-    () => store.resolve({ provider }, 'review'));
-
   if (!config.model) {
     throw new Error(`Model is required for provider: ${config.provider}`);
   }
-  const model = withRetries(adapter, config.model, config.effort);
-  return { ...model, ...attachments(apiKey, await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch)) };
+  const resolveSecret = () => store.resolve({ provider }, 'review');
+  const roster = rosterFor(rotation, provider);
+  const model = roster
+    ? rotatingReviewModel(provider, config.model, config.effort, roster, rotation, resolveSecret)
+    : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config.model, config.effort);
+  const fallbacks = await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch, rotation);
+  return { ...model, ...attachments(apiKey, fallbacks, roster ? roster.keys : []) };
 }

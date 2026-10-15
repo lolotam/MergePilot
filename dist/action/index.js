@@ -112720,6 +112720,7 @@ function failureFromHttp(input2, now = Date.now) {
 }
 var KIND_BY_CODE = {
   QUOTA: "quota",
+  QUOTA_EXHAUSTED_ALL_KEYS: "quota",
   INVALID_CREDENTIAL: "auth",
   RATE_LIMIT: "rate-limit",
   SERVER: "server",
@@ -113125,6 +113126,45 @@ var SubscriptionAdapter = class extends LlmAdapter {
 
 var import_yaml = __toESM(require_dist3(), 1);
 
+function rotationOrder(length, startIndex) {
+  if (length <= 0)
+    return [];
+  const start = (Math.trunc(startIndex) % length + length) % length;
+  return Array.from({ length }, (_, offset) => (start + offset) % length);
+}
+function isRotatingFailure(error62) {
+  return error62 instanceof LlmFailure && (error62.code === "QUOTA" || error62.code === "RATE_LIMIT");
+}
+async function callWithKeyRotation(options) {
+  const order = rotationOrder(options.keyCount, options.startIndex);
+  if (order.length === 0) {
+    throw new LlmFailure({
+      code: "QUOTA_EXHAUSTED_ALL_KEYS",
+      provider: options.provider,
+      message: `all 0 API keys for ${options.provider} are quota-exhausted`
+    });
+  }
+  let skipped = 0;
+  let lastStatus;
+  for (const index of order) {
+    try {
+      const value = await options.call(index);
+      return { value, index, skipped };
+    } catch (error62) {
+      if (!isRotatingFailure(error62))
+        throw error62;
+      lastStatus = error62.status;
+      skipped += 1;
+    }
+  }
+  throw new LlmFailure({
+    code: "QUOTA_EXHAUSTED_ALL_KEYS",
+    provider: options.provider,
+    ...lastStatus !== void 0 ? { status: lastStatus } : {},
+    message: `all ${options.keyCount} API keys for ${options.provider} are quota-exhausted`
+  });
+}
+
 function estimateTokens(text) {
   return Math.ceil(text.length / 3.5);
 }
@@ -113392,6 +113432,7 @@ function judgeFailureCode(error62) {
     case "RATE_LIMIT":
       return "rate-limited";
     case "QUOTA":
+    case "QUOTA_EXHAUSTED_ALL_KEYS":
       return "quota";
     case "SERVER":
       return error62.status === 529 ? "overloaded" : "server";
@@ -113427,6 +113468,7 @@ function createJudge(options) {
   let answeredBy;
   let unavailable;
   let startAt = 0;
+  const keyCursor = entries.map((entry) => entry.startIndex ?? 0);
   const priceOf = (provider, model) => {
     const looked = options.priceLookup?.(provider, model);
     if (looked)
@@ -113461,7 +113503,8 @@ function createJudge(options) {
         skip("time-budget");
         break;
       }
-      if (!entry.apiKey) {
+      const roster = entry.keys && entry.keys.length > 0 ? entry.keys : void 0;
+      if (!entry.apiKey && !roster) {
         skip("no-key");
         continue;
       }
@@ -113473,17 +113516,46 @@ function createJudge(options) {
       }
       const started = now();
       try {
-        const result = await callSystemOne({
+        const callOnce = (apiKey) => {
+          if (deadline - now() <= 0) {
+            throw new LlmFailure({ code: "TIMEOUT", provider: entry.provider, message: "the judge time budget ran out" });
+          }
+          return callSystemOne({
+            provider: entry.provider,
+            model: entry.model,
+            apiKey,
+            state: request2.state,
+            questions: request2.questions,
+            fetch: options.fetch,
+            // Recomputed per key: a rotation must not reuse the budget measured before the first key.
+            timeoutMs: Math.min(callTimeoutMs, deadline - now()),
+            signal: request2.signal,
+            sleep: options.sleep
+          });
+        };
+        const result = roster ? await callWithKeyRotation({
           provider: entry.provider,
-          model: entry.model,
-          apiKey: entry.apiKey,
-          state: request2.state,
-          questions: request2.questions,
-          fetch: options.fetch,
-          timeoutMs: Math.min(callTimeoutMs, remaining),
-          signal: request2.signal,
-          sleep: options.sleep
-        });
+          keyCount: roster.length,
+          startIndex: keyCursor[index] ?? 0,
+          call: (keyIndex) => {
+            const apiKey = roster[keyIndex];
+            if (!apiKey) {
+              throw new LlmFailure({
+                code: "INVALID_CREDENTIAL",
+                provider: entry.provider,
+                message: `no API key is configured for ${entry.provider}`
+              });
+            }
+            return callOnce(apiKey);
+          }
+        }).then((outcome) => {
+          keyCursor[index] = outcome.index;
+          try {
+            entry.onKeyRotation?.({ provider: entry.provider, index: outcome.index, skipped: outcome.skipped });
+          } catch {
+          }
+          return outcome.value;
+        }) : await callOnce(entry.apiKey);
         const ms = now() - started;
         const cost = result.costUsd ?? (price !== void 0 ? (result.usage.inputTokens * price.inputPerMTok + result.usage.outputTokens * (price.outputPerMTok ?? 0)) / 1e6 : void 0);
         const attempt = {
@@ -113535,7 +113607,11 @@ function createJudge(options) {
   const primary = entries[0];
   return {
     label: primary ? `${primary.provider}:${primary.model}` : "jev",
-    entries: entries.map((e2) => ({ provider: e2.provider, model: e2.model, hasKey: Boolean(e2.apiKey) })),
+    entries: entries.map((e2) => ({
+      provider: e2.provider,
+      model: e2.model,
+      hasKey: Boolean(e2.apiKey) || (e2.keys?.length ?? 0) > 0
+    })),
     decide,
     report: () => ({
       attempts: [...allAttempts],
@@ -114317,7 +114393,8 @@ var KNOWN_CODES = /* @__PURE__ */ new Set([
   "SERVER",
   "BAD_REQUEST",
   "ABORTED",
-  "UNKNOWN"
+  "UNKNOWN",
+  "QUOTA_EXHAUSTED_ALL_KEYS"
 ]);
 function failureKindOf(error62) {
   if (typeof error62 !== "object" || error62 === null || !("code" in error62))
@@ -162799,6 +162876,45 @@ function createAdapter(provider, apiKey, customBaseUrl, customFetch, resolveSubs
     return new OpenAIAdapter({ apiKey });
   return new GeminiAdapter({ apiKey });
 }
+function rosterFor(rotation, provider) {
+  const roster = rotation?.rosters?.[provider];
+  return roster && roster.keys.length > 0 ? roster : void 0;
+}
+function notifyRotation(onKeyRotation, event) {
+  try {
+    onKeyRotation?.(event);
+  } catch {
+  }
+}
+function rotatingReviewModel(provider, model, effort, roster, rotation, resolveSubscriptionSecret) {
+  let cursor = roster.startIndex;
+  const sample = withRetries(createAdapter(provider, roster.keys[0], rotation.customBaseUrl, rotation.customFetch, resolveSubscriptionSecret), model, effort);
+  return {
+    label: sample.label,
+    ...sample.outputTokensFor ? { outputTokensFor: sample.outputTokensFor } : {},
+    async generate(request2) {
+      const outcome = await callWithKeyRotation({
+        provider,
+        keyCount: roster.keys.length,
+        startIndex: cursor,
+        call: (index) => {
+          const key = roster.keys[index];
+          if (!key) {
+            throw new LlmFailure({
+              code: "INVALID_CREDENTIAL",
+              provider,
+              message: `no API key is configured for ${provider}`
+            });
+          }
+          return withRetries(createAdapter(provider, key, rotation.customBaseUrl, rotation.customFetch, resolveSubscriptionSecret), model, effort).generate(request2);
+        }
+      });
+      cursor = outcome.index;
+      notifyRotation(rotation.onKeyRotation, { provider, index: outcome.index, skipped: outcome.skipped });
+      return outcome.value;
+    }
+  };
+}
 function withRetries(adapter, model, effort) {
   const base = modelFromAdapter(adapter, model, effort);
   const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
@@ -162821,7 +162937,7 @@ async function resolveKey(store, provider) {
   }
   return store.resolve({ provider }, "review");
 }
-async function resolveFallbacks(config2, store, customBaseUrl, customFetch) {
+async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rotation) {
   const resolved = { models: [], secrets: [], skipped: [] };
   for (const entry of config2.fallback ?? []) {
     const label = `${entry.provider}:${entry.model}`;
@@ -162834,12 +162950,23 @@ async function resolveFallbacks(config2, store, customBaseUrl, customFetch) {
     }
     if (key)
       resolved.secrets.push(key);
+    const roster = rosterFor(rotation, entry.provider);
+    if (roster) {
+      for (const secret of roster.keys)
+        resolved.secrets.push(secret);
+    }
     if (entry.provider === "custom" && !customBaseUrl?.trim()) {
       resolved.skipped.push({ label, reason: "no trusted base URL is configured (CUSTOM_LLM_BASE_URL)" });
       continue;
     }
+    const resolveSecret = () => store.resolve({ provider: entry.provider }, "review");
     try {
-      resolved.models.push(withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch, () => store.resolve({ provider: entry.provider }, "review")), entry.model, entry.effort));
+      resolved.models.push(roster ? rotatingReviewModel(entry.provider, entry.model, entry.effort, roster, {
+        rosters: rotation?.rosters,
+        onKeyRotation: rotation?.onKeyRotation,
+        customBaseUrl,
+        customFetch
+      }, resolveSecret) : withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch, resolveSecret), entry.model, entry.effort));
     } catch {
       resolved.skipped.push({ label, reason: "the provider could not be set up" });
     }
@@ -162851,14 +162978,28 @@ async function resolveReviewSecrets(config2, store) {
   const fallbacks = await resolveFallbacks(config2, store);
   return [...primary ? [primary] : [], ...fallbacks.secrets];
 }
-function attachments(primaryKey, fallbacks) {
+function attachments(primaryKey, fallbacks, extra = []) {
+  const seen = /* @__PURE__ */ new Set();
+  const secrets = [];
+  for (const secret of [...primaryKey ? [primaryKey] : [], ...fallbacks.secrets, ...extra]) {
+    if (seen.has(secret))
+      continue;
+    seen.add(secret);
+    secrets.push(secret);
+  }
   return {
     ...fallbacks.models.length > 0 ? { fallbacks: fallbacks.models } : {},
-    secrets: [...primaryKey ? [primaryKey] : [], ...fallbacks.secrets],
+    secrets,
     ...fallbacks.skipped.length > 0 ? { skippedFallbacks: fallbacks.skipped } : {}
   };
 }
 async function createReviewModel(config2, store, opts) {
+  const rotation = {
+    rosters: opts.keyRosters,
+    onKeyRotation: opts.onKeyRotation,
+    customBaseUrl: opts.customBaseUrl,
+    customFetch: opts.customFetch
+  };
   if (config2.provider === "claude-code") {
     const token = await store.resolve({ provider: "claude-code" }, "review");
     const runner = new ClaudeCodeRunner({
@@ -162867,19 +163008,21 @@ async function createReviewModel(config2, store, opts) {
       ...config2.model ? { model: config2.model } : {},
       ...opts.configDir ? { configDir: opts.configDir } : {}
     });
-    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch)));
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch, rotation)));
   }
   if (!isApiProviderId(config2.provider)) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
   }
   const provider = config2.provider;
   const apiKey = provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
-  const adapter = createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, () => store.resolve({ provider }, "review"));
   if (!config2.model) {
     throw new Error(`Model is required for provider: ${config2.provider}`);
   }
-  const model = withRetries(adapter, config2.model, config2.effort);
-  return { ...model, ...attachments(apiKey, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch)) };
+  const resolveSecret = () => store.resolve({ provider }, "review");
+  const roster = rosterFor(rotation, provider);
+  const model = roster ? rotatingReviewModel(provider, config2.model, config2.effort, roster, rotation, resolveSecret) : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config2.model, config2.effort);
+  const fallbacks = await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch, rotation);
+  return { ...model, ...attachments(apiKey, fallbacks, roster ? roster.keys : []) };
 }
 
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([

@@ -53,12 +53,13 @@ export function SettingsPage() {
     await updateSettingsMutation.mutateAsync(updatedSettings);
   };
 
-  const handleAddKeySubmit = async (prov: KeyProvider, apiKey: string, baseUrl?: string) => {
+  const handleAddKeySubmit = async (prov: KeyProvider, apiKey: string, baseUrl?: string, apiKeys?: string[]) => {
     try {
       await saveKeyMutation.mutateAsync({
         provider: prov,
         apiKey,
         baseUrl: baseUrl || undefined,
+        ...(apiKeys ? { apiKeys } : {}),
       });
       setAddKeyModalOpen(false);
     } catch {

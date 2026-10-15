@@ -2,8 +2,47 @@ import { randomUUID } from 'node:crypto';
 import { Secret, decodeSubscription, encodeSubscription, isSubscriptionProvider, refreshSubscription, SUBSCRIPTION_PREFIX,
   type SubscriptionCredential, type SubscriptionProvider } from '@mergepilot/engine';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
-import type { KeyProvider, AppStore, StoredCredential, Vault } from '../core/types.js';
+import type { KeyProvider, KeyQuotaStatus, AppStore, StoredCredential, StoredProviderKey, Vault } from '../core/types.js';
+import { isMultiKeyProvider, MAX_PROVIDER_KEYS } from './multi-key.js';
 import { coordinateRefresh } from './refresh-coordination.js';
+
+export class TooManyKeysError extends Error {
+  readonly limit = MAX_PROVIDER_KEYS;
+  constructor() {
+    super(`This provider accepts at most ${MAX_PROVIDER_KEYS} API keys`);
+    this.name = 'TooManyKeysError';
+  }
+}
+
+export class SingleKeyProviderError extends Error {
+  constructor(provider: string) {
+    super(`Provider "${provider}" stores one credential`);
+    this.name = 'SingleKeyProviderError';
+  }
+}
+
+export class KeyOrderError extends Error {
+  constructor() {
+    super('Key order must list every stored key exactly once');
+    this.name = 'KeyOrderError';
+  }
+}
+
+class MissingProviderKeyError extends Error {
+  constructor() {
+    super('Stored API key was not found');
+    this.name = 'MissingProviderKeyError';
+  }
+}
+
+export interface ProviderKeyPublic {
+  id: string;
+  position: number;
+  last4: string;
+  createdAt: Date;
+  lastTestStatus: KeyQuotaStatus | null;
+  lastTestedAt: Date | null;
+}
 
 export type ValidateApiKeyFn = (provider: KeyProvider, apiKey: string, baseUrl?: string) => Promise<boolean | void>;
 
@@ -23,7 +62,11 @@ export interface SaveKeyParams {
   baseUrl?: string | null | undefined;
 }
 
-export type KeyMetadata = Omit<StoredCredential, 'ciphertext'> & { authMethod?: 'api-key' | 'subscription' | 'unknown' };
+export type KeyMetadata = Omit<StoredCredential, 'ciphertext'> & {
+  authMethod?: 'api-key' | 'subscription' | 'unknown';
+  /** Present for gemini, openrouter and opencode-zen when slot rows exist. Never a secret. */
+  keys?: ProviderKeyPublic[] | undefined;
+};
 
 export class CredentialService {
   readonly #store: AppStore;
@@ -40,10 +83,158 @@ export class CredentialService {
 
   async saveKey(params: SaveKeyParams): Promise<KeyMetadata> {
     const credential = await this.sealKey(params, { validate: true });
+    if (isMultiKeyProvider(params.provider)) {
+      const slot = slotFrom(credential, 0, credential.id);
+      await this.#store.modifyProviderKeys(params.workspaceId, params.provider, async () => ({
+        keys: [slot],
+        parent: credential,
+        cursor: 0,
+      }));
+      return publicCredential(credential, [slot]);
+    }
     await this.#store.saveCredential(credential);
+    return publicCredential(credential);
+  }
 
-    const { ciphertext: _c, ...metadata } = credential;
-    return metadata;
+  /** Replaces the ordered list. Seals every key before the first write. */
+  async saveKeyList(params: Omit<SaveKeyParams, 'apiKey'> & { apiKeys: readonly string[] }): Promise<KeyMetadata> {
+    if (!isMultiKeyProvider(params.provider)) throw new SingleKeyProviderError(params.provider);
+    if (params.apiKeys.length < 1 || params.apiKeys.length > MAX_PROVIDER_KEYS) throw new TooManyKeysError();
+    const sealed = [];
+    for (const apiKey of params.apiKeys) {
+      sealed.push(await this.sealKey({ ...params, apiKey }, { validate: true }));
+    }
+    const first = sealed[0];
+    if (!first) throw new TooManyKeysError();
+    const slots = sealed.map((credential, position) => slotFrom(credential, position, credential.id));
+    await this.#store.modifyProviderKeys(params.workspaceId, params.provider, async () => ({
+      keys: slots,
+      parent: first,
+      cursor: 0,
+    }));
+    return publicCredential(first, slots);
+  }
+
+  /** Appends one key. A list that is already full is refused inside the lock, before any write. */
+  async appendProviderKey(params: SaveKeyParams): Promise<ProviderKeyPublic> {
+    if (!isMultiKeyProvider(params.provider)) throw new SingleKeyProviderError(params.provider);
+    const sealed = await this.sealKey(params, { validate: true });
+    const slots = await this.#store.modifyProviderKeys(params.workspaceId, params.provider, async (current) => {
+      if (current.length >= MAX_PROVIDER_KEYS) throw new TooManyKeysError();
+      const slot = slotFrom(sealed, current.length, sealed.id);
+      if (current.length === 0) return { keys: [slot], parent: sealed, cursor: 0 };
+      return { keys: [...current, slot] };
+    });
+    const added = slots[slots.length - 1];
+    if (!added) throw new TooManyKeysError();
+    return publicSlot(added);
+  }
+
+  /** Removes one key and compacts positions. False when the id is absent (nothing is written). */
+  async deleteProviderKey(workspaceId: string, provider: KeyProvider, keyId: string): Promise<boolean> {
+    if (!isMultiKeyProvider(provider)) throw new SingleKeyProviderError(provider);
+    const parent = await this.#store.getCredential(workspaceId, provider);
+    try {
+      await this.#store.modifyProviderKeys(workspaceId, provider, async (current) => {
+        if (!current.some((slot) => slot.id === keyId)) throw new MissingProviderKeyError();
+        const remaining = current
+          .filter((slot) => slot.id !== keyId)
+          .map((slot, position) => ({ ...slot, position }));
+        const nextParent = remaining[0];
+        if (!nextParent) return { keys: [], parent: null };
+        return { keys: remaining, parent: credentialFromSlot(nextParent, parent?.baseUrl), cursor: 0 };
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof MissingProviderKeyError) return false;
+      throw error;
+    }
+  }
+
+  /** Full reorder. The id set must match the stored ids exactly, or nothing is written. */
+  async reorderProviderKeys(workspaceId: string, provider: KeyProvider, ids: readonly string[]): Promise<ProviderKeyPublic[]> {
+    if (!isMultiKeyProvider(provider)) throw new SingleKeyProviderError(provider);
+    const parent = await this.#store.getCredential(workspaceId, provider);
+    const slots = await this.#store.modifyProviderKeys(workspaceId, provider, async (current) => {
+      const unique = new Set(ids);
+      const known = new Set(current.map((slot) => slot.id));
+      const same = ids.length === current.length && unique.size === ids.length && [...unique].every((id) => known.has(id));
+      if (!same) throw new KeyOrderError();
+      const byId = new Map(current.map((slot) => [slot.id, slot]));
+      const keys = ids.map((id, position) => {
+        const slot = byId.get(id);
+        if (!slot) throw new KeyOrderError();
+        return { ...slot, position };
+      });
+      const first = keys[0];
+      if (!first) throw new KeyOrderError();
+      return { keys, parent: credentialFromSlot(first, parent?.baseUrl), cursor: 0 };
+    });
+    return slots.map(publicSlot);
+  }
+
+  /**
+   * Ordered secrets for a multi-key provider, or null when it is not one or has no credential.
+   * Slot rows win; a parent with no slots is a one-key roster starting at 0.
+   */
+  async resolveKeyRoster(
+    workspaceId: string,
+    provider: KeyProvider,
+  ): Promise<{ secrets: Secret[]; keyIds: string[]; startIndex: number } | null> {
+    if (!isMultiKeyProvider(provider)) return null;
+    const parent = await this.#store.getCredential(workspaceId, provider);
+    if (!parent) return null;
+    const slots = await this.#store.listProviderKeys(workspaceId, provider);
+    if (slots.length === 0) {
+      const plaintext = await this.#vault.decrypt(parent.ciphertext, { workspaceId, provider });
+      return { secrets: [new Secret(plaintext)], keyIds: [parent.id], startIndex: 0 };
+    }
+    const ordered = [...slots].sort((a, b) => a.position - b.position);
+    const secrets: Secret[] = [];
+    const keyIds: string[] = [];
+    for (const slot of ordered) {
+      keyIds.push(slot.id);
+      secrets.push(new Secret(await this.#vault.decrypt(slot.ciphertext, { workspaceId, provider })));
+    }
+    const cursor = await this.#store.getKeyCursor(workspaceId, provider);
+    return { secrets, keyIds, startIndex: cursor >= 0 && cursor < secrets.length ? cursor : 0 };
+  }
+
+  /** Persists the cursor at the current position of this key id. No-op when the id is gone. */
+  async rememberSuccessfulKey(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void> {
+    if (!isMultiKeyProvider(provider)) return;
+    await this.#store.setKeyCursor(workspaceId, provider, keyId);
+  }
+
+  /** Decrypts one stored slot. Null when the id is not in this workspace's list. */
+  async readStoredKey(workspaceId: string, provider: KeyProvider, keyId: string): Promise<Secret | null> {
+    const slot = (await this.#store.listProviderKeys(workspaceId, provider)).find((row) => row.id === keyId);
+    if (!slot) return null;
+    return new Secret(await this.#vault.decrypt(slot.ciphertext, { workspaceId, provider }));
+  }
+
+  async recordKeyTest(workspaceId: string, provider: KeyProvider, keyId: string, status: KeyQuotaStatus, testedAt: Date): Promise<boolean> {
+    return this.#store.recordProviderKeyTest(workspaceId, provider, keyId, status, testedAt);
+  }
+
+  /** Decrypted roster in order, for a passphrase-sealed backup. Empty when there is no credential. */
+  async revealRoster(workspaceId: string, provider: KeyProvider): Promise<Array<{ secret: Secret; last4: string }>> {
+    if (!isMultiKeyProvider(provider)) return [];
+    const parent = await this.#store.getCredential(workspaceId, provider);
+    if (!parent) return [];
+    const slots = [...(await this.#store.listProviderKeys(workspaceId, provider))].sort((a, b) => a.position - b.position);
+    if (slots.length === 0) {
+      const plaintext = await this.#vault.decrypt(parent.ciphertext, { workspaceId, provider });
+      return [{ secret: new Secret(plaintext), last4: parent.last4 }];
+    }
+    const revealed: Array<{ secret: Secret; last4: string }> = [];
+    for (const slot of slots) {
+      revealed.push({
+        secret: new Secret(await this.#vault.decrypt(slot.ciphertext, { workspaceId, provider })),
+        last4: slot.last4,
+      });
+    }
+    return revealed;
   }
 
   /**
@@ -111,16 +302,21 @@ export class CredentialService {
 
   async listKeys(workspaceId: string): Promise<KeyMetadata[]> {
     const items = await this.#store.listCredentials(workspaceId);
+    const slots = await this.#store.listWorkspaceProviderKeys(workspaceId);
     return Promise.all(items.map(async (item) => {
-      if (!isSubscriptionProvider(item.provider)) return { ...item, authMethod: 'api-key' as const };
+      const keys = isMultiKeyProvider(item.provider)
+        ? slots.filter((slot) => slot.provider === item.provider).sort((a, b) => a.position - b.position).map(publicSlot)
+        : undefined;
+      const withKeys = keys && keys.length > 0 ? { keys } : {};
+      if (!isSubscriptionProvider(item.provider)) return { ...item, ...withKeys, authMethod: 'api-key' as const };
       try {
         const stored = await this.#store.getCredential(workspaceId, item.provider);
-        if (!stored) return { ...item, authMethod: 'unknown' as const };
+        if (!stored) return { ...item, ...withKeys, authMethod: 'unknown' as const };
         const value = await this.#vault.decrypt(stored.ciphertext, { workspaceId, provider: item.provider });
-        return { ...item, authMethod: decodeSubscription(value, item.provider) ? 'subscription' as const : 'api-key' as const };
+        return { ...item, ...withKeys, authMethod: decodeSubscription(value, item.provider) ? 'subscription' as const : 'api-key' as const };
       } catch {
         // Keep disconnect/replacement available even when one encrypted credential cannot be read.
-        return { ...item, authMethod: 'unknown' as const };
+        return { ...item, ...withKeys, authMethod: 'unknown' as const };
       }
     }));
   }
@@ -191,4 +387,50 @@ export class CredentialService {
   async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
     return this.#store.getCredential(workspaceId, provider);
   }
+}
+
+function publicCredential(credential: StoredCredential, slots?: readonly StoredProviderKey[]): KeyMetadata {
+  const { ciphertext: _ciphertext, ...metadata } = credential;
+  return slots && slots.length > 0 ? { ...metadata, keys: slots.map(publicSlot) } : metadata;
+}
+
+function publicSlot(slot: StoredProviderKey): ProviderKeyPublic {
+  return {
+    id: slot.id,
+    position: slot.position,
+    last4: slot.last4,
+    createdAt: slot.createdAt,
+    lastTestStatus: slot.lastTestStatus,
+    lastTestedAt: slot.lastTestedAt,
+  };
+}
+
+function slotFrom(credential: StoredCredential, position: number, id: string): StoredProviderKey {
+  return {
+    id,
+    workspaceId: credential.workspaceId,
+    provider: credential.provider,
+    position,
+    ciphertext: credential.ciphertext,
+    keyVersion: credential.keyVersion,
+    last4: credential.last4,
+    createdBy: credential.createdBy,
+    createdAt: credential.createdAt,
+    lastTestStatus: null,
+    lastTestedAt: null,
+  };
+}
+
+function credentialFromSlot(slot: StoredProviderKey, baseUrl: string | null | undefined): StoredCredential {
+  return {
+    id: slot.id,
+    workspaceId: slot.workspaceId,
+    provider: slot.provider,
+    ciphertext: slot.ciphertext,
+    keyVersion: slot.keyVersion,
+    last4: slot.last4,
+    createdBy: slot.createdBy,
+    createdAt: slot.createdAt,
+    baseUrl: baseUrl ?? null,
+  };
 }

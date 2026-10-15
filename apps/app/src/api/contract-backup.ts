@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_EXTRA_BOTS } from '../core/bot-types.js';
+import { MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
 import { KeyProviderSchema } from './contract-judge.js';
 
 // Settings backup and restore (ADR-0018). Re-exported by contract.ts. A backup file never holds a
@@ -34,7 +35,10 @@ export const BackupCredentialSchema = z.object({
   provider: KeyProviderSchema,
   baseUrl: z.string().max(500).nullable().optional(),
   last4: z.string().max(4),
+  /** First key, so a reader from before ADR-0026 still restores position 0. */
   key: SealedKeySchema.optional(),
+  /** Full ordered list for gemini, openrouter and opencode-zen. Wins over `key` on restore. */
+  keys: z.array(SealedKeySchema).max(MAX_PROVIDER_KEYS).optional(),
 });
 export type BackupCredential = z.infer<typeof BackupCredentialSchema>;
 

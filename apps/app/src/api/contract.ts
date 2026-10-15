@@ -17,6 +17,7 @@ import {
   EffortSchema,
   FallbackEntrySchema,
   MAX_FALLBACK_MODELS,
+  MAX_PROVIDER_KEYS,
   ModelIdSchema,
 } from './contract-models.js';
 import { RepoColorsSchema, RunRetentionDaysSchema } from './contract-runs.js';
@@ -95,6 +96,18 @@ export const SettingsUpdateSchema = SettingsSchema.extend({
 export type SettingsUpdate = z.infer<typeof SettingsUpdateSchema>;
 export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable() });
 
+export const KeyQuotaStatusSchema = z.enum(['valid', 'invalid', 'quota-exhausted']);
+
+/** One stored key in a list. The secret is never part of this object. */
+export const ProviderKeySlotSchema = z.object({
+  id: z.string().uuid(),
+  position: z.number().int().min(0).max(MAX_PROVIDER_KEYS - 1),
+  last4: z.string(),
+  createdAt: z.string(),
+  lastTestStatus: KeyQuotaStatusSchema.nullable(),
+  lastTestedAt: z.string().nullable(),
+});
+
 /** GET (admin) /api/workspaces/:workspaceId/keys */
 export const KeysResponseSchema = z.object({
   keys: z.array(
@@ -105,6 +118,8 @@ export const KeysResponseSchema = z.object({
       createdAt: z.string(),
       createdBy: z.string(),
       baseUrl: z.string().nullable().optional(),
+      /** Ordered keys for gemini, openrouter and opencode-zen. Absent for every other provider. */
+      keys: z.array(ProviderKeySlotSchema).max(MAX_PROVIDER_KEYS).optional(),
     }),
   ),
 });
@@ -112,6 +127,28 @@ export const KeysResponseSchema = z.object({
 export const SaveKeyRequestSchema = z.object({
   apiKey: z.string().min(8).max(500),
   baseUrl: z.string().url().optional(),
+});
+/**
+ * PUT body when the provider stores a list. Exactly one of `apiKey` (replaces the list with one key)
+ * or `apiKeys` (replaces the list, order kept). `SaveKeyRequestSchema` stays the single-key shape
+ * backup restore parses.
+ */
+export const SaveKeysRequestSchema = z
+  .object({
+    apiKey: z.string().min(8).max(500).optional(),
+    apiKeys: z.array(z.string().min(8).max(500)).min(1).max(MAX_PROVIDER_KEYS).optional(),
+    baseUrl: z.string().url().optional(),
+  })
+  .refine((body) => (body.apiKey === undefined) !== (body.apiKeys === undefined), {
+    message: 'Send apiKey or apiKeys',
+  });
+/** POST (admin) .../keys/:provider/slots — append one key. */
+export const AppendKeyRequestSchema = z.object({
+  apiKey: z.string().min(8).max(500),
+});
+/** PUT (admin) .../keys/:provider/order — the full id list, in the new order. */
+export const ReorderKeysRequestSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(MAX_PROVIDER_KEYS),
 });
 /** DELETE (admin) /api/workspaces/:workspaceId/keys/:provider → 204 */
 
@@ -141,24 +178,32 @@ export const ListModelsBodySchema = z.object({
  * POST (admin) /api/workspaces/:workspaceId/credentials/:provider/test — the stored key, or an
  * unsaved `apiKey` (test before saving); rate-limited to 10 per minute per workspace.
  */
-export const TestConnectionBodySchema = z.object({
-  apiKey: z.string().max(500).optional(),
-  baseUrl: z.string().url().max(500).optional(),
-  model: z.string().max(200).optional(),
-  effort: EffortSchema.optional(),
-});
+export const TestConnectionBodySchema = z
+  .object({
+    apiKey: z.string().max(500).optional(),
+    /** Tests one stored key. Rejected together with `apiKey`. */
+    keyId: z.string().uuid().optional(),
+    baseUrl: z.string().url().max(500).optional(),
+    model: z.string().max(200).optional(),
+    effort: EffortSchema.optional(),
+  })
+  .refine((body) => !(body.apiKey !== undefined && body.keyId !== undefined), {
+    message: 'Send apiKey or keyId, not both',
+  });
 
 export const TestConnectionResponseSchema = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
     ms: z.number(),
     model: z.string(),
+    quotaStatus: KeyQuotaStatusSchema.optional(),
   }),
   z.object({
     ok: z.literal(false),
     code: z.string(),
     message: z.string(),
     ms: z.number().optional(),
+    quotaStatus: KeyQuotaStatusSchema.optional(),
   }),
 ]);
 export type TestConnectionResponse = z.infer<typeof TestConnectionResponseSchema>;
@@ -228,6 +273,17 @@ export const ReviewRunResultSchema = z.object({
     .optional(),
   judge: JudgeRunSchema.optional(),
   pricing: RunPricingSchema.optional(),
+  /** Which API key answered, and how many were skipped for quota (ADR-0026). Never a secret. */
+  keyRotation: z
+    .array(
+      z.object({
+        provider: z.string(),
+        keyIndex: z.number().int().min(0).max(MAX_PROVIDER_KEYS - 1),
+        skipped: z.number().int().min(0).max(MAX_PROVIDER_KEYS),
+      }),
+    )
+    .max(MAX_PROVIDER_KEYS)
+    .optional(),
 });
 export type ReviewRunResult = z.infer<typeof ReviewRunResultSchema>;
 
