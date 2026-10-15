@@ -548,4 +548,13 @@
 - نشر واحد في المرة ومن غير إلغاء نشر شغال؛ وrollback تلقائي بس لو مفيش migration اتغيّر؛ وissue عليه `release-hold` بيوقف أي نشر بعد الفشل.
 - من غير `MERGEPILOT_AUTO_RELEASE=enabled` بيشتغل dry run بس، وقاعدة موافقة صاحب المشروع على النشر فاضلة زي ما هي.
 
-**قرارات لسه مستنية صاحب المشروع:** تحويل Dokploy لفرع `production` مع قفل autoDeploy؛ مدة `WORKER_STOP_GRACE_PERIOD` (المقترح 25m، والبديل 12m)؛ حماية `main` بالـ checks التلاتة؛ مستخدم ومفتاح API مخصّص في Dokploy؛ وتفعيل السياسة نفسها.
+**قرارات لسه مستنية صاحب المشروع:** تحويل Dokploy لفرع `production` مع قفل autoDeploy؛ مدة `WORKER_STOP_GRACE_PERIOD` (المقترح 25m، والبديل 12m)؛ حماية `main` بالـ checks التلاتة (اتصحّحت لـ `check` و`integration` بس، شوف التصحيح تحت)؛ مستخدم ومفتاح API مخصّص في Dokploy؛ وتفعيل السياسة نفسها.
+
+**تصحيح بعد الـ merge (2026-10-15):**
+- فرع `production` لازم يبدأ من `4991976`، لأن ملف الـ compose فيه بيثبّت الصورة الشغالة `4c32dee`. أما `4c32dee` نفسه فبيثبّت `4915c26`.
+- حماية `main` بتطلب `check` و`integration` بس. `Build and Push Docker Image` مش بيشتغل على أغلب الـ PRs (ومنها PRs التوثيق)، فلو بقى required كانت الـ PRs دي هتتقفل.
+
+**طلب التفعيل من صاحب المشروع (بنصّه، 2026-10-15):**
+«do all by your own by using ssh-musalam-2-mcp and dokploy-musalam-2-mcp»
+
+الخطوات اتوقفت عند رفض صلاحيات Claude Code لإنشاء فرع `production` وتعديل إعدادات الريبو وDokploy. ومفتاح `DOKPLOY_API_KEY` ومدة `WORKER_STOP_GRACE_PERIOD` بيفضلوا على صاحب المشروع، عشان الأسرار ما تعدّيش على الموديل.
