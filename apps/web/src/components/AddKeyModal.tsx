@@ -75,23 +75,23 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     setFields([blankField('field-0')]);
   };
 
-  // The page closes the modal after a successful save; drop every typed key then, never before.
-  useEffect(() => {
-    if (isOpen) return;
-    setApiKeyInput('');
-    setBaseUrlInput('');
-    setTestResult(null);
-    fieldSeq.current = 1;
-    setFields([blankField('field-0')]);
-  }, [isOpen]);
-
-  const handleClose = () => {
+  /** Everything the user typed or chose; shared by both close paths. */
+  const resetForm = () => {
     setAuthMethod('api-key');
     setApiKeyInput('');
     setBaseUrlInput('');
     setKeyError('');
     setTestResult(null);
     resetFields();
+  };
+
+  // The page closes the modal after a successful save (without handleClose); reset then, never before.
+  useEffect(() => {
+    if (!isOpen) resetForm();
+  }, [isOpen]);
+
+  const handleClose = () => {
+    resetForm();
     onClose();
   };
 

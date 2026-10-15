@@ -159,5 +159,19 @@ describe('AddKeyModal multi-key fields', () => {
     expect(await screen.findByText('Could not verify right now (rate limit or connection). Try again')).toBeDefined();
     expect(screen.queryByText(COPY.en.invalid)).toBeNull();
   });
+
+  it('clears the form through the shared reset when the page closes the modal after a save', async () => {
+    const view = renderSettings(
+      <AddKeyModal isOpen onClose={vi.fn()} onSubmit={vi.fn(async () => undefined)} isPending={false} workspaceId="ws-1" />,
+      'en',
+    );
+    await user.selectOptions(screen.getByRole('combobox', { name: COPY.en.provider }), 'gemini');
+    await user.type(screen.getByLabelText(COPY.en.keyFieldLabel), typedKey());
+
+    view.rerender(<AddKeyModal isOpen={false} onClose={vi.fn()} onSubmit={vi.fn(async () => undefined)} isPending={false} workspaceId="ws-1" />);
+    view.rerender(<AddKeyModal isOpen onClose={vi.fn()} onSubmit={vi.fn(async () => undefined)} isPending={false} workspaceId="ws-1" />);
+
+    expect((screen.getByLabelText(COPY.en.keyFieldLabel) as HTMLInputElement).value).toBe('');
+  });
 });
 
