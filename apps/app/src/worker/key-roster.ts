@@ -55,7 +55,23 @@ export function rosterSecrets(rosters: Readonly<Record<string, KeyRoster>>): Sec
 }
 
 /**
- * Records a successful rotation and stores the index. A cursor write that fails is logged and
+ * Cursor writes of one run, applied in order. `flush` resolves once every queued write has
+ * settled, so the run completes only after the next review can read the stored key.
+ */
+export class CursorWrites {
+  #chain: Promise<void> = Promise.resolve();
+
+  enqueue(write: () => Promise<void>): void {
+    this.#chain = this.#chain.then(write);
+  }
+
+  flush(): Promise<void> {
+    return this.#chain;
+  }
+}
+
+/**
+ * Records a successful rotation and queues the cursor write. A write that fails is logged and
  * does not fail the review. The log line carries the index and the skip count only.
  */
 export function rotationHandler(
@@ -64,6 +80,7 @@ export function rotationHandler(
   workspaceId: string,
   logger: Logger,
   keyIdsByProvider: Readonly<Record<string, readonly string[]>>,
+  writes: CursorWrites,
 ): (event: KeyRotationEvent) => void {
   return (event) => {
     if (events.length < MAX_PROVIDER_KEYS) {
@@ -77,7 +94,8 @@ export function rotationHandler(
     const provider = event.provider;
     const keyId = keyIdsByProvider[provider]?.[event.index];
     if (!keyId) return;
-    void Promise.resolve(credentials.rememberSuccessfulKey(workspaceId, provider, keyId)).catch((error: unknown) => {
+    const remember = credentials.rememberSuccessfulKey;
+    writes.enqueue(() => Promise.resolve(remember(workspaceId, provider, keyId)).catch((error: unknown) => {
       logger.warn(
         {
           event: 'credential.key_cursor_failed',
@@ -86,6 +104,6 @@ export function rotationHandler(
         },
         'Could not store the last successful API key index',
       );
-    });
+    }));
   };
 }

@@ -188,5 +188,37 @@ describe('provider key list routes', { timeout: 60000 }, () => {
     const slots = await h.store.listProviderKeys('ws-1', 'gemini');
     expect(slots.find((slot) => slot.id === keyId)?.lastTestStatus).toBe('quota-exhausted');
     expect(slots.find((slot) => slot.id !== keyId)?.lastTestStatus).toBeNull();
+
+    // A transient failure (rate limit, outage, network) is not proof of a bad key: the status stays.
+    vi.mocked(testConnection).mockResolvedValue({ ok: false, ms: 3, code: 'rate-limit', message: 'slow down' });
+    const limited = await h.app.inject({
+      method: 'POST',
+      url: '/api/workspaces/ws-1/credentials/gemini/test',
+      headers: cookie(),
+      payload: { keyId, model: 'gemini-2.0-flash' },
+    });
+    expect(limited.json()).toMatchObject({ ok: false, code: 'rate-limit' });
+    expect(limited.json()).not.toHaveProperty('quotaStatus');
+    vi.mocked(testConnection).mockRejectedValue(new Error('socket hang up'));
+    const offline = await h.app.inject({
+      method: 'POST',
+      url: '/api/workspaces/ws-1/credentials/gemini/test',
+      headers: cookie(),
+      payload: { keyId, model: 'gemini-2.0-flash' },
+    });
+    expect(offline.json()).toMatchObject({ ok: false, code: 'network' });
+    expect(offline.json()).not.toHaveProperty('quotaStatus');
+    const after = await h.store.listProviderKeys('ws-1', 'gemini');
+    expect(after.find((slot) => slot.id === keyId)?.lastTestStatus).toBe('quota-exhausted');
+
+    vi.mocked(testConnection).mockResolvedValue({ ok: false, ms: 3, code: 'auth', message: 'bad key' });
+    await h.app.inject({
+      method: 'POST',
+      url: '/api/workspaces/ws-1/credentials/gemini/test',
+      headers: cookie(),
+      payload: { keyId, model: 'gemini-2.0-flash' },
+    });
+    const rejected = await h.store.listProviderKeys('ws-1', 'gemini');
+    expect(rejected.find((slot) => slot.id === keyId)?.lastTestStatus).toBe('invalid');
   });
 });

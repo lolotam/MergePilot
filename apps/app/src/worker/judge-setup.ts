@@ -51,7 +51,14 @@ export async function workspaceJudge(
   for (const entry of [{ provider: config.provider, model: config.model }, ...config.fallback]) {
     try {
       if (credentials.resolveKeyRoster && isMultiKeyProvider(entry.provider)) {
-        const roster = await credentials.resolveKeyRoster(workspaceId, entry.provider);
+        const roster = await credentials.resolveKeyRoster(workspaceId, entry.provider).catch((error: unknown) => {
+          // One unreadable key must not leave the judge keyless: fall back to the single credential.
+          logger.warn(
+            { event: 'credential.key_roster_failed', provider: entry.provider, error: error instanceof Error ? error.name : 'unknown' },
+            'Could not load the API key roster for a judge provider',
+          );
+          return null;
+        });
         if (roster && roster.secrets.length > 0) {
           secrets.push(...roster.secrets);
           const start = roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;

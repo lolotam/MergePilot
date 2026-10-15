@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LlmFailure, Secret, callWithKeyRotation } from '@mergepilot/engine';
 import type { Logger } from 'pino';
 import { MemoryStore } from '../core/memory-store.js';
-import { rotationHandler } from '../worker/key-roster.js';
+import { CursorWrites, rotationHandler } from '../worker/key-roster.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { CredentialService } from './service.js';
 
@@ -132,11 +132,12 @@ describe('multi-key roster', () => {
       warn: (obj: unknown) => lines.push(obj),
     } as unknown as Logger;
     const events: Array<{ provider: string; keyIndex: number; skipped: number }> = [];
+    const writes = new CursorWrites();
     const handler = rotationHandler(events, service, 'ws', logger, {
       gemini: [geminiSlots[0]!.id, geminiSlots[1]!.id],
-    });
+    }, writes);
     handler({ provider: 'gemini', index: 1, skipped: 1 });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await writes.flush();
     const dumped = JSON.stringify({ lines, events, secret: new Secret(keyA).toString() });
     expect(dumped).not.toContain(keyA);
     expect(dumped).not.toContain(keyB);

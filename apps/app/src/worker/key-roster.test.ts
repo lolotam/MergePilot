@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
 import { Secret } from '@mergepilot/engine';
-import { loadRosters, rotationHandler } from './key-roster.js';
+import { CursorWrites, loadRosters, rotationHandler } from './key-roster.js';
 import type { ProcessReviewCredentials } from './types.js';
 
 function loggerStub(): Logger {
@@ -71,15 +71,58 @@ describe('rotationHandler roster snapshots', () => {
     const events: Array<{ provider: string; keyIndex: number; skipped: number }> = [];
 
     const first = await loadRosters(credentials, 'ws', ['openrouter'], 'openrouter', logger);
-    const firstHandler = rotationHandler(events, credentials, 'ws', logger, first.keyIds);
+    const writes = new CursorWrites();
+    const firstHandler = rotationHandler(events, credentials, 'ws', logger, first.keyIds, writes);
     firstHandler({ provider: 'openrouter', index: 1, skipped: 0 });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await writes.flush();
     expect(remembered).toEqual(['id-b']);
 
     const second = await loadRosters(credentials, 'ws', ['openrouter'], 'openrouter', logger);
-    const secondHandler = rotationHandler(events, credentials, 'ws', logger, second.keyIds);
+    const secondHandler = rotationHandler(events, credentials, 'ws', logger, second.keyIds, writes);
     secondHandler({ provider: 'openrouter', index: 1, skipped: 0 });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await writes.flush();
     expect(remembered).toEqual(['id-b', 'id-a']);
   });
 });
+
+describe('CursorWrites', () => {
+  it('runs queued cursor writes in order and flush waits for all of them, even after a failure', async () => {
+    const order: string[] = [];
+    let release: () => void = () => undefined;
+    const slow = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const credentials: ProcessReviewCredentials = {
+      resolve: vi.fn(),
+      rememberSuccessfulKey: vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          await slow;
+          order.push('first');
+        })
+        .mockImplementationOnce(async () => {
+          throw new Error('cursor table unavailable');
+        })
+        .mockImplementationOnce(async () => {
+          order.push('third');
+        }),
+    };
+    const writes = new CursorWrites();
+    const handler = rotationHandler([], credentials, 'ws', loggerStub(), { gemini: ['a', 'b', 'c'] }, writes);
+    handler({ provider: 'gemini', index: 0, skipped: 0 });
+    handler({ provider: 'gemini', index: 1, skipped: 1 });
+    handler({ provider: 'gemini', index: 2, skipped: 2 });
+
+    let flushed = false;
+    const done = writes.flush().then(() => {
+      flushed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(flushed).toBe(false);
+
+    release();
+    await done;
+    expect(order).toEqual(['first', 'third']);
+  });
+});
+

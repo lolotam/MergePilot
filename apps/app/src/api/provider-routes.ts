@@ -33,10 +33,11 @@ export const TEST_LIMIT = 10;
 const UNSAVED_MODELS_LIMIT = 20;
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
-function quotaStatusOf(ok: boolean, code: string | undefined): KeyQuotaStatus {
+/** Only a definite answer is stored: transient failures (rate limit, server, network) keep the prior status. */
+function quotaStatusOf(ok: boolean, code: string | undefined): KeyQuotaStatus | null {
   if (ok) return 'valid';
   if (code === 'quota') return 'quota-exhausted';
-  return 'invalid';
+  return code === 'auth' ? 'invalid' : null;
 }
 
 /** Test helper: forget every cached model list and rate-limit bucket. */
@@ -328,8 +329,8 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const effort = body.effort?.trim();
 
       const start = Date.now();
-      const remember = async (status: KeyQuotaStatus): Promise<void> => {
-        if (!keyId) return;
+      const remember = async (status: KeyQuotaStatus | null): Promise<void> => {
+        if (!keyId || !status) return;
         await deps.credentials.recordKeyTest(workspaceId, provider, keyId, status, new Date());
       };
       try {
@@ -371,12 +372,11 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           code: outcome.code,
           message: redact(outcome.message, target.apiKey),
           ms: outcome.ms,
-          quotaStatus,
+          ...(quotaStatus ? { quotaStatus } : {}),
         });
       } catch (err) {
         const ms = Date.now() - start;
         const msg = err instanceof Error ? err.message : String(err);
-        await remember('invalid');
         request.log.info(
           {
             event: 'provider.test_connection',
@@ -385,7 +385,6 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
             ok: false,
             code: 'network',
             ms,
-            quotaStatus: 'invalid',
           },
           'Provider connection test failed',
         );
@@ -394,7 +393,6 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           code: 'network',
           message: redact(msg, target.apiKey),
           ms,
-          quotaStatus: 'invalid' as const,
         });
       }
     },

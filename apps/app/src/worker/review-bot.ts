@@ -16,7 +16,7 @@ import { executeReview } from './execute-review.js';
 import { judgeRunParts, workspaceJudge, type WorkspaceJudge } from './judge-setup.js';
 import { customBaseUrlFor, fallbackChain, skippedFallbacksNote, usedModel, type ModelChoice } from './model-choice.js';
 import type { BotOutcome, BotRun, PanelContext } from './panel-types.js';
-import { loadRosters, rosterSecrets, rotationHandler, type KeyRotationDisclosure } from './key-roster.js';
+import { CursorWrites, loadRosters, rosterSecrets, rotationHandler, type KeyRotationDisclosure } from './key-roster.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewResult } from './types.js';
@@ -41,6 +41,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
   const slot = br.bot.slot;
   const choice = botChoice(ctx, br);
   let credStore: WorkspaceCredentialStore | undefined;
+  const cursorWrites = new CursorWrites();
   try {
     const fallbackList = fallbackChain(br.bot.fallback, choice);
     const customBaseUrl = await customBaseUrlFor(
@@ -60,7 +61,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret);
     const rotationEvents: KeyRotationDisclosure[] = [];
     const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>
-      rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds);
+      rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds, cursorWrites);
     const judgeSetup = await workspaceJudge(settings, workspaceId, deps.credentials, logger, {
       jobId: job.deliveryId,
       runId: br.run.id,
@@ -136,6 +137,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         await runBotReview({ ...params, prFiles: consensus.prFiles, selection: consensus.selection }),
         { knownSecrets, judge: judgeSetup.judge },
       );
+      await cursorWrites.flush();
       const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice, rotationEvents);
       if (outcome.fallback) {
         const { from, code, detail: why } = outcome.fallback;
@@ -157,11 +159,13 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
           }
         : {}),
     });
+    await cursorWrites.flush();
     const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice, rotationEvents);
     record.finish.reviewUrl = reviewResult.reviewUrl ?? null;
     await finishBotRun(ctx, br, record.finish, reviewResult.runResult);
     return { slot, result: record.result, findings: record.finish.findingsCount ?? 0 };
   } catch (error) {
+    await cursorWrites.flush();
     return { slot, result: await failBotRun(ctx, br, error, credStore?.getKnownSecrets() ?? [], choice) };
   }
 }
