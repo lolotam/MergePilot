@@ -177,14 +177,16 @@ commit فيه تغيير توثيق بس بيتخطّى (مفيش صورة جد�
    - النهارده (2026-10-15) الصورة الشغالة `4c32dee68dcc08d4626995d755054c9bc3971cbc`، والـ commit الصح هو `4991976334911c832ac8bb0eddec4585855267a2`.
    - **مش** `4c32dee`: ملف الـ compose فيه بيثبّت `4915c26`، فالسجل كان هيعتبر ده الشغال ويرجع لصورة غلط.
 2. يحوّل مصدر الـ compose في Dokploy لفرع `production` ويقفل autoDeploy **في نفس التعديل**، قبل أي push على `production`. من اللحظة دي لحد التفعيل، الإنتاج بيفضل على الإصدار الحالي وأي merge على `main` مش بينزل لوحده.
-3. يعمل مفتاح API في Dokploy (Settings → API)، ويحطه بنفسه في secret اسمه `DOKPLOY_API_KEY` بالأمر `gh secret set DOKPLOY_API_KEY --repo lolotam/MergePilot` (بيسأل على القيمة، فمش بتظهر في أي شات أو log).
+3. يعمل مستخدم API مخصّص في Dokploy بأقل صلاحيات تكفي لـ deploy الـ compose ده وقراءة حاويّاته (مش مفتاح admin)، ويعمل له مفتاح API (Settings → API)، ويحطه بنفسه في secret اسمه `DOKPLOY_API_KEY` بالأمر `gh secret set DOKPLOY_API_KEY --repo lolotam/MergePilot` (بيسأل على القيمة، فمش بتظهر في أي شات أو log).
 4. يحط الـ variables دي: `DOKPLOY_URL` (عنوان `https://…/api` بتاع Dokploy) و`DOKPLOY_COMPOSE_ID` و`DOKPLOY_APP_NAME` (واختياري `PRODUCTION_URL` و`RELEASE_BRANCH` و`DEPLOY_TIMEOUT_MINUTES` و`VERIFY_TIMEOUT_MINUTES`).
 5. يعمل label اسمه `release-hold` في الريبو.
 6. يختار مدة `WORKER_STOP_GRACE_PERIOD` في Environment بتاع Dokploy (الافتراضي 10s، ودي مدة الـ worker عشان يخلّص المراجعات الشغالة قبل ما Docker يقفله).
 7. يحمي `main` بـ required checks هما `check` و`integration` **بس**.
    - `Build and Push Docker Image` ما ينفعش يبقى required: على الـ PRs الـ workflow ده بيشتغل بس لو اتغيّر `Dockerfile` أو `.dockerignore` أو `docker-compose*.yml` أو `deploy/**` أو `docker.yml`. فأي PR تاني (زي PR توثيق) كان هيفضل مستنيه للأبد ومش هيتعمل له merge.
    - الصورة لسه مطلوبة وقت النشر: البوابة بتستنى الـ check ده على commit الـ `main`، وبتتأكد إن revision الصورة هو نفس الـ SHA.
-8. يحط الـ variable `MERGEPILOT_AUTO_RELEASE` = `enabled`، وبعدها على طول يشغّل الـ workflow يدوي (`workflow_dispatch`) على آخر commit في `main` كاختبار قبول، ويتأكد من الصورة والـ SHA على الحاويات و`/health`.
+8. يحط الـ variable `MERGEPILOT_AUTO_RELEASE` = `enabled`، وبعدها على طول يشغّل الـ workflow يدوي (`workflow_dispatch`) كاختبار قبول على **آخر commit في `main` بيبني صورة**، ويتأكد من الصورة والـ SHA على الحاويات و`/health`.
+   - commit توثيق بس بيتخطّى كـ `no-image` من غير ما ينشر حاجة، فما ينفعش يبقى اختبار القبول.
+   - النهارده (2026-10-15) الـ commit ده هو `88a87bb70b10bea06c004273528f98ed31632ea7`، وصورته `sha256:eabfe1fbc4571e8e8c7626e62f6039fd0c002141b95e9ac4959c1b4d7d43fd53`.
 
 **الإيقاف:** امسح الـ variable `MERGEPILOT_AUTO_RELEASE` (أو غيّر قيمته)، والـ workflow يرجع dry run. ولإيقاف مؤقت من غير ما تلمس الإعدادات، افتح issue عليه `release-hold`.
 
