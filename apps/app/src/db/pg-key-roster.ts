@@ -63,7 +63,7 @@ export async function readStoredKeyCursor(db: AppDb, workspaceId: string, provid
 }
 
 /** No slots means there is nothing to remember, so the cursor row is removed. */
-export async function writeStoredKeyCursor(db: AppDb, workspaceId: string, provider: KeyProvider, position: number): Promise<void> {
+export async function writeStoredKeyCursor(db: AppDb, workspaceId: string, provider: KeyProvider, keyId: string): Promise<void> {
   await withLiveWorkspace(db, workspaceId, async (tx) => {
     await lockCredential(tx, workspaceId, provider);
     const keys = await listPgProviderKeys(tx, workspaceId, provider);
@@ -71,7 +71,9 @@ export async function writeStoredKeyCursor(db: AppDb, workspaceId: string, provi
       await writePgKeyCursor(tx, workspaceId, provider, null);
       return;
     }
-    await writePgKeyCursor(tx, workspaceId, provider, clampKeyCursor(position, keys.length));
+    const index = keys.findIndex((row) => row.id === keyId);
+    if (index < 0) return;
+    await writePgKeyCursor(tx, workspaceId, provider, index);
   });
 }
 

@@ -338,8 +338,8 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
   ): Promise<StoredProviderKey[]>;
   /** 0 when missing, when there are no slots, or when the stored index is outside the list. */
   getKeyCursor(workspaceId: string, provider: KeyProvider): Promise<number>;
-  /** Clamps into `0 .. length - 1`. Deletes the cursor when the provider has no slots. */
-  setKeyCursor(workspaceId: string, provider: KeyProvider, position: number): Promise<void>;
+  /** Stores the 0-based index of `keyId` in the current slot list. No-op when the id is absent. */
+  setKeyCursor(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void>;
   /** Writes the last test of one stored key. False when that id is not in the list (no write). */
   recordProviderKeyTest(
     workspaceId: string,

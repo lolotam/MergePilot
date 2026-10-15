@@ -13,6 +13,7 @@ import { defineRetentionContract } from './store-contract-retention.js';
 import { definePricesContract } from './store-contract-prices.js';
 import { defineReviewerBotContract } from './store-contract-bots.js';
 import { defineBackupRestoreContract } from './store-contract-backup.js';
+import { defineProviderKeyCursorContract } from './store-contract-provider-keys.js';
 
 /** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
 export const STORE_CONTRACT_WORKSPACES = [
@@ -382,5 +383,6 @@ export function describeStoreContract(
     definePricesContract(createStore, cleanup);
     defineReviewerBotContract(createStore, cleanup);
     defineBackupRestoreContract(createStore, cleanup);
+    defineProviderKeyCursorContract(createStore, cleanup);
   });
 }

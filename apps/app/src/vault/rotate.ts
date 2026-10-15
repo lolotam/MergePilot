@@ -1,5 +1,25 @@
 import { isMultiKeyProvider } from '../credentials/multi-key.js';
-import { WorkspaceDeletedError, type AppStore, type StoredProviderKey, type Vault } from '../core/types.js';
+import {
+  WorkspaceDeletedError,
+  type AppStore,
+  type StoredCredential,
+  type StoredProviderKey,
+  type Vault,
+} from '../core/types.js';
+
+function parentFromSlot(slot: StoredProviderKey, baseUrl: string | null | undefined): StoredCredential {
+  return {
+    id: slot.id,
+    workspaceId: slot.workspaceId,
+    provider: slot.provider,
+    ciphertext: slot.ciphertext,
+    keyVersion: slot.keyVersion,
+    last4: slot.last4,
+    createdBy: slot.createdBy,
+    createdAt: slot.createdAt,
+    baseUrl: baseUrl ?? null,
+  };
+}
 
 export interface RotateResult {
   reencrypted: number;
@@ -52,29 +72,37 @@ export async function reencryptAll(
       }
 
       if (!isMultiKeyProvider(item.provider)) continue;
-      const slots = await store.listProviderKeys(workspaceId, item.provider);
-      const stale = slots.filter((slot) => slot.keyVersion !== vault.keyVersion);
-      if (stale.length === 0) continue;
-      const updated: StoredProviderKey[] = [];
-      for (const slot of slots) {
-        if (slot.keyVersion === vault.keyVersion) {
-          updated.push(slot);
-          continue;
-        }
-        const plaintext = await vault.decrypt(slot.ciphertext, { workspaceId, provider: slot.provider });
-        updated.push({
-          ...slot,
-          ciphertext: await vault.encrypt(plaintext, { workspaceId, provider: slot.provider }),
-          keyVersion: vault.keyVersion,
-        });
-      }
+      let slotReencrypted = 0;
       try {
-        await store.modifyProviderKeys(workspaceId, item.provider, async () => ({ keys: updated }));
+        await store.modifyProviderKeys(workspaceId, item.provider, async (current) => {
+          const parent = await store.getCredential(workspaceId, item.provider);
+          const updated: StoredProviderKey[] = [];
+          for (const slot of current) {
+            if (slot.keyVersion === vault.keyVersion) {
+              updated.push(slot);
+              continue;
+            }
+            const plaintext = await vault.decrypt(slot.ciphertext, { workspaceId, provider: slot.provider });
+            updated.push({
+              ...slot,
+              ciphertext: await vault.encrypt(plaintext, { workspaceId, provider: slot.provider }),
+              keyVersion: vault.keyVersion,
+            });
+            slotReencrypted++;
+          }
+          if (slotReencrypted === 0) return { keys: current };
+          const sorted = [...updated].sort((a, b) => a.position - b.position);
+          const first = sorted[0];
+          return {
+            keys: sorted,
+            ...(first ? { parent: parentFromSlot(first, parent?.baseUrl) } : {}),
+          };
+        });
       } catch (error) {
         if (error instanceof WorkspaceDeletedError) break;
         throw error;
       }
-      reencrypted += stale.length;
+      reencrypted += slotReencrypted;
     }
   }
 

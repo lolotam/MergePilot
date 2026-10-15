@@ -288,8 +288,8 @@ export class PgStore implements AppStore {
     return readStoredKeyCursor(this.db, workspaceId, provider);
   }
 
-  async setKeyCursor(workspaceId: string, provider: KeyProvider, position: number): Promise<void> {
-    await writeStoredKeyCursor(this.db, workspaceId, provider, position);
+  async setKeyCursor(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void> {
+    await writeStoredKeyCursor(this.db, workspaceId, provider, keyId);
   }
 
   async recordProviderKeyTest(workspaceId: string, provider: KeyProvider, keyId: string, status: KeyQuotaStatus, testedAt: Date): Promise<boolean> {

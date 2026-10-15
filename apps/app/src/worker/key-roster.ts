@@ -15,6 +15,9 @@ export async function loadRosters(
   credentials: ProcessReviewCredentials,
   workspaceId: string,
   providers: readonly string[],
+  primaryProvider: string,
+  logger: Logger,
+  keyIdsByProvider: Record<string, string[]>,
 ): Promise<Record<string, KeyRoster>> {
   const rosters: Record<string, KeyRoster> = {};
   if (!credentials.resolveKeyRoster) return rosters;
@@ -22,9 +25,22 @@ export async function loadRosters(
   for (const provider of providers) {
     if (seen.has(provider) || !isMultiKeyProvider(provider)) continue;
     seen.add(provider);
-    const roster = await credentials.resolveKeyRoster(workspaceId, provider);
-    if (!roster || roster.secrets.length === 0) continue;
-    rosters[provider] = { keys: roster.secrets, startIndex: roster.startIndex };
+    try {
+      const roster = await credentials.resolveKeyRoster(workspaceId, provider);
+      if (!roster || roster.secrets.length === 0) continue;
+      keyIdsByProvider[provider] = roster.keyIds;
+      rosters[provider] = { keys: roster.secrets, startIndex: roster.startIndex };
+    } catch (error) {
+      if (provider === primaryProvider) throw error;
+      logger.warn(
+        {
+          event: 'credential.key_roster_failed',
+          provider,
+          error: error instanceof Error ? error.name : 'unknown',
+        },
+        'Could not load the API key roster for a provider',
+      );
+    }
   }
   return rosters;
 }
@@ -42,6 +58,7 @@ export function rotationHandler(
   credentials: ProcessReviewCredentials,
   workspaceId: string,
   logger: Logger,
+  keyIdsByProvider: Readonly<Record<string, readonly string[]>>,
 ): (event: KeyRotationEvent) => void {
   return (event) => {
     if (events.length < MAX_PROVIDER_KEYS) {
@@ -53,7 +70,9 @@ export function rotationHandler(
     );
     if (!credentials.rememberSuccessfulKey || !isMultiKeyProvider(event.provider)) return;
     const provider = event.provider;
-    void Promise.resolve(credentials.rememberSuccessfulKey(workspaceId, provider, event.index)).catch((error: unknown) => {
+    const keyId = keyIdsByProvider[provider]?.[event.index];
+    if (!keyId) return;
+    void Promise.resolve(credentials.rememberSuccessfulKey(workspaceId, provider, keyId)).catch((error: unknown) => {
       logger.warn(
         {
           event: 'credential.key_cursor_failed',

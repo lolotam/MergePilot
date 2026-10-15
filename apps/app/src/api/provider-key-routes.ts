@@ -18,7 +18,7 @@ function redactSecrets(message: string, secrets: readonly string[]): string {
   return safe;
 }
 
-function keyError(err: unknown, secrets: readonly string[]): { status: number; code: string; message: string } {
+function knownKeyError(err: unknown): { status: number; code: string; message: string } | null {
   if (err instanceof TooManyKeysError) {
     return { status: 400, code: 'too_many_keys', message: `This provider accepts at most ${MAX_PROVIDER_KEYS} API keys` };
   }
@@ -28,8 +28,12 @@ function keyError(err: unknown, secrets: readonly string[]): { status: number; c
   if (err instanceof KeyOrderError) {
     return { status: 400, code: 'key_order', message: 'Key order must list every stored key exactly once' };
   }
+  return null;
+}
+
+function validationFailedMessage(err: unknown, secrets: readonly string[]): string {
   const raw = err instanceof Error ? err.message : String(err);
-  return { status: 422, code: 'validation_failed', message: redactSecrets(raw, secrets) };
+  return redactSecrets(raw, secrets);
 }
 
 function slotBody(slot: { id: string; position: number; last4: string; createdAt: Date; lastTestStatus: string | null; lastTestedAt: Date | null }) {
@@ -77,6 +81,10 @@ export function registerProviderKeyRoutes(
       const apiKey = body.data.apiKey.trim();
       try {
         await validateKeyFn(provider, apiKey);
+      } catch (err) {
+        return sendError(reply, 422, 'validation_failed', validationFailedMessage(err, [apiKey]));
+      }
+      try {
         const saved = await credentials.appendProviderKey({
           workspaceId,
           provider,
@@ -87,8 +95,10 @@ export function registerProviderKeyRoutes(
         request.log.info({ event: 'credential.key_appended', workspaceId, provider, position: saved.position }, 'Provider API key appended');
         return reply.status(201).send(slotBody(saved));
       } catch (err) {
-        const mapped = keyError(err, [apiKey]);
-        return sendError(reply, mapped.status, mapped.code, mapped.message);
+        const mapped = knownKeyError(err);
+        if (mapped) return sendError(reply, mapped.status, mapped.code, mapped.message);
+        request.log.error({ event: 'credential.key_append_failed', workspaceId, provider, error: err instanceof Error ? err.name : 'unknown' }, 'Provider API key append failed');
+        return sendError(reply, 500, 'internal_error', 'Internal server error');
       }
     },
   );
@@ -122,8 +132,10 @@ export function registerProviderKeyRoutes(
         request.log.info({ event: 'credential.key_reordered', workspaceId, provider, keyCount: keys.length }, 'Provider API keys reordered');
         return reply.status(200).send({ keys: keys.map(slotBody) });
       } catch (err) {
-        const mapped = keyError(err, []);
-        return sendError(reply, mapped.status, mapped.code, mapped.message);
+        const mapped = knownKeyError(err);
+        if (mapped) return sendError(reply, mapped.status, mapped.code, mapped.message);
+        request.log.error({ event: 'credential.key_reorder_failed', workspaceId, provider, error: err instanceof Error ? err.name : 'unknown' }, 'Provider API key reorder failed');
+        return sendError(reply, 500, 'internal_error', 'Internal server error');
       }
     },
   );

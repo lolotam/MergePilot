@@ -123,4 +123,46 @@ describe('reencryptAll', () => {
     expect(result).toEqual({ reencrypted: 0, skipped: 0 });
     expect(await store.listCredentials('ws-del')).toEqual([]);
   });
+
+  it('re-encrypts from the locked slot snapshot so append and delete before rotation stay applied', async () => {
+    const key1 = randomBytes(32);
+    const key2 = randomBytes(32);
+    const vaultV1 = new EnvelopeVault({ current: 1, keys: new Map([[1, key1]]) });
+    const vaultV2 = new EnvelopeVault({ current: 2, keys: new Map([[1, key1], [2, key2]]) });
+    const store = new MemoryStore();
+    const { CredentialService } = await import('../credentials/service.js');
+    const service = new CredentialService({ store, vault: vaultV1 });
+    const first = 'gemini-rotate-key-aaaa-1111';
+    const second = 'gemini-rotate-key-bbbb-2222';
+    const third = 'gemini-rotate-key-cccc-3333';
+    await service.saveKeyList({ workspaceId: 'ws-rot', provider: 'gemini', apiKeys: [first, second], userId: 'u' });
+    const before = await store.listProviderKeys('ws-rot', 'gemini');
+    const deleteId = before[0]!.id;
+    await service.appendProviderKey({ workspaceId: 'ws-rot', provider: 'gemini', apiKey: third, userId: 'u' });
+    await service.deleteProviderKey('ws-rot', 'gemini', deleteId);
+
+    let lockedSlotCount = 0;
+    const modify = store.modifyProviderKeys.bind(store);
+    vi.spyOn(store, 'modifyProviderKeys').mockImplementation(async (workspaceId, provider, change) =>
+      modify(workspaceId, provider, async (current) => {
+        lockedSlotCount = current.length;
+        return change(current);
+      }),
+    );
+
+    const result = await reencryptAll(store, vaultV2, ['ws-rot']);
+    expect(result.reencrypted).toBeGreaterThan(0);
+    expect(lockedSlotCount).toBe(2);
+
+    const slots = await store.listProviderKeys('ws-rot', 'gemini');
+    expect(slots).toHaveLength(2);
+    expect(slots.map((slot) => slot.keyVersion)).toEqual([2, 2]);
+    const parent = await store.getCredential('ws-rot', 'gemini');
+    expect(parent?.id).toBe(slots[0]?.id);
+    expect(parent?.keyVersion).toBe(2);
+    expect(slots.some((slot) => slot.last4 === first.slice(-4))).toBe(false);
+    const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
+    const plain = await onlyV2.decrypt(slots[0]!.ciphertext, { workspaceId: 'ws-rot', provider: 'gemini' });
+    expect([second, third]).toContain(plain);
+  });
 });

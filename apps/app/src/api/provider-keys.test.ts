@@ -132,6 +132,20 @@ describe('provider key list routes', { timeout: 60000 }, () => {
     expect(await h.store.listProviderKeys('ws-1', 'gemini')).toEqual([]);
   });
 
+  it('does not leak unexpected append errors as validation_failed', async () => {
+    vi.spyOn(h.credentials, 'appendProviderKey').mockRejectedValueOnce(new Error('database exploded'));
+    const apiKey = keyFor('boom');
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/api/workspaces/ws-1/keys/gemini/slots',
+      headers: cookie(),
+      payload: { apiKey },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toMatchObject({ error: { code: 'internal_error', message: 'Internal server error' } });
+    expect(res.body).not.toContain('database exploded');
+  });
+
   it('tests an unsaved key without storing it, and records a stored key by id', async () => {
     const unsaved = keyFor('unsaved');
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 4, model: 'gemini-2.0-flash', reply: 'OK' });

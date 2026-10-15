@@ -59,13 +59,15 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     const primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret);
     const rotationEvents: KeyRotationDisclosure[] = [];
-    const onKeyRotation = rotationHandler(rotationEvents, deps.credentials, workspaceId, logger);
+    const rosterKeyIds: Record<string, string[]> = {};
+    const onKeyRotation = rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, rosterKeyIds);
     const judgeSetup = await workspaceJudge(settings, workspaceId, deps.credentials, logger, {
       jobId: job.deliveryId,
       runId: br.run.id,
       fetch: deps.judgeFetch,
       priceLookup: ctx.judgePrices,
       onKeyRotation,
+      rosterKeyIds,
     });
     credStore.addKnownSecrets(judgeSetup.secrets);
 
@@ -73,10 +75,14 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     if (deps.createModelForProvider) {
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
-      const rosters = await loadRosters(deps.credentials, workspaceId, [
+      const rosters = await loadRosters(
+        deps.credentials,
+        workspaceId,
+        [choice.provider, ...fallbackList.map((fallback) => fallback.provider)],
         choice.provider,
-        ...fallbackList.map((fallback) => fallback.provider),
-      ]);
+        logger,
+        rosterKeyIds,
+      );
       credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {
         cwd: process.cwd(),

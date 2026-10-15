@@ -21,6 +21,10 @@ interface KeyField {
   value: string;
   testing: boolean;
   result: TestConnectionResponse | null;
+  /** Monotonic token for the in-flight test; stale responses are ignored. */
+  testToken: number;
+  /** Value sent with the active test request. */
+  testedValue: string;
 }
 
 export interface AddKeyModalProps {
@@ -33,7 +37,7 @@ export interface AddKeyModalProps {
 }
 
 function blankField(id: string): KeyField {
-  return { id, value: '', testing: false, result: null };
+  return { id, value: '', testing: false, result: null, testToken: 0, testedValue: '' };
 }
 
 function quotaOutcome(result: TestConnectionResponse): 'valid' | 'invalid' | 'quota-exhausted' {
@@ -55,6 +59,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
   const fieldSeq = useRef(1);
+  const fieldTestSeq = useRef(0);
   const [fields, setFields] = useState<KeyField[]>([blankField('field-0')]);
   const multi = isMultiKeyProvider(keyProvider) && authMethod === 'api-key';
 
@@ -86,14 +91,26 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     setFields((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
   };
 
-  const testField = async (index: number) => {
+  const testField = async (fieldId: string) => {
     if (!workspaceId || !isMultiKeyProvider(keyProvider)) return;
-    const current = fields[index];
+    const current = fields.find((field) => field.id === fieldId);
     const apiKey = current?.value.trim() ?? '';
     if (!current || apiKey.length < 8) return;
-    setFields((prev) => prev.map((item, i) => (i === index ? { ...item, testing: true, result: null } : item)));
+    const token = fieldTestSeq.current + 1;
+    fieldTestSeq.current = token;
+    setFields((prev) =>
+      prev.map((item) =>
+        item.id === fieldId ? { ...item, testing: true, result: null, testToken: token, testedValue: apiKey } : item,
+      ),
+    );
     const result = await runConnectionTest(() => api.testConnection(workspaceId, keyProvider, { apiKey }));
-    setFields((prev) => prev.map((item, i) => (i === index ? { ...item, testing: false, result } : item)));
+    setFields((prev) =>
+      prev.map((item) => {
+        if (item.id !== fieldId) return item;
+        if (item.testToken !== token || item.testedValue !== apiKey) return { ...item, testing: false };
+        return { ...item, testing: false, result };
+      }),
+    );
   };
 
   const outcomeText = (result: TestConnectionResponse): string => {
@@ -267,7 +284,9 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
                       aria-label={index === 0 ? undefined : `${t('keySecretLabel')} ${index + 1}`}
                       onChange={(e) => {
                         const value = e.target.value;
-                        setFields((prev) => prev.map((item, i) => (i === index ? { ...item, value, result: null } : item)));
+                        setFields((prev) =>
+                          prev.map((item) => (item.id === field.id ? { ...item, value, result: null, testedValue: '' } : item)),
+                        );
                         if (keyError) setKeyError('');
                       }}
                       placeholder={t('keySecretPlaceholder')}
@@ -282,7 +301,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
                         type="button"
                         aria-label={`${t('testKeyAction')} ${index + 1}`}
                         disabled={field.testing || isPending || field.value.trim().length < 8}
-                        onClick={() => void testField(index)}
+                        onClick={() => void testField(field.id)}
                         className="shrink-0 px-3 py-2 rounded-full border border-ink-300 dark:border-ink-700 text-xs font-medium text-ink-700 dark:text-ink-300 hover:bg-ink-50 dark:hover:bg-ink-800 disabled:opacity-50"
                       >
                         {field.testing ? t('testingKey') : t('testKeyAction')}

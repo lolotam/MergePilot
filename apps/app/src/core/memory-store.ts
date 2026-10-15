@@ -221,8 +221,8 @@ export class MemoryStore implements AppStore {
     return readMemoryKeyCursor(this, workspaceId, provider);
   }
 
-  async setKeyCursor(workspaceId: string, provider: KeyProvider, position: number): Promise<void> {
-    await writeMemoryKeyCursor(this.keyLock(workspaceId, provider), workspaceId, provider, position);
+  async setKeyCursor(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void> {
+    await writeMemoryKeyCursor(this.keyLock(workspaceId, provider), workspaceId, provider, keyId);
   }
 
   async recordProviderKeyTest(workspaceId: string, provider: KeyProvider, keyId: string, status: KeyQuotaStatus, testedAt: Date): Promise<boolean> {

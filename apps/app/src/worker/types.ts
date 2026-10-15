@@ -18,9 +18,9 @@ export interface ProcessReviewCredentials {
   resolveKeyRoster?(
     workspaceId: string,
     provider: KeyProvider,
-  ): Promise<{ secrets: Secret[]; startIndex: number } | null>;
-  /** Persists the last successful 0-based key index. Optional on the same test fakes. */
-  rememberSuccessfulKey?(workspaceId: string, provider: KeyProvider, position: number): Promise<void>;
+  ): Promise<{ secrets: Secret[]; keyIds: string[]; startIndex: number } | null>;
+  /** Persists the cursor at the current position of this key id. Optional on the same test fakes. */
+  rememberSuccessfulKey?(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void>;
 }
 
 export type GitHubAppClientFactory = (installationId: number) => Promise<{

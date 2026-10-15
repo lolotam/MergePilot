@@ -180,27 +180,30 @@ export class CredentialService {
   async resolveKeyRoster(
     workspaceId: string,
     provider: KeyProvider,
-  ): Promise<{ secrets: Secret[]; startIndex: number } | null> {
+  ): Promise<{ secrets: Secret[]; keyIds: string[]; startIndex: number } | null> {
     if (!isMultiKeyProvider(provider)) return null;
     const parent = await this.#store.getCredential(workspaceId, provider);
     if (!parent) return null;
     const slots = await this.#store.listProviderKeys(workspaceId, provider);
     if (slots.length === 0) {
       const plaintext = await this.#vault.decrypt(parent.ciphertext, { workspaceId, provider });
-      return { secrets: [new Secret(plaintext)], startIndex: 0 };
+      return { secrets: [new Secret(plaintext)], keyIds: [parent.id], startIndex: 0 };
     }
+    const ordered = [...slots].sort((a, b) => a.position - b.position);
     const secrets: Secret[] = [];
-    for (const slot of [...slots].sort((a, b) => a.position - b.position)) {
+    const keyIds: string[] = [];
+    for (const slot of ordered) {
+      keyIds.push(slot.id);
       secrets.push(new Secret(await this.#vault.decrypt(slot.ciphertext, { workspaceId, provider })));
     }
     const cursor = await this.#store.getKeyCursor(workspaceId, provider);
-    return { secrets, startIndex: cursor >= 0 && cursor < secrets.length ? cursor : 0 };
+    return { secrets, keyIds, startIndex: cursor >= 0 && cursor < secrets.length ? cursor : 0 };
   }
 
-  /** Persists the last successful 0-based index. The store clamps it. */
-  async rememberSuccessfulKey(workspaceId: string, provider: KeyProvider, position: number): Promise<void> {
+  /** Persists the cursor at the current position of this key id. No-op when the id is gone. */
+  async rememberSuccessfulKey(workspaceId: string, provider: KeyProvider, keyId: string): Promise<void> {
     if (!isMultiKeyProvider(provider)) return;
-    await this.#store.setKeyCursor(workspaceId, provider, position);
+    await this.#store.setKeyCursor(workspaceId, provider, keyId);
   }
 
   /** Decrypts one stored slot. Null when the id is not in this workspace's list. */
@@ -216,18 +219,22 @@ export class CredentialService {
 
   /** Decrypted roster in order, for a passphrase-sealed backup. Empty when there is no credential. */
   async revealRoster(workspaceId: string, provider: KeyProvider): Promise<Array<{ secret: Secret; last4: string }>> {
-    const roster = await this.resolveKeyRoster(workspaceId, provider);
-    if (!roster) return [];
+    if (!isMultiKeyProvider(provider)) return [];
+    const parent = await this.#store.getCredential(workspaceId, provider);
+    if (!parent) return [];
     const slots = [...(await this.#store.listProviderKeys(workspaceId, provider))].sort((a, b) => a.position - b.position);
     if (slots.length === 0) {
-      const parent = await this.#store.getCredential(workspaceId, provider);
-      return roster.secrets.map((secret) => ({ secret, last4: parent?.last4 ?? '' }));
+      const plaintext = await this.#vault.decrypt(parent.ciphertext, { workspaceId, provider });
+      return [{ secret: new Secret(plaintext), last4: parent.last4 }];
     }
-    return slots.map((slot, index) => {
-      const secret = roster.secrets[index];
-      if (!secret) throw new Error(`Stored key at position ${slot.position} could not be read`);
-      return { secret, last4: slot.last4 };
-    });
+    const revealed: Array<{ secret: Secret; last4: string }> = [];
+    for (const slot of slots) {
+      revealed.push({
+        secret: new Secret(await this.#vault.decrypt(slot.ciphertext, { workspaceId, provider })),
+        last4: slot.last4,
+      });
+    }
+    return revealed;
   }
 
   /**

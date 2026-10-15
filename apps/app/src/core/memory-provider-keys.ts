@@ -79,17 +79,19 @@ export async function writeMemoryKeyCursor(
   lock: MemoryKeyLock,
   workspaceId: string,
   provider: KeyProvider,
-  position: number,
+  keyId: string,
 ): Promise<void> {
   await lock.runLocked(async () => {
     lock.assertLive(workspaceId);
     const key = slotKey(workspaceId, provider);
-    const length = lock.tables.providerKeys.get(key)?.length ?? 0;
-    if (length === 0) {
+    const rows = lock.tables.providerKeys.get(key) ?? [];
+    if (rows.length === 0) {
       lock.tables.keyCursors.delete(key);
       return;
     }
-    lock.tables.keyCursors.set(key, clampKeyCursor(position, length));
+    const index = rows.findIndex((row) => row.id === keyId);
+    if (index < 0) return;
+    lock.tables.keyCursors.set(key, index);
   });
 }
 

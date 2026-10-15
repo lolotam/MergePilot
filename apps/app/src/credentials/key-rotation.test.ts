@@ -59,7 +59,10 @@ describe('multi-key roster', () => {
       },
     });
     expect(outcome).toEqual({ value: 'ok', index: 1, skipped: 1 });
-    await service.rememberSuccessfulKey('ws', 'openrouter', outcome.index);
+    const slots = await store.listProviderKeys('ws', 'openrouter');
+    const keyBId = slots.find((slot) => slot.position === outcome.index)?.id;
+    expect(keyBId).toBeDefined();
+    await service.rememberSuccessfulKey('ws', 'openrouter', keyBId!);
     expect(await store.getKeyCursor('ws', 'openrouter')).toBe(1);
     const next = await service.resolveKeyRoster('ws', 'openrouter');
     expect(next?.startIndex).toBe(1);
@@ -70,7 +73,8 @@ describe('multi-key roster', () => {
   it('leaves the cursor where it was when every key is quota-exhausted', async () => {
     const { store, service } = fixture();
     await service.saveKeyList({ workspaceId: 'ws', provider: 'opencode-zen', apiKeys: [keyA, keyB], userId: 'u' });
-    await service.rememberSuccessfulKey('ws', 'opencode-zen', 1);
+    const zenSlots = await store.listProviderKeys('ws', 'opencode-zen');
+    await service.rememberSuccessfulKey('ws', 'opencode-zen', zenSlots[1]!.id);
     await expect(
       callWithKeyRotation({
         provider: 'opencode-zen',
@@ -87,19 +91,50 @@ describe('multi-key roster', () => {
   it('keeps a concurrent cursor inside the stored list', async () => {
     const { store, service } = fixture();
     await service.saveKeyList({ workspaceId: 'ws', provider: 'gemini', apiKeys: [keyA, keyB], userId: 'u' });
-    await Promise.all([0, 1, 0, 1, 0].map((position) => service.rememberSuccessfulKey('ws', 'gemini', position)));
+    const geminiSlots = await store.listProviderKeys('ws', 'gemini');
+    await Promise.all(
+      [0, 1, 0, 1, 0].map((position) => service.rememberSuccessfulKey('ws', 'gemini', geminiSlots[position]!.id)),
+    );
     expect([0, 1]).toContain(await store.getKeyCursor('ws', 'gemini'));
   });
 
+  it('stores the cursor by key id so a reorder moves the remembered index with the key', async () => {
+    const { store, service } = fixture();
+    await service.saveKeyList({ workspaceId: 'ws', provider: 'gemini', apiKeys: [keyA, keyB], userId: 'u' });
+    const slots = await store.listProviderKeys('ws', 'gemini');
+    const idA = slots[0]!.id;
+    const idB = slots[1]!.id;
+    await service.rememberSuccessfulKey('ws', 'gemini', idB);
+    expect(await store.getKeyCursor('ws', 'gemini')).toBe(1);
+    await service.reorderProviderKeys('ws', 'gemini', [idB, idA]);
+    expect(await store.getKeyCursor('ws', 'gemini')).toBe(0);
+  });
+
+  it('leaves the cursor unchanged when the successful key id no longer exists', async () => {
+    const { store, service } = fixture();
+    await service.saveKeyList({ workspaceId: 'ws', provider: 'openrouter', apiKeys: [keyA, keyB], userId: 'u' });
+    const slots = await store.listProviderKeys('ws', 'openrouter');
+    const idB = slots[1]!.id;
+    await service.rememberSuccessfulKey('ws', 'openrouter', idB);
+    expect(await store.getKeyCursor('ws', 'openrouter')).toBe(1);
+    await service.deleteProviderKey('ws', 'openrouter', idB);
+    await service.rememberSuccessfulKey('ws', 'openrouter', idB);
+    expect(await store.getKeyCursor('ws', 'openrouter')).toBe(0);
+  });
+
   it('logs the index and never the secret', async () => {
-    const { service } = fixture();
+    const { store, service } = fixture();
+    await service.saveKeyList({ workspaceId: 'ws', provider: 'gemini', apiKeys: [keyA, keyB], userId: 'u' });
+    const geminiSlots = await store.listProviderKeys('ws', 'gemini');
     const lines: unknown[] = [];
     const logger = {
       info: (obj: unknown) => lines.push(obj),
       warn: (obj: unknown) => lines.push(obj),
     } as unknown as Logger;
     const events: Array<{ provider: string; keyIndex: number; skipped: number }> = [];
-    const handler = rotationHandler(events, service, 'ws', logger);
+    const handler = rotationHandler(events, service, 'ws', logger, {
+      gemini: [geminiSlots[0]!.id, geminiSlots[1]!.id],
+    });
     handler({ provider: 'gemini', index: 1, skipped: 1 });
     await new Promise((resolve) => setTimeout(resolve, 0));
     const dumped = JSON.stringify({ lines, events, secret: new Secret(keyA).toString() });
