@@ -97,4 +97,5 @@ export const enSettings = {
   testKeyOutcomeValid: 'Valid, quota remaining',
   testKeyOutcomeInvalid: 'Invalid key',
   testKeyOutcomeQuota: 'Quota exhausted',
+  testKeyOutcomeUnverified: 'Could not verify right now (rate limit or connection). Try again',
 };

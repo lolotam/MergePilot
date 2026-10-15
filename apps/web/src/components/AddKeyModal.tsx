@@ -40,11 +40,18 @@ function blankField(id: string): KeyField {
   return { id, value: '', testing: false, result: null, testToken: 0, testedValue: '' };
 }
 
-function quotaOutcome(result: TestConnectionResponse): 'valid' | 'invalid' | 'quota-exhausted' {
+/** `unverified`: a transient failure (rate limit, outage, network) says nothing about the key. */
+function quotaOutcome(result: TestConnectionResponse): 'valid' | 'invalid' | 'quota-exhausted' | 'unverified' {
   if (result.quotaStatus) return result.quotaStatus;
   if (result.ok) return 'valid';
   if (result.code === 'quota') return 'quota-exhausted';
-  return 'invalid';
+  return result.code === 'auth' ? 'invalid' : 'unverified';
+}
+
+function outcomeColor(status: ReturnType<typeof quotaOutcome>): string {
+  if (status === 'valid') return 'text-emerald-700 dark:text-emerald-300';
+  if (status === 'unverified') return 'text-amber-700 dark:text-amber-300';
+  return 'text-red-600 dark:text-red-300';
 }
 
 export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId }: AddKeyModalProps) {
@@ -127,6 +134,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     const status = quotaOutcome(result);
     if (status === 'valid') return t('testKeyOutcomeValid');
     if (status === 'quota-exhausted') return t('testKeyOutcomeQuota');
+    if (status === 'unverified') return t('testKeyOutcomeUnverified');
     return t('testKeyOutcomeInvalid');
   };
 
@@ -330,7 +338,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
                   {field.result && (
                     <p
                       role="status"
-                      className={`text-xs mt-1 ms-2 ${quotaOutcome(field.result) === 'valid' ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-300'}`}
+                      className={`text-xs mt-1 ms-2 ${outcomeColor(quotaOutcome(field.result))}`}
                     >
                       {outcomeText(field.result)}
                     </p>

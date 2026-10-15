@@ -94,8 +94,8 @@ export function rotationHandler(
     const provider = event.provider;
     const keyId = keyIdsByProvider[provider]?.[event.index];
     if (!keyId) return;
-    const remember = credentials.rememberSuccessfulKey;
-    writes.enqueue(() => Promise.resolve(remember(workspaceId, provider, keyId)).catch((error: unknown) => {
+    // Called on the object: CredentialService uses private fields, so the method needs its receiver.
+    writes.enqueue(() => Promise.resolve(credentials.rememberSuccessfulKey?.(workspaceId, provider, keyId)).catch((error: unknown) => {
       logger.warn(
         {
           event: 'credential.key_cursor_failed',

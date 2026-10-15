@@ -97,4 +97,5 @@ export const arSettings = {
   testKeyOutcomeValid: 'المفتاح صالح وفيه حصة متبقية',
   testKeyOutcomeInvalid: 'المفتاح غير صالح',
   testKeyOutcomeQuota: 'نفدت حصة هذا المفتاح',
+  testKeyOutcomeUnverified: 'تعذّر التحقق الآن (حدّ الطلبات أو الاتصال). حاول مرة أخرى',
 };

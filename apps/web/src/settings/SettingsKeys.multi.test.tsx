@@ -148,5 +148,16 @@ describe('AddKeyModal multi-key fields', () => {
     // The page keeps the modal open when the save fails, so the 1-20 keys must still be there to retry.
     expect((screen.getByLabelText(COPY.en.keyFieldLabel) as HTMLInputElement).value).toBe(key);
   });
+
+  it('shows a transient test failure as unverified, not as an invalid key', async () => {
+    vi.mocked(api.testConnection).mockResolvedValueOnce({ ok: false, code: 'rate-limit', message: 'slow down', ms: 4 });
+    renderSettings(<AddKeyModal isOpen onClose={vi.fn()} onSubmit={vi.fn(async () => undefined)} isPending={false} workspaceId="ws-1" />, 'en');
+    await user.selectOptions(screen.getByRole('combobox', { name: COPY.en.provider }), 'gemini');
+    await user.type(screen.getByLabelText(COPY.en.keyFieldLabel), typedKey());
+    await user.click(screen.getByRole('button', { name: COPY.en.test1 }));
+
+    expect(await screen.findByText('Could not verify right now (rate limit or connection). Try again')).toBeDefined();
+    expect(screen.queryByText(COPY.en.invalid)).toBeNull();
+  });
 });
 

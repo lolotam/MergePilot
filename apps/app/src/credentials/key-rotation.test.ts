@@ -138,6 +138,9 @@ describe('multi-key roster', () => {
     }, writes);
     handler({ provider: 'gemini', index: 1, skipped: 1 });
     await writes.flush();
+    // The real CredentialService (private fields) must be called with its receiver and persist the key.
+    expect(await store.getKeyCursor('ws', 'gemini')).toBe(1);
+    expect(lines.some((line) => (line as { event?: string }).event === 'credential.key_cursor_failed')).toBe(false);
     const dumped = JSON.stringify({ lines, events, secret: new Secret(keyA).toString() });
     expect(dumped).not.toContain(keyA);
     expect(dumped).not.toContain(keyB);
