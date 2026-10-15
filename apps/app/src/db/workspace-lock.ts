@@ -13,6 +13,7 @@ import {
   workspaceUsageMonthly,
 } from './schema.js';
 import type * as schema from './schema.js';
+import { deletePgWorkspaceAuthPreferences } from './pg-auth-preferences.js';
 
 export type AppTx = Parameters<Parameters<AppDb['transaction']>[0]>[0];
 
@@ -80,6 +81,7 @@ export async function deleteWorkspaceInTx(tx: AppTx, workspaceId: string): Promi
   await tx.delete(providerCredentials).where(eq(providerCredentials.workspaceId, workspaceId));
   await tx.delete(providerApiKeys).where(eq(providerApiKeys.workspaceId, workspaceId));
   await tx.delete(providerKeyCursors).where(eq(providerKeyCursors.workspaceId, workspaceId));
+  await deletePgWorkspaceAuthPreferences(tx, workspaceId);
   await tx.delete(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
   await tx.delete(reviewRuns).where(eq(reviewRuns.workspaceId, workspaceId));
   // After the runs: a run finishing concurrently commits its usage row before this delete runs.

@@ -57,7 +57,18 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         ? ctx.mainConfig
         : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store);
 
-    const primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
+    const effectiveAuth = await deps.credentials.getEffectiveAuthMethod?.(workspaceId, choice.provider as ApiProvider);
+    let primarySecret: Secret;
+    if (effectiveAuth === 'api-key' && deps.credentials.resolveKeyRoster) {
+      const roster = await deps.credentials.resolveKeyRoster(workspaceId, choice.provider as ApiProvider);
+      if (!roster || roster.secrets.length === 0) {
+        throw new Error(`No API key roster is available for provider "${choice.provider}"`);
+      }
+      const start = roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;
+      primarySecret = roster.secrets[start]!;
+    } else {
+      primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
+    }
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret);
     const rotationEvents: KeyRotationDisclosure[] = [];
     const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>

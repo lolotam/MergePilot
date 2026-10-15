@@ -1,9 +1,14 @@
-import { randomUUID } from 'node:crypto';
+import { InstallationAlreadyLinkedError, WorkspaceDeletedError } from './types.js';
+import { findActiveRun } from './memory-runs.js';
 import {
-  ACTIVE_RUN_STATUSES, ActiveRunExistsError, InstallationAlreadyLinkedError, REUSABLE_RUN_STATUSES,
-  WorkspaceDeletedError,
-} from './types.js';
-import { compareRuns, filterRuns, findActiveRun, selectLatestFailedRuns } from './memory-runs.js';
+  memoryCreateReviewRun,
+  memoryFailStaleRuns,
+  memoryFinishReviewRun,
+  memoryListLatestFailedRuns,
+  memoryListReviewRuns,
+  memoryTouchReviewRun,
+  type MemoryRunTables,
+} from './memory-store-runs.js';
 import {
   deleteMemoryBot, keepPanelSettings, listMemoryBots, panelSettingsOrDefaults,
   upsertMemoryBot,
@@ -15,7 +20,10 @@ import {
   recordMemoryProviderKeyTest, writeMemoryKeyCursor,
 } from './memory-provider-keys.js';
 import {
-  addMemoryUsage, deleteMemoryRuns, finishMemoryMaintenance, groupMemoryRuns, latestMemoryMaintenance,
+  deleteMemoryAuthPreference, readMemoryAuthPreference, writeMemoryAuthPreference,
+} from './memory-auth-preferences.js';
+import {
+  deleteMemoryRuns, finishMemoryMaintenance, groupMemoryRuns, latestMemoryMaintenance,
   memoryRetentionPolicies, pruneMemoryRuns, startMemoryMaintenance,
 } from './memory-maintenance.js';
 import { DEFAULT_RUN_RETENTION_DAYS, usageMonth } from './run-types.js';
@@ -26,7 +34,7 @@ import type {
   KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
   ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
   MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StaleRunRef, StoredCredential, StoredProviderKey,
-  ProviderKeyChange, KeyQuotaStatus, WorkspaceRestore, WorkspaceSettings,
+  ProviderKeyChange, KeyQuotaStatus, ProviderAuthMethod, WorkspaceRestore, WorkspaceSettings,
 } from './types.js';
 /** In-memory AppStore for tests and local development. Same contract as the Postgres store. */
 export class MemoryStore implements AppStore {
@@ -38,6 +46,7 @@ export class MemoryStore implements AppStore {
   readonly providerKeys = new Map<string, StoredProviderKey[]>();
   /** Last successful 0-based key index. Missing means the next call starts at 0. */
   readonly keyCursors = new Map<string, number>();
+  readonly authPreferences = new Map<string, ProviderAuthMethod>();
   private readonly credentialLocks = new Map<string, Promise<void>>();
   readonly runs = new Map<string, ReviewRun>();
   readonly deletedWorkspaces = new Set<string>();
@@ -186,6 +195,7 @@ export class MemoryStore implements AppStore {
         this.credentials.delete(key);
         this.providerKeys.delete(key);
         this.keyCursors.delete(key);
+        deleteMemoryAuthPreference(this, workspaceId, provider);
       }
       return next;
     });
@@ -213,8 +223,30 @@ export class MemoryStore implements AppStore {
     return listMemoryWorkspaceProviderKeys(this, workspaceId);
   }
 
-  async modifyProviderKeys(workspaceId: string, provider: KeyProvider, change: (current: StoredProviderKey[]) => Promise<ProviderKeyChange>): Promise<StoredProviderKey[]> {
-    return modifyMemoryProviderKeys(this.keyLock(workspaceId, provider), workspaceId, provider, change);
+  async modifyProviderKeys(
+    workspaceId: string,
+    provider: KeyProvider,
+    change: (current: StoredProviderKey[], parent: StoredCredential | null) => Promise<ProviderKeyChange>,
+    signal?: AbortSignal,
+  ): Promise<StoredProviderKey[]> {
+    return modifyMemoryProviderKeys(this.keyLock(workspaceId, provider), workspaceId, provider, change, signal);
+  }
+
+  async getProviderAuthPreference(workspaceId: string, provider: KeyProvider): Promise<ProviderAuthMethod | null> {
+    return readMemoryAuthPreference(this, workspaceId, provider);
+  }
+
+  async setProviderAuthPreference(workspaceId: string, provider: KeyProvider, method: ProviderAuthMethod): Promise<void> {
+    await this.withCredentialLock(workspaceId, provider, async () => {
+      this.assertLive(workspaceId);
+      writeMemoryAuthPreference(this, workspaceId, provider, method);
+    });
+  }
+
+  async deleteProviderAuthPreference(workspaceId: string, provider: KeyProvider): Promise<void> {
+    await this.withCredentialLock(workspaceId, provider, async () => {
+      deleteMemoryAuthPreference(this, workspaceId, provider);
+    });
   }
 
   async getKeyCursor(workspaceId: string, provider: KeyProvider): Promise<number> {
@@ -238,61 +270,16 @@ export class MemoryStore implements AppStore {
     };
   }
 
+  private runTables(): MemoryRunTables {
+    return this as MemoryStore & MemoryRunTables;
+  }
+
   async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {
-    this.assertLive(run.workspaceId);
-    const now = new Date();
-    const starting = {
-      finishedAt: null,
-      updatedAt: now,
-      costUsd: run.costUsd ?? null,
-      detail: run.detail ?? null,
-      provider: run.provider ?? null,
-      model: run.model ?? null,
-      effort: run.effort ?? null,
-      fallbackFrom: run.fallbackFrom ?? null,
-      findingsCount: run.findingsCount ?? null,
-      result: run.result ?? null,
-      reviewUrl: run.reviewUrl ?? null,
-      botSlot: run.botSlot ?? 1,
-      botName: run.botName ?? null,
-    };
-    let reusable: ReviewRun | undefined;
-    if (run.jobId) {
-      // Only a queued/running/failed run of this job is reused; completed and skipped runs stay.
-      for (const existing of this.runs.values()) {
-        if (
-          existing.workspaceId === run.workspaceId &&
-          existing.jobId === run.jobId &&
-          existing.botSlot === starting.botSlot &&
-          REUSABLE_RUN_STATUSES.includes(existing.status)
-        ) {
-          reusable = existing;
-          break;
-        }
-      }
-    }
-    // Emulates the partial unique index of migration 0004: one queued/running run per head.
-    if (
-      ACTIVE_RUN_STATUSES.includes(run.status) &&
-      findActiveRun(this.runs.values(), { ...run, botSlot: starting.botSlot }, reusable?.id)
-    ) {
-      throw new ActiveRunExistsError(run.repoFullName, run.pullNumber, starting.botSlot);
-    }
-    if (reusable) {
-      const updated: ReviewRun = { ...reusable, ...run, ...starting };
-      this.runs.set(reusable.id, updated);
-      return { ...updated };
-    }
-    const created: ReviewRun = { ...run, ...starting, id: randomUUID(), createdAt: now };
-    this.runs.set(created.id, created);
-    return { ...created };
+    return memoryCreateReviewRun(this.runTables(), run);
   }
 
   async touchReviewRun(workspaceId: string, id: string): Promise<void> {
-    const run = this.runs.get(id);
-    if (!run || run.workspaceId !== workspaceId) return;
-    if (run.status !== 'queued' && run.status !== 'running') return;
-    this.runs.set(id, { ...run, updatedAt: new Date() });
+    memoryTouchReviewRun(this.runTables(), workspaceId, id);
   }
 
   async finishReviewRun(
@@ -300,15 +287,7 @@ export class MemoryStore implements AppStore {
     id: string,
     result: FinishReviewRunOptions,
   ): Promise<void> {
-    const run = this.runs.get(id);
-    if (!run || run.workspaceId !== workspaceId) return;
-    const now = new Date();
-    const finished: ReviewRun = { ...run, ...result, finishedAt: now, updatedAt: now };
-    this.runs.set(id, finished);
-    // A run finished twice (e.g. failed by the stale sweep, then finished by its worker) replaces
-    // its earlier usage instead of counting twice.
-    if (run.finishedAt) addMemoryUsage(this.usage, run, -1);
-    addMemoryUsage(this.usage, finished);
+    memoryFinishReviewRun(this.runTables(), workspaceId, id, result);
   }
 
   async getReviewRun(workspaceId: string, id: string): Promise<ReviewRun | null> {
@@ -342,26 +321,11 @@ export class MemoryStore implements AppStore {
     workspaceId: string,
     options?: LatestFailedRunsOptions,
   ): Promise<ReviewRun[]> {
-    return selectLatestFailedRuns(this.runs.values(), workspaceId, options);
+    return memoryListLatestFailedRuns(this.runTables(), workspaceId, options);
   }
 
   async failStaleRuns(heartbeatBefore: Date, onFailed?: (failed: readonly StaleRunRef[]) => void): Promise<number> {
-    const refs: StaleRunRef[] = [];
-    const now = new Date();
-    for (const [id, r] of this.runs.entries()) {
-      if (
-        (r.status === 'running' || r.status === 'queued') &&
-        r.updatedAt < heartbeatBefore &&
-        !this.deletedWorkspaces.has(r.workspaceId)
-      ) {
-        const failed: ReviewRun = { ...r, status: 'failed', detail: 'interrupted', finishedAt: now, updatedAt: now };
-        this.runs.set(id, failed);
-        addMemoryUsage(this.usage, { ...failed, costUsd: null, result: null });
-        refs.push({ workspaceId: r.workspaceId, id });
-      }
-    }
-    if (refs.length > 0) onFailed?.(refs);
-    return refs.length;
+    return memoryFailStaleRuns(this.runTables(), heartbeatBefore, onFailed);
   }
 
   async listReviewRuns(workspaceId: string, limit: number): Promise<ReviewRun[]>;
@@ -373,22 +337,7 @@ export class MemoryStore implements AppStore {
     workspaceId: string,
     limitOrOptions?: number | ListReviewRunsOptions,
   ): Promise<ReviewRun[] | ListReviewRunsResult> {
-    if (typeof limitOrOptions === 'number' || limitOrOptions === undefined) {
-      const limit = limitOrOptions ?? 50;
-      return [...this.runs.values()]
-        .filter((r) => r.workspaceId === workspaceId)
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-        .slice(0, limit);
-    }
-
-    const opts = limitOrOptions;
-    const filtered = filterRuns(this.runs.values(), workspaceId, opts).sort(compareRuns(opts.sort, opts.dir));
-    const total = filtered.length;
-    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
-    const offset = Math.max(opts.offset ?? 0, 0);
-    const sliced = filtered.slice(offset, offset + limit);
-
-    return { runs: sliced, total };
+    return memoryListReviewRuns(this.runTables(), workspaceId, limitOrOptions);
   }
 
   async monthCostUsd(workspaceId: string, monthStart: Date): Promise<number> {

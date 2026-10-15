@@ -12,7 +12,8 @@ import {
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { writePgSettings } from './pg-settings.js';
-import { replacePgProviderKeys, writePgKeyCursor } from './pg-provider-keys.js';
+import { listPgProviderKeys, replacePgProviderKeys, writePgKeyCursor } from './pg-provider-keys.js';
+import { readParentCredential, writeProviderKeyChangeTx } from './pg-key-roster.js';
 import { providerCredentials, reviewerBots, workspaceSettings } from './schema.js';
 import { lockBotNames, lockCredential, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
@@ -77,11 +78,14 @@ export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore
     if (restore.bots) await tx.delete(reviewerBots).where(eq(reviewerBots.workspaceId, workspaceId));
     if (restore.settings) await writePgSettings(tx, { ...restore.settings, workspaceId });
     if (restore.bots) await replacePgBots(tx, workspaceId, restore.bots);
+    const dualProviders = new Set((restore.dualProviderKeyChanges ?? []).map((entry) => entry.provider));
     for (const credential of [...(restore.credentials ?? [])].sort((a, b) => a.provider.localeCompare(b.provider))) {
+      if (dualProviders.has(credential.provider)) continue;
       await writePgCredential(tx, { ...credential, workspaceId });
     }
     const groups = new Map<KeyProvider, StoredProviderKey[]>();
     for (const key of restore.providerKeys ?? []) {
+      if (dualProviders.has(key.provider)) continue;
       const list = groups.get(key.provider) ?? [];
       list.push({ ...key, workspaceId });
       groups.set(key.provider, list);
@@ -91,6 +95,13 @@ export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore
       await lockCredential(tx, workspaceId, provider);
       await replacePgProviderKeys(tx, workspaceId, provider, ordered);
       await writePgKeyCursor(tx, workspaceId, provider, ordered.length === 0 ? null : 0);
+    }
+    for (const entry of [...(restore.dualProviderKeyChanges ?? [])].sort((a, b) => a.provider.localeCompare(b.provider))) {
+      await lockCredential(tx, workspaceId, entry.provider);
+      const parent = await readParentCredential(tx, workspaceId, entry.provider);
+      const current = await listPgProviderKeys(tx, workspaceId, entry.provider);
+      const next = await entry.change(current, parent);
+      await writeProviderKeyChangeTx(tx, workspaceId, entry.provider, next);
     }
   });
 }

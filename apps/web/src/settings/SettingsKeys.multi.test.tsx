@@ -52,8 +52,10 @@ describe('AddKeyModal multi-key fields', () => {
       .mockResolvedValueOnce({ ok: false, code: 'quota', message: 'over', quotaStatus: 'quota-exhausted' });
     renderSettings(<AddKeyModal isOpen onClose={vi.fn()} onSubmit={onSubmit} isPending={false} workspaceId="ws-1" />, language);
 
+    const providerSelect = screen.getByRole('combobox', { name: copy.provider });
+    await user.selectOptions(providerSelect, 'deepseek');
     expect(screen.queryByRole('button', { name: copy.add })).toBeNull();
-    await user.selectOptions(screen.getByRole('combobox', { name: copy.provider }), 'gemini');
+    await user.selectOptions(providerSelect, 'gemini');
     const add = screen.getByRole('button', { name: copy.add });
     await user.click(add);
     expect(screen.getAllByPlaceholderText('sk-...')).toHaveLength(2);

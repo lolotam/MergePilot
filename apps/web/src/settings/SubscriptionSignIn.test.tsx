@@ -20,13 +20,12 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('dashboard subscription login', () => {
-  it.each(['openai', 'anthropic', 'xai'])('offers API and subscription methods for %s without exposing a token input in subscription mode', async (provider) => {
+  it.each(['openai', 'anthropic', 'xai'])('shows subscription sign-in and API key fields together for %s', async (provider) => {
     const user = userEvent.setup();
     renderSettings(<AddKeyModal isOpen onClose={vi.fn()} onSubmit={vi.fn()} isPending={false} workspaceId="ws" />, 'en');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Provider' }), provider);
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Authentication method' }), 'subscription');
-    expect(screen.queryByLabelText('Secret API Key')).toBeNull();
     expect(screen.getByRole('button', { name: /Sign in with/ })).toBeDefined();
+    expect(screen.getByLabelText('Secret API Key')).toBeDefined();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Provider' }), 'gemini');
     expect(screen.queryByRole('combobox', { name: 'Authentication method' })).toBeNull();
     expect(screen.getByLabelText('Secret API Key')).toBeDefined();

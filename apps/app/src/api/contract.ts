@@ -114,11 +114,14 @@ export const KeysResponseSchema = z.object({
     z.object({
       provider: KeyProviderSchema,
       authMethod: z.enum(['api-key', 'subscription', 'unknown']).optional(),
+      /** ADR-0027 dual-method providers: effective default auth method. */
+      defaultMethod: z.enum(['subscription', 'api-key']).optional(),
+      hasSubscription: z.boolean().optional(),
       last4: z.string(),
       createdAt: z.string(),
       createdBy: z.string(),
       baseUrl: z.string().nullable().optional(),
-      /** Ordered keys for gemini, openrouter and opencode-zen. Absent for every other provider. */
+      /** Ordered keys for key-list providers. Absent when there are no API key slots. */
       keys: z.array(ProviderKeySlotSchema).max(MAX_PROVIDER_KEYS).optional(),
     }),
   ),

@@ -109,6 +109,7 @@ export function registerBackupRoutes(app: FastifyInstance, deps: DashboardApiDep
         throw err;
       }
       for (const c of plan.restore.credentials ?? []) invalidateModelsCache(workspaceId, c.provider);
+      for (const entry of plan.restore.dualProviderKeyChanges ?? []) invalidateModelsCache(workspaceId, entry.provider);
       request.log.info(
         {
           event: 'backup.restore',

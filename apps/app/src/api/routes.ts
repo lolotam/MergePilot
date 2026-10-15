@@ -7,7 +7,8 @@ import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import { BotNameTakenError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
-import { isMultiKeyProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
+import { isKeyListProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
+import { registerProviderAuthRoutes } from './provider-auth-routes.js';
 import { KeyOrderError, SingleKeyProviderError, TooManyKeysError, type CredentialService } from '../credentials/service.js';
 import type { RunEventBus } from '../core/run-events.js';
 import type { GitHubAppClientFactory } from '../worker/types.js';
@@ -191,6 +192,8 @@ export function registerDashboardApi(
         createdAt: toIso(k.createdAt),
         createdBy: k.createdBy,
         authMethod: k.authMethod ?? 'api-key',
+        ...(k.hasSubscription !== undefined ? { hasSubscription: k.hasSubscription } : {}),
+        ...(k.defaultMethod ? { defaultMethod: k.defaultMethod } : {}),
         ...(k.keys
           ? {
               keys: k.keys.map((slot) => ({
@@ -239,7 +242,7 @@ export function registerDashboardApi(
           bodyParse.error.issues[0]?.message ?? 'Invalid apiKey',
         );
       }
-      if (bodyParse.data.apiKeys && !isMultiKeyProvider(provider)) {
+      if (bodyParse.data.apiKeys && !isKeyListProvider(provider)) {
         return sendError(reply, 400, 'single_key_provider', 'This provider stores one credential');
       }
       const apiKeys = (bodyParse.data.apiKeys ?? [bodyParse.data.apiKey ?? '']).map((key) => key.trim());
@@ -359,6 +362,7 @@ export function registerDashboardApi(
   );
 
   registerProviderKeyRoutes(app, deps, validateKeyFn);
+  registerProviderAuthRoutes(app, deps);
   registerInstallationRoutes(app, deps);
   registerRunsRoutes(app, deps);
   registerProviderRoutes(app, deps);

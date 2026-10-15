@@ -37,8 +37,10 @@ export const BackupCredentialSchema = z.object({
   last4: z.string().max(4),
   /** First key, so a reader from before ADR-0026 still restores position 0. */
   key: SealedKeySchema.optional(),
-  /** Full ordered list for gemini, openrouter and opencode-zen. Wins over `key` on restore. */
+  /** Full ordered list for key-list providers. Wins over `key` on restore. */
   keys: z.array(SealedKeySchema).max(MAX_PROVIDER_KEYS).optional(),
+  /** ADR-0027: stored default for dual-method providers. */
+  defaultMethod: z.enum(['subscription', 'api-key']).optional(),
 });
 export type BackupCredential = z.infer<typeof BackupCredentialSchema>;
 

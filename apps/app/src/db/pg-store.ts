@@ -6,7 +6,7 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import type {
   KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
   KeyQuotaStatus, ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
-  MonthlyUsage, NewReviewRun, ProviderKeyChange, RetentionPolicy, ReviewRun, ReviewerBot, StoredCredential,
+  MonthlyUsage, NewReviewRun, ProviderAuthMethod, ProviderKeyChange, RetentionPolicy, ReviewRun, ReviewerBot, StoredCredential,
   StoredProviderKey, WorkspaceRestore,
   WorkspaceSettings, ModelKey,
   StaleRunRef,
@@ -20,6 +20,9 @@ import {
 } from './pg-maintenance.js';
 import { restorePgWorkspace, writePgCredential } from './pg-backup.js';
 import { deletePgProviderKeyRows } from './pg-provider-keys.js';
+import {
+  deletePgAuthPreference, readPgAuthPreference, writePgAuthPreference,
+} from './pg-auth-preferences.js';
 import {
   listStoredProviderKeys, listWorkspaceStoredProviderKeys, modifyStoredProviderKeys, readStoredKeyCursor,
   recordStoredProviderKeyTest, writeStoredKeyCursor,
@@ -211,6 +214,7 @@ export class PgStore implements AppStore {
         await tx.delete(providerCredentials)
           .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
         await deletePgProviderKeyRows(tx, workspaceId, provider);
+        await deletePgAuthPreference(tx, workspaceId, provider);
       }
       // Cancellation during the SQL write aborts this transaction before COMMIT.
       signal?.throwIfAborted();
@@ -280,8 +284,31 @@ export class PgStore implements AppStore {
     return listWorkspaceStoredProviderKeys(this.db, workspaceId);
   }
 
-  async modifyProviderKeys(workspaceId: string, provider: KeyProvider, change: (current: StoredProviderKey[]) => Promise<ProviderKeyChange>): Promise<StoredProviderKey[]> {
-    return modifyStoredProviderKeys(this.db, workspaceId, provider, change);
+  async modifyProviderKeys(
+    workspaceId: string,
+    provider: KeyProvider,
+    change: (current: StoredProviderKey[], parent: StoredCredential | null) => Promise<ProviderKeyChange>,
+    signal?: AbortSignal,
+  ): Promise<StoredProviderKey[]> {
+    return modifyStoredProviderKeys(this.db, workspaceId, provider, change, signal);
+  }
+
+  async getProviderAuthPreference(workspaceId: string, provider: KeyProvider): Promise<ProviderAuthMethod | null> {
+    return readPgAuthPreference(this.db, workspaceId, provider);
+  }
+
+  async setProviderAuthPreference(workspaceId: string, provider: KeyProvider, method: ProviderAuthMethod): Promise<void> {
+    await withLiveWorkspace(this.db, workspaceId, async (tx) => {
+      await lockCredential(tx, workspaceId, provider);
+      await writePgAuthPreference(tx, workspaceId, provider, method);
+    });
+  }
+
+  async deleteProviderAuthPreference(workspaceId: string, provider: KeyProvider): Promise<void> {
+    await withLiveWorkspace(this.db, workspaceId, async (tx) => {
+      await lockCredential(tx, workspaceId, provider);
+      await deletePgAuthPreference(tx, workspaceId, provider);
+    });
   }
 
   async getKeyCursor(workspaceId: string, provider: KeyProvider): Promise<number> {

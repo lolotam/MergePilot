@@ -151,6 +151,20 @@ export const providerKeyCursors = pgTable(
   (table) => [primaryKey({ columns: [table.workspaceId, table.provider] })],
 );
 
+/** Migration 0012: default auth method for dual-method providers (ADR-0027). */
+export const providerAuthPreferences = pgTable(
+  'provider_auth_preferences',
+  {
+    workspaceId: text('workspace_id').notNull(),
+    provider: text('provider').notNull(),
+    defaultMethod: text('default_method').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.provider] })],
+);
+
 export const reviewRuns = pgTable(
   'review_runs',
   {

@@ -14,7 +14,7 @@ The owner asked that these three providers keep a subscription **and** up to 20 
 
 ## Decision
 
-The change is delivered in two phases on one branch:
+The change is delivered in two phases, each in its own pull request:
 - **Phase A:** points 1, 2, 3, 8 and 9. Both methods coexist and the default is stored, but a review still uses only the effective default method. Migration `0012` only adds a table.
 - **Phase B:** points 4–7, the money and runtime change: the method fallback, its triggers, its disclosure, its cost and budget admission.
 
@@ -79,7 +79,7 @@ The change is delivered in two phases on one branch:
    - **Settings row.** Shows both methods and a default selector.
    - **Text.** All user-facing text is in the en and ar dictionaries. The "this replaces the current credential" copy is removed.
 
-9. **Backup** (ADR-0018). Export carries the sealed subscription envelope, the sealed key list and the default method. Restore writes all three in one locked change. Older backups, which have no preference and no `keys`, restore as before.
+9. **Backup** (ADR-0018). Export carries the sealed subscription envelope, the sealed key list and the **effective** default method (not only a stored preference row). Restore applies each dual provider as one locked change inside the same restore transaction, so a failed restore still changes nothing (ADR-0018): a file with a subscription envelope sets the parent to that envelope and keeps the file's key slots when present, otherwise the current slots after legacy materialisation; a keys-only file replaces the slots and keeps a subscription parent when one is connected, otherwise mirrors slot 0; the preference row is set from `defaultMethod` or deleted when the field is absent. The file wins over an unreadable current credential, so a restore can still repair a workspace after a lost master key. Subscription envelopes inside the key list are rejected. Non-dual providers and backups from before ADR-0027 restore unchanged.
 
 ## Consequences
 

@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsPage } from './SettingsPage.js';
 import { I18nProvider } from '../i18n/context.js';
 import { ToastProvider } from '../components/Toast.js';
+import type { KeyItem } from '../api/client.js';
 import * as hooks from '../api/hooks.js';
 
 vi.mock('../api/hooks.js');
@@ -54,7 +55,11 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
         createdAt: '2026-10-01',
         createdBy: 'user-1',
       },
-    ],
+    ] as KeyItem[],
+  }: {
+    role?: 'owner' | 'admin' | 'member';
+    settings?: { provider: 'anthropic'; model: string; language: 'ar'; monthlyBudgetUsd: number };
+    keys?: KeyItem[];
   } = {}) => {
     vi.mocked(hooks.useMeQuery).mockReturnValue({
       data: {
@@ -88,6 +93,16 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
       mutateAsync: mockDeleteKey,
       isPending: false,
     } as unknown as ReturnType<typeof hooks.useDeleteKeyMutation>);
+
+    vi.mocked(hooks.useSetProviderDefaultMethodMutation).mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof hooks.useSetProviderDefaultMethodMutation>);
+
+    vi.mocked(hooks.useDisconnectSubscriptionMutation).mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof hooks.useDisconnectSubscriptionMutation>);
 
     vi.mocked(hooks.useRenameWorkspaceMutation).mockReturnValue({
       mutateAsync: vi.fn(),
@@ -195,6 +210,33 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     expect(screen.getByRole('button', { name: /حذف مساحة العمل/i })).toBeDefined();
   });
 
+  it('shows the default-method selector only when subscription and API keys coexist', () => {
+    setupMocks({
+      role: 'admin',
+      keys: [
+        {
+          provider: 'openai' as const,
+          last4: '1111',
+          createdAt: '2026-10-01',
+          createdBy: 'user-1',
+          hasSubscription: true,
+          defaultMethod: 'subscription' as const,
+          keys: [{ id: 'k1', position: 0, last4: '4242', createdAt: '2026-10-01', lastTestStatus: null, lastTestedAt: null }],
+        },
+        {
+          provider: 'anthropic' as const,
+          last4: '9999',
+          createdAt: '2026-10-01',
+          createdBy: 'user-1',
+          hasSubscription: true,
+          keys: [],
+        },
+      ],
+    });
+    renderComponent();
+    expect(screen.getAllByLabelText(/الطريقة الافتراضية/i)).toHaveLength(1);
+  });
+
   it('add-key never shows the key after save', async () => {
     const user = userEvent.setup();
     const fakeSecret = 'sk-test-secret-99999999';
@@ -218,6 +260,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     expect(mockSaveKey).toHaveBeenCalledWith({
       provider: 'anthropic',
       apiKey: fakeSecret,
+      apiKeys: [fakeSecret],
     });
 
     // Wait for modal to close

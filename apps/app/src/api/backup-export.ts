@@ -1,6 +1,6 @@
 import { deriveBackupKey, newBackupSalt, sealBackupKey } from '../backup/passphrase-crypto.js';
 import type { AppStore } from '../core/types.js';
-import { isMultiKeyProvider } from '../credentials/multi-key.js';
+import { isDualMethodProvider, isKeyListProvider } from '../credentials/multi-key.js';
 import type { CredentialService } from '../credentials/service.js';
 import { BACKUP_FORMAT, BACKUP_VERSION, type BackupCredential, type BackupFile } from './contract-backup.js';
 
@@ -52,16 +52,30 @@ export async function buildBackupFile(
   const credentials: BackupCredential[] = [];
   for (const meta of keys) {
     if (fileKey && salt) {
-      if (isMultiKeyProvider(meta.provider)) {
+      if (isKeyListProvider(meta.provider)) {
         const roster = await deps.credentials.revealRoster(workspace.id, meta.provider);
-        const sealed = roster.map((item) =>
+        const sealedKeys = roster.map((item) =>
           sealBackupKey(item.secret.reveal(), fileKey, salt, { provider: meta.provider, baseUrl: null }),
         );
-        const first = sealed[0];
+        const effectiveDefault = isDualMethodProvider(meta.provider) ? meta.defaultMethod : undefined;
+        if (isDualMethodProvider(meta.provider) && meta.hasSubscription) {
+          const resolved = await deps.credentials.resolveCredential(workspace.id, meta.provider);
+          const subSealed = sealBackupKey(resolved.secret.reveal(), fileKey, salt, { provider: meta.provider, baseUrl: null });
+          credentials.push({
+            provider: meta.provider,
+            last4: meta.last4,
+            key: subSealed,
+            ...(sealedKeys.length > 0 ? { keys: sealedKeys } : {}),
+            ...(effectiveDefault ? { defaultMethod: effectiveDefault } : {}),
+          });
+          continue;
+        }
+        const first = sealedKeys[0];
         credentials.push({
           provider: meta.provider,
           last4: roster[0]?.last4 ?? meta.last4,
-          ...(first ? { key: first, keys: sealed } : {}),
+          ...(first ? { key: first, keys: sealedKeys } : {}),
+          ...(effectiveDefault ? { defaultMethod: effectiveDefault } : {}),
         });
         continue;
       }

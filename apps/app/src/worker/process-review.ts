@@ -286,6 +286,11 @@ async function sharedSteps(
 /** True when the provider's stored credential is a consumer subscription (no incremental cost). Unknown counts as paid. */
 async function usesSubscription(deps: ProcessReviewDeps, workspaceId: string, provider: string): Promise<boolean> {
   try {
+    const effective = await deps.credentials.getEffectiveAuthMethod?.(
+      workspaceId,
+      provider as Parameters<ProcessReviewDeps['credentials']['resolve']>[1],
+    );
+    if (effective) return effective === 'subscription';
     const secret = await deps.credentials.resolve(workspaceId, provider as Parameters<ProcessReviewDeps['credentials']['resolve']>[1]);
     return secret.reveal().startsWith(SUBSCRIPTION_PREFIX);
   } catch {

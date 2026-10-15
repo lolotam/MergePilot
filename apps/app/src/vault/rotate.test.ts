@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { encodeSubscription, type SubscriptionCredential } from '@mergepilot/engine';
 import { MemoryStore } from '../core/memory-store.js';
 import { EnvelopeVault } from './envelope-vault.js';
 import { reencryptAll } from './rotate.js';
@@ -205,9 +206,9 @@ describe('reencryptAll', () => {
     let lockedSlotCount = 0;
     const modify = store.modifyProviderKeys.bind(store);
     vi.spyOn(store, 'modifyProviderKeys').mockImplementation(async (workspaceId, provider, change) =>
-      modify(workspaceId, provider, async (current) => {
+      modify(workspaceId, provider, async (current, parent) => {
         lockedSlotCount = current.length;
-        return change(current);
+        return change(current, parent);
       }),
     );
 
@@ -256,10 +257,10 @@ describe('reencryptAll', () => {
         concurrentRan = true;
         await service.appendProviderKey({ workspaceId, provider: 'gemini', apiKey: third, userId: 'u' });
       }
-      return modify(workspaceId, provider, async (current) => {
+      return modify(workspaceId, provider, async (current, parent) => {
         insideModifyCallback = true;
         try {
-          return await change(current);
+          return await change(current, parent);
         } finally {
           insideModifyCallback = false;
         }
@@ -279,5 +280,54 @@ describe('reencryptAll', () => {
     expect(thirdSlot).toBeDefined();
     const thirdPlain = await onlyV2.decrypt(thirdSlot!.ciphertext, { workspaceId: 'ws-race', provider: 'gemini' });
     expect(thirdPlain).toBe(third);
+  });
+
+  it('re-encrypts a subscription parent when slots were emptied before rotation', async () => {
+    const key1 = randomBytes(32);
+    const key2 = randomBytes(32);
+    const vaultV1 = new EnvelopeVault({ current: 1, keys: new Map([[1, key1]]) });
+    const vaultV2 = new EnvelopeVault({ current: 2, keys: new Map([[1, key1], [2, key2]]) });
+    const store = new MemoryStore();
+    const { CredentialService } = await import('../credentials/service.js');
+    const service = new CredentialService({ store, vault: vaultV1 });
+    const sub: SubscriptionCredential = {
+      type: 'oauth',
+      access: ['test', 'access', '1111'].join('-'),
+      refresh: ['test', 'refresh'].join('-'),
+      expires: Date.now() + 3_600_000,
+    };
+    await service.saveSubscription('ws-sub', 'openai', sub, 'u');
+    const added = await service.appendProviderKey({
+      workspaceId: 'ws-sub',
+      provider: 'openai',
+      apiKey: 'sk-openai-rotate-0001',
+      userId: 'u',
+    });
+    expect(await store.listProviderKeys('ws-sub', 'openai')).toHaveLength(1);
+
+    let emptiedDuringRotate = false;
+    const modify = store.modifyProviderKeys.bind(store);
+    vi.spyOn(store, 'modifyProviderKeys').mockImplementation(async (workspaceId, provider, change) => {
+      if (provider === 'openai' && workspaceId === 'ws-sub' && !emptiedDuringRotate) {
+        emptiedDuringRotate = true;
+        await service.deleteProviderKey(workspaceId, 'openai', added.id);
+      }
+      return modify(workspaceId, provider, change);
+    });
+
+    const parentBefore = await store.getCredential('ws-sub', 'openai');
+    expect(parentBefore?.keyVersion).toBe(1);
+    const plainSub = await vaultV1.decrypt(parentBefore!.ciphertext, { workspaceId: 'ws-sub', provider: 'openai' });
+    expect(plainSub).toContain('mergepilot:oauth');
+
+    const encrypt = vi.spyOn(vaultV2, 'encrypt');
+    await reencryptAll(store, vaultV2, ['ws-sub']);
+    expect(encrypt).toHaveBeenCalled();
+
+    const parentAfter = await store.getCredential('ws-sub', 'openai');
+    expect(parentAfter?.keyVersion).toBe(2);
+    const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
+    const rotated = await onlyV2.decrypt(parentAfter!.ciphertext, { workspaceId: 'ws-sub', provider: 'openai' });
+    expect(encodeSubscription('openai', sub)).toBe(rotated);
   });
 });

@@ -70,8 +70,13 @@ describe('workspace subscription credentials', () => {
     const secret = await service.resolve('ws', provider);
     expect(decodeSubscription(secret.reveal(), provider)?.credential.access).toBe(credential().access);
     await service.saveKey({ workspaceId: 'ws', provider, userId: 'user', apiKey: fakeValue('test', 'api', 'key', '2222') });
-    expect((await service.listKeys('ws'))[0]?.authMethod).toBe('api-key');
-    expect((await service.resolve('ws', provider)).reveal()).toBe('test-api-key-2222');
+    const listed = (await service.listKeys('ws'))[0];
+    expect(listed?.hasSubscription).toBe(true);
+    expect(listed?.keys?.length).toBe(1);
+    expect(listed?.defaultMethod).toBe('subscription');
+    expect((await service.resolve('ws', provider)).reveal()).toContain('mergepilot:oauth');
+    const roster = await service.resolveKeyRoster('ws', provider);
+    expect(roster?.secrets[0]?.reveal()).toBe('test-api-key-2222');
   });
 
   it('rotates expired tokens once for concurrent service instances and persists the new refresh token', async () => {
@@ -103,7 +108,7 @@ describe('workspace subscription credentials', () => {
   it('rejects OAuth envelopes in the API-key path and mismatched provider backup restores', async () => {
     const { service } = fixture();
     const encoded = encodeSubscription('openai', credential());
-    await expect(service.saveKey({ workspaceId: 'ws', provider: 'openai', apiKey: encoded, userId: 'u' })).rejects.toThrow(/subscription sign-in/);
+    await expect(service.saveKey({ workspaceId: 'ws', provider: 'openai', apiKey: encoded, userId: 'u' })).rejects.toThrow(/API key list|subscription sign-in/i);
     await expect(service.sealKey({ workspaceId: 'ws', provider: 'xai', apiKey: encoded, userId: 'u' }, { validate: false })).rejects.toThrow(/Invalid subscription credential/);
   });
 
