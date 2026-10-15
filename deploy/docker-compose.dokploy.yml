@@ -128,6 +128,10 @@ services:
     image: *image
     restart: unless-stopped
     command: ["node", "dist/worker/main.js"]
+    # On SIGTERM the worker stops taking jobs and waits for the running reviews to finish
+    # (worker.close()); Docker kills it after this period. 10s is Docker's default; the owner
+    # decides a longer drain by setting WORKER_STOP_GRACE_PERIOD in Dokploy (ADR-0025).
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-10s}
     environment:
       <<: *app-env
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-8}

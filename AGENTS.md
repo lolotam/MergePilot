@@ -36,3 +36,4 @@ MergePilot reviews pull requests through a shared TypeScript engine, a GitHub Ac
 - Authentication changes need coverage for admin authorization, user/workspace isolation, cancellation/expiry, encrypted persistence, concurrent refresh, and token redaction. Provider changes need request-protocol and failure-classification coverage.
 - Update affected usage documentation. Report the commands actually run and any remaining verification limits.
 - Commit, push, merge, or deploy only when the user requests it.
+- Production releases follow ADR-0025 (`.github/workflows/release.yml`, `scripts/release/`). It deploys only while the owner keeps the repository variable `MERGEPILOT_AUTO_RELEASE` set to `enabled`; until then the workflow is a dry run and deploys still need the owner's explicit approval. Never set that variable, the Dokploy credentials, branch protections or the `production` branch yourself.

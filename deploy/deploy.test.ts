@@ -12,11 +12,12 @@ describe('Task F4: Docker and Deployment Configuration', () => {
       expect(existsSync(dockerfilePath)).toBe(true);
     });
 
-    it('uses node:22-bookworm-slim and pins pnpm via corepack', () => {
+    it('uses node:22-bookworm-slim and pins the same pnpm as package.json via corepack', () => {
       const content = readFileSync(dockerfilePath, 'utf8');
+      const { packageManager } = JSON.parse(readFileSync(resolve(rootDir, 'package.json'), 'utf8')) as { packageManager: string };
       expect(content).toMatch(/FROM\s+node:22-bookworm-slim/);
       expect(content).toMatch(/corepack\s+enable/);
-      expect(content).toMatch(/pnpm@10\.18\.0/);
+      expect(content).toContain(`corepack prepare ${packageManager} --activate`);
     });
 
     it('configures build stage with frozen lockfile and pnpm build', () => {
@@ -120,11 +121,28 @@ describe('Task F4: Docker and Deployment Configuration', () => {
       expect(content).toContain('traefik.http.services.mergepilot.loadbalancer.server.port=3000');
     });
 
-    it('uses MERGEPILOT_IMAGE variable and dokploy-network external network', () => {
+    it('pins one immutable release (full SHA tag, optional digest) and joins the external dokploy-network', () => {
       const content = readFileSync(dokployPath, 'utf8');
-      expect(content).toMatch(/\$\{MERGEPILOT_IMAGE\}/);
+      const pins = content.match(/^x-image: &image \S+$/gm) ?? [];
+      expect(pins).toHaveLength(1);
+      expect(pins[0]).toMatch(/^x-image: &image ghcr\.io\/lolotam\/mergepilot:[a-f0-9]{40}(@sha256:[a-f0-9]{64})?$/);
+      expect(content).not.toMatch(/mergepilot:latest/);
       expect(content).toMatch(/dokploy-network/);
       expect(content).toMatch(/external:\s*true/);
+    });
+
+    it('runs migrate, web and worker from the same pinned image', () => {
+      const content = readFileSync(dokployPath, 'utf8').replace(/\r\n/g, '\n');
+      for (const service of ['migrate', 'web', 'worker']) {
+        const block = new RegExp(`\\n  ${service}:\\n([\\s\\S]*?)(?=\\n  [a-z-]+:\\n|\\nvolumes:)`).exec(content)?.[1] ?? '';
+        expect(block, service).toMatch(/^ {4}image: \*image$/m);
+      }
+      expect(content.match(/ghcr\.io\/lolotam\/mergepilot/g)).toHaveLength(1);
+    });
+
+    it("gives the worker a stop grace period that defaults to Docker's current 10s", () => {
+      const content = readFileSync(dokployPath, 'utf8');
+      expect(content).toContain('stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-10s}');
     });
 
     it('places postgres and redis on internal network only', () => {
@@ -144,7 +162,6 @@ describe('Task F4: Docker and Deployment Configuration', () => {
       const content = readFileSync(envExamplePath, 'utf8');
       const requiredVars = [
         'MERGEPILOT_BASE_URL',
-        'PORT',
         'DATABASE_URL',
         'REDIS_URL',
         'MERGEPILOT_MASTER_KEY',

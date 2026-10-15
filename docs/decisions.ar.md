@@ -535,3 +535,17 @@
 **القرار والنتيجة (ADR-0024):**
 - الـ run على اشتراك (Codex أو Claude أو Grok) أو على zai-coding بتفضل تكلفتها الحقيقية $0 زي ما هي (ADR-0020)، وبيتحسب جنبها رقم تاني: التوكنز × سعر الـ API لنفس الموديل من جدول الأسعار (ولـ GLM سعر `zai/glm-5.3` العادي).
 - الرقم ده بيظهر في جدول المراجعات وصفحة التفاصيل كـ «≈ مكافئ API» بشكل مختلف عن التكلفة الحقيقية، ومش بيدخل في الميزانية الشهرية ولا في ملخص المراجعة على GitHub.
+
+### س40: النشر التلقائي المشروط للإنتاج (ADR-0025)
+
+**طلب صاحب المشروع (بنصّه):**
+«why deployment is not automatically after merg or push to main ? every time i should merg manually»
+
+وبعدها كتب مواصفات من 12 نقطة، منها: «لا تعرض tokens أو webhook secrets أو production environment values في chat أو logs أو repository. احتفظ بأسرار التطبيق الحالية كما هي.» و«لا تحذف volumes ولا تنفّذ database downgrade أو restore تلقائيًا.» و«حافظ على قاعدة طلب موافقة صاحب المشروع الحالية حتى يعتمد صراحةً سياسة automatic deployment الجديدة.»
+
+**اللي اتنفّذ (ADR-0025، مش مفعّل):**
+- workflow بيستنى `CI` و`Integration Tests` و`Docker Image` على نفس الـ SHA على `main`، ويثبّت الصورة بالـ digest في release commit على فرع `production`، وينشر عن طريق الـ Compose API في Dokploy، ويتأكد من الحاويات و`/health`.
+- نشر واحد في المرة ومن غير إلغاء نشر شغال؛ وrollback تلقائي بس لو مفيش migration اتغيّر؛ وissue عليه `release-hold` بيوقف أي نشر بعد الفشل.
+- من غير `MERGEPILOT_AUTO_RELEASE=enabled` بيشتغل dry run بس، وقاعدة موافقة صاحب المشروع على النشر فاضلة زي ما هي.
+
+**قرارات لسه مستنية صاحب المشروع:** تحويل Dokploy لفرع `production` مع قفل autoDeploy؛ مدة `WORKER_STOP_GRACE_PERIOD` (المقترح 25m، والبديل 12m)؛ حماية `main` بالـ checks التلاتة؛ مستخدم ومفتاح API مخصّص في Dokploy؛ وتفعيل السياسة نفسها.

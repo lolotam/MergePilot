@@ -14,6 +14,14 @@ export default defineConfig({
           hookTimeout: 30_000,
         },
       },
+      {
+        test: {
+          // Release automation (ADR-0025) and deployment configuration.
+          name: 'release',
+          include: ['scripts/**/*.test.ts', 'deploy/**/*.test.ts'],
+          environment: 'node',
+        },
+      },
       'apps/web/vitest.config.ts',
     ],
   },
