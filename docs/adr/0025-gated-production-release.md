@@ -1,6 +1,6 @@
 # ADR-0025: Gated production release
 
-**Date:** 2026-10-15 · **Status:** proposed (implemented, dry run only; activation pending owner decision) · **Owner decision:** decisions log س40
+**Date:** 2026-10-15 · **Status:** accepted (live since 2026-10-15) · **Owner decision:** decisions log س40
 
 ## Context
 
@@ -33,3 +33,11 @@ Production (Dokploy compose on musalam-2) reads `deploy/docker-compose.dokploy.y
 - A failed release stops the pipeline until a person closes the hold issue.
 - Deploys are not zero-downtime: Compose recreates `web` and `worker`, and a drain longer than the grace period interrupts running reviews.
 - Not verifiable before merge: `workflow_run` and `workflow_dispatch` fire only once the workflow is on the default branch, and the live Dokploy calls need the key. The first live release is the acceptance test.
+
+## Activation (2026-10-15)
+
+- The owner set up the `production` branch at `4991976`, the Dokploy switch to it with autoDeploy off, a dedicated Dokploy Member user and key, the repository variables, the `release-hold` label, `WORKER_STOP_GRACE_PERIOD=25m`, and a `main` ruleset requiring `check` and `integration`. Then the owner enabled `MERGEPILOT_AUTO_RELEASE`.
+- The first live run (`workflow_dispatch` on `88a87bb`) deployed the new image, but verification failed with `container config answered HTTP 401` because the Member user could not read container details (`docker.getConfig`). The release rolled back to `4c32dee`, then the rollback's own verification failed the same way, and the run opened hold #134. Production stayed healthy on `4c32dee`. The rollback path therefore worked live.
+- After the owner granted the user Docker access and closed the holds, run 38689398972 deployed `88a87bb@sha256:eabfe1fb…` as release commit `72b618a` (parents `88a87bb`, `c4defa2`). Verification passed: web and worker were healthy on the pinned image, migrate exited 0, and `/health` returned 200.
+- The dedicated user needs API access, the mergepilot project and service, and Docker read access.
+
