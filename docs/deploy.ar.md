@@ -155,10 +155,10 @@ WORKER_CONCURRENCY=8
 
 من 2026-10-15 النشر بيحصل تلقائياً (الجزء اللي بعده). الطريقة اليدوية دي للطوارئ بس، بعد ما توقف النشر التلقائي. ولاحظ إن Dokploy دلوقتي بيقرا من فرع `production` مش `main`، فالتعديل اليدوي بيتعمل هناك.
 
-1. **للتحديث:** عدّل سطر `x-image` في `deploy/docker-compose.dokploy.yml` للـ SHA الكامل الجديد (ويُفضّل مع الـ digest)، مثلاً:
+1. **للتحديث:** عدّل سطر `x-image` في `deploy/docker-compose.dokploy.yml` **على فرع `production`** للـ SHA الكامل الجديد (ويُفضّل مع الـ digest)، مثلاً:
    `x-image: &image ghcr.io/lolotam/mergepilot:<SHA>@sha256:<DIGEST>`
-   وبعد ما يوصل `main` اضغط **Deploy** في Dokploy.
-2. **للتراجع:** رجّع سطر `x-image` للإصدار اللي كان شغال واضغط **Deploy**. ده بيرجّع الصورة بس، مش قاعدة البيانات: لو الإصدار الجديد فيه migration، التراجع محتاج قرار يدوي.
+   اعمل commit وpush للتعديل على `production` نفسه (مش `main`، لأن Dokploy مش بيقرا منه)، وبعد كده اضغط **Deploy** في Dokploy.
+2. **للتراجع:** رجّع سطر `x-image` على `production` للإصدار اللي كان شغال، واعمل push، واضغط **Deploy**. ده بيرجّع الصورة بس، مش قاعدة البيانات: لو الإصدار الجديد فيه migration، التراجع محتاج قرار يدوي.
 3. النشر **مش zero-downtime**: Compose بيعيد إنشاء `web` و`worker`، والطلبات أو المراجعات اللي شغالة وقتها ممكن تتقطع.
 
 ### النشر التلقائي المشروط (ADR-0025، مفعّل من 2026-10-15)
@@ -181,7 +181,7 @@ commit فيه تغيير توثيق بس بيتخطّى (مفيش صورة جد�
    - النهارده (2026-10-15) الصورة الشغالة `4c32dee68dcc08d4626995d755054c9bc3971cbc`، والـ commit الصح هو `4991976334911c832ac8bb0eddec4585855267a2`.
    - **مش** `4c32dee`: ملف الـ compose فيه بيثبّت `4915c26`، فالسجل كان هيعتبر ده الشغال ويرجع لصورة غلط.
 2. يحوّل مصدر الـ compose في Dokploy لفرع `production` ويقفل autoDeploy **في نفس التعديل**، قبل أي push على `production`. من اللحظة دي لحد التفعيل، الإنتاج بيفضل على الإصدار الحالي وأي merge على `main` مش بينزل لوحده.
-3. يعمل مستخدم API مخصّص في Dokploy بأقل صلاحيات تكفي لـ deploy الـ compose ده وقراءة حاويّاته (مش مفتاح admin). المستخدم ده محتاج: الوصول للـ API، ومشروع mergepilot والخدمة بتاعته، و**صلاحية Docker** عشان يقرا تفاصيل الحاويات. من غير صلاحية Docker، كل تحقق بيفشل بـ `container config answered HTTP 401`، وده اللي حصل في أول تشغيل. وبعدين ويعمل له مفتاح API (Settings → API)، ويحطه بنفسه في secret اسمه `DOKPLOY_API_KEY` بالأمر `gh secret set DOKPLOY_API_KEY --repo lolotam/MergePilot` (بيسأل على القيمة، فمش بتظهر في أي شات أو log).
+3. يعمل مستخدم API مخصّص في Dokploy بأقل صلاحيات تكفي لـ deploy الـ compose ده وقراءة حاويّاته (مش مفتاح admin). المستخدم ده محتاج: الوصول للـ API، ومشروع mergepilot والخدمة بتاعته، و**صلاحية Docker** عشان يقرا تفاصيل الحاويات. من غير صلاحية Docker، كل تحقق بيفشل بـ `container config answered HTTP 401`، وده اللي حصل في أول تشغيل. وبعدين يعمل له مفتاح API (Settings → API)، ويحطه بنفسه في secret اسمه `DOKPLOY_API_KEY` بالأمر `gh secret set DOKPLOY_API_KEY --repo lolotam/MergePilot` (بيسأل على القيمة، فمش بتظهر في أي شات أو log).
 4. يحط الـ variables دي: `DOKPLOY_URL` (عنوان `https://…/api` بتاع Dokploy) و`DOKPLOY_COMPOSE_ID` و`DOKPLOY_APP_NAME` (واختياري `PRODUCTION_URL` و`RELEASE_BRANCH` و`DEPLOY_TIMEOUT_MINUTES` و`VERIFY_TIMEOUT_MINUTES`).
 5. يعمل label اسمه `release-hold` في الريبو.
 6. يختار مدة `WORKER_STOP_GRACE_PERIOD` في Environment بتاع Dokploy (الافتراضي 10s، ودي مدة الـ worker عشان يخلّص المراجعات الشغالة قبل ما Docker يقفله).
