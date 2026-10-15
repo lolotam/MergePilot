@@ -125,6 +125,8 @@ export async function restoreMemoryWorkspace(
     keyCursors: (store as MemoryStore).keyCursors,
     authPreferences: (store as MemoryStore).authPreferences,
   };
+  // Tests and local dev only: these changes are planned without the per-provider lock. The
+  // Postgres store plans and applies each one under that lock inside the restore transaction.
   const dualWrites: Array<{ provider: KeyProvider; next: ProviderKeyChange }> = [];
   for (const entry of restore.dualProviderKeyChanges ?? []) {
     const key = slotKey(workspaceId, entry.provider);

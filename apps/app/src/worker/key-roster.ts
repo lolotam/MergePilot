@@ -1,7 +1,7 @@
 import type { KeyRoster, KeyRotationEvent, Secret } from '@mergepilot/engine';
 import type { Logger } from 'pino';
 import { isKeyListProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
-import type { KeyProvider } from '../core/types.js';
+import type { KeyProvider, ProviderAuthMethod } from '../core/types.js';
 import type { ProcessReviewCredentials } from './types.js';
 
 /** What a finished run records: which key answered, and how many were skipped. Never the key. */
@@ -31,9 +31,11 @@ export async function loadRosters(
   for (const provider of providers) {
     if (seen.has(provider) || !isKeyListProvider(provider)) continue;
     seen.add(provider);
-    const effective = await credentials.getEffectiveAuthMethod?.(workspaceId, provider as KeyProvider);
-    if (effective === 'subscription') continue;
+    let effective: ProviderAuthMethod | null | undefined;
     try {
+      // Inside the try: a fallback whose method cannot be read is skipped, never the whole review.
+      effective = await credentials.getEffectiveAuthMethod?.(workspaceId, provider as KeyProvider);
+      if (effective === 'subscription') continue;
       const roster = await credentials.resolveKeyRoster(workspaceId, provider as KeyProvider);
       if (!roster || roster.secrets.length === 0) {
         if (provider === primaryProvider) {

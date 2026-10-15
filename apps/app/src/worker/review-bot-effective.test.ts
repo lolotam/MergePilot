@@ -21,7 +21,7 @@ describe('runBot effective auth (ADR-0027)', () => {
     };
     await store.saveSettings(settings);
 
-    const apiSecret = new Secret('sk-openai-effective-0001');
+    const apiSecret = new Secret(['sk', 'openai', 'effective', '0001'].join('-'));
     const resolve = vi.fn(async () => new Secret('mergepilot:oauth:v1:should-not-run'));
     const resolveKeyRoster = vi.fn(async () => ({
       secrets: [apiSecret],

@@ -13,8 +13,11 @@ import {
 } from '../credentials/service.js';
 import { KeyProviderSchema } from './contract.js';
 import { sendError } from './helpers.js';
-import { invalidateModelsCache } from './provider-routes.js';
+import { allow, invalidateModelsCache } from './provider-routes.js';
 import type { DashboardApiDeps } from './routes.js';
+
+/** Per workspace and per route, per minute: each change takes the provider credential lock. */
+export const PROVIDER_AUTH_LIMIT = 20;
 
 const DefaultMethodBodySchema = z.object({
   method: z.enum(['subscription', 'api-key']),
@@ -48,6 +51,9 @@ export function registerProviderAuthRoutes(
       const { workspaceId } = request.params as { workspaceId: string };
       const provider = parseDualProvider(request, reply);
       if (!provider) return reply;
+      if (!allow(`${workspaceId}:default-method`, PROVIDER_AUTH_LIMIT)) {
+        return sendError(reply, 429, 'rate_limited', `Too many requests: ${PROVIDER_AUTH_LIMIT} per minute per workspace`);
+      }
       const body = DefaultMethodBodySchema.safeParse(request.body);
       if (!body.success) {
         return sendError(reply, 400, 'validation_error', body.error.issues[0]?.message ?? 'Invalid method');
@@ -82,6 +88,9 @@ export function registerProviderAuthRoutes(
       const { workspaceId } = request.params as { workspaceId: string };
       const provider = parseDualProvider(request, reply);
       if (!provider) return reply;
+      if (!allow(`${workspaceId}:subscription-disconnect`, PROVIDER_AUTH_LIMIT)) {
+        return sendError(reply, 429, 'rate_limited', `Too many requests: ${PROVIDER_AUTH_LIMIT} per minute per workspace`);
+      }
       try {
         await credentials.disconnectSubscription(workspaceId, provider as SubscriptionProvider);
         invalidateModelsCache(workspaceId, provider);

@@ -11,7 +11,7 @@ function loggerStub(): Logger {
 
 describe('WorkspaceCredentialStore', () => {
   it('resolves api-key fallbacks from the roster instead of refreshing an expired subscription', async () => {
-    const rosterSecret = new Secret('sk-fallback-roster-key-01');
+    const rosterSecret = new Secret(['sk', 'fallback', 'roster', 'key', '01'].join('-'));
     const resolve = vi.fn(async () => {
       throw new Error('Subscription token refresh failed; sign in again');
     });

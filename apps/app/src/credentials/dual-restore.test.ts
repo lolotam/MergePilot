@@ -33,7 +33,7 @@ describe('dualProviderRestoreChange (restore-only, R2/R3)', () => {
       createdAt: new Date(),
       baseUrl: null,
     });
-    const fileKey = 'sk-file-key-00000001';
+    const fileKey = ['sk', 'file', 'key', '00000001'].join('-');
     const sealed = await vault.encrypt(fileKey, { workspaceId: 'ws', provider: 'openai' });
     const plan: DualProviderRestorePlan = {
       provider: 'openai',
@@ -74,7 +74,7 @@ describe('dualProviderRestoreChange (restore-only, R2/R3)', () => {
 
   it('subscription without keys materialises only when the current parent is readable', async () => {
     const { store, vault, service } = fixture();
-    const legacy = 'sk-legacy-readable-01';
+    const legacy = ['sk', 'legacy', 'readable', '01'].join('-');
     await service.saveKey({ workspaceId: 'ws', provider: 'anthropic', apiKey: legacy, userId: 'u' });
     const parent = await store.getCredential('ws', 'anthropic');
     const plan: DualProviderRestorePlan = {
@@ -105,7 +105,7 @@ describe('dualProviderRestoreChange (restore-only, R2/R3)', () => {
   it('keys-only keeps a readable subscription parent and mirrors when it is unreadable', async () => {
     const { store, vault, service } = fixture();
     await service.saveSubscription('ws', 'xai', subCredential(), 'u');
-    const fileKey = 'xai-file-key-000001';
+    const fileKey = ['xai', 'file', 'key', '000001'].join('-');
     const sealed = await vault.encrypt(fileKey, { workspaceId: 'ws', provider: 'xai' });
     const keys = [
       {

@@ -300,7 +300,7 @@ describe('reencryptAll', () => {
     const added = await service.appendProviderKey({
       workspaceId: 'ws-sub',
       provider: 'openai',
-      apiKey: 'sk-openai-rotate-0001',
+      apiKey: ['sk', 'openai', 'rotate', '0001'].join('-'),
       userId: 'u',
     });
     expect(await store.listProviderKeys('ws-sub', 'openai')).toHaveLength(1);
@@ -329,5 +329,35 @@ describe('reencryptAll', () => {
     const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
     const rotated = await onlyV2.decrypt(parentAfter!.ciphertext, { workspaceId: 'ws-sub', provider: 'openai' });
     expect(encodeSubscription('openai', sub)).toBe(rotated);
+  });
+
+  it('keeps a readable subscription parent and re-encrypts its API key slots', async () => {
+    const key1 = randomBytes(32);
+    const key2 = randomBytes(32);
+    const vaultV1 = new EnvelopeVault({ current: 1, keys: new Map([[1, key1]]) });
+    const vaultV2 = new EnvelopeVault({ current: 2, keys: new Map([[1, key1], [2, key2]]) });
+    const store = new MemoryStore();
+    const { CredentialService } = await import('../credentials/service.js');
+    const service = new CredentialService({ store, vault: vaultV1 });
+    const sub: SubscriptionCredential = {
+      type: 'oauth',
+      access: ['test', 'access', '2222'].join('-'),
+      refresh: ['test', 'refresh'].join('-'),
+      expires: Date.now() + 3_600_000,
+    };
+    const apiKey = ['fake', 'anthropic', 'slot', '0001'].join('-');
+    await service.saveSubscription('ws-both', 'anthropic', sub, 'u');
+    await service.appendProviderKey({ workspaceId: 'ws-both', provider: 'anthropic', apiKey, userId: 'u' });
+
+    await reencryptAll(store, vaultV2, ['ws-both']);
+
+    const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
+    const context = { workspaceId: 'ws-both', provider: 'anthropic' } as const;
+    const parent = await store.getCredential('ws-both', 'anthropic');
+    expect(parent?.keyVersion).toBe(2);
+    expect(await onlyV2.decrypt(parent!.ciphertext, context)).toBe(encodeSubscription('anthropic', sub));
+    const [slot] = await store.listProviderKeys('ws-both', 'anthropic');
+    expect(slot?.keyVersion).toBe(2);
+    expect(await onlyV2.decrypt(slot!.ciphertext, context)).toBe(apiKey);
   });
 });

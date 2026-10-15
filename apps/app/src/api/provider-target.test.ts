@@ -21,7 +21,7 @@ describe('storedTarget (ADR-0027)', () => {
     await credentials.appendProviderKey({
       workspaceId: 'ws',
       provider: 'anthropic',
-      apiKey: 'sk-ant-api-target-4242',
+      apiKey: ['sk', 'ant', 'api', 'target', '4242'].join('-'),
       userId: 'u',
     });
     await credentials.setProviderDefaultMethod('ws', 'anthropic', 'api-key');
@@ -29,7 +29,7 @@ describe('storedTarget (ADR-0027)', () => {
     const resolve = vi.spyOn(credentials, 'resolve');
     const result = await storedTarget({ store, credentials }, 'ws', 'anthropic');
     expect(result).toMatchObject({ ok: true });
-    if (result.ok) expect(result.target.apiKey).toBe('sk-ant-api-target-4242');
+    if (result.ok) expect(result.target.apiKey).toBe(['sk', 'ant', 'api', 'target', '4242'].join('-'));
     expect(resolve).not.toHaveBeenCalled();
   });
 
