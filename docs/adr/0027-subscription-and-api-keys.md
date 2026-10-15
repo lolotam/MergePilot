@@ -1,0 +1,89 @@
+# ADR-0027: Subscription and API keys together, with a default method and a disclosed method fallback
+
+**Date:** 2026-10-15 · **Status:** accepted · **Owner decision:** decisions log س42
+
+## Context
+
+`anthropic`, `openai` and `xai` accept a consumer subscription (Claude, Codex, Grok; ADR-0020) or an API key. Until now a workspace stored exactly one of them: the single `provider_credentials` row held either the subscription envelope or the key, and saving one replaced the other. ADR-0026 added ordered lists of up to 20 API keys, but only for `gemini`, `openrouter` and `opencode-zen`.
+
+The owner asked that these three providers keep a subscription **and** up to 20 API keys at the same time, choose the default method, and continue with the other method when the default runs out. The owner's decisions (س42):
+- Both methods together, with a selectable default.
+- A paid API-key fallback is counted in the monthly budget and disclosed in the GitHub review and the dashboard.
+- The switch happens only on quota or rate limit.
+- Both directions: subscription → API keys and API keys → subscription.
+
+## Decision
+
+The change is delivered in two phases on one branch:
+- **Phase A:** points 1, 2, 3, 8 and 9. Both methods coexist and the default is stored, but a review still uses only the effective default method. Migration `0012` only adds a table.
+- **Phase B:** points 4–7, the money and runtime change: the method fallback, its triggers, its disclosure, its cost and budget admission.
+
+1. **Scope.** `DUAL_METHOD_PROVIDER_IDS = ['anthropic', 'openai', 'xai']`, which is the same set as `SUBSCRIPTION_PROVIDERS`. For these providers the API keys use the ADR-0026 machinery: the `provider_api_keys` slots, the key cursor, the 20-key cap, rotation and per-key tests. Every other provider is unchanged.
+
+2. **Storage.**
+   - **The parent row.** The subscription envelope stays in the parent `provider_credentials` row. When a subscription is connected, the parent row is the subscription and the API keys live only in slots. The ADR-0026 mirror ("parent = slot 0") applies only while no subscription is connected.
+   - **The locked change sees the parent.** `modifyProviderKeys` reads the parent row in the same transaction and lock, and passes it to the change: `change(currentSlots, parent)`. Both stores and the store contract follow this. The service decrypts the parent and uses `decodeSubscription` to tell a subscription from a key. No store method that opens a second connection may be called inside the change.
+   - **Every slot write follows that rule:**
+     - `saveKey`, and `PUT /keys/:provider` with one `apiKey` or a list of `apiKeys`: replace the key list and keep a subscription parent
+     - append, delete, reorder
+     - subscription connect and disconnect
+     - backup restore
+     - master-key rotation (`vault/rotate.ts`)
+
+     When the parent is a subscription it is kept. When the parent is an API key, the ADR-0026 mirror applies.
+   - **Legacy materialisation.** Under the lock, a dual provider whose parent is an API key and which has no slots first gets that parent inserted as slot 0. This happens before the first key append and before a subscription is connected, so neither path loses the existing key. SQL cannot do this as a migration, because it cannot tell an encrypted key from an encrypted envelope.
+   - **The roster never contains the envelope.** For a dual provider, `resolveKeyRoster` and `revealRoster` return the parent-only one-key roster only when the decrypted parent is not a subscription envelope. A subscription parent with no slots means there are no API keys (`null`).
+   - **Connecting a subscription** writes the envelope as the parent and never deletes slots.
+   - **Disconnecting the subscription** (new route) rewrites the parent from slot 0, or deletes the parent when there are no slots.
+   - **Deleting the last API key** keeps a subscription parent.
+   - **`DELETE /keys/:provider`** still removes everything for that provider, including the default-method preference.
+   - **Default method.** Migration `0012_provider_auth_preferences.sql` adds the table `provider_auth_preferences`:
+     - `workspace_id`, `provider`, `default_method` (`CHECK IN ('subscription', 'api-key')`), `updated_at`
+     - `PRIMARY KEY (workspace_id, provider)`
+     - deleted with the workspace in both stores
+     - written under the credential lock
+
+3. **Effective default.** The effective default is the stored preference when that method has a credential, otherwise whichever method exists. With no preference row it is `subscription` when one is connected, otherwise `api-key`, which is the behaviour before this ADR. Setting a method that has no credential is refused. The keys list, the runtime and budget admission all use the effective default, never the parent row's prefix.
+   - In Phase A a review uses only that method. A subscription default uses the subscription. An API-key default uses the rotating key list (ADR-0026) even when a subscription is connected.
+
+4. **The method fallback (Phase B).** When a dual provider has both methods, the model built for it is the effective default. It is followed **immediately** in the fallback chain by the same provider and model on the other method:
+   - an API-key rotating model behind a subscription default;
+   - a subscription model behind an API-key default.
+
+   The chain is `[primary, primary-other-method, fallback1, fallback1-other-method, …]`. The configured ADR-0008 fallbacks are unchanged. The subscription model keeps its resolver (`store.resolve`), so a token refresh still happens mid-review.
+
+5. **Triggers, with skip semantics (Phase B).** A method-fallback entry is entered only for failure kinds `quota` and `rate-limit`. That includes `QUOTA_EXHAUSTED_ALL_KEYS`, whose kind is `quota`.
+   - `ReviewModel` gains an optional `fallbackTriggers`. `FallbackChain` skips an entry whose triggers do not include the failure kind, and looks at the next entry with the global ADR-0008 triggers.
+   - The recorded `fallbackFrom` stays the primary's failure.
+   - Example: a subscription that fails with `auth` while keys exist goes to the configured fallback, and the keys are not used. An expired subscription is never silently paid for.
+
+6. **Disclosure (Phase B).** `ReviewModel` gains `authMethod?: 'subscription' | 'api-key'`, and `rotatingReviewModel` keeps `authMethod` and `includedInSubscription` of the method it wraps.
+   - The disclosure adds `fallbackFromMethod` and `modelUsedMethod` when they differ, because the `provider:model` labels are equal.
+   - **GitHub summary:** the fallback notice says the review continued with an API key (or with the subscription) because the other method hit its quota or rate limit.
+   - **Dashboard:** the run record stores the method switch in its existing `result` JSON, next to `fallback_from`. No new column.
+   - **Logs:** carry the methods and the failure kind, never a secret.
+
+7. **Cost and budget (Phase B).**
+   - **Pricing.** For a dual provider, `budget.pricing` is always the model's **API** price, whatever the default. It comes from the ADR-0024 lookup: the workspace manual price, then the catalog row of the same provider and model. Subscription calls stay $0 through `includedInSubscription`, and API-key calls are priced with the API price.
+   - **Final cost.** A run whose only fallback is a method fallback records `cost_usd` as the sum of its priced calls. This is identified by the disclosure: `fallbackFromMethod` is set and the `modelUsed` label equals `fallbackFrom`. A run that used a configured model fallback keeps the ADR-0008 §4 "unknown after fallback" rule.
+   - **Admission.** A subscription-default bot whose provider also has API keys reserves `perReviewUsd` like a paid bot (ADR-0022), because it may pay. `usesSubscription` in `process-review.ts` is decided from the effective default and the key list, not from `resolve()`.
+   - **API-equivalent.** The ADR-0024 figure is shown only when every call was on the subscription.
+
+8. **API and dashboard.**
+   - **Keys list.** For a dual provider it reports `hasSubscription`, `defaultMethod` (the effective default) and its `keys` slots. `authMethod` keeps meaning the effective default, for older clients.
+   - **New routes** (admin only, workspace scoped, rate-limited like the other credential routes):
+     - `PUT /api/workspaces/:ws/keys/:provider/default-method` with `{ method }`
+     - `DELETE /api/workspaces/:ws/keys/:provider/subscription`
+   - **Slot routes** (ADR-0026) accept dual providers.
+   - **Add-key form.** For a dual provider it offers both subscription sign-in and the + list of API keys with a per-key Test. Saving one does not replace the other.
+   - **Settings row.** Shows both methods and a default selector.
+   - **Text.** All user-facing text is in the en and ar dictionaries. The "this replaces the current credential" copy is removed.
+
+9. **Backup** (ADR-0018). Export carries the sealed subscription envelope, the sealed key list and the default method. Restore writes all three in one locked change. Older backups, which have no preference and no `keys`, restore as before.
+
+## Consequences
+
+- AGENTS.md "one active credential per provider; saving either method replaces the other" now has an exception for these three providers. ADR-0020 (one credential, replacement), ADR-0026 (scope and the parent mirror) and `docs/subscription-auth.md` are amended to point here.
+- ADR-0008 §4 is narrowed: a method-only fallback has a known cost.
+- ADR-0022 is narrowed: a subscription bot that may fall back to paid keys reserves its per-review budget.
+- An expired or revoked subscription (auth failure) is not hidden by paying with keys.
