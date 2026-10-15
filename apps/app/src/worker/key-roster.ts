@@ -10,6 +10,11 @@ export interface KeyRotationDisclosure {
   skipped: number;
 }
 
+export interface LoadedRosters {
+  rosters: Record<string, KeyRoster>;
+  keyIds: Record<string, string[]>;
+}
+
 /** Loads one roster per multi-key provider. Missing method, other providers, and empty lists are skipped. */
 export async function loadRosters(
   credentials: ProcessReviewCredentials,
@@ -17,10 +22,10 @@ export async function loadRosters(
   providers: readonly string[],
   primaryProvider: string,
   logger: Logger,
-  keyIdsByProvider: Record<string, string[]>,
-): Promise<Record<string, KeyRoster>> {
+): Promise<LoadedRosters> {
   const rosters: Record<string, KeyRoster> = {};
-  if (!credentials.resolveKeyRoster) return rosters;
+  const keyIds: Record<string, string[]> = {};
+  if (!credentials.resolveKeyRoster) return { rosters, keyIds };
   const seen = new Set<string>();
   for (const provider of providers) {
     if (seen.has(provider) || !isMultiKeyProvider(provider)) continue;
@@ -28,7 +33,7 @@ export async function loadRosters(
     try {
       const roster = await credentials.resolveKeyRoster(workspaceId, provider);
       if (!roster || roster.secrets.length === 0) continue;
-      keyIdsByProvider[provider] = roster.keyIds;
+      keyIds[provider] = [...roster.keyIds];
       rosters[provider] = { keys: roster.secrets, startIndex: roster.startIndex };
     } catch (error) {
       if (provider === primaryProvider) throw error;
@@ -42,7 +47,7 @@ export async function loadRosters(
       );
     }
   }
-  return rosters;
+  return { rosters, keyIds };
 }
 
 export function rosterSecrets(rosters: Readonly<Record<string, KeyRoster>>): Secret[] {

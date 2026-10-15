@@ -124,6 +124,67 @@ describe('reencryptAll', () => {
     expect(await store.listCredentials('ws-del')).toEqual([]);
   });
 
+  it('counts every already-current key of a multi-key list as skipped', async () => {
+    const key1 = randomBytes(32);
+    const vault = new EnvelopeVault({ current: 1, keys: new Map([[1, key1]]) });
+    const store = new MemoryStore();
+    const { CredentialService } = await import('../credentials/service.js');
+    const service = new CredentialService({ store, vault });
+    await service.saveKeyList({
+      workspaceId: 'ws-current',
+      provider: 'gemini',
+      apiKeys: ['gemini-current-key-aaaa-1111', 'gemini-current-key-bbbb-2222'],
+      userId: 'u',
+    });
+
+    expect(await reencryptAll(store, vault, ['ws-current'])).toEqual({ reencrypted: 0, skipped: 2 });
+  });
+
+  it('does not resurrect a deleted multi-key credential via the outer parent branch', async () => {
+    const key1 = randomBytes(32);
+    const key2 = randomBytes(32);
+    const vaultV1 = new EnvelopeVault({ current: 1, keys: new Map([[1, key1]]) });
+    const vaultV2 = new EnvelopeVault({ current: 2, keys: new Map([[1, key1], [2, key2]]) });
+    const store = new MemoryStore();
+    const { CredentialService } = await import('../credentials/service.js');
+    const service = new CredentialService({ store, vault: vaultV1 });
+    await service.saveKeyList({
+      workspaceId: 'ws-gone',
+      provider: 'gemini',
+      apiKeys: ['gemini-rotate-key-aaaa-1111', 'gemini-rotate-key-bbbb-2222'],
+      userId: 'u',
+    });
+    const slots = await store.listProviderKeys('ws-gone', 'gemini');
+    for (const slot of slots) {
+      await service.deleteProviderKey('ws-gone', 'gemini', slot.id);
+    }
+    expect(await store.getCredential('ws-gone', 'gemini')).toBeNull();
+
+    const listCredentials = store.listCredentials.bind(store);
+    vi.spyOn(store, 'listCredentials').mockImplementation(async (workspaceId) => {
+      const rows = await listCredentials(workspaceId);
+      if (workspaceId === 'ws-gone' && rows.length === 0) {
+        return [
+          {
+            id: 'stale-parent',
+            workspaceId: 'ws-gone',
+            provider: 'gemini',
+            keyVersion: 1,
+            last4: '1111',
+            createdBy: 'u',
+            createdAt: new Date(),
+          },
+        ];
+      }
+      return rows;
+    });
+
+    await reencryptAll(store, vaultV2, ['ws-gone']);
+
+    expect(await store.getCredential('ws-gone', 'gemini')).toBeNull();
+    expect(await store.listProviderKeys('ws-gone', 'gemini')).toEqual([]);
+  });
+
   it('re-encrypts from the locked slot snapshot so append and delete before rotation stay applied', async () => {
     const key1 = randomBytes(32);
     const key2 = randomBytes(32);
@@ -164,5 +225,59 @@ describe('reencryptAll', () => {
     const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
     const plain = await onlyV2.decrypt(slots[0]!.ciphertext, { workspaceId: 'ws-rot', provider: 'gemini' });
     expect([second, third]).toContain(plain);
+  });
+
+  it('applies concurrent slot changes before the modify callback and never calls getCredential inside it', async () => {
+    const key1 = randomBytes(32);
+    const key2 = randomBytes(32);
+    const vaultV1 = new EnvelopeVault({ current: 1, keys: new Map([[1, key1]]) });
+    const vaultV2 = new EnvelopeVault({ current: 2, keys: new Map([[1, key1], [2, key2]]) });
+    const store = new MemoryStore();
+    const { CredentialService } = await import('../credentials/service.js');
+    const service = new CredentialService({ store, vault: vaultV1 });
+    const first = 'gemini-rotate-key-aaaa-1111';
+    const second = 'gemini-rotate-key-bbbb-2222';
+    const third = 'gemini-rotate-key-cccc-3333';
+    await service.saveKeyList({ workspaceId: 'ws-race', provider: 'gemini', apiKeys: [first, second], userId: 'u' });
+
+    let insideModifyCallback = false;
+    let concurrentRan = false;
+    const getCredential = store.getCredential.bind(store);
+    vi.spyOn(store, 'getCredential').mockImplementation(async (workspaceId, provider) => {
+      if (insideModifyCallback) {
+        throw new Error('getCredential must not run inside modifyProviderKeys');
+      }
+      return getCredential(workspaceId, provider);
+    });
+
+    const modify = store.modifyProviderKeys.bind(store);
+    vi.spyOn(store, 'modifyProviderKeys').mockImplementation(async (workspaceId, provider, change) => {
+      if (provider === 'gemini' && workspaceId === 'ws-race' && !concurrentRan) {
+        concurrentRan = true;
+        await service.appendProviderKey({ workspaceId, provider: 'gemini', apiKey: third, userId: 'u' });
+      }
+      return modify(workspaceId, provider, async (current) => {
+        insideModifyCallback = true;
+        try {
+          return await change(current);
+        } finally {
+          insideModifyCallback = false;
+        }
+      });
+    });
+
+    await reencryptAll(store, vaultV2, ['ws-race']);
+
+    const slots = await store.listProviderKeys('ws-race', 'gemini');
+    expect(slots).toHaveLength(3);
+    expect(slots.every((slot) => slot.keyVersion === 2)).toBe(true);
+    const parent = await store.getCredential('ws-race', 'gemini');
+    expect(parent?.id).toBe(slots[0]?.id);
+    expect(parent?.keyVersion).toBe(2);
+    const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
+    const thirdSlot = slots.find((slot) => slot.last4 === third.slice(-4));
+    expect(thirdSlot).toBeDefined();
+    const thirdPlain = await onlyV2.decrypt(thirdSlot!.ciphertext, { workspaceId: 'ws-race', provider: 'gemini' });
+    expect(thirdPlain).toBe(third);
   });
 });

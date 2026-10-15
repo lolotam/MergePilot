@@ -59,15 +59,14 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     const primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret);
     const rotationEvents: KeyRotationDisclosure[] = [];
-    const rosterKeyIds: Record<string, string[]> = {};
-    const onKeyRotation = rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, rosterKeyIds);
+    const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>
+      rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds);
     const judgeSetup = await workspaceJudge(settings, workspaceId, deps.credentials, logger, {
       jobId: job.deliveryId,
       runId: br.run.id,
       fetch: deps.judgeFetch,
       priceLookup: ctx.judgePrices,
-      onKeyRotation,
-      rosterKeyIds,
+      makeRotationHandler,
     });
     credStore.addKnownSecrets(judgeSetup.secrets);
 
@@ -75,19 +74,18 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     if (deps.createModelForProvider) {
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
-      const rosters = await loadRosters(
+      const { rosters, keyIds } = await loadRosters(
         deps.credentials,
         workspaceId,
         [choice.provider, ...fallbackList.map((fallback) => fallback.provider)],
         choice.provider,
         logger,
-        rosterKeyIds,
       );
       credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {
         cwd: process.cwd(),
         keyRosters: rosters,
-        onKeyRotation,
+        onKeyRotation: makeRotationHandler(keyIds),
         ...(customBaseUrl
           ? { customBaseUrl, customFetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup, ...REVIEW_FETCH_LIMITS }) }
           : {}),

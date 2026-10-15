@@ -41,8 +41,7 @@ export async function workspaceJudge(
     runId: string;
     fetch?: FetchLike | undefined;
     priceLookup?: JudgePriceLookup | undefined;
-    onKeyRotation?: ((event: KeyRotationEvent) => void) | undefined;
-    rosterKeyIds?: Record<string, string[]> | undefined;
+    makeRotationHandler?: ((keyIds: Readonly<Record<string, readonly string[]>>) => (event: KeyRotationEvent) => void) | undefined;
   },
 ): Promise<WorkspaceJudge> {
   const config = settings.judge;
@@ -54,16 +53,18 @@ export async function workspaceJudge(
       if (credentials.resolveKeyRoster && isMultiKeyProvider(entry.provider)) {
         const roster = await credentials.resolveKeyRoster(workspaceId, entry.provider);
         if (roster && roster.secrets.length > 0) {
-          if (context.rosterKeyIds) context.rosterKeyIds[entry.provider] = roster.keyIds;
           secrets.push(...roster.secrets);
           const start = roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;
           const apiKey = roster.secrets[start];
+          const keyIdsSnapshot = { [entry.provider]: roster.keyIds };
           entries.push({
             ...entry,
             ...(apiKey ? { apiKey } : {}),
             keys: roster.secrets,
             startIndex: start,
-            ...(context.onKeyRotation ? { onKeyRotation: context.onKeyRotation } : {}),
+            ...(context.makeRotationHandler
+              ? { onKeyRotation: context.makeRotationHandler(keyIdsSnapshot) }
+              : {}),
           });
           continue;
         }
