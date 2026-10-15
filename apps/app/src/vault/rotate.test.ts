@@ -1,9 +1,47 @@
 import { randomBytes } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
-import { encodeSubscription, type SubscriptionCredential } from '@mergepilot/engine';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { decodeSubscription, encodeSubscription, type SubscriptionCredential } from '@mergepilot/engine';
 import { MemoryStore } from '../core/memory-store.js';
+import { CredentialService } from '../credentials/service.js';
 import { EnvelopeVault } from './envelope-vault.js';
 import { reencryptAll } from './rotate.js';
+
+const fakeValue = (...parts: string[]) => parts.join('-');
+
+/** A v1 store holding one xai subscription (no key slots), and a v2 vault for rotation. */
+async function subscriptionFixture(expires: number) {
+  const key1 = randomBytes(32);
+  const key2 = randomBytes(32);
+  const vaultV1 = new EnvelopeVault({ current: 1, keys: new Map([[1, key1]]) });
+  const vaultV2 = new EnvelopeVault({ current: 2, keys: new Map([[1, key1], [2, key2]]) });
+  const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
+  const store = new MemoryStore();
+  const service = new CredentialService({ store, vault: vaultV1 });
+  const sub: SubscriptionCredential = {
+    type: 'oauth', access: fakeValue('old', 'access', '1111'), refresh: fakeValue('old', 'refresh'), expires,
+  };
+  await service.saveSubscription('ws', 'xai', sub, 'u');
+  expect(await store.listProviderKeys('ws', 'xai')).toEqual([]);
+  return { store, service, vaultV1, vaultV2, onlyV2, sub };
+}
+
+/** Runs `concurrent` once, just before the next locked credential change, as another process would. */
+function beforeNextCredentialLock(store: MemoryStore, concurrent: () => Promise<unknown>) {
+  let ran = false;
+  const modify = store.modifyCredential.bind(store);
+  vi.spyOn(store, 'modifyCredential').mockImplementation(async (workspaceId, provider, change, signal) => {
+    if (!ran) {
+      ran = true;
+      await concurrent();
+    }
+    return modify(workspaceId, provider, change, signal);
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe('reencryptAll', () => {
   it('re-wraps credentials whose keyVersion is old and updates the store', async () => {
@@ -112,12 +150,7 @@ describe('reencryptAll', () => {
       createdBy: 'user-1',
       createdAt: new Date(),
     });
-    const getCredential = store.getCredential.bind(store);
-    vi.spyOn(store, 'getCredential').mockImplementation(async (wsId, provider) => {
-      const full = await getCredential(wsId, provider);
-      await store.deleteWorkspace(wsId);
-      return full;
-    });
+    beforeNextCredentialLock(store, () => store.deleteWorkspace('ws-del'));
 
     const result = await reencryptAll(store, vaultV2, ['ws-del']);
 
@@ -359,5 +392,52 @@ describe('reencryptAll', () => {
     const [slot] = await store.listProviderKeys('ws-both', 'anthropic');
     expect(slot?.keyVersion).toBe(2);
     expect(await onlyV2.decrypt(slot!.ciphertext, context)).toBe(apiKey);
+  });
+
+  it('keeps a subscription token refreshed concurrently with rotation instead of the stale read', async () => {
+    const { store, service, vaultV2, onlyV2 } = await subscriptionFixture(0);
+    const fetchMock = vi.fn(async () => Response.json({
+      access_token: fakeValue('new', 'access', '2222'), refresh_token: fakeValue('new', 'refresh'), expires_in: 3600,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    beforeNextCredentialLock(store, () => service.resolve('ws', 'xai'));
+
+    const result = await reencryptAll(store, vaultV2, ['ws']);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ reencrypted: 1, skipped: 0 });
+    const stored = await store.getCredential('ws', 'xai');
+    expect(stored?.keyVersion).toBe(2);
+    expect(stored?.last4).toBe('2222');
+    const envelope = decodeSubscription(await onlyV2.decrypt(stored!.ciphertext, { workspaceId: 'ws', provider: 'xai' }), 'xai');
+    expect(envelope?.credential.access).toBe(fakeValue('new', 'access', '2222'));
+    expect(envelope?.credential.refresh).toBe(fakeValue('new', 'refresh'));
+  });
+
+  it('does not resurrect a single-key credential disconnected during rotation', async () => {
+    const { store, service, vaultV2 } = await subscriptionFixture(Date.now() + 3_600_000);
+    beforeNextCredentialLock(store, () => service.deleteKey('ws', 'xai'));
+
+    const result = await reencryptAll(store, vaultV2, ['ws']);
+
+    expect(result).toEqual({ reencrypted: 0, skipped: 0 });
+    expect(await store.getCredential('ws', 'xai')).toBeNull();
+    expect(await store.listCredentials('ws')).toEqual([]);
+  });
+
+  it('writes nothing and leaks no token when re-encryption fails inside the lock', async () => {
+    const { store, vaultV1, vaultV2, sub } = await subscriptionFixture(Date.now() + 3_600_000);
+    const before = await store.getCredential('ws', 'xai');
+    vi.spyOn(vaultV2, 'encrypt').mockRejectedValue(new Error('vault unavailable'));
+
+    const error: unknown = await reencryptAll(store, vaultV2, ['ws']).then(() => null, (caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    const surfaced = `${String(error)}\n${(error as Error).stack ?? ''}`;
+    expect(surfaced).not.toContain(sub.access);
+    expect(surfaced).not.toContain(sub.refresh);
+    expect(await store.getCredential('ws', 'xai')).toEqual(before);
+    const plain = await vaultV1.decrypt(before!.ciphertext, { workspaceId: 'ws', provider: 'xai' });
+    expect(plain).toBe(encodeSubscription('xai', sub));
   });
 });
