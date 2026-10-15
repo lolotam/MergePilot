@@ -231,17 +231,24 @@ export function createJudge(options: JudgeOptions): Judge {
 
       const started = now();
       try {
-        const callOnce = (apiKey: Secret) => callSystemOne({
-          provider: entry.provider,
-          model: entry.model,
-          apiKey,
-          state: request.state,
-          questions: request.questions,
-          fetch: options.fetch,
-          timeoutMs: Math.min(callTimeoutMs, remaining),
-          signal: request.signal,
-          sleep: options.sleep,
-        });
+        const callOnce = (apiKey: Secret) => {
+          if (deadline - now() <= 0) {
+            // Not a quota or rate limit, so the rotation stops here instead of trying more keys.
+            throw new LlmFailure({ code: 'TIMEOUT', provider: entry.provider, message: 'the judge time budget ran out' });
+          }
+          return callSystemOne({
+            provider: entry.provider,
+            model: entry.model,
+            apiKey,
+            state: request.state,
+            questions: request.questions,
+            fetch: options.fetch,
+            // Recomputed per key: a rotation must not reuse the budget measured before the first key.
+            timeoutMs: Math.min(callTimeoutMs, deadline - now()),
+            signal: request.signal,
+            sleep: options.sleep,
+          });
+        };
         const result = roster
           ? await callWithKeyRotation({
               provider: entry.provider,

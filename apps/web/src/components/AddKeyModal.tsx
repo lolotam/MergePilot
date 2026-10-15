@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { MAX_PROVIDER_KEYS as ServerMaxKeys, MULTI_KEY_PROVIDER_IDS as ServerMultiKeyIds } from '@mergepilot/app/contract';
 import { CheckCircle2, Plus, X, XCircle } from 'lucide-react';
 import { api, type KeyProvider, type TestConnectionResponse } from '../api/client.js';
@@ -67,6 +67,16 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     fieldSeq.current = 1;
     setFields([blankField('field-0')]);
   };
+
+  // The page closes the modal after a successful save; drop every typed key then, never before.
+  useEffect(() => {
+    if (isOpen) return;
+    setApiKeyInput('');
+    setBaseUrlInput('');
+    setTestResult(null);
+    fieldSeq.current = 1;
+    setFields([blankField('field-0')]);
+  }, [isOpen]);
 
   const handleClose = () => {
     setAuthMethod('api-key');
@@ -165,8 +175,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
       }
       const first = apiKeys[0];
       if (!first) return;
-      resetFields();
-      setTestResult(null);
+      // Fields are kept until the save succeeds and the page closes the modal (see the effect above).
       await onSubmit(keyProvider, first, undefined, apiKeys);
       return;
     }

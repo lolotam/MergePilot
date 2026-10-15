@@ -13,7 +13,7 @@ vi.mock('../api/client.js', async (importOriginal) => {
 const COPY = {
   en: {
     provider: 'Provider',
-    secret: 'Secret API Key',
+    keyFieldLabel: 'Secret API Key',
     add: 'Add another API key',
     remove2: 'Remove this API key 2',
     test1: 'Test connection 1',
@@ -24,7 +24,7 @@ const COPY = {
   },
   ar: {
     provider: 'المزود',
-    secret: 'المفتاح السري (API Key)',
+    keyFieldLabel: 'المفتاح السري (API Key)',
     add: 'إضافة مفتاح API آخر',
     remove2: 'إزالة هذا المفتاح 2',
     test1: 'اختبار الاتصال 1',
@@ -61,7 +61,7 @@ describe('AddKeyModal multi-key fields', () => {
     expect(screen.getAllByPlaceholderText('sk-...')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /Test before saving|اختبر قبل الحفظ/ })).toBeNull();
 
-    await user.type(screen.getByLabelText(copy.secret), key);
+    await user.type(screen.getByLabelText(copy.keyFieldLabel), key);
     const test = screen.getByRole('button', { name: copy.test1 });
     await user.click(test);
     expect(await screen.findByText(copy.valid)).toBeDefined();
@@ -123,7 +123,7 @@ describe('AddKeyModal multi-key fields', () => {
       'en',
     );
     await user.selectOptions(screen.getByRole('combobox', { name: COPY.en.provider }), 'gemini');
-    const input = screen.getByLabelText(COPY.en.secret);
+    const input = screen.getByLabelText(COPY.en.keyFieldLabel);
     await user.type(input, key);
     await user.click(screen.getByRole('button', { name: COPY.en.test1 }));
     await user.clear(input);
@@ -134,4 +134,19 @@ describe('AddKeyModal multi-key fields', () => {
     });
     expect(screen.queryByText(COPY.en.valid)).toBeNull();
   });
+
+  it('keeps the typed keys when the save does not close the modal (failed save)', async () => {
+    const key = typedKey();
+    const onSubmit = vi.fn(async () => undefined);
+    renderSettings(<AddKeyModal isOpen onClose={vi.fn()} onSubmit={onSubmit} isPending={false} workspaceId="ws-1" />, 'en');
+    await user.selectOptions(screen.getByRole('combobox', { name: COPY.en.provider }), 'gemini');
+    await user.type(screen.getByLabelText(COPY.en.keyFieldLabel), key);
+
+    await user.click(screen.getByRole('button', { name: COPY.en.save }));
+
+    expect(onSubmit).toHaveBeenCalledWith('gemini', key, undefined, [key]);
+    // The page keeps the modal open when the save fails, so the 1-20 keys must still be there to retry.
+    expect((screen.getByLabelText(COPY.en.keyFieldLabel) as HTMLInputElement).value).toBe(key);
+  });
 });
+
