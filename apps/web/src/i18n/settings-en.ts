@@ -91,4 +91,10 @@ export const enSettings = {
   testReasonInvalidResponse: 'The provider answered without text',
   testReasonOther: 'Connection failed',
   testNotRun: 'Not tested yet',
+  addKeyField: 'Add another API key',
+  removeKeyField: 'Remove this API key',
+  keyFieldLimit: 'A provider can store at most 20 API keys.',
+  testKeyOutcomeValid: 'Valid, quota remaining',
+  testKeyOutcomeInvalid: 'Invalid key',
+  testKeyOutcomeQuota: 'Quota exhausted',
 };

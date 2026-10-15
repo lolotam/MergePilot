@@ -1,5 +1,5 @@
 import type { ReviewerBot } from './bot-types.js';
-import type { StoredCredential, WorkspaceSettings } from './types.js';
+import type { StoredCredential, StoredProviderKey, WorkspaceSettings } from './types.js';
 
 // Settings restore (ADR-0018). Re-exported by types.ts.
 
@@ -11,6 +11,11 @@ export interface WorkspaceRestore {
   bots?: ReviewerBot[] | undefined;
   /** Vault-encrypted keys, upserted by provider; credentials not listed stay as they are. */
   credentials?: StoredCredential[] | undefined;
+  /**
+   * Slot rows for providers in this restore (ADR-0026). Undefined leaves every slot list
+   * untouched. An empty array is a no-op. A non-empty list replaces that provider's slots.
+   */
+  providerKeys?: StoredProviderKey[] | undefined;
 }
 
 /** The restore part of AppStore. */

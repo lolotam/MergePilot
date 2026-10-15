@@ -9,7 +9,7 @@ import {
 } from './bot-types.js';
 import { deleteMemoryWorkspaceBots, listMemoryBots, upsertMemoryBot, type MemoryBots } from './memory-bots.js';
 import type { MemoryStore } from './memory-store.js';
-import type { StoredCredential, WorkspaceSettings } from './types.js';
+import type { KeyProvider, StoredCredential, StoredProviderKey, WorkspaceSettings } from './types.js';
 
 // Workspace-wide writes of the MemoryStore: a settings restore (the twin of pg-backup.ts, ADR-0018)
 // and deleting a workspace.
@@ -19,6 +19,11 @@ export interface MemoryRestoreTarget {
   readonly settings: Map<string, WorkspaceSettings>;
   saveSettings(settings: WorkspaceSettings): Promise<void>;
   saveCredential(credential: StoredCredential): Promise<void>;
+  modifyProviderKeys(
+    workspaceId: string,
+    provider: KeyProvider,
+    change: (current: StoredProviderKey[]) => Promise<{ keys: StoredProviderKey[]; cursor?: number }>,
+  ): Promise<StoredProviderKey[]>;
 }
 
 /** Throws BotNameTakenError / InvalidBotSlotError when the restored names or slots would clash. */
@@ -47,11 +52,21 @@ export async function restoreMemoryWorkspace(
   }
   if (restore.settings) await store.saveSettings({ ...restore.settings, workspaceId });
   for (const credential of restore.credentials ?? []) await store.saveCredential({ ...credential, workspaceId });
+  const groups = new Map<KeyProvider, StoredProviderKey[]>();
+  for (const key of restore.providerKeys ?? []) {
+    const list = groups.get(key.provider) ?? [];
+    list.push({ ...key, workspaceId });
+    groups.set(key.provider, list);
+  }
+  for (const [provider, keys] of groups) {
+    const ordered = [...keys].sort((a, b) => a.position - b.position);
+    await store.modifyProviderKeys(workspaceId, provider, async () => ({ keys: ordered, cursor: 0 }));
+  }
 }
 
 /** Drops the workspace's keys, settings, bots, runs and usage, and unlinks its installations. */
 export function deleteMemoryWorkspace(
-  store: Pick<MemoryStore, 'deletedWorkspaces' | 'credentials' | 'settings' | 'bots' | 'runs' | 'usage' | 'installations'>,
+  store: Pick<MemoryStore, 'deletedWorkspaces' | 'credentials' | 'providerKeys' | 'keyCursors' | 'settings' | 'bots' | 'runs' | 'usage' | 'installations'>,
   workspaceId: string,
 ): void {
   store.deletedWorkspaces.add(workspaceId);
@@ -59,6 +74,12 @@ export function deleteMemoryWorkspace(
     if (cred.workspaceId === workspaceId) {
       store.credentials.delete(key);
     }
+  }
+  for (const [key, rows] of store.providerKeys.entries()) {
+    if (rows.some((row) => row.workspaceId === workspaceId)) store.providerKeys.delete(key);
+  }
+  for (const key of store.keyCursors.keys()) {
+    if (key.startsWith(`${workspaceId}:`)) store.keyCursors.delete(key);
   }
   store.settings.delete(workspaceId);
   deleteMemoryWorkspaceBots(store.bots, workspaceId);

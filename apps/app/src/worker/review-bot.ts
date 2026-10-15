@@ -16,6 +16,7 @@ import { executeReview } from './execute-review.js';
 import { judgeRunParts, workspaceJudge, type WorkspaceJudge } from './judge-setup.js';
 import { customBaseUrlFor, fallbackChain, skippedFallbacksNote, usedModel, type ModelChoice } from './model-choice.js';
 import type { BotOutcome, BotRun, PanelContext } from './panel-types.js';
+import { loadRosters, rosterSecrets, rotationHandler, type KeyRotationDisclosure } from './key-roster.js';
 import { prepareRunResult } from './prepare-run-result.js';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewResult } from './types.js';
@@ -57,11 +58,14 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
 
     const primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret);
+    const rotationEvents: KeyRotationDisclosure[] = [];
+    const onKeyRotation = rotationHandler(rotationEvents, deps.credentials, workspaceId, logger);
     const judgeSetup = await workspaceJudge(settings, workspaceId, deps.credentials, logger, {
       jobId: job.deliveryId,
       runId: br.run.id,
       fetch: deps.judgeFetch,
       priceLookup: ctx.judgePrices,
+      onKeyRotation,
     });
     credStore.addKnownSecrets(judgeSetup.secrets);
 
@@ -69,8 +73,15 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     if (deps.createModelForProvider) {
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
+      const rosters = await loadRosters(deps.credentials, workspaceId, [
+        choice.provider,
+        ...fallbackList.map((fallback) => fallback.provider),
+      ]);
+      credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {
         cwd: process.cwd(),
+        keyRosters: rosters,
+        onKeyRotation,
         ...(customBaseUrl
           ? { customBaseUrl, customFetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup, ...REVIEW_FETCH_LIMITS }) }
           : {}),
@@ -121,7 +132,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         await runBotReview({ ...params, prFiles: consensus.prFiles, selection: consensus.selection }),
         { knownSecrets, judge: judgeSetup.judge },
       );
-      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice);
+      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice, rotationEvents);
       if (outcome.fallback) {
         const { from, code, detail: why } = outcome.fallback;
         deps.log?.(`Fallback used: ${from} failed (${code})${why ? `: ${why}` : ''}`);
@@ -142,7 +153,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
           }
         : {}),
     });
-    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice);
+    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice, rotationEvents);
     record.finish.reviewUrl = reviewResult.reviewUrl ?? null;
     await finishBotRun(ctx, br, record.finish, reviewResult.runResult);
     return { slot, result: record.result, findings: record.finish.findingsCount ?? 0 };
@@ -168,6 +179,7 @@ function recordOf(
   skippedNote: string | undefined,
   pricing: RunPricing,
   apiPrice?: ApiEquivalentPrice | undefined,
+  rotation: readonly KeyRotationDisclosure[] = [],
 ): BotRecord {
   const status: ReviewRunStatus =
     review.outcome === 'completed'
@@ -199,6 +211,7 @@ function recordOf(
       // What priced this bot's own model (ADR-0016), plus the display-only API-equivalent of a
       // subscription or token-plan run (ADR-0024), from its own usage before the judge's tokens.
       pricing: { ...pricing, ...apiEquivalentFields(rr.usage, review.fallbackFrom ? undefined : apiPrice) },
+      ...(rotation.length > 0 ? { keyRotation: rotation.slice(0, 20).map((event) => ({ ...event })) } : {}),
     };
     findingsCount = rr.inline.length + rr.summaryOnly.length;
   } else if (status === 'skipped') {

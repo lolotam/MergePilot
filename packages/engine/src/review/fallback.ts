@@ -24,6 +24,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<LlmFailureCode>([
   'BAD_REQUEST',
   'ABORTED',
   'UNKNOWN',
+  'QUOTA_EXHAUSTED_ALL_KEYS',
 ]);
 
 /** The failure category of anything a model threw, or undefined when it is not an LlmFailure. */

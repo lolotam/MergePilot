@@ -71,6 +71,29 @@ export async function storedTarget(
   return { ok: true, target: { apiKey } };
 }
 
+/** One stored slot, by id. Nothing is written. A missing id is `key_not_found`. */
+export async function storedKeyById(
+  deps: ProviderTargetDeps,
+  workspaceId: string,
+  provider: ApiProviderId,
+  keyId: string,
+  signal?: AbortSignal,
+): Promise<TargetResult> {
+  let apiKey: string;
+  try {
+    const secret = await deps.credentials.readStoredKey(workspaceId, provider, keyId);
+    if (!secret) return fail(404, 'key_not_found', 'Stored API key was not found');
+    apiKey = secret.reveal();
+  } catch {
+    return fail(404, 'key_not_found', 'The stored key could not be read');
+  }
+  if (provider === 'custom') {
+    const cred = await deps.store.getCredential(workspaceId, provider);
+    return customTarget(deps, apiKey, cred?.baseUrl ?? undefined, signal);
+  }
+  return { ok: true, target: { apiKey } };
+}
+
 /** A key typed in the dialog and not saved; a base URL is accepted for `custom` only. */
 export async function unsavedTarget(
   deps: ProviderTargetDeps,

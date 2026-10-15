@@ -1,5 +1,6 @@
 import { deriveBackupKey, newBackupSalt, sealBackupKey } from '../backup/passphrase-crypto.js';
 import type { AppStore } from '../core/types.js';
+import { isMultiKeyProvider } from '../credentials/multi-key.js';
 import type { CredentialService } from '../credentials/service.js';
 import { BACKUP_FORMAT, BACKUP_VERSION, type BackupCredential, type BackupFile } from './contract-backup.js';
 
@@ -51,6 +52,19 @@ export async function buildBackupFile(
   const credentials: BackupCredential[] = [];
   for (const meta of keys) {
     if (fileKey && salt) {
+      if (isMultiKeyProvider(meta.provider)) {
+        const roster = await deps.credentials.revealRoster(workspace.id, meta.provider);
+        const sealed = roster.map((item) =>
+          sealBackupKey(item.secret.reveal(), fileKey, salt, { provider: meta.provider, baseUrl: null }),
+        );
+        const first = sealed[0];
+        credentials.push({
+          provider: meta.provider,
+          last4: roster[0]?.last4 ?? meta.last4,
+          ...(first ? { key: first, keys: sealed } : {}),
+        });
+        continue;
+      }
       // The key and its URL come from ONE read, so a custom key rotated with a new URL during the
       // export can never be sealed (and later restored) against the old endpoint.
       const resolved = await deps.credentials.resolveCredential(workspace.id, meta.provider);

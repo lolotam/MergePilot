@@ -7,10 +7,11 @@ import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import { BotNameTakenError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
-import type { CredentialService } from '../credentials/service.js';
+import { isMultiKeyProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
+import { KeyOrderError, SingleKeyProviderError, TooManyKeysError, type CredentialService } from '../credentials/service.js';
 import type { RunEventBus } from '../core/run-events.js';
 import type { GitHubAppClientFactory } from '../worker/types.js';
-import { KeyProviderSchema, SettingsUpdateSchema, SaveKeyRequestSchema } from './contract.js';
+import { KeyProviderSchema, SettingsUpdateSchema, SaveKeysRequestSchema } from './contract.js';
 import { validateKey as defaultValidateKey } from './validate-key.js';
 import {
   sendError,
@@ -22,6 +23,7 @@ import { registerInstallationRoutes } from './installation-routes.js';
 import { registerJudgeRoutes } from './judge-routes.js';
 import { registerPricesRoutes } from './prices-routes.js';
 import { invalidateModelsCache, registerProviderRoutes } from './provider-routes.js';
+import { registerProviderKeyRoutes } from './provider-key-routes.js';
 import { registerRunsRoutes } from './runs-routes.js';
 import type { RunStreamOptions } from './runs-events-routes.js';
 import { registerBackupRoutes } from './backup-routes.js';
@@ -52,6 +54,28 @@ export interface DashboardApiDeps {
 }
 
 const toIso = (d: Date | string) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
+
+function redactSecrets(message: string, secrets: readonly string[]): string {
+  let safe = message;
+  for (const secret of secrets) {
+    if (secret) safe = safe.replaceAll(secret, '[REDACTED]');
+  }
+  return safe;
+}
+
+function keyError(err: unknown, secrets: readonly string[]): { status: number; code: string; message: string } {
+  if (err instanceof TooManyKeysError) {
+    return { status: 400, code: 'too_many_keys', message: `This provider accepts at most ${MAX_PROVIDER_KEYS} API keys` };
+  }
+  if (err instanceof SingleKeyProviderError) {
+    return { status: 400, code: 'single_key_provider', message: 'This provider stores one credential' };
+  }
+  if (err instanceof KeyOrderError) {
+    return { status: 400, code: 'key_order', message: 'Key order must list every stored key exactly once' };
+  }
+  const raw = err instanceof Error ? err.message : String(err);
+  return { status: 422, code: 'validation_failed', message: redactSecrets(raw, secrets) };
+}
 
 export function registerDashboardApi(
   app: FastifyInstance,
@@ -167,6 +191,18 @@ export function registerDashboardApi(
         createdAt: toIso(k.createdAt),
         createdBy: k.createdBy,
         authMethod: k.authMethod ?? 'api-key',
+        ...(k.keys
+          ? {
+              keys: k.keys.map((slot) => ({
+                id: slot.id,
+                position: slot.position,
+                last4: slot.last4,
+                createdAt: toIso(slot.createdAt),
+                lastTestStatus: slot.lastTestStatus,
+                lastTestedAt: slot.lastTestedAt ? toIso(slot.lastTestedAt) : null,
+              })),
+            }
+          : {}),
       }));
       return reply.status(200).send({ keys: safeKeys });
     },
@@ -187,7 +223,14 @@ export function registerDashboardApi(
       }
       const provider = providerParse.data;
 
-      const bodyParse = SaveKeyRequestSchema.safeParse(request.body);
+      const rawBody = request.body;
+      const rawList = rawBody && typeof rawBody === 'object' && 'apiKeys' in rawBody
+        ? (rawBody as { apiKeys?: unknown }).apiKeys
+        : undefined;
+      if (Array.isArray(rawList) && rawList.length > MAX_PROVIDER_KEYS) {
+        return sendError(reply, 400, 'too_many_keys', `This provider accepts at most ${MAX_PROVIDER_KEYS} API keys`);
+      }
+      const bodyParse = SaveKeysRequestSchema.safeParse(rawBody);
       if (!bodyParse.success) {
         return sendError(
           reply,
@@ -196,8 +239,11 @@ export function registerDashboardApi(
           bodyParse.error.issues[0]?.message ?? 'Invalid apiKey',
         );
       }
-      const apiKey = bodyParse.data.apiKey.trim();
-      if (apiKey.startsWith(SUBSCRIPTION_PREFIX)) {
+      if (bodyParse.data.apiKeys && !isMultiKeyProvider(provider)) {
+        return sendError(reply, 400, 'single_key_provider', 'This provider stores one credential');
+      }
+      const apiKeys = (bodyParse.data.apiKeys ?? [bodyParse.data.apiKey ?? '']).map((key) => key.trim());
+      if (apiKeys.some((key) => key.startsWith(SUBSCRIPTION_PREFIX))) {
         return sendError(reply, 400, 'validation_error', 'Use subscription sign-in instead of the API key field');
       }
       let baseUrl = bodyParse.data.baseUrl?.trim();
@@ -217,28 +263,23 @@ export function registerDashboardApi(
       }
 
       try {
-        await validateKeyFn(provider, apiKey, baseUrl);
+        for (const apiKey of apiKeys) await validateKeyFn(provider, apiKey, baseUrl);
       } catch (err) {
-        const rawMsg = err instanceof Error ? err.message : String(err);
-        const safeMsg = rawMsg.replaceAll(apiKey, '[REDACTED]');
-        return sendError(reply, 422, 'validation_failed', safeMsg);
+        return sendError(reply, 422, 'validation_failed', keyError(err, apiKeys).message);
       }
 
       const userId = request.auth?.userId ?? '';
       try {
-        const saved = await deps.credentials.saveKey({
-          workspaceId,
-          provider,
-          apiKey,
-          userId,
-          baseUrl,
-        });
+        const saved = bodyParse.data.apiKeys
+          ? await deps.credentials.saveKeyList({ workspaceId, provider, apiKeys, userId, baseUrl })
+          : await deps.credentials.saveKey({ workspaceId, provider, apiKey: apiKeys[0] ?? '', userId, baseUrl });
         invalidateModelsCache(workspaceId, provider);
         request.log.info(
           {
             event: 'credential.key_saved',
             workspaceId,
             provider,
+            keyCount: apiKeys.length,
           },
           'Provider API key saved',
         );
@@ -249,11 +290,22 @@ export function registerDashboardApi(
           baseUrl: saved.baseUrl ?? null,
           createdAt: toIso(saved.createdAt),
           createdBy: saved.createdBy,
+          ...(saved.keys
+            ? {
+                keys: saved.keys.map((slot) => ({
+                  id: slot.id,
+                  position: slot.position,
+                  last4: slot.last4,
+                  createdAt: toIso(slot.createdAt),
+                  lastTestStatus: slot.lastTestStatus,
+                  lastTestedAt: slot.lastTestedAt ? toIso(slot.lastTestedAt) : null,
+                })),
+              }
+            : {}),
         });
       } catch (err) {
-        const rawMsg = err instanceof Error ? err.message : String(err);
-        const safeMsg = rawMsg.replaceAll(apiKey, '[REDACTED]');
-        return sendError(reply, 422, 'validation_failed', safeMsg);
+        const mapped = keyError(err, apiKeys);
+        return sendError(reply, mapped.status, mapped.code, mapped.message);
       }
     },
   );
@@ -306,6 +358,7 @@ export function registerDashboardApi(
     },
   );
 
+  registerProviderKeyRoutes(app, deps, validateKeyFn);
   registerInstallationRoutes(app, deps);
   registerRunsRoutes(app, deps);
   registerProviderRoutes(app, deps);

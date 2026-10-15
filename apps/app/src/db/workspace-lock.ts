@@ -5,7 +5,9 @@ import { WorkspaceDeletedError } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import {
   installations,
+  providerApiKeys,
   providerCredentials,
+  providerKeyCursors,
   reviewRuns,
   workspaceSettings,
   workspaceUsageMonthly,
@@ -76,6 +78,8 @@ export async function deleteWorkspaceInTx(tx: AppTx, workspaceId: string): Promi
     .where(eq(organization.id, workspaceId));
   await tx.delete(organization).where(eq(organization.id, workspaceId));
   await tx.delete(providerCredentials).where(eq(providerCredentials.workspaceId, workspaceId));
+  await tx.delete(providerApiKeys).where(eq(providerApiKeys.workspaceId, workspaceId));
+  await tx.delete(providerKeyCursors).where(eq(providerKeyCursors.workspaceId, workspaceId));
   await tx.delete(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
   await tx.delete(reviewRuns).where(eq(reviewRuns.workspaceId, workspaceId));
   // After the runs: a run finishing concurrently commits its usage row before this delete runs.

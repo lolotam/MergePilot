@@ -1,0 +1,27 @@
+# ADR-0026: Multi-key rotation for free-quota providers
+
+**Date:** 2026-10-15 · **Status:** accepted · **Owner decision:** decisions log س41
+
+## Context
+
+A workspace stored one active credential per provider. Gemini, OpenRouter and OpenCode Zen are used against free-quota models, and one key runs out while others would still answer. The owner asked to store several secret keys per provider and, at review time, try the next key when the current one is quota-exhausted.
+
+ADR-0008 already switches **model or provider** when a call fails, and that switch is disclosed. ADR-0020 stores one credential per provider for subscription sign-in and said that path needed no schema migration. Those rules stay for every provider that is not in the list below.
+
+## Decision
+
+1. **Scope.** Only `gemini`, `openrouter` and `opencode-zen` store an ordered list of 1 to 20 API keys (`MULTI_KEY_PROVIDER_IDS`, `MAX_PROVIDER_KEYS` in `apps/app/src/credentials/multi-key.ts`). Adding a provider is one entry in that list. Subscriptions (Codex, Claude, Grok) and every other provider keep exactly one credential and their current behaviour.
+2. **Not a model fallback.** Rotation keeps the same provider and the same model. Only the key changes. It is not the fallback in ADR-0008. It is still disclosed: a completed run's `result.keyRotation` records `{ provider, keyIndex, skipped }` and the log event `credential.key_rotation` records the same. The secret is never written there.
+3. **When the next key is tried.** The engine helper `callWithKeyRotation` advances only after a classified `QUOTA` or `RATE_LIMIT` failure (HTTP 429 or the provider's quota error, after the adapter's own retries on that same key). Auth errors, 5xx, timeouts and every other `LlmFailure` are returned unchanged and no later key is tried. When every key in the list has failed that way, one `LlmFailure` with code `QUOTA_EXHAUSTED_ALL_KEYS` is raised. Its kind is `quota` and its class is `exhausted`, so an explicitly configured model/provider fallback (ADR-0008) still runs afterwards. The message names the provider and the key count, not the provider body and not the secret.
+4. **Where it runs.** `packages/engine` does not import `apps/`. The app passes an ordered `Secret[]` plus a start index, and an `onKeyRotation` callback, into `createReviewModel` and into each judge entry. The Action keeps a single key.
+5. **Cursor.** The last successful 0-based index is stored per workspace and provider in `provider_key_cursors`, updated under the existing credential lock, so the web and the worker share it. A missing or out-of-range cursor starts at 0. The order tried is that index, then later keys, then earlier keys, once each. Success stores the index. Exhausting every key leaves the cursor unchanged. A cursor write that fails is logged (`credential.key_cursor_failed`, error name only) and does not fail a review that already succeeded. Concurrent updates may last-write-win; the stored value stays inside the list.
+6. **Storage.** Each key is encrypted with the existing vault envelope (same AAD: workspace and provider). Order is the `position` column, 0-based. The parent `provider_credentials` row stays the position-0 key so current "has a key" checks keep working. Migration `0011_provider_api_keys.sql` copies an existing key for those three providers to position 0. Other providers are not copied.
+7. **API.** List, create, replace, append, delete and reorder are admin-only and workspace-scoped, like today's key routes. A list item is `id`, `position`, `last4`, `createdAt`, `lastTestStatus`, `lastTestedAt`. The secret is not returned. The 20-key cap is enforced on the server with `MAX_PROVIDER_KEYS`. The web keeps a local copy of that constant and of `MULTI_KEY_PROVIDER_IDS`, locked to the contract with a type-only import, because a value import would pull the app runtime into the dashboard bundle. Testing a typed-but-unsaved key calls the existing provider test and stores nothing. Testing a stored key by `keyId` records `valid`, `invalid` or `quota-exhausted`.
+8. **Backup.** Settings backup (ADR-0018) already seals secrets. A multi-key credential is exported as the existing `key` field (the first seal, so older readers restore position 0) plus `keys` in order. Restore treats `keys` as the source of truth when it is present. `BACKUP_VERSION` stays 1. `counts.keys` still counts credentials that have a `key` field.
+
+## Consequences
+
+- The AGENTS.md invariant "one active credential per provider" now has this exception. ADR-0020's "one credential / no schema migration" is superseded only for these three API-key providers. Subscription replacement is unchanged.
+- ADR-0008's note that one key serves both review and judge still holds: the list is the credential, and review and judge share it. Judge rotation applies only when the judge provider is in the multi-key list (`openrouter`, `opencode-zen`).
+- Dashboard responses, logs and run events can name a key index. They must not name the secret.
+- A per-process cache was rejected: web and worker would disagree about which key to try first.

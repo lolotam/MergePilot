@@ -11,6 +11,10 @@ import {
 import { BotNameTakenError, sameBotName, type ReviewerBot } from './bot-types.js';
 import { deleteMemoryWorkspace, restoreMemoryWorkspace } from './memory-workspace.js';
 import {
+  listMemoryProviderKeys, listMemoryWorkspaceProviderKeys, modifyMemoryProviderKeys, readMemoryKeyCursor,
+  recordMemoryProviderKeyTest, writeMemoryKeyCursor,
+} from './memory-provider-keys.js';
+import {
   addMemoryUsage, deleteMemoryRuns, finishMemoryMaintenance, groupMemoryRuns, latestMemoryMaintenance,
   memoryRetentionPolicies, pruneMemoryRuns, startMemoryMaintenance,
 } from './memory-maintenance.js';
@@ -21,16 +25,19 @@ import type { ModelKey, StoredModelPrice } from './price-types.js';
 import type {
   KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
   ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
-  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StaleRunRef, StoredCredential, WorkspaceRestore,
-  WorkspaceSettings,
+  MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StaleRunRef, StoredCredential, StoredProviderKey,
+  ProviderKeyChange, KeyQuotaStatus, WorkspaceRestore, WorkspaceSettings,
 } from './types.js';
-
 /** In-memory AppStore for tests and local development. Same contract as the Postgres store. */
 export class MemoryStore implements AppStore {
   readonly deliveries = new Set<string>();
   readonly installations = new Map<number, Installation | Omit<Installation, 'workspaceId'>>();
   readonly settings = new Map<string, WorkspaceSettings>();
   readonly credentials = new Map<string, StoredCredential>();
+  /** Ordered slot rows, keyed like `credentials` (`workspaceId:provider`). */
+  readonly providerKeys = new Map<string, StoredProviderKey[]>();
+  /** Last successful 0-based key index. Missing means the next call starts at 0. */
+  readonly keyCursors = new Map<string, number>();
   private readonly credentialLocks = new Map<string, Promise<void>>();
   readonly runs = new Map<string, ReviewRun>();
   readonly deletedWorkspaces = new Set<string>();
@@ -151,7 +158,7 @@ export class MemoryStore implements AppStore {
     await this.modifyCredential(credential.workspaceId, credential.provider, async () => ({ ...credential }));
   }
 
-  async modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>, signal?: AbortSignal): Promise<StoredCredential | null> {
+  private async withCredentialLock<T>(workspaceId: string, provider: string, work: () => Promise<T>): Promise<T> {
     const key = `${workspaceId}:${provider}`;
     const previous = this.credentialLocks.get(key) ?? Promise.resolve();
     let release!: () => void;
@@ -159,18 +166,29 @@ export class MemoryStore implements AppStore {
     this.credentialLocks.set(key, lock);
     await previous;
     try {
-      signal?.throwIfAborted();
-      this.assertLive(workspaceId);
-      const next = await change(this.credentials.get(key) ?? null);
-      signal?.throwIfAborted();
-      this.assertLive(workspaceId);
-      if (next) this.credentials.set(key, { ...next });
-      else this.credentials.delete(key);
-      return next;
+      return await work();
     } finally {
       release();
       if (this.credentialLocks.get(key) === lock) this.credentialLocks.delete(key);
     }
+  }
+
+  async modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>, signal?: AbortSignal): Promise<StoredCredential | null> {
+    return this.withCredentialLock(workspaceId, provider, async () => {
+      signal?.throwIfAborted();
+      this.assertLive(workspaceId);
+      const key = `${workspaceId}:${provider}`;
+      const next = await change(this.credentials.get(key) ?? null);
+      signal?.throwIfAborted();
+      this.assertLive(workspaceId);
+      if (next) this.credentials.set(key, { ...next });
+      else {
+        this.credentials.delete(key);
+        this.providerKeys.delete(key);
+        this.keyCursors.delete(key);
+      }
+      return next;
+    });
   }
 
   async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
@@ -185,6 +203,39 @@ export class MemoryStore implements AppStore {
 
   async deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void> {
     await this.modifyCredential(workspaceId, provider, async () => null);
+  }
+
+  async listProviderKeys(workspaceId: string, provider: KeyProvider): Promise<StoredProviderKey[]> {
+    return listMemoryProviderKeys(this, workspaceId, provider);
+  }
+
+  async listWorkspaceProviderKeys(workspaceId: string): Promise<StoredProviderKey[]> {
+    return listMemoryWorkspaceProviderKeys(this, workspaceId);
+  }
+
+  async modifyProviderKeys(workspaceId: string, provider: KeyProvider, change: (current: StoredProviderKey[]) => Promise<ProviderKeyChange>): Promise<StoredProviderKey[]> {
+    return modifyMemoryProviderKeys(this.keyLock(workspaceId, provider), workspaceId, provider, change);
+  }
+
+  async getKeyCursor(workspaceId: string, provider: KeyProvider): Promise<number> {
+    return readMemoryKeyCursor(this, workspaceId, provider);
+  }
+
+  async setKeyCursor(workspaceId: string, provider: KeyProvider, position: number): Promise<void> {
+    await writeMemoryKeyCursor(this.keyLock(workspaceId, provider), workspaceId, provider, position);
+  }
+
+  async recordProviderKeyTest(workspaceId: string, provider: KeyProvider, keyId: string, status: KeyQuotaStatus, testedAt: Date): Promise<boolean> {
+    return recordMemoryProviderKeyTest(this.keyLock(workspaceId, provider), workspaceId, provider, { keyId, status, testedAt });
+  }
+
+  /** Tables plus the per-provider lock. The lock is not re-entrant, so helpers must not call back into the store. */
+  private keyLock(workspaceId: string, provider: KeyProvider) {
+    return {
+      tables: this,
+      runLocked: <T>(work: () => Promise<T>) => this.withCredentialLock(workspaceId, provider, work),
+      assertLive: (id: string) => this.assertLive(id),
+    };
   }
 
   async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {

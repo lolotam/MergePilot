@@ -8,6 +8,7 @@
  */
 import type { Secret } from '../credentials/secret.js';
 import { LlmFailure } from '../llm/failure.js';
+import { callWithKeyRotation } from '../providers/key-rotation.js';
 import type { FetchLike } from '../providers/http.js';
 import { estimateTokens } from '../review/budget.js';
 
@@ -37,6 +38,15 @@ export interface JudgeEntry {
   model: string;
   /** Undefined when the workspace / environment has no key: the entry is skipped and disclosed. */
   apiKey?: Secret | undefined;
+  /**
+   * Ordered keys for one provider (ADR-0026). When set, this entry rotates on quota or
+   * rate limit before the judge moves to the next provider. Absent keeps a single key.
+   */
+  keys?: readonly Secret[] | undefined;
+  /** 0-based index to try first. The judge advances it after a successful call. */
+  startIndex?: number | undefined;
+  /** Discloses which key answered. Must not throw a secret, and a throw is ignored. */
+  onKeyRotation?: ((event: { provider: string; index: number; skipped: number }) => void) | undefined;
 }
 
 /** A judge model's price in USD per million tokens (Jev bills input; output is usually 0). */
@@ -133,6 +143,7 @@ export function judgeFailureCode(error: unknown): string {
     case 'RATE_LIMIT':
       return 'rate-limited';
     case 'QUOTA':
+    case 'QUOTA_EXHAUSTED_ALL_KEYS':
       return 'quota';
     case 'SERVER':
       return error.status === 529 ? 'overloaded' : 'server';
@@ -167,6 +178,7 @@ export function createJudge(options: JudgeOptions): Judge {
   let unavailable: string | undefined;
   // A fallback that answered stays in use for the rest of this review (ADR-0008).
   let startAt = 0;
+  const keyCursor = entries.map((entry) => entry.startIndex ?? 0);
   const priceOf = (provider: JudgeProviderId, model: string): JudgePrice | undefined => {
     const looked = options.priceLookup?.(provider, model);
     if (looked) return looked;
@@ -204,7 +216,8 @@ export function createJudge(options: JudgeOptions): Judge {
         skip('time-budget');
         break;
       }
-      if (!entry.apiKey) {
+      const roster = entry.keys && entry.keys.length > 0 ? entry.keys : undefined;
+      if (!entry.apiKey && !roster) {
         skip('no-key');
         continue;
       }
@@ -218,10 +231,10 @@ export function createJudge(options: JudgeOptions): Judge {
 
       const started = now();
       try {
-        const result = await callSystemOne({
+        const callOnce = (apiKey: Secret) => callSystemOne({
           provider: entry.provider,
           model: entry.model,
-          apiKey: entry.apiKey,
+          apiKey,
           state: request.state,
           questions: request.questions,
           fetch: options.fetch,
@@ -229,6 +242,32 @@ export function createJudge(options: JudgeOptions): Judge {
           signal: request.signal,
           sleep: options.sleep,
         });
+        const result = roster
+          ? await callWithKeyRotation({
+              provider: entry.provider,
+              keyCount: roster.length,
+              startIndex: keyCursor[index] ?? 0,
+              call: (keyIndex) => {
+                const apiKey = roster[keyIndex];
+                if (!apiKey) {
+                  throw new LlmFailure({
+                    code: 'INVALID_CREDENTIAL',
+                    provider: entry.provider,
+                    message: `no API key is configured for ${entry.provider}`,
+                  });
+                }
+                return callOnce(apiKey);
+              },
+            }).then((outcome) => {
+              keyCursor[index] = outcome.index;
+              try {
+                entry.onKeyRotation?.({ provider: entry.provider, index: outcome.index, skipped: outcome.skipped });
+              } catch {
+                // Disclosure must not fail a call that already succeeded.
+              }
+              return outcome.value;
+            })
+          : await callOnce(entry.apiKey!);
         const ms = now() - started;
         const cost =
           result.costUsd ??
@@ -285,7 +324,11 @@ export function createJudge(options: JudgeOptions): Judge {
   const primary = entries[0];
   return {
     label: primary ? `${primary.provider}:${primary.model}` : 'jev',
-    entries: entries.map((e) => ({ provider: e.provider, model: e.model, hasKey: Boolean(e.apiKey) })),
+    entries: entries.map((e) => ({
+      provider: e.provider,
+      model: e.model,
+      hasKey: Boolean(e.apiKey) || (e.keys?.length ?? 0) > 0,
+    })),
     decide,
     report: () => ({
       attempts: [...allAttempts],
