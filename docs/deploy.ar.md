@@ -151,7 +151,9 @@ WORKER_CONCURRENCY=8
 
 كل push على `main` بيبني صورة `ghcr.io/lolotam/mergepilot:<COMMIT_SHA>` الكاملة (40 حرف) عن طريق GitHub Actions.
 
-### الطريقة الحالية: يدوي (لحد ما صاحب المشروع يفعّل النشر التلقائي)
+### يدوي (بس لو النشر التلقائي متوقف)
+
+من 2026-10-15 النشر بيحصل تلقائياً (الجزء اللي بعده). الطريقة اليدوية دي للطوارئ بس، بعد ما توقف النشر التلقائي. ولاحظ إن Dokploy دلوقتي بيقرا من فرع `production` مش `main`، فالتعديل اليدوي بيتعمل هناك.
 
 1. **للتحديث:** عدّل سطر `x-image` في `deploy/docker-compose.dokploy.yml` للـ SHA الكامل الجديد (ويُفضّل مع الـ digest)، مثلاً:
    `x-image: &image ghcr.io/lolotam/mergepilot:<SHA>@sha256:<DIGEST>`
@@ -159,11 +161,11 @@ WORKER_CONCURRENCY=8
 2. **للتراجع:** رجّع سطر `x-image` للإصدار اللي كان شغال واضغط **Deploy**. ده بيرجّع الصورة بس، مش قاعدة البيانات: لو الإصدار الجديد فيه migration، التراجع محتاج قرار يدوي.
 3. النشر **مش zero-downtime**: Compose بيعيد إنشاء `web` و`worker`، والطلبات أو المراجعات اللي شغالة وقتها ممكن تتقطع.
 
-### النشر التلقائي المشروط (ADR-0025، متطبّق بس مش مفعّل)
+### النشر التلقائي المشروط (ADR-0025، مفعّل من 2026-10-15)
 
-الـ workflow `.github/workflows/release.yml` بيشتغل بعد ما `CI` و`Integration Tests` و`Docker Image` يخلصوا على push لـ `main`، أو يدوي من تبويب Actions بـ SHA كامل. من غير تفعيل بيعمل **dry run** بس: بيكتب الخطة في ملخص الـ job ومش بيغيّر حاجة.
+الـ workflow `.github/workflows/release.yml` بيشتغل بعد ما `CI` و`Integration Tests` و`Docker Image` يخلصوا على push لـ `main`، أو يدوي من تبويب Actions بـ SHA كامل. من غير `MERGEPILOT_AUTO_RELEASE=enabled` بيعمل **dry run** بس: بيكتب الخطة في ملخص الـ job ومش بيغيّر حاجة.
 
-لما يتفعّل، بينشر الـ commit بس لو:
+وهو مفعّل، بينشر الـ commit بس لو:
 - الـ checks التلاتة (`check` و`integration` و`Build and Push Docker Image`) نجحت على **نفس الـ SHA**، والـ commit موجود على `main`.
 - الصورة بتاعة الـ SHA ده مرفوعة، والـ label `org.opencontainers.image.revision` فيها بيساوي الـ SHA.
 - الـ commit أحدث من اللي شغال، ومفيش issue مفتوح عليه label `release-hold`.
@@ -172,12 +174,14 @@ commit فيه تغيير توثيق بس بيتخطّى (مفيش صورة جد�
 
 **لو التحقق فشل:** بيفتح issue عليه `release-hold` (وده بيوقف أي نشر بعده لحد ما يتقفل)، ويرجع تلقائياً للإصدار السابق **بس لو مفيش ملف اتغيّر تحت `apps/app/migrations/`**. مش بيمسح volumes، ومش بيعمل downgrade أو restore لقاعدة البيانات أبداً.
 
+**بعد ما تصلّح السبب:** اقفل **كل** issues الـ `release-hold` المفتوحة. لو فيه واحد مفتوح، أي تشغيل بيرجع `blocked: release hold open`. بعدين شغّل الـ workflow يدوي (**Run workflow**) بالـ SHA الكامل للـ commit اللي عايز تنشره.
+
 **خطوات التفعيل (صاحب المشروع بس):**
 1. يعمل فرع `production` على commit من `main` **ملف الـ compose بتاعه بيثبّت الصورة الشغالة دلوقتي** (مش الـ commit اللي اسمه زي الصورة). قبل أول release commit، الـ release بيعرف الإصدار الشغال من سطر `x-image` في رأس الفرع، وده اللي بيرجعله لو حصل rollback.
    - النهارده (2026-10-15) الصورة الشغالة `4c32dee68dcc08d4626995d755054c9bc3971cbc`، والـ commit الصح هو `4991976334911c832ac8bb0eddec4585855267a2`.
    - **مش** `4c32dee`: ملف الـ compose فيه بيثبّت `4915c26`، فالسجل كان هيعتبر ده الشغال ويرجع لصورة غلط.
 2. يحوّل مصدر الـ compose في Dokploy لفرع `production` ويقفل autoDeploy **في نفس التعديل**، قبل أي push على `production`. من اللحظة دي لحد التفعيل، الإنتاج بيفضل على الإصدار الحالي وأي merge على `main` مش بينزل لوحده.
-3. يعمل مستخدم API مخصّص في Dokploy بأقل صلاحيات تكفي لـ deploy الـ compose ده وقراءة حاويّاته (مش مفتاح admin)، ويعمل له مفتاح API (Settings → API)، ويحطه بنفسه في secret اسمه `DOKPLOY_API_KEY` بالأمر `gh secret set DOKPLOY_API_KEY --repo lolotam/MergePilot` (بيسأل على القيمة، فمش بتظهر في أي شات أو log).
+3. يعمل مستخدم API مخصّص في Dokploy بأقل صلاحيات تكفي لـ deploy الـ compose ده وقراءة حاويّاته (مش مفتاح admin). المستخدم ده محتاج: الوصول للـ API، ومشروع mergepilot والخدمة بتاعته، و**صلاحية Docker** عشان يقرا تفاصيل الحاويات. من غير صلاحية Docker، كل تحقق بيفشل بـ `container config answered HTTP 401`، وده اللي حصل في أول تشغيل. وبعدين ويعمل له مفتاح API (Settings → API)، ويحطه بنفسه في secret اسمه `DOKPLOY_API_KEY` بالأمر `gh secret set DOKPLOY_API_KEY --repo lolotam/MergePilot` (بيسأل على القيمة، فمش بتظهر في أي شات أو log).
 4. يحط الـ variables دي: `DOKPLOY_URL` (عنوان `https://…/api` بتاع Dokploy) و`DOKPLOY_COMPOSE_ID` و`DOKPLOY_APP_NAME` (واختياري `PRODUCTION_URL` و`RELEASE_BRANCH` و`DEPLOY_TIMEOUT_MINUTES` و`VERIFY_TIMEOUT_MINUTES`).
 5. يعمل label اسمه `release-hold` في الريبو.
 6. يختار مدة `WORKER_STOP_GRACE_PERIOD` في Environment بتاع Dokploy (الافتراضي 10s، ودي مدة الـ worker عشان يخلّص المراجعات الشغالة قبل ما Docker يقفله).
