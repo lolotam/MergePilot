@@ -41,6 +41,12 @@ describe('follow-up disclosure', () => {
       { sent: [], leftOut: [], pr: { sent: ['b.ts'], leftOut: ['c.ts'] }, openFindings: { shown: ['41', '42'], unchecked: false } },
       { sent: [], leftOut: [], openFindings: { shown: [], unchecked: true } },
     ]);
-    expect(merged).toEqual({ sent: [], leftOut: [], pr: { sent: ['a.ts', 'b.ts'], leftOut: ['c.ts'] }, openFindings: { shown: ['41', '42'] } });
+    expect(merged).toEqual({
+      sent: [],
+      leftOut: [],
+      pr: { sent: ['a.ts', 'b.ts'], leftOut: ['c.ts'] },
+      openFindings: { shown: ['41', '42'], unchecked: true },
+    });
+    expect(renderContextNote(merged, false)).toContain('Open findings re-checked: 2, but some bots could not read their thread status.');
   });
 });

@@ -37,6 +37,20 @@ describe('fetchReviewThreads', () => {
     ]);
   });
 
+  it('reads ids past 2^31-1 from fullDatabaseId', async () => {
+    const graphql: GraphqlRequest = async () =>
+      page([{ isResolved: false, comments: { nodes: [{ databaseId: null, fullDatabaseId: '4297107815' }] } }], null);
+    expect(await fetchReviewThreads(graphql, { owner: 'o', repo: 'r', pull_number: 5 })).toEqual([
+      { isResolved: false, firstCommentId: 4297107815 },
+    ]);
+  });
+
+  it('fails instead of returning a partial list when the threads exceed the page limit', async () => {
+    let n = 0;
+    const graphql: GraphqlRequest = async () => page([{ isResolved: false, comments: { nodes: [{ databaseId: ++n }] } }], `c${n}`);
+    await expect(fetchReviewThreads(graphql, { owner: 'o', repo: 'r', pull_number: 5 })).rejects.toThrow(/exceed/);
+  });
+
   it('returns no thread when the pull request is not found', async () => {
     expect(await fetchReviewThreads(async () => ({ repository: null }), { owner: 'o', repo: 'r', pull_number: 5 })).toEqual([]);
   });

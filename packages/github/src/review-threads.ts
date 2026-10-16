@@ -10,13 +10,13 @@ export const REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $num
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { isResolved comments(first: 1) { nodes { databaseId } } }
+        nodes { isResolved comments(first: 1) { nodes { databaseId fullDatabaseId } } }
       }
     }
   }
 }`;
 
-/** At most this many pages of 100 threads; a thread past them counts as not found (not shown). */
+/** At most this many pages of 100 threads; a PR with more fails the read, so it is disclosed as not re-checked. */
 const MAX_THREAD_PAGES = 10;
 
 /** A GraphQL call: `octokit.graphql` in both clients. */
@@ -27,10 +27,23 @@ interface ReviewThreadsPage {
     pullRequest?: {
       reviewThreads?: {
         pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-        nodes?: Array<{ isResolved?: boolean; comments?: { nodes?: Array<{ databaseId?: number | null } | null> } } | null>;
+        nodes?: Array<{
+          isResolved?: boolean;
+          comments?: { nodes?: Array<{ databaseId?: number | null; fullDatabaseId?: string | null } | null> };
+        } | null>;
       } | null;
     } | null;
   } | null;
+}
+
+/**
+ * The REST id of a thread's first comment. `fullDatabaseId` (a BigInt as a string) holds ids past
+ * 2^31-1, which review comment ids have reached; `databaseId` (a 32-bit Int) is the fallback.
+ */
+function firstCommentIdOf(comment: { databaseId?: number | null; fullDatabaseId?: string | null } | null | undefined): number | null {
+  const full = comment?.fullDatabaseId ? Number(comment.fullDatabaseId) : NaN;
+  if (Number.isSafeInteger(full)) return full;
+  return comment?.databaseId ?? null;
 }
 
 /** Every review thread of a pull request: resolved or not, and the id of its first comment. */
@@ -48,10 +61,12 @@ export async function fetchReviewThreads(graphql: GraphqlRequest, params: ListRe
     if (!connection) break;
     for (const node of connection.nodes ?? []) {
       if (!node) continue;
-      threads.push({ isResolved: node.isResolved === true, firstCommentId: node.comments?.nodes?.[0]?.databaseId ?? null });
+      threads.push({ isResolved: node.isResolved === true, firstCommentId: firstCommentIdOf(node.comments?.nodes?.[0]) });
     }
-    if (!connection.pageInfo?.hasNextPage || !connection.pageInfo.endCursor) break;
+    if (!connection.pageInfo?.hasNextPage || !connection.pageInfo.endCursor) return threads;
     cursor = connection.pageInfo.endCursor;
   }
+  // More threads than the page limit: a partial list would silently drop open findings.
+  if (cursor !== null) throw new Error(`review threads exceed ${MAX_THREAD_PAGES * 100}`);
   return threads;
 }

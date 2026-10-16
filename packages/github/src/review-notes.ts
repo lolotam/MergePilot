@@ -88,6 +88,12 @@ function openFindingsLine(open: ContextDisclosure['openFindings'], isArabic: boo
       : '> ℹ️ Open findings were not re-checked: their thread status could not be read.';
   }
   if (shown === 0) return undefined;
+  if (open.unchecked) {
+    // A panel where some bots re-checked and others could not read the thread status.
+    return isArabic
+      ? `> ℹ️ ملاحظات مفتوحة أُعيد فحصها: ${shown}، لكن بعض البوتات تعذّر عليها قراءة حالة المحادثات.`
+      : `> ℹ️ Open findings re-checked: ${shown}, but some bots could not read their thread status.`;
+  }
   return isArabic ? `> ℹ️ ملاحظات مفتوحة أُعيد فحصها: ${shown}.` : `> ℹ️ Open findings re-checked: ${shown}.`;
 }
 
@@ -101,7 +107,8 @@ export function mergeContextDisclosures(items: ReadonlyArray<ContextDisclosure |
   const opens = present.map((c) => c.openFindings).filter((o) => o !== undefined);
   if (opens.length > 0) {
     const shown = [...new Set(opens.flatMap((o) => o.shown))];
-    merged.openFindings = { shown, ...(opens.every((o) => o.unchecked) ? { unchecked: true } : {}) };
+    // One bot that could not re-check is disclosed, even when another could.
+    merged.openFindings = { shown, ...(opens.some((o) => o.unchecked) ? { unchecked: true } : {}) };
   }
   return merged;
 }

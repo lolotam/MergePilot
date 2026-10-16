@@ -168307,12 +168307,18 @@ var REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { isResolved comments(first: 1) { nodes { databaseId } } }
+        nodes { isResolved comments(first: 1) { nodes { databaseId fullDatabaseId } } }
       }
     }
   }
 }`;
 var MAX_THREAD_PAGES = 10;
+function firstCommentIdOf(comment) {
+  const full = comment?.fullDatabaseId ? Number(comment.fullDatabaseId) : NaN;
+  if (Number.isSafeInteger(full))
+    return full;
+  return comment?.databaseId ?? null;
+}
 async function fetchReviewThreads(graphql3, params) {
   const threads = [];
   let cursor = null;
@@ -168329,12 +168335,14 @@ async function fetchReviewThreads(graphql3, params) {
     for (const node2 of connection.nodes ?? []) {
       if (!node2)
         continue;
-      threads.push({ isResolved: node2.isResolved === true, firstCommentId: node2.comments?.nodes?.[0]?.databaseId ?? null });
+      threads.push({ isResolved: node2.isResolved === true, firstCommentId: firstCommentIdOf(node2.comments?.nodes?.[0]) });
     }
     if (!connection.pageInfo?.hasNextPage || !connection.pageInfo.endCursor)
-      break;
+      return threads;
     cursor = connection.pageInfo.endCursor;
   }
+  if (cursor !== null)
+    throw new Error(`review threads exceed ${MAX_THREAD_PAGES * 100}`);
   return threads;
 }
 
@@ -169533,6 +169541,9 @@ function openFindingsLine(open3, isArabic) {
   }
   if (shown2 === 0)
     return void 0;
+  if (open3.unchecked) {
+    return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${shown2}\u060C \u0644\u0643\u0646 \u0628\u0639\u0636 \u0627\u0644\u0628\u0648\u062A\u0627\u062A \u062A\u0639\u0630\u0651\u0631 \u0639\u0644\u064A\u0647\u0627 \u0642\u0631\u0627\u0621\u0629 \u062D\u0627\u0644\u0629 \u0627\u0644\u0645\u062D\u0627\u062F\u062B\u0627\u062A.` : `> \u2139\uFE0F Open findings re-checked: ${shown2}, but some bots could not read their thread status.`;
+  }
   return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${shown2}.` : `> \u2139\uFE0F Open findings re-checked: ${shown2}.`;
 }
 
