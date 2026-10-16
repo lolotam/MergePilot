@@ -20,6 +20,31 @@ const sse = (events: Record<string, unknown>[]) => new Response(events.map((even
 const requestJson = (body: unknown): unknown =>
   JSON.parse(typeof body === 'string' ? body : zstdDecompressSync(body as Uint8Array).toString('utf8'));
 
+/** A Responses API stream that answers `OK` (Codex and Grok). */
+function responsesReply(): Response {
+  const item = { id: 'msg-test', type: 'message', role: 'assistant', content: [] };
+  const done = { ...item, content: [{ type: 'output_text', text: 'OK' }] };
+  return sse([
+    { type: 'response.created', response: { id: 'resp-test', status: 'in_progress', output: [] } },
+    { type: 'response.output_item.added', output_index: 0, item },
+    { type: 'response.content_part.added', output_index: 0, content_index: 0, part: { type: 'output_text', text: '' } },
+    { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'OK' },
+    { type: 'response.output_text.done', output_index: 0, content_index: 0, text: 'OK' },
+    { type: 'response.output_item.done', output_index: 0, item: done },
+    { type: 'response.completed', response: { id: 'resp-test', status: 'completed', output: [done], usage: { input_tokens: 10, output_tokens: 2, input_tokens_details: { cached_tokens: 3 } } } },
+  ]);
+}
+
+/** Stubs fetch with a Responses API reply and returns the JSON body each request sent. */
+function stubResponses(): { body: () => Record<string, unknown> } {
+  let sent: Record<string, unknown> = {};
+  vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {
+    sent = requestJson(init?.body) as Record<string, unknown>;
+    return responsesReply();
+  }));
+  return { body: () => sent };
+}
+
 afterEach(() => vi.unstubAllGlobals());
 describe('subscription model protocols', () => {
   it('redacts malformed credential envelopes without throwing from the redaction path', () => {
@@ -45,22 +70,13 @@ describe('subscription model protocols', () => {
   it.each(['openai', 'xai'] as const)('streams %s Responses API text and usage with bearer authentication at the configured effort', async (provider) => {
     const model = subscriptionModels(provider).find((entry) => entry.efforts.includes('high'))!.id;
     let sent: { reasoning?: { effort?: string } } = {};
-    const item = { id: 'msg-test', type: 'message', role: 'assistant', content: [] };
     const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = String(input);
       expect(url).toContain(provider === 'openai' ? 'https://chatgpt.com/backend-api/codex/responses' : 'https://api.x.ai/v1/responses');
       expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${access}`);
       expect(String(init?.body)).not.toContain(refresh);
       sent = requestJson(init?.body) as typeof sent;
-      return sse([
-        { type: 'response.created', response: { id: 'resp-test', status: 'in_progress', output: [] } },
-        { type: 'response.output_item.added', output_index: 0, item },
-        { type: 'response.content_part.added', output_index: 0, content_index: 0, part: { type: 'output_text', text: '' } },
-        { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'OK' },
-        { type: 'response.output_text.done', output_index: 0, content_index: 0, text: 'OK' },
-        { type: 'response.output_item.done', output_index: 0, item: { ...item, content: [{ type: 'output_text', text: 'OK' }] } },
-        { type: 'response.completed', response: { id: 'resp-test', status: 'completed', output: [{ ...item, content: [{ type: 'output_text', text: 'OK' }] }], usage: { input_tokens: 10, output_tokens: 2, input_tokens_details: { cached_tokens: 3 } } } },
-      ]);
+      return responsesReply();
     });
     vi.stubGlobal('fetch', fetchMock);
     const result = await collectText(new SubscriptionAdapter(provider, secretFor(provider)).stream({ ...request(model), effort: 'high' }));
@@ -162,10 +178,41 @@ describe('subscription output limit', () => {
     expect(adapter.requestedOutputTokens(review('claude-opus-4-5', 'medium'))).toBe(4096 + 8192);
   });
 
-  it.each(['openai', 'xai'] as const)('keeps the bare answer budget for %s, whatever the effort', (provider) => {
-    const model = subscriptionModels(provider).find((entry) => entry.efforts.includes('high'))!;
-    const adapter = new SubscriptionAdapter(provider, secretFor(provider));
-    expect(adapter.requestedOutputTokens({ model: model.id, effort: 'high', maxOutputTokens: 4096 })).toBe(4096);
+  it('sizes a thinking-off retry the way it is sent, without the thinking budget', async () => {
+    const reply = stubClaude('{"summary":"ok","findings":[]}', 'end_turn', 20);
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'));
+    const retry = { ...review('claude-opus-4-5', 'medium'), thinking: 'off' as const };
+
+    await collectText(adapter.stream(retry));
+
+    expect(reply.body()).toMatchObject({ max_tokens: 4096, thinking: { type: 'disabled' } });
+    expect(adapter.requestedOutputTokens(retry)).toBe(4096);
+  });
+
+  it('keeps the bare answer budget for Codex, which pi-ai sends without an output limit', async () => {
+    const reply = stubResponses();
+    const model = subscriptionModels('openai').find((entry) => entry.efforts.includes('high'))!.id;
+    const adapter = new SubscriptionAdapter('openai', secretFor('openai'));
+
+    await collectText(adapter.stream(review(model, 'high')));
+
+    expect(reply.body()).not.toHaveProperty('max_output_tokens');
+    expect(adapter.requestedOutputTokens(review(model, 'high'))).toBe(4096);
+  });
+
+  it.each([
+    ['grok-4.6', 'high', 4096 + 16384],
+    ['grok-4.6', undefined, 4096 + 8192],
+    ['grok-4.3', undefined, 4096],
+  ])('sends Grok %s at effort %s a max_output_tokens with room to reason', async (model, effort, limit) => {
+    const reply = stubResponses();
+    const call = { ...request(model), maxOutputTokens: 4096, ...(effort ? { effort } : {}) };
+    const adapter = new SubscriptionAdapter('xai', secretFor('xai'));
+
+    await collectText(adapter.stream(call));
+
+    expect(reply.body().max_output_tokens).toBe(limit);
+    expect(adapter.requestedOutputTokens(call)).toBe(limit);
   });
 
   it('reports an answer cut at max_tokens as a truncated review, never as a finished one', async () => {

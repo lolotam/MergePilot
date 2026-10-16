@@ -105,14 +105,26 @@ disabled.
   budget table `THINKING_BUDGET_TOKENS` is unchanged, so `budget_tokens` for older Claude models,
   Gemini budgets and OpenAI headroom stay as they were.
 - `AnthropicAdapter.requestedOutputTokens` uses `anthropicThinkingHeadroom(model, effort)`: the
-  adaptive table for adaptive models, the budget table otherwise.
+  adaptive table for adaptive models, the budget table otherwise. Claude 5 and later think
+  adaptively even when the request sends no `thinking` (no effort, or `off`), so such a call
+  reserves the `high` headroom too. That is the default effort on most of them; on Opus 5.5 and
+  Haiku 5.5 the default is `medium`, so it over-reserves there. Claude 4.6 to 4.8 run without
+  thinking in that case and keep the bare answer budget.
 - `SubscriptionAdapter` overrides `requestedOutputTokens` (`subscription/output-tokens.ts`) and
   passes the result to pi-ai. For an adaptive Claude model it adds the adaptive headroom, and a
   managed-effort model with no effort is sized at `high`. For a budget-thinking Claude model pi-ai adds
-  the budget itself, so the adapter sends the answer budget and prices answer + budget. Both are
-  capped at the model's `maxTokens`. Codex and Grok calls keep the bare answer budget.
+  the budget itself, so the adapter sends the answer budget and prices answer + budget.
+- Grok on the subscription goes through pi-ai's `openai-responses` API, which sends `maxTokens` as
+  `max_output_tokens`, and reasoning counts against that limit. The adapter adds the OpenAI-style
+  headroom (`thinkingHeadroom(level)`). A Grok model that cannot switch reasoning off and gets no
+  level reserves the default 8,192. A model that can switch it off gets effort `none` and no
+  headroom. Codex (`openai-codex-responses`) sends no output limit at all, so its calls keep the
+  bare answer budget.
+- All of these limits are capped at the model's `maxTokens`.
 - The effort is passed to pi-ai as `reasoning`. `off`, or a thinking-off retry on a model that can
-  switch thinking off, sends no level.
+  switch thinking off, sends no level. `requestedOutputTokens` resolves the level the same way,
+  including the per-call `thinking: 'off'` (now part of `OutputTokenRequest`), so a call is sized
+  as it is sent.
 - No new retry was added. The existing truncation retry inherits the new headroom.
 
 **Cost.** Subscription calls stay at $0 incremental cost: the pipeline prices them at zero whatever

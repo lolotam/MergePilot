@@ -22,8 +22,12 @@ export function subscriptionModels(provider: SubscriptionProvider) {
 
 type ModelLevel = ReturnType<typeof getSupportedThinkingLevels>[number];
 
-/** The model's level for this effort (`none` is `off`), or undefined when it has no such level. */
-function supportedLevel(levels: readonly ModelLevel[], effort: string | undefined): ModelLevel | undefined {
+/**
+ * The model's level for one call: `off` for a per-call thinking-off retry where the model has it,
+ * else the configured effort (`none` is `off`); undefined when the model has no such level.
+ */
+function levelFor(levels: readonly ModelLevel[], options: OutputTokenRequest): ModelLevel | undefined {
+  const effort = options.thinking === 'off' && levels.includes('off') ? 'off' : options.effort;
   return levels.find((level) => level === effort || (effort === 'none' && level === 'off'));
 }
 
@@ -41,7 +45,7 @@ export class SubscriptionAdapter extends LlmAdapter {
   override requestedOutputTokens(options: OutputTokenRequest): number {
     const model = subscriptionProvider(this.provider).getModels().find((entry) => entry.id === options.model);
     if (!model) return options.maxOutputTokens;
-    const reasoning = reasoningFor(supportedLevel(getSupportedThinkingLevels(model), options.effort));
+    const reasoning = reasoningFor(levelFor(getSupportedThinkingLevels(model), options));
     return subscriptionOutputTokens(model, reasoning, options.maxOutputTokens).requested;
   }
 
@@ -73,8 +77,7 @@ export class SubscriptionAdapter extends LlmAdapter {
     models.setProvider(provider);
     const model = models.getModel(provider.id, options.model);
     if (!model) throw new LlmFailure({ provider: this.provider, code: 'BAD_REQUEST', message: `Unknown subscription model: ${options.model}` });
-    const efforts = getSupportedThinkingLevels(model);
-    const level = supportedLevel(efforts, options.thinking === 'off' && efforts.includes('off') ? 'off' : options.effort);
+    const level = levelFor(getSupportedThinkingLevels(model), options);
     if (options.effort !== undefined && !level) {
       throw new LlmFailure({ provider: this.provider, code: 'BAD_REQUEST', message: `Unsupported subscription effort: ${options.effort}` });
     }

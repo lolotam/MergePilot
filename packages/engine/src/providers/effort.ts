@@ -167,10 +167,20 @@ export function adaptiveThinkingHeadroom(effort: string | undefined): number {
   return ADAPTIVE_THINKING_HEADROOM[value === 'minimal' ? 'low' : value] ?? ADAPTIVE_THINKING_HEADROOM.high ?? 0;
 }
 
-/** Anthropic API: output tokens added on top of the answer for this model's thinking; 0 without thinking. */
+/**
+ * Claude 5 and later think adaptively when a request sends no `thinking` (Opus 5.5, Sonnet 5.5 and
+ * Fable 5 cannot turn it off); Claude 4.6 to 4.8 run without thinking then.
+ */
+const THINKS_BY_DEFAULT_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-[5-9](?:\b|-)/;
+
+/**
+ * Anthropic API: output tokens added on top of the answer for this model's thinking. A request
+ * without `thinking` reserves the `high` headroom on a model that thinks anyway, since the default
+ * effort is `high` on most of them (`medium` on Opus 5.5 and Haiku 5.5); otherwise 0.
+ */
 export function anthropicThinkingHeadroom(model: string, effort: string | undefined): number {
   const thinking = anthropicThinking(model, effort);
-  if (!thinking) return 0;
+  if (!thinking) return THINKS_BY_DEFAULT_CLAUDE.test(model) ? adaptiveThinkingHeadroom(undefined) : 0;
   return thinking.thinking.type === 'adaptive' ? adaptiveThinkingHeadroom(effort) : thinkingHeadroom(effort);
 }
 

@@ -160,7 +160,7 @@ describe('AnthropicAdapter', () => {
     ];
     const adapter = new AnthropicAdapter({ apiKey: new Secret('sk-test-000'), client: fakeClient });
     const options: GenerateOptions = {
-      model: 'claude-opus-5',
+      model: 'claude-opus-4-8',
       messages: [{ role: 'user', content: 'Generate essay' }],
       maxOutputTokens: 1024,
     };
@@ -170,7 +170,7 @@ describe('AnthropicAdapter', () => {
       chunks.push(chunk);
     }
 
-    expect(fakeClient.lastStreamParams?.model).toBe('claude-opus-5');
+    expect(fakeClient.lastStreamParams?.model).toBe('claude-opus-4-8');
     expect(fakeClient.lastStreamParams?.max_tokens).toBe(1024);
     expect(chunks.find((c) => c.type === 'finish')).toEqual({ type: 'finish', reason: 'max-tokens' });
   });
@@ -187,6 +187,17 @@ describe('AnthropicAdapter', () => {
 
     expect(fakeClient.lastStreamParams?.max_tokens).toBe(limit);
     expect(adapter.requestedOutputTokens({ model, effort: 'high', maxOutputTokens: 4096 })).toBe(limit);
+  });
+
+  it('sends a Claude 5 model with no effort room for the thinking it does by default', async () => {
+    const fakeClient = new FakeAnthropicClient();
+    fakeClient.eventsToEmit = [{ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } }];
+    const adapter = new AnthropicAdapter({ apiKey: new Secret('sk-test-000'), client: fakeClient });
+
+    await drain(adapter.stream({ model: 'claude-opus-5-5', messages: [{ role: 'user', content: 'Review' }], maxOutputTokens: 4096 }));
+
+    expect(fakeClient.lastStreamParams?.max_tokens).toBe(4096 + 32768);
+    expect(fakeClient.lastStreamParams).not.toHaveProperty('thinking');
   });
 
   it('maps stop_sequence and other reasons to stop', async () => {

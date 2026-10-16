@@ -100,9 +100,17 @@ describe('anthropicThinkingHeadroom', () => {
     expect(anthropicThinkingHeadroom('claude-sonnet-4-5', 'high')).toBe(16384);
   });
 
-  it('adds nothing when no thinking is sent', () => {
-    expect(anthropicThinkingHeadroom('claude-opus-5-5', undefined)).toBe(0);
-    expect(anthropicThinkingHeadroom('claude-opus-5-5', 'off')).toBe(0);
+  it.each(['claude-opus-5-5', 'claude-sonnet-5', 'claude-fable-5'])(
+    'reserves the high headroom for %s, which thinks even when no thinking is sent',
+    (model) => {
+      expect(anthropicThinkingHeadroom(model, undefined)).toBe(32768);
+      expect(anthropicThinkingHeadroom(model, 'off')).toBe(32768);
+    },
+  );
+
+  it('adds nothing for models that run without thinking when none is sent', () => {
+    expect(anthropicThinkingHeadroom('claude-opus-4-8', undefined)).toBe(0);
+    expect(anthropicThinkingHeadroom('claude-sonnet-4-5', 'off')).toBe(0);
   });
 });
 

@@ -1,7 +1,8 @@
 import type { RetryPolicy } from './retry.js';
 import type { GenerateOptions, ModelEntry, StreamChunk } from './types.js';
 
-export type OutputTokenRequest = Pick<GenerateOptions, 'model' | 'effort' | 'maxOutputTokens'>;
+/** `thinking` is the per-call override; an adapter that sizes thinking-off calls differently reads it. */
+export type OutputTokenRequest = Pick<GenerateOptions, 'model' | 'effort' | 'maxOutputTokens' | 'thinking'>;
 
 /**
  * The one seam every provider implements (ADR-0003). Only `stream` is required, so an

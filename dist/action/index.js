@@ -113084,10 +113084,11 @@ function adaptiveThinkingHeadroom(effort) {
   const value = normalize(effort);
   return ADAPTIVE_THINKING_HEADROOM[value === "minimal" ? "low" : value] ?? ADAPTIVE_THINKING_HEADROOM.high ?? 0;
 }
+var THINKS_BY_DEFAULT_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-[5-9](?:\b|-)/;
 function anthropicThinkingHeadroom(model, effort) {
   const thinking = anthropicThinking(model, effort);
   if (!thinking)
-    return 0;
+    return THINKS_BY_DEFAULT_CLAUDE.test(model) ? adaptiveThinkingHeadroom(void 0) : 0;
   return thinking.thinking.type === "adaptive" ? adaptiveThinkingHeadroom(effort) : thinkingHeadroom(effort);
 }
 var GEMINI_BUDGET_MODEL = /^gemini-(?:1|2)\./;
@@ -113133,10 +113134,14 @@ function isCompatibleReasoningModel(provider, model, style) {
 }
 
 function subscriptionOutputTokens(model, reasoning, answerTokens) {
+  const capped = (tokens) => Math.min(tokens, model.maxTokens);
+  if (model.api === "openai-responses") {
+    const tokens = capped(answerTokens + responsesReasoningHeadroom(model, reasoning));
+    return { send: tokens, requested: tokens };
+  }
   if (model.api !== "anthropic-messages")
     return { send: answerTokens, requested: answerTokens };
   const compat = model.compat;
-  const capped = (tokens) => Math.min(tokens, model.maxTokens);
   if (compat?.supportsMidConvoEffort === true || reasoning && compat?.forceAdaptiveThinking === true) {
     const tokens = capped(answerTokens + adaptiveThinkingHeadroom(reasoning));
     return { send: tokens, requested: tokens };
@@ -113145,8 +113150,14 @@ function subscriptionOutputTokens(model, reasoning, answerTokens) {
     return { send: answerTokens, requested: capped(answerTokens + thinkingHeadroom(reasoning)) };
   return { send: answerTokens, requested: answerTokens };
 }
+function responsesReasoningHeadroom(model, reasoning) {
+  if (reasoning)
+    return thinkingHeadroom(reasoning);
+  return model.reasoning && model.thinkingLevelMap?.off === null ? DEFAULT_THINKING_HEADROOM : 0;
+}
 
-function supportedLevel(levels, effort) {
+function levelFor(levels, options) {
+  const effort = options.thinking === "off" && levels.includes("off") ? "off" : options.effort;
   return levels.find((level) => level === effort || effort === "none" && level === "off");
 }
 function reasoningFor(level) {
@@ -113167,7 +113178,7 @@ var SubscriptionAdapter = class extends LlmAdapter {
     const model = subscriptionProvider(this.provider).getModels().find((entry) => entry.id === options.model);
     if (!model)
       return options.maxOutputTokens;
-    const reasoning = reasoningFor(supportedLevel(getSupportedThinkingLevels(model), options.effort));
+    const reasoning = reasoningFor(levelFor(getSupportedThinkingLevels(model), options));
     return subscriptionOutputTokens(model, reasoning, options.maxOutputTokens).requested;
   }
   async *stream(options) {
@@ -113205,8 +113216,7 @@ var SubscriptionAdapter = class extends LlmAdapter {
     const model = models.getModel(provider.id, options.model);
     if (!model)
       throw new LlmFailure({ provider: this.provider, code: "BAD_REQUEST", message: `Unknown subscription model: ${options.model}` });
-    const efforts = getSupportedThinkingLevels(model);
-    const level = supportedLevel(efforts, options.thinking === "off" && efforts.includes("off") ? "off" : options.effort);
+    const level = levelFor(getSupportedThinkingLevels(model), options);
     if (options.effort !== void 0 && !level) {
       throw new LlmFailure({ provider: this.provider, code: "BAD_REQUEST", message: `Unsupported subscription effort: ${options.effort}` });
     }
