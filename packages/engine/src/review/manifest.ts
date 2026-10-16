@@ -35,7 +35,11 @@ export interface ManifestSource {
 
 function countPatchLines(patch: string | undefined, sign: '+' | '-'): number {
   if (!patch) return 0;
-  return patch.split('\n').filter((line) => line.startsWith(sign)).length;
+  // Only the `--- a/…` / `+++ b/…` file headers before the first hunk are skipped: a changed line
+  // whose text is `---` (a Markdown rule) still counts.
+  const lines = patch.split('\n');
+  const firstHunk = lines.findIndex((line) => line.startsWith('@@'));
+  return lines.slice(Math.max(firstHunk, 0)).filter((line) => line.startsWith(sign)).length;
 }
 
 /** A PR file as a manifest entry. */
@@ -56,8 +60,9 @@ function shown(text: string): string {
     const code = ch.codePointAt(0)!;
     return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
   };
-  const flat = [...text].map((ch) => (isControl(ch) ? '?' : ch)).join('');
-  return flat.length <= MAX_PATH_CHARS ? flat : `…${flat.slice(flat.length - MAX_PATH_CHARS + 1)}`;
+  // Code points, not UTF-16 units: a cut never splits a surrogate pair.
+  const chars = [...text].map((ch) => (isControl(ch) ? '?' : ch));
+  return chars.length <= MAX_PATH_CHARS ? chars.join('') : `…${chars.slice(chars.length - MAX_PATH_CHARS + 1).join('')}`;
 }
 
 /**

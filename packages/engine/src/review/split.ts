@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import type { TokenUsage } from '../llm/types.js';
-import { groupFilesForBatches, type BatchNode } from './batch-groups.js';
+import { FileTier, groupFilesForBatches, type BatchNode } from './batch-groups.js';
 import { estimateTokens } from './budget.js';
 import { ReviewAnswerSchema } from './answer.js';
 import type { Finding } from './types.js';
@@ -150,13 +150,22 @@ export function batchFilesByTokenCap(
     current = [];
     currentTokens = 0;
   };
+  // Test-only units split out of an oversized source group wait until every source group is
+  // placed, so a big directory never puts its tests ahead of another directory's source.
+  const deferredTests: BatchNode<ReviewableFileWithPatch>[] = [];
+  const placeDeferred = (): void => {
+    deferredTests.splice(0).forEach(place);
+  };
   const place = (node: BatchNode<ReviewableFileWithPatch>): void => {
     if (node.tokens <= capTokens) {
       if (currentTokens + node.tokens > capTokens) flush();
       current.push(...node.files.map((f) => ({ ...f })));
       currentTokens += node.tokens;
     } else if (node.children) {
-      node.children.forEach(place);
+      for (const child of node.children) {
+        if (node.tier === FileTier.Source && child.tier !== FileTier.Source) deferredTests.push(child);
+        else place(child);
+      }
     } else {
       const file = node.files[0]!;
       flush();
@@ -165,7 +174,11 @@ export function batchFilesByTokenCap(
     }
   };
 
-  groupFilesForBatches(files, (f) => estimateTokens(f.patch)).forEach(place);
+  for (const group of groupFilesForBatches(files, (f) => estimateTokens(f.patch))) {
+    if (group.tier !== FileTier.Source) placeDeferred();
+    place(group);
+  }
+  placeDeferred();
   flush();
   return { batches, truncatedPaths };
 }

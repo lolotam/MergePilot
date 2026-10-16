@@ -59,6 +59,8 @@ describe('runReview — PR manifest of a batched review (ADR-0031)', () => {
     calls.forEach((call, index) => {
       expect(call.system).toContain('BATCHES:');
       expect(call.user).toContain(`This is batch ${index + 1} of 2 of this pull request.`);
+      // The identical manifest comes before the one line that differs, for prefix caching.
+      expect(call.user.indexOf('<<<END UNTRUSTED:PR_MANIFEST>>>')).toBeLessThan(call.user.indexOf('This is batch'));
       const manifest = manifestOf(call.user);
       expect(manifest).toContain('batch 1 | added | +25 -0 | src/a.ts');
       expect(manifest).toContain('batch 2 | modified | +7 -2 | src/b.ts');
@@ -156,5 +158,21 @@ describe('renderManifest', () => {
     expect(lines).toHaveLength(MANIFEST_MAX_FILES + 2);
     expect(lines.at(-2)).toBe(`batch 1 | added | +1 -0 | src/f${MANIFEST_MAX_FILES - 1}.ts`);
     expect(lines.at(-1)).toBe('+1 more files');
+  });
+
+  it('does not count the +++/--- file headers as changed lines', () => {
+    const file = manifestFileOf({ path: 'src/a.ts', status: 'modified', patch: '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-x\n+y' }, []);
+    expect([file.additions, file.deletions]).toEqual([1, 1]);
+    const rule = manifestFileOf({ path: 'README.md', status: 'modified', patch: '@@ -1,2 +1,1 @@\n----\n x' }, []);
+    expect(rule.deletions).toBe(1); // a removed Markdown rule `---` is a changed line
+  });
+
+  it('cuts a long path on code points, never inside a surrogate pair', () => {
+    // 504 UTF-16 units: a cut counted in units would land inside a pair.
+    const path = `${'😀'.repeat(250)}x.ts`;
+    const lines = renderManifest([manifestFileOf({ path, status: 'added', patch: '+a' }, [])], [[{ path }]]).split('\n');
+    const line = lines.find((l) => l.startsWith('batch 1 |'));
+    expect(line).toMatch(/^batch 1 \| added \| \+1 -0 \| …😀/u);
+    expect(line).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
 });

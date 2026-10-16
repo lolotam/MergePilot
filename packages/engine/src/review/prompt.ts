@@ -354,8 +354,10 @@ function buildUserPrompt(input: PromptInput): string {
   }
 
   if (input.batch) {
-    parts.push(`This is batch ${input.batch.number} of ${input.batch.count} of this pull request.`);
+    // The manifest is identical in every batch: it goes before the one line that differs, so a
+    // provider's prefix cache can reuse it across batch calls.
     parts.push(wrapUntrusted('PR_MANIFEST', input.batch.manifest));
+    parts.push(`This is batch ${input.batch.number} of ${input.batch.count} of this pull request.`);
   }
 
   // Each reviewable file with annotated patch
