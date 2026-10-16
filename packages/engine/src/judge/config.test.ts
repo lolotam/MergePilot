@@ -5,9 +5,9 @@ import { isApiProviderId } from '../providers/ids.js';
 import { isJudgeKeyOnlyProviderId, JUDGE_KEY_ONLY_PROVIDER_IDS, JUDGE_PROVIDER_IDS, jevModelIds, systemOneUrl } from './providers.js';
 
 describe('judge config', () => {
-  it('defaults the model, the duplicate check only (the old mode off) and threshold 0.35', () => {
+  it('defaults the model, the duplicate check only (the old mode off) and threshold 0.25 (ADR-0028)', () => {
     const judge = JudgeConfigSchema.parse({ provider: 'typesafe' });
-    expect(judge).toEqual({ provider: 'typesafe', uses: ['dedupe'], threshold: 0.35, fallback: [] });
+    expect(judge).toEqual({ provider: 'typesafe', uses: ['dedupe'], threshold: 0.25, fallback: [] });
     expect(judgeChainOf(judge)).toEqual([{ provider: 'typesafe', model: 'jev-latest' }]);
   });
 

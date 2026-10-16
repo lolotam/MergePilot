@@ -14,6 +14,7 @@ import {
   reviewScopeOf,
   selectIncrementalFiles,
   withJudgeUsage,
+  withNestedRulesFiles,
   type FallbackReason,
   type FileContent,
   type GitHubClient,
@@ -57,7 +58,8 @@ export interface BotReviewParams {
 
 export type BotReviewRun =
   | { kind: 'nothing-new' }
-  | { kind: 'reviewed'; reviewResult: ReviewRunResult; scope: ReviewScope };
+  /** `rulesLeftOut`: nested rules files the review could not include (ADR-0028), for the summary. */
+  | { kind: 'reviewed'; reviewResult: ReviewRunResult; scope: ReviewScope; rulesLeftOut: string[] };
 
 export const DEFAULT_PUBLISHER_LOGIN = 'github-actions[bot]';
 
@@ -110,19 +112,30 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     return { kind: 'nothing-new' };
   }
 
+  // ADR-0028: the nearest AGENTS.md / CLAUDE.md of each reviewed file, from the base commit.
+  const rules = await withNestedRulesFiles(params.client, {
+    owner: params.owner,
+    repo: params.repo,
+    baseSha: params.baseSha,
+    rulesFiles,
+    changedPaths: filesToReview.map((f) => f.path),
+    maxRulesTokens: config.review.maxRulesTokens,
+  });
+  if (rules.leftOut.length > 0) log?.(`Rules files not sent with the review: ${rules.leftOut.join(', ')}`);
+
   log?.('Running review...');
   const reviewResult = await runReview({
     config,
     pr: { title: params.prTitle, body: params.prBody },
     files: filesToReview,
     anchorFiles: prFiles,
-    rulesFiles,
+    rulesFiles: rules.rulesFiles,
     model,
     knownSecrets,
     judge,
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
-  return { kind: 'reviewed', reviewResult, scope };
+  return { kind: 'reviewed', reviewResult, scope, rulesLeftOut: rules.leftOut };
 }
 
 /** The outcome of a bot's review that is not published by itself (consensus mode). */
@@ -138,6 +151,8 @@ export interface ReviewOnlyOutcome {
   /** Why a fallback model took over: the provider's answer, redacted and cut (ADR-0008). */
   fallback?: FallbackReason | undefined;
   scope?: ReviewScope | undefined;
+  /** Nested rules files the review could not include (ADR-0028). */
+  rulesLeftOut?: string[] | undefined;
 }
 
 /** Status, cost (with the judge's) and a redacted detail, as `executeReview` records them. */
@@ -145,7 +160,7 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
   if (run.kind === 'nothing-new') return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL };
   const secrets = params.knownSecrets ?? [];
   const r = run.reviewResult;
-  const base = { runResult: r, scope: run.scope };
+  const base = { runResult: r, scope: run.scope, rulesLeftOut: run.rulesLeftOut };
   if (r.status === 'completed') {
     const totals = withJudgeUsage(r.costUsd, r.usage, params.judge?.judge.report());
     return {

@@ -28,14 +28,12 @@ import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
-import {
-  makeRedactionFinding,
-  buildPatchLineToNewLineMap,
-} from './patch-helpers.js';
+import { redactPatches } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, type CappedBatches } from './split.js';
 import { paidSwitchFits, SpendTracker } from './spend.js';
 import { runVerifyPass, VERIFY_MAX_OUTPUT_TOKENS } from './verify-pass.js';
+import type { VerifyRejectedFinding } from './verify.js';
 
 // ── Input types ──
 
@@ -88,6 +86,8 @@ export type ReviewRunResult =
       droppedInvalid: number;
       complete: boolean;
       verification?: { checked: number; rejected: number } | undefined;
+      /** Findings the verification pass rejected, listed in the summary (ADR-0028). */
+      verifyRejected?: VerifyRejectedFinding[] | undefined;
       judge?: JudgeFilterSummary | undefined;
       /** Every attempted call, failures included, was on a subscription: the run cost $0. */
       onlySubscriptionCalls: boolean;
@@ -144,9 +144,6 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
 
   // ── Step b: redact secrets ─────────────────────────────────────────────
-  const securityFindings: Finding[] = [];
-  let secFindingIdx = 1;
-
   // Redact PR text
   const redactedPrTitle = redactSecrets(pr.title, knownSecrets).text;
   const redactedPrBody = redactSecrets(pr.body, knownSecrets).text;
@@ -157,29 +154,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     content: redactSecrets(rf.content, knownSecrets).text,
   }));
 
-  // Redact patches and collect security findings for added lines
-  const redactedReviewableFiles: Array<{ path: string; patch: string }> = [];
-
-  for (const rf of reviewableFiles) {
-    const redactResult = redactSecrets(rf.patch, knownSecrets);
-    redactedReviewableFiles.push({ path: rf.path, patch: redactResult.text });
-
-    // Build a map from patch-text line# → new-side file line# so we can correlate
-    // redactSecrets findings (patch-text line numbers) with actual file line numbers.
-    const patchLineToNewLine = buildPatchLineToNewLineMap(rf.patch);
-    // Parse original patch to know which new-side lines are "added"
-    const parsed = parsePatch(rf.patch);
-
-    for (const finding of redactResult.found) {
-      const newSideLine = patchLineToNewLine.get(finding.line);
-      // Only emit a finding if the redacted line is an added line on the new side
-      if (newSideLine !== undefined && parsed.addedLines.has(newSideLine)) {
-        securityFindings.push(
-          makeRedactionFinding(rf.path, newSideLine, finding.kind, secFindingIdx++),
-        );
-      }
-    }
-  }
+  // Redact patches; a secret on an added line becomes a security finding.
+  const { files: redactedReviewableFiles, securityFindings } = redactPatches(reviewableFiles, knownSecrets);
 
   // ── Step c: build prompt + budget check ───────────────────────────────
   const prompt = buildReviewPrompt({
@@ -237,7 +213,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       0,
     );
     if (reviewCfg.verify) {
-      // Worst case for the verification call: its hunks are a subset of the review prompt.
+      // Worst case for the verification call: it shows each file at most once (capped at
+      // review.batchTokens), so its code is a subset of the review prompt.
       estimatedCostUsd += estimateCostUsd(
         { inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens },
         pricing,
@@ -285,12 +262,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // ── Step e2: verification pass ─────────────────────────────────────────
   let modelFindings = pass.findings;
   let verification: { checked: number; rejected: number } | undefined;
+  let verifyRejected: VerifyRejectedFinding[] = [];
 
   if (reviewCfg.verify && modelFindings.length > 0) {
     const verified = await runVerifyPass({
       language: config.language,
       findings: modelFindings,
       files: redactedReviewableFiles,
+      maxCodeTokens: limits.batchTokens,
       model,
       spend,
       knownSecrets,
@@ -301,6 +280,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     modelFindings = verified.findings;
     totalUsage = verified.totalUsage;
     verification = verified.verification;
+    verifyRejected = verified.rejected;
     incompleteReasons.push(...verified.incompleteReasons);
   }
 
@@ -378,6 +358,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     droppedInvalid: pass.droppedInvalid,
     complete,
     ...(verification !== undefined ? { verification } : {}),
+    ...(verifyRejected.length > 0 ? { verifyRejected } : {}),
     ...(judge ? { judge } : {}),
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls,

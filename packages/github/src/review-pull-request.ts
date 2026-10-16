@@ -23,6 +23,7 @@ import { dedupeJudgeOf, judgeSummaryInput, withJudgeUsage, type ReviewJudge } fr
 import { isPrPaused, postPauseNoticeOnce } from './pause.js';
 import { listPullRequestFiles } from './pr-files.js';
 import { publishReview, type PublishReviewResult } from './publish.js';
+import { withNestedRulesFiles } from './rules-files.js';
 import { renderReviewSummary } from './summary.js';
 
 export type LoadRepoConfigResult =
@@ -194,6 +195,17 @@ export async function reviewPullRequest(
     return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL, publish: { status: 'skipped-no-changes' } };
   }
 
+  // ADR-0028: every AGENTS.md / CLAUDE.md in the directories of each reviewed file, from the base commit.
+  const rules = await withNestedRulesFiles(client, {
+    owner,
+    repo,
+    baseSha,
+    rulesFiles,
+    changedPaths: filesToReview.map((f) => f.path),
+    maxRulesTokens: config.review.maxRulesTokens,
+  });
+  if (rules.leftOut.length > 0) log?.(`Rules files not sent with the review: ${rules.leftOut.join(', ')}`);
+
   log?.('Running review...');
   const reviewResult = await runReview({
     config,
@@ -203,7 +215,7 @@ export async function reviewPullRequest(
     },
     files: filesToReview,
     anchorFiles: prFiles,
-    rulesFiles,
+    rulesFiles: rules.rulesFiles,
     model,
     knownSecrets,
     judge,
@@ -260,6 +272,8 @@ export async function reviewPullRequest(
       scope,
       outcome: 'completed',
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
+      verifyRejected: reviewResult.verifyRejected,
+      rulesLeftOut: rules.leftOut,
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),

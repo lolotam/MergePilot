@@ -64,6 +64,17 @@ describe('runFalsePositiveFilter', () => {
     expect(out.filtered.map((f) => f.title)).toEqual(['Bug c']);
   });
 
+  it('filter never drops a security or data-loss finding, whatever its severity (ADR-0028)', async () => {
+    const { fetch } = mockFetch(noulReply({ f1: 0.05, f2: 0.05, f3: 0.05 }));
+    const base = input(fetch, { uses: ['filter'] });
+    const categories = ['security', 'data-loss', 'correctness'] as const;
+    const findings = base.findings.map((f, i) => ({ ...f, severity: 'low' as const, category: categories[i]! }));
+    const out = await runFalsePositiveFilter({ ...base, findings });
+    expect(out.findings.map((f) => f.category)).toEqual(['security', 'data-loss']);
+    expect(out.findings[0]?.body).toContain('Jev confidence: 0.05');
+    expect(out.filtered.map((f) => f.title)).toEqual(['Bug c']);
+  });
+
   it('annotate alone keeps every finding and adds the confidence line to each', async () => {
     const { fetch, calls } = mockFetch(noulReply({ f1: 0.82, f2: 0.1, f3: 0.5 }));
     const out = await runFalsePositiveFilter(input(fetch, { uses: ['annotate'] }));

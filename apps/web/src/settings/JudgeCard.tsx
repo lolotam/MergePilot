@@ -25,7 +25,7 @@ const modelsOf = (catalog: Catalog, provider: JudgeProvider): string[] =>
 function defaults(catalog: Catalog, keyed: readonly KeyProvider[] | undefined): JudgeSettings {
   const first = catalog.find((p) => !keyed || keyed.includes(p.id)) ?? catalog[0];
   const provider: JudgeProvider = first?.id ?? 'typesafe';
-  return { enabled: false, provider, model: first?.models[0] ?? '', uses: [], threshold: 0.35, fallback: [] };
+  return { enabled: false, provider, model: first?.models[0] ?? '', uses: [], threshold: 0.25, fallback: [] };
 }
 
 interface JevModelSelectProps {

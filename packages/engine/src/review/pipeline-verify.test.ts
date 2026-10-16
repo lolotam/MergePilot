@@ -10,7 +10,7 @@ import {
 } from './pipeline.fixtures.js';
 import { runReview } from './pipeline.js';
 
-function makeVerifyAnswerJson(verdicts: Array<{ id: string; verdict: 'confirmed' | 'rejected'; reason: string }>): string {
+function makeVerifyAnswerJson(verdicts: Array<{ id: string; verdict: 'confirmed' | 'plausible' | 'rejected'; reason: string }>): string {
   return JSON.stringify({ verdicts });
 }
 
@@ -60,6 +60,40 @@ describe('runReview — verification pass', () => {
       });
       expect(result.complete).toBe(true);
     }
+  });
+
+  it('confirms a finding resting on unshown code at confidence 0.69 instead of rejecting it, and lists rejections (ADR-0028)', async () => {
+    const reviewAnswer = JSON.stringify({
+      summary: 'Two issues.',
+      findings: [
+        validFindingJson({ title: 'Needs the caller', confidence: 0.85, body: 'Unsafe if src/caller.ts skips the lock; that file would confirm it.' }),
+        validFindingJson({ title: 'Wrong guess', line: 2 }),
+      ],
+    });
+    const verifyAnswer = makeVerifyAnswerJson([
+      { id: 'f1', verdict: 'plausible', reason: 'The proving code is not shown.' },
+      { id: 'f2', verdict: 'rejected', reason: 'The shown code contradicts it.' },
+    ]);
+    const answers = [reviewAnswer, verifyAnswer];
+    const model: ReviewModel = {
+      label: 'fake:plausible',
+      generate: async (): Promise<ReviewModelResponse> => ({ text: answers.shift() ?? '', finishReason: 'stop' }),
+    };
+
+    const result = await runReview({
+      config: makeConfig({ review: { ...makeConfig().review, verify: true } }),
+      pr: { title: 'T', body: 'B' },
+      files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }],
+      rulesFiles: [],
+      model,
+      knownSecrets: [],
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    const kept = [...result.inline, ...result.summaryOnly];
+    expect(kept.map((f) => [f.title, f.confidence])).toEqual([['Needs the caller', 0.69]]);
+    expect(result.verifyRejected).toEqual([{ title: 'Wrong guess', path: 'src/index.ts', line: 2 }]);
   });
 
   it('bypasses verification for secret redaction findings', async () => {

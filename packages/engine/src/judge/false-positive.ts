@@ -4,7 +4,8 @@
  * and that one request serves both uses (multi-use amendment):
  * - `annotate` adds the confidence to every finding it scored;
  * - `filter` drops findings below the threshold and returns them so the summary lists them
- *   (disclosed, never silent). Critical and high are never dropped.
+ *   (disclosed, never silent). Critical and high, and the `security` and `data-loss` categories,
+ *   are never dropped (ADR-0028).
  * With both on, findings are filtered and every remaining one gets its confidence line. When the
  * judge is unavailable the findings come back unchanged with the failure code.
  */
@@ -17,8 +18,15 @@ import { normalizeJudgeUses, type JudgeUse, type JudgeUses } from './uses.js';
 
 /** Severities the filter never drops, whatever Jev answers (ADR-0015). */
 const NEVER_FILTERED: ReadonlySet<string> = new Set(['critical', 'high']);
+/** Categories the filter never drops either: a missed one costs more than a shown one (ADR-0028). */
+const NEVER_FILTERED_CATEGORIES: ReadonlySet<string> = new Set(['security', 'data-loss']);
 
-export const DEFAULT_JUDGE_THRESHOLD = 0.35;
+/** Lowered from 0.35 by ADR-0028: the filter dropped real findings the panel had already found. */
+export const DEFAULT_JUDGE_THRESHOLD = 0.25;
+
+function neverFiltered(finding: Finding): boolean {
+  return NEVER_FILTERED.has(finding.severity) || NEVER_FILTERED_CATEGORIES.has(finding.category);
+}
 
 export interface FalsePositiveInput {
   judge: Judge;
@@ -119,11 +127,11 @@ export async function runFalsePositiveFilter(input: FalsePositiveInput): Promise
     const value = answer?.type === 'noul' ? answer.noul : undefined;
     if (value === undefined) {
       kept.push(finding);
-    } else if (filter && value < threshold && !NEVER_FILTERED.has(finding.severity)) {
+    } else if (filter && value < threshold && !neverFiltered(finding)) {
       filtered.push({ title: finding.title, path: finding.path, line: finding.line, noul: value });
     } else if (annotate || (filter && value < threshold)) {
-      // The filter never drops critical/high findings (the reviewed code could try to steer the
-      // judge); a low score on one is shown as a confidence line instead.
+      // The filter never drops critical/high or security/data-loss findings (the reviewed code
+      // could try to steer the judge); a low score on one is shown as a confidence line instead.
       kept.push({ ...finding, body: `${finding.body}\n\n${confidenceLine(value, input.language)}` });
     } else {
       kept.push(finding);

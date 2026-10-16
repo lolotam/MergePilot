@@ -1,6 +1,6 @@
 # ADR-0023: Review prompt — method, severity scale and confidence bands
 
-**Date:** 2026-10-14 · **Status:** accepted
+**Date:** 2026-10-14 · **Status:** accepted; amended by ADR-0028 (findings about code not shown are reported at confidence 0.5–0.69 instead of dropped, and the verify prompt changed)
 
 ## Context
 

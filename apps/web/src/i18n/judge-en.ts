@@ -12,7 +12,7 @@ export const enJudge = {
   judgeUseAnnotate: 'Annotate',
   judgeUseAnnotateHint: 'A "Jev confidence: 0.82" line on every posted finding.',
   judgeUseFilter: 'Filter',
-  judgeUseFilterHint: 'Drops findings below the threshold (never critical or high).',
+  judgeUseFilterHint: 'Drops findings below the threshold (never critical, high, security or data-loss).',
   judgeUseDedupe: 'Duplicate check',
   judgeUseDedupeHint: 'Skips a finding that repeats, in meaning, an earlier comment from the same bot near it.',
   judgeUseConsensus: 'Consensus',

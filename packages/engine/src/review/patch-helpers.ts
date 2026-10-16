@@ -1,3 +1,6 @@
+import type { Secret } from '../credentials/secret.js';
+import { parsePatch } from '../diff/parse-patch.js';
+import { redactSecrets } from '../security/redact.js';
 import type { Finding } from './types.js';
 
 /** Builds a security Finding for a redacted secret on an added line. */
@@ -54,4 +57,30 @@ export function buildPatchLineToNewLineMap(patch: string): Map<number, number> {
     patchLineNum++;
   }
   return result;
+}
+
+/**
+ * Redacts every patch before any model call and turns each secret found on an added line into a
+ * security finding (secrets on context or removed lines are redacted without a finding).
+ */
+export function redactPatches(
+  files: ReadonlyArray<{ path: string; patch: string }>,
+  knownSecrets: Secret[],
+): { files: Array<{ path: string; patch: string }>; securityFindings: Finding[] } {
+  const redacted: Array<{ path: string; patch: string }> = [];
+  const securityFindings: Finding[] = [];
+  for (const file of files) {
+    const result = redactSecrets(file.patch, knownSecrets);
+    redacted.push({ path: file.path, patch: result.text });
+    // redactSecrets reports patch-text line numbers; map them to new-side file lines.
+    const patchLineToNewLine = buildPatchLineToNewLineMap(file.patch);
+    const parsed = parsePatch(file.patch);
+    for (const found of result.found) {
+      const newSideLine = patchLineToNewLine.get(found.line);
+      if (newSideLine !== undefined && parsed.addedLines.has(newSideLine)) {
+        securityFindings.push(makeRedactionFinding(file.path, newSideLine, found.kind, securityFindings.length + 1));
+      }
+    }
+  }
+  return { files: redacted, securityFindings };
 }

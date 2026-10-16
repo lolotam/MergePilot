@@ -2,6 +2,7 @@ import { escapeInline, renderBotLogo } from './bot-identity.js';
 import { foundByLabel, type ConsensusCluster, type MergePanelResult } from './consensus.js';
 import type { FallbackReason } from './fallback-reason.js';
 import { renderFallbackNotice, renderScopeLine, type ReviewScope } from './summary.js';
+import { renderRulesLeftOut, renderVerifyRejected, type VerifyRejectedItem } from './review-notes.js';
 import { neutralize } from './text-safety.js';
 
 /** One bot's row in the consensus summary table (ADR-0017). */
@@ -34,6 +35,10 @@ export interface PanelSummaryInput {
   incompleteReasons?: string[] | undefined;
   /** Code when the judge's same-issue check for the merge was unavailable. */
   judgeUnavailable?: string | undefined;
+  /** Every bot's findings its verification pass rejected, each naming the bot (ADR-0028). */
+  verifyRejected?: readonly VerifyRejectedItem[] | undefined;
+  /** Nested rules files left out of the review (ADR-0028). */
+  rulesLeftOut?: readonly string[] | undefined;
 }
 
 interface Labels {
@@ -140,6 +145,11 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
     const items = merge.below.map((c) => `- ${clusterLine(c, merge.total, input.language)}`);
     sections.push(details(labels.below(merge.below.length), items.join('\n')));
   }
+
+  const rejected = renderVerifyRejected(input.verifyRejected ?? [], isArabic);
+  if (rejected) sections.push(rejected);
+  const rulesLeftOut = renderRulesLeftOut(input.rulesLeftOut ?? [], isArabic);
+  if (rulesLeftOut) sections.push(rulesLeftOut);
 
   const summaries = input.bots.filter((b) => b.status === 'completed' && b.summary?.trim());
   if (summaries.length > 0) {

@@ -98,7 +98,7 @@ judge:
   provider: openrouter        # typesafe | openrouter | vercel-gateway | opencode-zen
   model: ~typesafe/jev-latest # optional; defaults to the provider's first Jev model
   uses: [annotate, filter, dedupe] # any of annotate | filter | dedupe | consensus; [] = idle
-  threshold: 0.35             # filter: drop findings whose Jev confidence is below this
+  threshold: 0.25             # filter: drop findings whose Jev confidence is below this
   fallback:                   # optional, at most 3, tried in order when the judge before fails
     - provider: opencode-zen
       model: jev-1.13-free

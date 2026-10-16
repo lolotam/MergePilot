@@ -168,6 +168,8 @@ export async function executeReview(
       ...fallbackSummary,
       outcome: 'completed',
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
+      verifyRejected: reviewResult.verifyRejected,
+      rulesLeftOut: run.rulesLeftOut,
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),

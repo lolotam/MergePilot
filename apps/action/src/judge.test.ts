@@ -23,7 +23,7 @@ describe('actionJudge', () => {
     );
     // The old single mode still works: filter -> filter + dedupe.
     expect(out.judge?.uses).toEqual(['filter', 'dedupe']);
-    expect(out.judge?.threshold).toBe(0.35);
+    expect(out.judge?.threshold).toBe(0.25);
     expect(out.judge?.judge.entries).toEqual([
       { provider: 'typesafe', model: 'jev-latest', hasKey: true },
       { provider: 'opencode-zen', model: 'jev-1.13-free', hasKey: false },
