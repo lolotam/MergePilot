@@ -11,6 +11,7 @@ import { redactSecrets } from '../security/redact.js';
 import { FINDINGS_MISSING_REASON } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
+import type { ManifestFile } from './manifest.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
 import { combineUsage, reviewJsonSchema, type ReviewableFileWithPatch, type RulesFileInput } from './split.js';
@@ -38,6 +39,8 @@ export interface ReviewPassContext {
   libraryDocs?: LibraryDoc[] | undefined;
   /** The repository context of a batch (ADR-0029), for up-front and recovery batches alike. */
   contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
+  /** Every changed file of the PR, for the manifest of each batch (ADR-0031). */
+  manifestFiles?: readonly ManifestFile[] | undefined;
 }
 
 export type ReviewPassResult =
@@ -129,6 +132,7 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     redactedReviewableFiles: ctx.redactedReviewableFiles,
     libraryDocs: ctx.libraryDocs,
     contextFor: ctx.contextFor,
+    manifestFiles: ctx.manifestFiles,
     signal,
     totalUsage: combineUsage(response.usage, empty.usage),
     thinkingOff: empty.thinkingOff,
@@ -174,6 +178,7 @@ export async function runBatchedPass(
     knownSecrets: ctx.knownSecrets,
     libraryDocs: ctx.libraryDocs,
     contextFor: ctx.contextFor,
+    manifestFiles: ctx.manifestFiles,
     signal: ctx.signal,
     deadline: ctx.deadline,
   });

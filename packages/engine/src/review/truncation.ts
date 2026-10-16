@@ -9,6 +9,7 @@ import type { TokenUsage } from '../llm/types.js';
 import type { ParseReviewAnswerResult } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import type { ReviewDeadline } from './call.js';
+import type { ManifestFile } from './manifest.js';
 import type { ReviewModel } from './model.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
 import {
@@ -40,6 +41,8 @@ export interface RecoverReviewTruncationInput {
   libraryDocs?: LibraryDoc[] | undefined;
   /** The repository context of each recovery batch (ADR-0029). */
   contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
+  /** Every changed file of the PR, for the manifest of each recovery batch (ADR-0031). */
+  manifestFiles?: readonly ManifestFile[] | undefined;
   signal?: AbortSignal | undefined;
   totalUsage?: TokenUsage | undefined;
   /** The answer came from a retry with thinking off: the truncation retry keeps it off. */
@@ -114,6 +117,7 @@ export async function recoverReviewTruncation(
       knownSecrets: input.knownSecrets,
       libraryDocs,
       contextFor: input.contextFor,
+      manifestFiles: input.manifestFiles,
       signal,
       initialUsage: totalUsage,
       deadline: input.deadline,

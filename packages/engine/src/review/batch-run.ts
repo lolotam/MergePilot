@@ -10,6 +10,7 @@ import type { TokenUsage } from '../llm/types.js';
 import { FINDINGS_MISSING_REASON, parseReviewAnswer, type ParseReviewAnswerResult } from './answer.js';
 import { estimateTokens } from './budget.js';
 import { describePaths, retryUnusableAnswer, type ReviewDeadline } from './call.js';
+import { renderManifest, type ManifestFile } from './manifest.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { buildReviewPrompt, type ContextFile, type LibraryDoc } from './prompt.js';
 import {
@@ -47,6 +48,8 @@ export interface ExecuteBatchedReviewInput {
   libraryDocs?: LibraryDoc[] | undefined;
   /** The repository context of a batch: only its own files' context (ADR-0029). */
   contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
+  /** Every changed file of the PR for the manifest each batch gets (ADR-0031); none without it. */
+  manifestFiles?: readonly ManifestFile[] | undefined;
   signal?: AbortSignal | undefined;
   initialUsage?: TokenUsage | undefined;
   /** Overall review time limit: once expired, no new batch starts. */
@@ -60,12 +63,14 @@ export interface ExecuteBatchedReviewResult {
   incompleteReasons: string[];
 }
 
-/** The prompt for one batch of files. */
+/** The prompt for batch `index` of `input.batches`, with the PR manifest when there is one. */
 export function buildBatchPrompt(
-  input: Pick<ExecuteBatchedReviewInput, 'config' | 'pr' | 'rulesFiles' | 'libraryDocs' | 'contextFor'>,
-  files: ReviewableFileWithPatch[],
+  input: Pick<ExecuteBatchedReviewInput, 'batches' | 'config' | 'pr' | 'rulesFiles' | 'libraryDocs' | 'contextFor' | 'manifestFiles'>,
+  index: number,
 ): { system: string; user: string } {
+  const files = input.batches[index] ?? [];
   const contextFiles = input.contextFor?.(files) ?? [];
+  const manifest = input.manifestFiles ? renderManifest(input.manifestFiles, input.batches) : undefined;
   return buildReviewPrompt({
     language: input.config.language,
     maxFindings: input.config.review.maxFindings,
@@ -75,6 +80,7 @@ export function buildBatchPrompt(
     files,
     ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
     ...(contextFiles.length > 0 ? { contextFiles } : {}),
+    ...(manifest !== undefined ? { batch: { number: index + 1, count: input.batches.length, manifest } } : {}),
   });
 }
 
@@ -169,7 +175,7 @@ export async function executeBatchedReview(
       break;
     }
     const label = labelOf(bIdx);
-    const batchPrompt = buildBatchPrompt(input, batches[bIdx]!);
+    const batchPrompt = buildBatchPrompt(input, bIdx);
     const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
 
     if (!spend.canAfford(bPromptTokens, reviewOutputTokens)) {

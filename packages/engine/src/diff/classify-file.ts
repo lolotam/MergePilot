@@ -96,7 +96,7 @@ const BINARY_EXTENSIONS = new Set([
 ]);
 
 /** `*.lock` files and lockfiles without that extension (Go's checksum file included). */
-function isLockfile(base: string): boolean {
+export function isLockfile(base: string): boolean {
   return LOCKFILES.has(base) || base.endsWith('.lock') || base === 'go.sum';
 }
 

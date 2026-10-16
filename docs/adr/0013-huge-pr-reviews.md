@@ -141,3 +141,11 @@ point 7 ran before the batches of points 1 and 2 could take over. Owner decision
   summary review and does not get the comment.
 - The GitHub Action already publishes a skipped-budget summary review. Its log now also gives the
   redacted reason.
+
+## Amendment (2026-10-16): grouped batches, a PR manifest, and `review.maxPromptTokens` 90,000
+
+ADR-0031 changes how the up-front batches of point 2 are filled. They still stay within `review.batchTokens`, and a single file bigger than the cap is still truncated and disclosed. What changed:
+- An implementation and its sibling test, and the code files of one directory, share a batch whenever they fit the cap.
+- Batches go source, then tests, then config/CI, then docs and generated-like files. When the overall time limit of point 5 stops new batches, it drops the least valuable ones. The skipped-batch disclosure of point 6 is unchanged.
+- Every batch call carries an untrusted `PR_MANIFEST` block: every changed file with its status, its line counts and its batch. The budget preflight of point 7 prices it.
+- The default `review.maxPromptTokens` of point 1 is now 90,000 (was 60,000; kept under 128k-token context windows). A whole-PR call stays the default up to that size.

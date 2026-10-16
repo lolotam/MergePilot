@@ -110,6 +110,54 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
     expect(huge.startsWith(cut.slice(0, cut.length - PATCH_TRUNCATED_NOTE.length - 1))).toBe(true);
   });
 
+  // ~`tokens` estimated diff tokens (3.5 characters per token).
+  const sized = (path: string, tokens: number) => ({ path, patch: 'x'.repeat(tokens * 3.5) });
+  const pathsOf = (batches: Array<Array<{ path: string }>>) => batches.map((b) => b.map((f) => f.path));
+
+  it('keeps an implementation and its test in one batch even when another file sits between them (ADR-0031)', () => {
+    const files = [sized('src/parser.ts', 100), sized('src/lexer.ts', 200), sized('src/parser.test.ts', 100)];
+    expect(pathsOf(batchFilesByTokenCap(files, 300).batches)).toEqual([['src/parser.ts', 'src/parser.test.ts'], ['src/lexer.ts']]);
+  });
+
+  it('keeps the files of one directory together across a file of another directory', () => {
+    const files = [sized('src/a/one.ts', 100), sized('src/b/two.ts', 100), sized('src/a/three.ts', 100)];
+    expect(pathsOf(batchFilesByTokenCap(files, 200).batches)).toEqual([['src/a/one.ts', 'src/a/three.ts'], ['src/b/two.ts']]);
+  });
+
+  it('splits a group bigger than the cap between its files without truncating them', () => {
+    const files = [sized('src/x.ts', 200), sized('src/x.test.ts', 200)];
+    const { batches, truncatedPaths } = batchFilesByTokenCap(files, 300);
+    expect(pathsOf(batches)).toEqual([['src/x.ts'], ['src/x.test.ts']]);
+    expect(truncatedPaths).toEqual([]);
+  });
+
+  it('in a mixed directory split over the cap, schedules source units before test-only units', () => {
+    const files = [sized('src/a.test.ts', 100), sized('src/b.ts', 100)];
+    expect(pathsOf(batchFilesByTokenCap(files, 100).batches)).toEqual([['src/b.ts'], ['src/a.test.ts']]);
+  });
+
+  it("places every directory's source before the tests split out of an oversized source group", () => {
+    const files = [sized('src/a/main.ts', 100), sized('src/a/orphan.test.ts', 100), sized('src/b/main.ts', 100)];
+    expect(pathsOf(batchFilesByTokenCap(files, 100).batches)).toEqual([['src/a/main.ts'], ['src/b/main.ts'], ['src/a/orphan.test.ts']]);
+  });
+
+  it('orders source, then tests, then config and CI, then docs', () => {
+    const files = [
+      sized('README.md', 100),
+      sized('.github/workflows/ci.yml', 100),
+      sized('package.json', 100),
+      sized('tests/helpers.test.ts', 100),
+      sized('src/y.ts', 100),
+    ];
+    expect(pathsOf(batchFilesByTokenCap(files, 100).batches)).toEqual([
+      ['src/y.ts'],
+      ['tests/helpers.test.ts'],
+      ['.github/workflows/ci.yml'],
+      ['package.json'],
+      ['README.md'],
+    ]);
+  });
+
   it('truncatePatch cuts at a line break', () => {
     const cut = truncatePatch('+aaaa\n+bbbb\n+cccc', 30);
     expect(cut.split('\n').slice(0, -1).every((line) => /^\+[abc]{4}$/.test(line))).toBe(true);
