@@ -19,7 +19,7 @@ MergePilot reviews pull requests through a shared TypeScript engine, a GitHub Ac
 
 ## Conversation language
 
-- Reply to the owner in simple Egyptian Arabic only, even when the owner writes in English. This covers every reply: status lines, progress updates, questions and final summaries. Switch to English only when the owner asks for an English reply in that message.
+- Reply to the owner in simple Egyptian Arabic only, even when the owner writes in English. This covers every reply: status lines, progress updates, questions and final summaries. Switch to English only when the owner asks for an English reply in that message. Reply to anyone else (for example a contributor commenting on a PR) in the language they wrote in.
 - Code, identifiers, commit messages, PR titles and descriptions, and English documentation stay in English. Keep file paths, commands, model names and error messages verbatim inside the Arabic text.
 
 ## Review and credential invariants
