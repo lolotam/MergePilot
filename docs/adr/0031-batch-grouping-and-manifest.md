@@ -56,8 +56,8 @@ This is change 4 of the Codex comparison behind ADR-0028. Above `review.maxPromp
    - A single whole-PR call has no manifest and no `BATCHES` section: its prompt is byte-for-byte what it was.
    - The batches of a truncation recovery (ADR-0011, `batchFilesBySize` halves, unchanged) get the manifest too.
 5. **Budget.** The cost preflight builds every batch prompt with `buildBatchPrompt`, so the manifest of each batch is priced, like ADR-0029 context. The size guard and `budget.maxInputTokens` still measure the whole-PR prompt, which has no manifest. A batch call can exceed `review.batchTokens` by its manifest (at most about 300 short lines), as it already can by its context.
-6. **Default `review.maxPromptTokens` raised from 60,000 to 120,000.**
-   - Current models handle 120,000-token prompts well. ADR-0029 context made more PRs cross 60,000, and each crossing means many small calls with no cross-file view.
+6. **Default `review.maxPromptTokens` raised from 60,000 to 90,000.**
+   - 90,000 leaves room under a 128k-token context window for the output reservation and the ~3.5 chars/token estimate running low on dense code (a 120,000 default could exceed such windows). ADR-0029 context made more PRs cross 60,000, and each crossing means many small calls with no cross-file view.
    - More PRs are now reviewed in one whole-PR call; huge ones get fewer, larger first calls.
    - `review.batchTokens` (24,000) is unchanged, so a batch is as large as before.
    - A repository that sets the key keeps its value.

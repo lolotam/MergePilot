@@ -14,6 +14,7 @@ describe('batch-groups - fileTierOf (ADR-0031)', () => {
     ['tsconfig.base.json', FileTier.Config],
     ['Dockerfile', FileTier.Config],
     ['vitest.config.ts', FileTier.Config],
+    ['src/app.config.ts', FileTier.Source],
     ['docs/adr/0031-batch-grouping-and-manifest.md', FileTier.Docs],
     ['pnpm-lock.yaml', FileTier.Docs],
     ['LICENSE', FileTier.Docs],
@@ -35,6 +36,10 @@ describe('batch-groups - implementationKeyOf', () => {
     ['pkg/x_test.py', 'pkg/x'],
     ['pkg/tests/test_x.py', 'pkg/x'],
     ['cmd/x_test.go', 'cmd/x'],
+    ['src/user.service.ts', 'src/user.service'],
+    ['src/user.controller.ts', 'src/user.controller'],
+    ['src/user.service.spec.ts', 'src/user.service'],
+    ['src/foo.client.test.ts', 'src/foo.client'],
   ])('%s belongs to %s', (path, key) => {
     expect(implementationKeyOf(path)).toBe(key);
   });

@@ -153,7 +153,7 @@ describe('review limits for huge PRs (ADR-0013)', () => {
   it('defaults maxPromptTokens, batchTokens, callTimeoutMs and totalTimeoutMs', () => {
     const config = MergePilotConfigSchema.parse({ provider: 'anthropic', model: 'claude-sonnet' });
     expect(config.review).toMatchObject({
-      maxPromptTokens: 120_000,
+      maxPromptTokens: 90_000,
       batchTokens: 24_000,
       callTimeoutMs: 300_000,
       totalTimeoutMs: 1_200_000,
