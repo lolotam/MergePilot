@@ -126,6 +126,19 @@ describe('RunDetailPage - header, grouped findings, plain text rendering, filter
     );
   };
 
+  it('shows the method-fallback notice when the run result discloses a method switch', () => {
+    const runWithMethod = {
+      ...sampleRun,
+      result: {
+        ...sampleResult,
+        fallbackFromMethod: 'subscription' as const,
+        modelUsedMethod: 'api-key' as const,
+      },
+    };
+    const { getByTestId } = renderComponent(runWithMethod);
+    expect(getByTestId('method-fallback-notice').textContent).toMatch(/API key/i);
+  });
+
   it('renders header metadata including repo, PR link, reviewUrl, model, tokens, and duration', () => {
     renderComponent();
 

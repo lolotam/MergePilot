@@ -368,6 +368,10 @@ export class CredentialService {
     return readEffectiveAuthMethod(this.#store, this.#vault, workspaceId, provider);
   }
 
+  async getDualAuthState(workspaceId: string, provider: KeyProvider) {
+    return readDualAuthState(this.#store, this.#vault, workspaceId, provider);
+  }
+
   async setProviderDefaultMethod(workspaceId: string, provider: KeyProvider, method: ProviderAuthMethod): Promise<void> {
     return setDualDefaultMethod(this.#store, this.#vault, workspaceId, provider, method);
   }

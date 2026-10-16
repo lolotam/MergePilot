@@ -305,6 +305,9 @@ export const en: I18nDictionary = {
   viewPrOnGitHub: 'View pull request on GitHub',
   fallbackBadge: 'Fallback',
   fallbackFromTooltip: 'Fallback from {from}',
+  methodFallbackToApi:
+    'Continued with an API key after the subscription hit its quota or rate limit. Those calls count toward the monthly budget.',
+  methodFallbackToSubscription: 'Continued with the subscription after the API keys hit their quota or rate limit.',
   noFindings: 'No findings',
   severityCritical: 'Critical',
   severityHigh: 'High',

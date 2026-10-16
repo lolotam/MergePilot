@@ -8,10 +8,13 @@ import type {
 import type { GitHubClient } from '@mergepilot/github';
 import type { FetchLike, Secret } from '@mergepilot/engine';
 import type { DnsLookupFn } from '../core/ssrf.js';
+import type { DualAuthState } from '../credentials/dual-auth.js';
 
 export interface ProcessReviewCredentials {
   resolve(workspaceId: string, provider: KeyProvider): Promise<Secret>;
   getEffectiveAuthMethod?(workspaceId: string, provider: string): Promise<'subscription' | 'api-key' | null>;
+  /** Dual-method providers (ADR-0027): subscription + API keys together. */
+  getDualAuthState?(workspaceId: string, provider: KeyProvider): Promise<DualAuthState | null>;
   /**
    * Ordered keys for gemini, openrouter and opencode-zen (ADR-0026). Null when that provider
    * stores one credential. Optional so existing test fakes that only resolve one key still compile.

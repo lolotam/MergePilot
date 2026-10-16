@@ -302,6 +302,9 @@ export const ar = {
   viewPrOnGitHub: 'عرض طلب السحب على GitHub',
   fallbackBadge: 'احتياطي',
   fallbackFromTooltip: 'بديل عن {from}',
+  methodFallbackToApi:
+    'تابعت المراجعة بمفتاح API بعد أن بلغ الاشتراك حد الحصة أو معدل الطلبات. تُحتسب هذه الاستدعاءات ضمن الميزانية الشهرية.',
+  methodFallbackToSubscription: 'تابعت المراجعة بالاشتراك بعد أن بلغت مفاتيح API حد الحصة أو معدل الطلبات.',
   noFindings: 'لا ملاحظات',
   severityCritical: 'حرجة',
   severityHigh: 'عالية',

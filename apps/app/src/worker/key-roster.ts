@@ -16,13 +16,18 @@ export interface LoadedRosters {
   keyIds: Record<string, string[]>;
 }
 
-/** Loads one roster per multi-key provider. Missing method, other providers, and empty lists are skipped. */
+/**
+ * Loads one roster per multi-key provider. Missing method, other providers, and empty lists are
+ * skipped. A provider whose default is its subscription loads its keys only when it is in
+ * `dualMethods` (ADR-0027): they are the method fallback behind the subscription.
+ */
 export async function loadRosters(
   credentials: ProcessReviewCredentials,
   workspaceId: string,
   providers: readonly string[],
   primaryProvider: string,
   logger: Logger,
+  dualMethods: Readonly<Record<string, unknown>> = {},
 ): Promise<LoadedRosters> {
   const rosters: Record<string, KeyRoster> = {};
   const keyIds: Record<string, string[]> = {};
@@ -32,13 +37,17 @@ export async function loadRosters(
     if (seen.has(provider) || !isKeyListProvider(provider)) continue;
     seen.add(provider);
     let effective: ProviderAuthMethod | null | undefined;
+    // The primary's keys are required, except behind its subscription default, where they are
+    // only the method fallback (ADR-0027) and missing ones never fail the review.
+    let required = provider === primaryProvider;
     try {
       // Inside the try: a fallback whose method cannot be read is skipped, never the whole review.
       effective = await credentials.getEffectiveAuthMethod?.(workspaceId, provider as KeyProvider);
-      if (effective === 'subscription') continue;
+      if (effective === 'subscription' && !dualMethods[provider]) continue;
+      if (effective === 'subscription') required = false;
       const roster = await credentials.resolveKeyRoster(workspaceId, provider as KeyProvider);
       if (!roster || roster.secrets.length === 0) {
-        if (provider === primaryProvider) {
+        if (required) {
           throw new Error(`No API key roster is available for provider "${provider}"`);
         }
         if (effective === 'api-key') {
@@ -52,7 +61,7 @@ export async function loadRosters(
       keyIds[provider] = [...roster.keyIds];
       rosters[provider] = { keys: roster.secrets, startIndex: roster.startIndex };
     } catch (error) {
-      if (provider === primaryProvider) throw error;
+      if (required) throw error;
       if (effective === 'api-key') {
         logger.warn(
           {

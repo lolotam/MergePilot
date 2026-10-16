@@ -6,6 +6,9 @@ export interface FallbackReason {
   code: string;
   /** The provider's answer: redacted, one line, at most `MAX_FALLBACK_DETAIL` characters. */
   detail?: string;
+  /** ADR-0027: set when the review switched auth method on the same provider and model. */
+  fromMethod?: 'subscription' | 'api-key';
+  usedMethod?: 'subscription' | 'api-key';
 }
 
 export const MAX_FALLBACK_DETAIL = 300;
@@ -16,12 +19,21 @@ export const MAX_FALLBACK_DETAIL = 300;
  * before redaction can match it.
  */
 export function fallbackReasonOf(
-  disclosure: Partial<Pick<FallbackDisclosure, 'fallbackFrom' | 'fallbackCode' | 'fallbackDetail'>>,
+  disclosure: Partial<
+    Pick<
+      FallbackDisclosure,
+      'fallbackFrom' | 'fallbackCode' | 'fallbackDetail' | 'fallbackFromMethod' | 'modelUsedMethod'
+    >
+  >,
   knownSecrets: Secret[],
 ): FallbackReason | undefined {
   if (!disclosure.fallbackFrom || !disclosure.fallbackCode) return undefined;
   const detail = disclosure.fallbackDetail ? shorten(redactSecrets(disclosure.fallbackDetail, knownSecrets).text) : '';
-  return { from: disclosure.fallbackFrom, code: disclosure.fallbackCode, ...(detail ? { detail } : {}) };
+  const methodSwitch =
+    disclosure.fallbackFromMethod && disclosure.modelUsedMethod
+      ? { fromMethod: disclosure.fallbackFromMethod, usedMethod: disclosure.modelUsedMethod }
+      : {};
+  return { from: disclosure.fallbackFrom, code: disclosure.fallbackCode, ...(detail ? { detail } : {}), ...methodSwitch };
 }
 
 /** One line without control characters, cut by code points (never inside a surrogate pair). */

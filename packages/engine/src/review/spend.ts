@@ -13,6 +13,8 @@ import type { ModelPricing } from '../config/schema.js';
 import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
 import type { Secret } from '../credentials/secret.js';
+import { estimateTokens } from './budget.js';
+import type { ChainMove } from './fallback.js';
 import type { ReviewModel } from './model.js';
 
 /** The output-token limit one call really requests (answer + thinking headroom). */
@@ -76,6 +78,25 @@ export class SpendTracker {
       ? costUsd(usage, pricing)
       : this.estimate(promptTokens, outputTokens);
   }
+}
+
+/**
+ * Whether the chain may move this request from a subscription to the same model on paid API keys
+ * (ADR-0027). That switch happens inside one call, after the call's budget check ran at the
+ * subscription's $0 price, so the request is priced again at the API price against what is left.
+ * Any other move is not this check's business and is allowed.
+ */
+export function paidSwitchFits(
+  spend: SpendTracker,
+  apiPricing: ModelPricing | undefined,
+  { leaving, next, request }: ChainMove,
+): boolean {
+  if (!apiPricing || !leaving.includedInSubscription || next.includedInSubscription || next.label !== leaving.label) return true;
+  const cost = estimateCostUsd(
+    { inputTokens: estimateTokens(request.system + request.user), maxOutputTokens: requestedOutputTokens(next, request.maxOutputTokens) },
+    apiPricing,
+  );
+  return cost <= spend.remainingUsd;
 }
 
 /** A short, secret-free description of a failed call: the LlmFailure code, else a redacted message. */

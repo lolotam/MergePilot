@@ -36,6 +36,8 @@ export interface ExecuteReviewOutcome {
   modelUsed?: string | undefined;
   /** Label of the configured model, set only when an explicit fallback took over (ADR-0008). */
   fallbackFrom?: string | undefined;
+  fallbackFromMethod?: 'subscription' | 'api-key' | undefined;
+  modelUsedMethod?: 'subscription' | 'api-key' | undefined;
   /** What the Jev semantic duplicate check did, when it ran. */
   judgeSemantic?: SemanticDedupeResult | undefined;
 }
@@ -252,6 +254,8 @@ export async function executeReview(
     runResult: reviewResult,
     ...(disclosure?.modelUsed ? { modelUsed: disclosure.modelUsed } : {}),
     ...(disclosure?.fallbackFrom ? { fallbackFrom: disclosure.fallbackFrom } : {}),
+    ...(disclosure?.fallbackFromMethod ? { fallbackFromMethod: disclosure.fallbackFromMethod } : {}),
+    ...(disclosure?.modelUsedMethod ? { modelUsedMethod: disclosure.modelUsedMethod } : {}),
     ...(judgeSemantic ? { judgeSemantic } : {}),
   };
 }

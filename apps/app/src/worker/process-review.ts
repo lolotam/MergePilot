@@ -1,4 +1,3 @@
-import { SUBSCRIPTION_PREFIX } from '@mergepilot/engine';
 import { processBudgetAdmission } from './budget-admission.js';
 import {
   listPullRequestFiles,
@@ -22,6 +21,7 @@ import { changedLinesOf, chooseModel, fallbackChain } from './model-choice.js';
 import { noteNothingNew } from './nothing-new-note.js';
 import { closeRuns, panelBots, runPanel, startBotRuns, type StartedRuns } from './panel.js';
 import type { BotRun, PanelContext } from './panel-types.js';
+import { reviewUsesSubscriptionAdmission } from './dual-method-review.js';
 import { failBotRun, WORKSPACE_DELETED } from './review-bot.js';
 import { guardWritesForWorkspace } from './workspace-guard.js';
 import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
@@ -221,9 +221,14 @@ async function sharedSteps(
     const budget = settings.monthlyBudgetUsd;
     // Reviews admitted before this one and still running have not recorded their cost: each
     // holds its paid bots × the per-review budget until it finishes (first come, first served).
-    // A bot on a consumer subscription costs nothing extra, so it holds nothing.
+    // A subscription bot with no API keys costs nothing extra, so it holds nothing (ADR-0027).
     const admission = deps.budgetAdmission ?? processBudgetAdmission;
-    const paidBots = (await Promise.all(runs.map((br) => usesSubscription(deps, workspaceId, br.bot.provider)))).filter((sub) => !sub).length;
+    const free = await Promise.all(runs.map((br) => reviewUsesSubscriptionAdmission(deps.credentials, workspaceId, br.bot.provider)));
+    // The run keeps the decision, so keys connected after admission do not add a paid fallback.
+    runs.forEach((br, index) => {
+      br.admittedFree = free[index] === true;
+    });
+    const paidBots = free.filter((sub) => !sub).length;
     releaseBudget = await admission.admit(
       workspaceId,
       paidBots * mainConfig.effectiveConfig.budget.perReviewUsd,
@@ -283,17 +288,3 @@ async function sharedSteps(
   };
 }
 
-/** True when the provider's stored credential is a consumer subscription (no incremental cost). Unknown counts as paid. */
-async function usesSubscription(deps: ProcessReviewDeps, workspaceId: string, provider: string): Promise<boolean> {
-  try {
-    const effective = await deps.credentials.getEffectiveAuthMethod?.(
-      workspaceId,
-      provider as Parameters<ProcessReviewDeps['credentials']['resolve']>[1],
-    );
-    if (effective) return effective === 'subscription';
-    const secret = await deps.credentials.resolve(workspaceId, provider as Parameters<ProcessReviewDeps['credentials']['resolve']>[1]);
-    return secret.reveal().startsWith(SUBSCRIPTION_PREFIX);
-  } catch {
-    return false;
-  }
-}

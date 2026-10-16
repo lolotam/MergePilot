@@ -41,6 +41,21 @@ describe('WorkspaceCredentialStore', () => {
     await expect(store.resolve({ provider: 'openai' }, 'fallback')).rejects.toThrow(/No API key is available/);
     expect(resolve).not.toHaveBeenCalled();
   });
+
+  it('returns the subscription when asked by name, though API keys are the default, and redacts both', async () => {
+    const primaryKey = new Secret('openai-default-api-key-001');
+    const envelope = new Secret('mp-sub:openai:envelope-for-test');
+    const credentials: ProcessReviewCredentials = {
+      resolve: vi.fn(async () => envelope),
+      resolveKeyRoster: vi.fn(async () => ({ secrets: [primaryKey], keyIds: ['k1'], startIndex: 0 })),
+      getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
+    };
+    const store = new WorkspaceCredentialStore('ws', credentials, 'openai', primaryKey);
+
+    expect(await store.resolve({ provider: 'openai' }, 'review')).toBe(primaryKey);
+    expect(await store.resolve({ provider: 'openai', method: 'subscription' }, 'review')).toBe(envelope);
+    expect(store.getKnownSecrets()).toEqual(expect.arrayContaining([primaryKey, envelope]));
+  });
 });
 
 describe('loadRosters api-key fallbacks', () => {
@@ -56,5 +71,31 @@ describe('loadRosters api-key fallbacks', () => {
     };
     const { rosters } = await loadRosters(credentials, 'ws', ['gemini', 'openai'], 'gemini', loggerStub());
     expect(Object.keys(rosters)).toEqual(['gemini']);
+  });
+});
+
+describe('loadRosters behind a subscription default (ADR-0027)', () => {
+  const roster = { secrets: [new Secret('openai-api-key-behind-sub')], keyIds: ['k1'], startIndex: 0 };
+  const credentials = (keys: typeof roster | null): ProcessReviewCredentials => ({
+    resolve: vi.fn(),
+    getEffectiveAuthMethod: vi.fn(async () => 'subscription' as const),
+    resolveKeyRoster: vi.fn(async () => keys),
+  });
+
+  it('loads the keys of a dual primary so they can follow its subscription', async () => {
+    const { rosters } = await loadRosters(credentials(roster), 'ws', ['openai'], 'openai', loggerStub(), { openai: { defaultMethod: 'subscription' } });
+    expect(rosters.openai?.keys).toEqual(roster.secrets);
+  });
+
+  it('leaves the keys out when the provider is not dual for this run', async () => {
+    const creds = credentials(roster);
+    const { rosters } = await loadRosters(creds, 'ws', ['openai'], 'openai', loggerStub());
+    expect(rosters).toEqual({});
+    expect(creds.resolveKeyRoster).not.toHaveBeenCalled();
+  });
+
+  it('does not fail the review when the keys behind a subscription primary are gone', async () => {
+    const { rosters } = await loadRosters(credentials(null), 'ws', ['openai'], 'openai', loggerStub(), { openai: { defaultMethod: 'subscription' } });
+    expect(rosters).toEqual({});
   });
 });

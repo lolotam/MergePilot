@@ -84,12 +84,18 @@ describe('generateWithTimeout (ADR-0013)', () => {
   it('withCallTimeout keeps the label, headroom and disclosure fields of the wrapped model', () => {
     const base: ReviewModel = {
       label: 'fake:base',
+      authMethod: 'subscription',
+      includedInSubscription: true,
+      fallbackTriggers: ['quota', 'rate-limit'],
       outputTokensFor: (max) => max + 8192,
       skippedFallbacks: [{ label: 'openai:gpt', reason: 'no key' }],
       generate: async () => ({ text: '', finishReason: 'stop' }),
     };
     const wrapped = withCallTimeout(base, 1_000);
     expect(wrapped.label).toBe('fake:base');
+    expect(wrapped.authMethod).toBe('subscription');
+    expect(wrapped.fallbackTriggers).toEqual(['quota', 'rate-limit']);
+    expect(wrapped.includedInSubscription).toBe(true);
     expect(wrapped.outputTokensFor?.(4096)).toBe(4096 + 8192);
     expect(wrapped.skippedFallbacks).toEqual([{ label: 'openai:gpt', reason: 'no key' }]);
   });

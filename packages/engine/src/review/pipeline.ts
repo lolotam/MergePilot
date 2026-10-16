@@ -34,7 +34,7 @@ import {
 } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, type CappedBatches } from './split.js';
-import { SpendTracker } from './spend.js';
+import { paidSwitchFits, SpendTracker } from './spend.js';
 import { runVerifyPass, VERIFY_MAX_OUTPUT_TOKENS } from './verify-pass.js';
 
 // ── Input types ──
@@ -114,9 +114,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // One chain per review, so a fallback lasts for the rest of this review only (ADR-0008).
   // Each model gets its own per-call timeout, so a timeout is a failure the chain decides on.
   const fallbackModels = input.fallbackModels ?? input.model.fallbacks ?? [];
-  const model = new FallbackChain(
+  const model: FallbackChain = new FallbackChain(
     withCallTimeout(input.model, limits.callTimeoutMs),
     fallbackModels.map((m) => withCallTimeout(m, limits.callTimeoutMs)),
+    (move) => paidSwitchFits(spend, budgetCfg.pricing, move),
   );
   const subscriptionPricing = { inputPerMTok: 0, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 };
   const currentPricing = () => model.includedInSubscription ? subscriptionPricing : budgetCfg.pricing;
@@ -354,13 +355,16 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     incompleteReasons,
   };
 
-  // Pricing belongs to the configured model; after a fallback the cost is unknown (tokens still count).
+  // Pricing belongs to the configured model; after a model fallback the cost is unknown (tokens still count).
   const disclosure = model.disclosure(knownSecrets);
+  const methodOnlyFallback =
+    disclosure.fallbackFromMethod !== undefined && disclosure.modelUsed === disclosure.fallbackFrom;
   let reviewCostUsd: number | undefined;
   if (model.onlySubscriptionCalls) {
     reviewCostUsd = 0;
-  } else if (budgetCfg.pricing && !disclosure.fallbackFrom) {
-    // Real cost where usage was reported, the estimate for calls without usage (ADR-0011).
+  } else if (budgetCfg.pricing && (!disclosure.fallbackFrom || methodOnlyFallback)) {
+    // Real cost where usage was reported, the estimate for calls without usage (ADR-0011). A
+    // method-only fallback stays on the configured model, so its total is known too (ADR-0027).
     reviewCostUsd = spend.spentUsd;
   }
 

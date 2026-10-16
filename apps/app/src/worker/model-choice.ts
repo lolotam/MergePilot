@@ -88,9 +88,19 @@ export function usedModel(
   settings: WorkspaceSettings,
   modelUsed: string | undefined,
   fallbackFrom: string | undefined,
+  fallbackFromMethod?: string | undefined,
+  modelUsedMethod?: string | undefined,
 ): UsedModel {
   const configured = { provider: choice.provider, model: choice.model, effort: choice.effort };
   if (!fallbackFrom || !modelUsed) return { ...configured, fallbackFrom: null };
+  if (
+    fallbackFromMethod &&
+    modelUsedMethod &&
+    fallbackFromMethod !== modelUsedMethod &&
+    modelUsed === fallbackFrom
+  ) {
+    return { ...configured, fallbackFrom };
+  }
   const colon = modelUsed.indexOf(':');
   const provider = colon > 0 ? modelUsed.slice(0, colon) : '';
   const model = colon > 0 ? modelUsed.slice(colon + 1) : '';
