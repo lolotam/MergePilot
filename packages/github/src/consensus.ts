@@ -144,12 +144,15 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
     const enough = cluster.foundBy.length >= input.minAgreement;
     (enough || ALWAYS_KEPT.has(cluster.finding.severity) ? agreed : below).push(cluster);
   }
-  const { kept, overLimit } = capClusters(agreed.sort(byImportance), input.maxFindings);
+  const { kept, overLimit } = capConsensusClusters(agreed.sort(byImportance), input.maxFindings);
   return { kept, below: below.sort(byImportance), overLimit, total: input.bots.length, ...(semantic ? { semantic } : {}) };
 }
 
-/** The `max` clusters to publish, most severe first and then those most bots found; order kept. */
-function capClusters(
+/**
+ * The `max` clusters to publish, most severe first and then those most bots found; order kept. A
+ * caller that drops clusters after the merge (already published ones) caps the survivors with it.
+ */
+export function capConsensusClusters(
   clusters: ConsensusCluster[],
   max: number | undefined,
 ): { kept: ConsensusCluster[]; overLimit: ConsensusCluster[] } {

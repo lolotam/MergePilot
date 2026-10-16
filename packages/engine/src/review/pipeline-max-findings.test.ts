@@ -199,6 +199,70 @@ describe('runReview — review.maxFindings', () => {
     expect(clampedFallback.status === 'completed' && clampedFallback.outputLimit).toMatchObject({ answerTokens: 7000 });
   });
 
+  describe('a truncated verification answer', () => {
+    const files: PrFile[] = [{ path: 'src/f0.ts', status: 'added', patch: patchOf(50), changes: 50 }];
+    /** Answers the review in full and truncates every verification answer. */
+    function verifyTruncatingModel(answerTokensFor?: (max: number) => number) {
+      const { model, calls } = findingsModel(50);
+      const truncating: ReviewModel = {
+        ...model,
+        ...(answerTokensFor ? { answerTokensFor } : {}),
+        generate: async (req) => {
+          if (calls.length === 0) return model.generate(req);
+          calls.push(req);
+          return { text: '{"verdicts": [', finishReason: 'length' };
+        },
+      };
+      return { model: truncating, calls };
+    }
+
+    it('skips the retry when the output limit leaves it no more answer room', async () => {
+      // 50 findings: 6,400 verification tokens, clamped to 6,000; the retry would get 6,000 too.
+      const { model, calls } = verifyTruncatingModel((max) => Math.min(max, 6000));
+      const result = await review(configWith({ maxFindings: 50, verify: true }), model, files);
+
+      expect(calls.slice(1).map((c) => c.maxOutputTokens)).toEqual([6400]);
+      expect(result.status === 'completed' && result.result.incompleteReasons).toContain(
+        "verification truncation retry skipped: the model's output limit leaves no room for a larger answer",
+      );
+    });
+
+    it('still retries once when the retry gets more room', async () => {
+      const { model, calls } = verifyTruncatingModel();
+      await review(configWith({ maxFindings: 50, verify: true }), model, files);
+      expect(calls.slice(1).map((c) => c.maxOutputTokens)).toEqual([6400, 12_800]);
+    });
+  });
+
+  it("discloses the review model's output limit even when verification moved to a fallback", async () => {
+    const files: PrFile[] = [{ path: 'src/f0.ts', status: 'added', patch: patchOf(10), changes: 10 }];
+    const { model: answering } = findingsModel(2);
+    let calls = 0;
+    // The primary answers the review clamped to 6,000, then hits a rate limit on verification.
+    const primary: ReviewModel = {
+      ...answering,
+      label: 'fake:primary',
+      answerTokensFor: (max) => Math.min(max, 6000),
+      generate: async (req) => {
+        if (calls++ === 0) return answering.generate(req);
+        throw new LlmFailure({ code: 'RATE_LIMIT', provider: 'fake', message: 'rate limited' });
+      },
+    };
+    const fallback: ReviewModel = { ...findingsModel(2).model, label: 'fake:fallback' };
+    const result = await runReview({
+      config: configWith({ maxFindings: 50, verify: true }),
+      pr: { title: 'PR', body: '' },
+      files,
+      rulesFiles: [],
+      model: primary,
+      fallbackModels: [fallback],
+      knownSecrets: [],
+    });
+
+    expect(result.status === 'completed' && result.modelUsed).toBe('fake:fallback');
+    expect(result.status === 'completed' && result.outputLimit).toMatchObject({ answerTokens: 6000 });
+  });
+
   it('sizes the verification answer for the findings it checks', async () => {
     const { model, calls } = findingsModel(50);
     const files: PrFile[] = [{ path: 'src/f0.ts', status: 'added', patch: patchOf(50), changes: 50 }];

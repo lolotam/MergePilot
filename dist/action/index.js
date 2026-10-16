@@ -141411,7 +141411,9 @@ async function runVerifyPass(input2) {
       incompleteReasons.push(`verification ${empty.note}`);
     if (needsTruncationRetry(verifyParsed, (empty.response ?? res).finishReason)) {
       const retryRequested = requestedOutputTokens(model, retryOutputTokens);
-      if (!spend.canAfford(promptTokens, retryRequested)) {
+      if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens, empty.thinkingOff ? "off" : void 0)) {
+        incompleteReasons.push(`verification ${OUTPUT_LIMIT_RETRY_SKIPPED}`);
+      } else if (!spend.canAfford(promptTokens, retryRequested)) {
         incompleteReasons.push("verification retry skipped: budget limit reached");
       } else {
         try {
@@ -141577,6 +141579,8 @@ async function runReview(input2) {
   }
   let totalUsage = pass.totalUsage;
   incompleteReasons.push(...pass.incompleteReasons);
+  const answerTokens = model.answerTokensFor(maxOutputTokens);
+  const outputLimit = answerTokens < maxOutputTokens ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens } : void 0;
   let modelFindings = pass.findings;
   let verification;
   let verifyRejected = [];
@@ -141630,8 +141634,6 @@ async function runReview(input2) {
     incompleteReasons
   };
   const contextDisclosure = context.disclosure();
-  const answerTokens = model.answerTokensFor(maxOutputTokens);
-  const outputLimit = answerTokens < maxOutputTokens ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens } : void 0;
   const disclosure = model.disclosure(knownSecrets);
   const methodOnlyFallback = disclosure.fallbackFromMethod !== void 0 && disclosure.modelUsed === disclosure.fallbackFrom;
   let reviewCostUsd;

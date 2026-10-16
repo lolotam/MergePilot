@@ -314,6 +314,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
   let totalUsage = pass.totalUsage;
   incompleteReasons.push(...pass.incompleteReasons);
+  // The answer budget of the model that answered the review (a fallback's own limit after a
+  // fallback), read before verification can move the chain on: the summary then says the answer
+  // may hold fewer findings (ADR-0033).
+  const answerTokens = model.answerTokensFor(maxOutputTokens);
+  const outputLimit: OutputLimitDisclosure | undefined =
+    answerTokens < maxOutputTokens
+      ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens }
+      : undefined;
 
   // ── Step e2: verification pass ─────────────────────────────────────────
   let modelFindings = pass.findings;
@@ -383,13 +391,6 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   };
 
   const contextDisclosure = context.disclosure();
-  // The answering model's known output limit may have clamped each call (a fallback's own limit
-  // after a fallback); the summary then says the answer may hold fewer findings (ADR-0033).
-  const answerTokens = model.answerTokensFor(maxOutputTokens);
-  const outputLimit: OutputLimitDisclosure | undefined =
-    answerTokens < maxOutputTokens
-      ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens }
-      : undefined;
   // Pricing belongs to the configured model; after a model fallback the cost is unknown (tokens still count).
   const disclosure = model.disclosure(knownSecrets);
   const methodOnlyFallback =

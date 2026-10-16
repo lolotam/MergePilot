@@ -15,7 +15,13 @@ import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { combineUsage, needsTruncationRetry, type ReviewableFileWithPatch } from './split.js';
 import { verifyOutputTokensFor, verifyRetryOutputTokens } from './output-budget.js';
-import { describeCallError, requestedOutputTokens, type SpendTracker } from './spend.js';
+import {
+  describeCallError,
+  OUTPUT_LIMIT_RETRY_SKIPPED,
+  requestedOutputTokens,
+  retryAddsAnswerRoom,
+  type SpendTracker,
+} from './spend.js';
 import type { ContextFile } from './prompt.js';
 import type { Finding } from './types.js';
 import {
@@ -114,7 +120,9 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
 
     if (needsTruncationRetry(verifyParsed, (empty.response ?? res).finishReason)) {
       const retryRequested = requestedOutputTokens(model, retryOutputTokens);
-      if (!spend.canAfford(promptTokens, retryRequested)) {
+      if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens, empty.thinkingOff ? 'off' : undefined)) {
+        incompleteReasons.push(`verification ${OUTPUT_LIMIT_RETRY_SKIPPED}`);
+      } else if (!spend.canAfford(promptTokens, retryRequested)) {
         incompleteReasons.push('verification retry skipped: budget limit reached');
       } else {
         try {

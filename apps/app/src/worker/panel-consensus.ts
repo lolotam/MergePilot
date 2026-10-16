@@ -1,5 +1,6 @@
 import { hasJudgeUse } from '@mergepilot/engine';
 import {
+  capConsensusClusters,
   dedupeJudgeOf,
   deduplicateFindings,
   judgeBudgetLeft,
@@ -68,25 +69,33 @@ export async function publishConsensus(
   const merge = await mergePanelFindings({
     bots: completed.map(({ br, rr }) => ({ slot: br.bot.slot, name: br.bot.name, inline: rr.inline, summaryOnly: rr.summaryOnly })),
     minAgreement: settings.panelMinAgreement ?? 1,
-    // One published review: the findings limit is for the merged total, not each bot (ADR-0033).
-    maxFindings: ctx.mainConfig.effectiveConfig.review.maxFindings,
+    // The findings limit is applied below, after the clusters already published are dropped.
     judge: consensusJudge,
     knownSecrets,
     maxUsd: consensusJudge ? budget() : undefined,
   });
-  const merged = merge.kept.filter((c) => c.kind === 'inline').map((c) => withFoundBy(c, merge.total, language));
+  const inlineOf = new Map(
+    merge.kept.filter((c) => c.kind === 'inline').map((c) => [c, withFoundBy(c, merge.total, language)] as const),
+  );
   const deduped = await deduplicateFindings(ctx.client, {
     owner: ctx.owner,
     repo: ctx.repo,
     pull_number: job.pullNumber,
     publisherLogin: ctx.publisherLogin,
-    findings: merged,
+    findings: [...inlineOf.values()],
     judge: dedupeJudge,
     knownSecrets,
     maxUsd: dedupeJudge ? budget() : undefined,
     botSlot: MAIN_BOT_SLOT,
   });
   addJudgeUsage(holder.pending, judge?.judge.report());
+  // One published review: the findings limit is for the merged total, not each bot (ADR-0033). It
+  // is applied to what survives the dedupe, so no slot goes to a finding already on the PR.
+  const notPublished = new Set(deduped.kept);
+  const survivors = merge.kept.filter((c) => c.kind === 'summaryOnly' || notPublished.has(inlineOf.get(c)!));
+  const capped = capConsensusClusters(survivors, ctx.mainConfig.effectiveConfig.review.maxFindings);
+  const published = { ...merge, kept: capped.kept, overLimit: capped.overLimit };
+  const inline = capped.kept.flatMap((c) => (c.kind === 'inline' ? [inlineOf.get(c)!] : []));
 
   const rows: PanelBotRow[] = [
     ...runs.map((br) => row(br.bot, outcomes.find((o) => o.slot === br.bot.slot))),
@@ -104,9 +113,9 @@ export async function publishConsensus(
     language,
     baseUrl: ctx.baseUrl,
     bots: rows,
-    merge,
+    merge: published,
     minAgreement: settings.panelMinAgreement ?? 1,
-    inlineCount: deduped.kept.length,
+    inlineCount: inline.length,
     scope: reviewScopeOf(files.selection),
     incompleteReasons,
     judgeUnavailable: merge.semantic?.unavailable,
@@ -123,7 +132,7 @@ export async function publishConsensus(
     pull_number: job.pullNumber,
     expectedHeadSha: job.headSha,
     summaryMarkdown,
-    inline: deduped.kept,
+    inline,
     configHash: ctx.mainConfig.configHash,
     language,
     suggestionsAsCode: false,
@@ -134,7 +143,7 @@ export async function publishConsensus(
     ...(job.force ? { force: true } : {}),
   });
   ctx.deps.log?.(`Review panel publication outcome: ${publish.status}`);
-  const findings = deduped.kept.length + merge.kept.filter((c) => c.kind === 'summaryOnly').length;
+  const findings = inline.length + capped.kept.filter((c) => c.kind === 'summaryOnly').length;
   logger.info({ event: 'panel.publish', jobId: job.deliveryId, mode: 'consensus', findings }, `Reviewer panel published ${findings} findings`);
   return { reviewUrl: reviewUrlOf(publish, capture.url(), { owner: ctx.owner, repo: ctx.repo, pullNumber: job.pullNumber }) };
 }

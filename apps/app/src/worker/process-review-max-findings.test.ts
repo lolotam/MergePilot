@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { renderFindingComment } from '@mergepilot/github';
 import { createHarness } from './model-settings.fixtures.js';
-import { finding, panelSetup } from './panel.fixtures.js';
+import { finding, panelSetup, PUBLISHER } from './panel.fixtures.js';
 import { processReviewJob } from './process-review.js';
 
 // The findings limit (ADR-0033): the workspace setting is the default, a repository file that
@@ -52,6 +53,29 @@ describe('processReviewJob — consensus review respects the findings limit', ()
     expect(review.body).toContain('Foxtrot · _Found by: Owl (1/2)_');
     expect(review.body).toContain('Golf · _Found by: Owl (1/2)_');
     expect(h.events('panel.publish')[0]).toMatchObject({ mode: 'consensus', findings: 5 });
+  });
+
+  it('gives no limit slot to a finding the PR already has a comment for', async () => {
+    const alpha = finding('Alpha', 'critical');
+    const published = { id: 'a', side: 'RIGHT' as const, ...alpha } as Parameters<typeof renderFindingComment>[0];
+    const h = await panelSetup({
+      settings: { panelMode: 'consensus', panelMinAgreement: 1 },
+      repoFiles: { '.mergepilot.yml': 'review:\n  maxFindings: 2\n' },
+      bots: [{ slot: 2 }],
+      // Each bot keeps its own 2; merged, they are 4 clusters.
+      findings: { 'main-model': [alpha, finding('Bravo')], 'bot2-model': [finding('Charlie'), finding('Delta')] },
+      comments: [
+        { id: 1, path: 'src/app.ts', line: 2, user: { login: PUBLISHER }, body: renderFindingComment(published, { language: 'en', suggestionsAsCode: false }) },
+      ],
+    });
+    expect((await processReviewJob(h.job, h.deps)).status).toBe('completed');
+
+    // The top cluster is already on the PR: both slots go to new findings, one is over the limit.
+    const titles = h.created[0]!.comments.map((c) => c.body.split('\n')[0]);
+    expect(titles).toHaveLength(2);
+    expect(titles).not.toContain('### Alpha');
+    expect(h.created[0]!.body).toContain('<summary>Over the findings limit (1)</summary>');
+    expect(h.created[0]!.body).not.toMatch(/Over the findings limit[\s\S]*Alpha/);
   });
 
   it('keeps every merged finding when they fit the limit', async () => {
