@@ -287,6 +287,8 @@ export const ReviewRunResultSchema = z.object({
     )
     .max(MAX_PROVIDER_KEYS)
     .optional(),
+  fallbackFromMethod: z.enum(['subscription', 'api-key']).optional(),
+  modelUsedMethod: z.enum(['subscription', 'api-key']).optional(),
 });
 export type ReviewRunResult = z.infer<typeof ReviewRunResultSchema>;
 

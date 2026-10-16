@@ -34,6 +34,8 @@ export interface BotRun {
   stopHeartbeat: () => void;
   /** `performance.now()` when the run started, for `panel.bot.done`. */
   startedAt: number;
+  /** Admitted against the monthly budget as a free subscription bot, holding nothing (ADR-0022). */
+  admittedFree?: boolean;
 }
 
 /** What the shared steps produced; every bot reads it, none changes it. */

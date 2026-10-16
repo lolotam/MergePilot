@@ -50,7 +50,7 @@ The change is delivered in two phases, each in its own pull request:
    - an API-key rotating model behind a subscription default;
    - a subscription model behind an API-key default.
 
-   The chain is `[primary, primary-other-method, fallback1, fallback1-other-method, …]`. The configured ADR-0008 fallbacks are unchanged. The subscription model keeps its resolver (`store.resolve`), so a token refresh still happens mid-review.
+   The chain is `[primary, primary-other-method, fallback1, fallback1-other-method, …]`. The configured ADR-0008 fallbacks are unchanged. The subscription model keeps its resolver, so a token refresh still happens mid-review. It asks the store for the subscription by name (`CredentialRef.method: 'subscription'`), because a plain `resolve` answers with the effective default, which is an API key when keys are the default. An other-method entry that cannot be built is listed in `skippedFallbacks` with a fixed reason, never dropped silently.
 
 5. **Triggers, with skip semantics (Phase B).** A method-fallback entry is entered only for failure kinds `quota` and `rate-limit`. That includes `QUOTA_EXHAUSTED_ALL_KEYS`, whose kind is `quota`.
    - `ReviewModel` gains an optional `fallbackTriggers`. `FallbackChain` skips an entry whose triggers do not include the failure kind, and looks at the next entry with the global ADR-0008 triggers.
@@ -58,7 +58,7 @@ The change is delivered in two phases, each in its own pull request:
    - Example: a subscription that fails with `auth` while keys exist goes to the configured fallback, and the keys are not used. An expired subscription is never silently paid for.
 
 6. **Disclosure (Phase B).** `ReviewModel` gains `authMethod?: 'subscription' | 'api-key'`, and `rotatingReviewModel` keeps `authMethod` and `includedInSubscription` of the method it wraps.
-   - The disclosure adds `fallbackFromMethod` and `modelUsedMethod` when they differ, because the `provider:model` labels are equal.
+   - The disclosure adds `fallbackFromMethod` and `modelUsedMethod` only when the model that answered is the primary's own model on another method, because the `provider:model` labels are equal then. A configured model that answered after the other method also failed is disclosed as an ordinary ADR-0008 fallback.
    - **GitHub summary:** the fallback notice says the review continued with an API key (or with the subscription) because the other method hit its quota or rate limit.
    - **Dashboard:** the run record stores the method switch in its existing `result` JSON, next to `fallback_from`. No new column.
    - **Logs:** carry the methods and the failure kind, never a secret.
@@ -66,7 +66,8 @@ The change is delivered in two phases, each in its own pull request:
 7. **Cost and budget (Phase B).**
    - **Pricing.** For a dual provider, `budget.pricing` is always the model's **API** price, whatever the default. It comes from the ADR-0024 lookup: the workspace manual price, then the catalog row of the same provider and model. Subscription calls stay $0 through `includedInSubscription`, and API-key calls are priced with the API price.
    - **Final cost.** A run whose only fallback is a method fallback records `cost_usd` as the sum of its priced calls. This is identified by the disclosure: `fallbackFromMethod` is set and the `modelUsed` label equals `fallbackFrom`. A run that used a configured model fallback keeps the ADR-0008 §4 "unknown after fallback" rule.
-   - **Admission.** A subscription-default bot whose provider also has API keys reserves `perReviewUsd` like a paid bot (ADR-0022), because it may pay. `usesSubscription` in `process-review.ts` is decided from the effective default and the key list, not from `resolve()`.
+   - **Admission.** A subscription-default bot whose provider also has API keys reserves `perReviewUsd` like a paid bot (ADR-0022), because it may pay. `reviewUsesSubscriptionAdmission` (`apps/app/src/worker/dual-method-review.ts`) decides from the effective default and the key list, not from `resolve()`; a state that cannot be read counts as paid. A bot admitted as free keeps that decision for its run: API keys connected after admission do not become a paid fallback behind its subscription until the next review.
+   - **Budget at the switch.** The switch from the subscription to paid keys happens inside one call, after that call's budget check ran at the subscription's $0 price. The chain therefore prices the call at the API price first; when it does not fit what is left of `perReviewUsd`, the keys are not entered and the chain goes on as if they were absent: to the next configured fallback (ADR-0008), or the review fails with the subscription's error.
    - **API-equivalent.** The ADR-0024 figure is shown only when every call was on the subscription.
 
 8. **API and dashboard.**

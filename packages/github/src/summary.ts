@@ -83,9 +83,25 @@ export function renderFallbackNotice(modelLabel: string, fallback: FallbackReaso
   const code = neutralize(fallback.code);
   const detail = fallback.detail ? neutralize(fallback.detail) : '';
   const why = detail ? `${code}: ${detail}` : code;
+  // ADR-0027: the same model continued on its other auth method, so name the method, not a model.
+  if (fallback.fromMethod && fallback.usedMethod && fallback.fromMethod !== fallback.usedMethod && modelLabel === fallback.from) {
+    return renderMethodNotice(used, why, fallback.usedMethod, isArabic);
+  }
   return isArabic
     ? `> ⚠️ استُخدم النموذج الاحتياطي \`${used}\` لأن \`${from}\` فشل (${why})`
     : `> ⚠️ Fallback model \`${used}\` was used because \`${from}\` failed (${why})`;
+}
+
+/** «The review continued on X with an API key / the subscription because the other hit its limit». */
+function renderMethodNotice(used: string, why: string, usedMethod: 'subscription' | 'api-key', isArabic: boolean): string {
+  if (usedMethod === 'api-key') {
+    return isArabic
+      ? `> ⚠️ تابعت المراجعة على \`${used}\` بمفتاح API لأن الاشتراك بلغ حد الحصة أو معدل الطلبات (${why}). تُحتسب هذه الاستدعاءات ضمن الميزانية الشهرية.`
+      : `> ⚠️ The review continued on \`${used}\` with an API key because the subscription hit its quota or rate limit (${why}). Those calls count toward the monthly budget.`;
+  }
+  return isArabic
+    ? `> ⚠️ تابعت المراجعة على \`${used}\` بالاشتراك لأن مفاتيح API بلغت حد الحصة أو معدل الطلبات (${why}).`
+    : `> ⚠️ The review continued on \`${used}\` with the subscription because the API keys hit their quota or rate limit (${why}).`;
 }
 
 /** The review scope line (incremental since a commit, or a full review and why). */

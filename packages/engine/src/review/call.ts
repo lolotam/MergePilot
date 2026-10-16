@@ -69,6 +69,8 @@ export function withCallTimeout(model: ReviewModel, timeoutMs: number): ReviewMo
       return model.label;
     },
     ...(model.includedInSubscription ? { includedInSubscription: true } : {}),
+    ...(model.authMethod ? { authMethod: model.authMethod } : {}),
+    ...(model.fallbackTriggers ? { fallbackTriggers: model.fallbackTriggers } : {}),
     ...(model.fallbacks ? { fallbacks: model.fallbacks } : {}),
     ...(model.secrets ? { secrets: model.secrets } : {}),
     ...(model.skippedFallbacks ? { skippedFallbacks: model.skippedFallbacks } : {}),

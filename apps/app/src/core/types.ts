@@ -201,6 +201,9 @@ export interface ReviewRunResultPayload {
   pricing?: RunPricing | undefined;
   /** Which API key answered, and how many were skipped for quota (ADR-0026). Never the key. */
   keyRotation?: Array<{ provider: string; keyIndex: number; skipped: number }> | undefined;
+  /** ADR-0027 method fallback disclosure (same model label as the configured primary). */
+  fallbackFromMethod?: 'subscription' | 'api-key' | undefined;
+  modelUsedMethod?: 'subscription' | 'api-key' | undefined;
 }
 
 export interface ReviewRunJudge {

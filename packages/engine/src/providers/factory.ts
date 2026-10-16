@@ -1,30 +1,32 @@
 import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
-import { decodeSubscription, isSubscriptionProvider } from '../credentials/subscription.js';
-import { SubscriptionAdapter } from './subscription/adapter.js';
 import { credentialEnvName, type AnyCredentialStore } from '../credentials/store.js';
-import type { LlmAdapter } from '../llm/adapter.js';
 import { LlmFailure } from '../llm/failure.js';
-import { DEFAULT_RETRY_POLICY, withRetry } from '../llm/retry.js';
-import { modelFromAdapter, type ReviewModel, type SkippedFallback } from '../review/model.js';
-import { AnthropicAdapter } from './anthropic/adapter.js';
+import type { ReviewModel, SkippedFallback } from '../review/model.js';
 import { ClaudeCodeRunner } from './claude-code/runner.js';
-import { OpenAICompatibleAdapter } from './compatible/adapter.js';
-import { GeminiAdapter } from './gemini/adapter.js';
+import { buildMethodModel, otherMethodEntry, type DualMethodConfig, type MethodModel, type OtherMethod } from './dual-method.js';
 import type { FetchLike } from './http.js';
 import { isApiProviderId, type ApiProviderId } from './ids.js';
-import { OpenAIAdapter } from './openai/adapter.js';
-import { callWithKeyRotation, type KeyRotationEvent } from './key-rotation.js';
-import { providerEntry } from './registry.js';
+import type { KeyRotationEvent } from './key-rotation.js';
+import {
+  createAdapter,
+  rosterFor,
+  rotatingReviewModel,
+  withRetries,
+  type KeyRoster,
+  type RotationContext,
+} from './model-builders.js';
 
-/** Ordered keys for one provider. `startIndex` is 0-based and advances after a successful call. */
-export interface KeyRoster {
-  keys: readonly Secret[];
-  startIndex: number;
-}
+export { createAdapter, CUSTOM_BASE_URL_MISSING, type KeyRoster } from './model-builders.js';
+export type { DualMethodConfig } from './dual-method.js';
 
 export interface CreateReviewModelOptions {
   cwd: string;
+  /**
+   * Per dual-method provider (ADR-0027): both subscription and API keys are connected. The engine
+   * inserts the other method immediately after each such provider in the fallback chain.
+   */
+  dualMethods?: Partial<Record<ApiProviderId, DualMethodConfig>> | undefined;
   /** claude-code only: isolated CLAUDE_CONFIG_DIR so no runner-level settings or hooks apply. */
   configDir?: string;
   /**
@@ -46,127 +48,6 @@ export interface CreateReviewModelOptions {
   keyRosters?: Readonly<Record<string, KeyRoster>> | undefined;
   /** Key index used and how many keys were skipped. Never receives the key. */
   onKeyRotation?: ((event: KeyRotationEvent) => void) | undefined;
-}
-
-interface RotationContext {
-  rosters?: Readonly<Record<string, KeyRoster>> | undefined;
-  onKeyRotation?: ((event: KeyRotationEvent) => void) | undefined;
-  customBaseUrl?: string | undefined;
-  customFetch?: FetchLike | undefined;
-}
-
-export const CUSTOM_BASE_URL_MISSING =
-  'provider "custom" needs a trusted base URL (CUSTOM_LLM_BASE_URL / the custom-base-url input); .mergepilot.yml baseUrl is ignored';
-
-/**
- * One API adapter for a provider id; `custom` may run without a key (a local server). Presets
- * always call their fixed registry URL; `customBaseUrl` is used for `custom` only and must be
- * trusted (see CreateReviewModelOptions).
- */
-export function createAdapter(
-  provider: ApiProviderId,
-  apiKey: Secret | undefined,
-  customBaseUrl?: string,
-  customFetch?: FetchLike,
-  resolveSubscriptionSecret?: () => Promise<Secret>,
-): LlmAdapter {
-  if (apiKey && decodeSubscription(apiKey.reveal(), provider)) {
-    if (!isSubscriptionProvider(provider)) throw new Error('Subscription authentication is unavailable for this provider');
-    return new SubscriptionAdapter(provider, apiKey, resolveSubscriptionSecret);
-  }
-  const entry = providerEntry(provider);
-  if (entry.kind === 'openai-compatible') {
-    if (provider === 'custom' && !customBaseUrl?.trim()) throw new Error(CUSTOM_BASE_URL_MISSING);
-    return new OpenAICompatibleAdapter({
-      provider,
-      apiKey,
-      ...(provider === 'custom' && customBaseUrl ? { baseUrl: customBaseUrl } : {}),
-      ...(provider === 'custom' && customFetch ? { fetch: customFetch } : {}),
-    });
-  }
-  if (!apiKey) throw new Error(`An API key is required for provider: ${provider}`);
-  if (provider === 'anthropic') return new AnthropicAdapter({ apiKey });
-  if (provider === 'openai') return new OpenAIAdapter({ apiKey });
-  return new GeminiAdapter({ apiKey });
-}
-
-function rosterFor(rotation: RotationContext | undefined, provider: string): KeyRoster | undefined {
-  const roster = rotation?.rosters?.[provider];
-  return roster && roster.keys.length > 0 ? roster : undefined;
-}
-
-function notifyRotation(onKeyRotation: RotationContext['onKeyRotation'], event: KeyRotationEvent): void {
-  try {
-    onKeyRotation?.(event);
-  } catch {
-    // Disclosure must not fail a call that already succeeded.
-  }
-}
-
-/** One adapter per key, outside `withRetry`, so a rate-limit retry stays on the same key. */
-function rotatingReviewModel(
-  provider: ApiProviderId,
-  model: string,
-  effort: string | undefined,
-  roster: KeyRoster,
-  rotation: RotationContext,
-  resolveSubscriptionSecret?: () => Promise<Secret>,
-): ReviewModel {
-  let cursor = roster.startIndex;
-  const sample = withRetries(
-    createAdapter(provider, roster.keys[0], rotation.customBaseUrl, rotation.customFetch, resolveSubscriptionSecret),
-    model,
-    effort,
-  );
-  return {
-    label: sample.label,
-    ...(sample.outputTokensFor ? { outputTokensFor: sample.outputTokensFor } : {}),
-    async generate(request) {
-      const outcome = await callWithKeyRotation({
-        provider,
-        keyCount: roster.keys.length,
-        startIndex: cursor,
-        call: (index) => {
-          const key = roster.keys[index];
-          if (!key) {
-            throw new LlmFailure({
-              code: 'INVALID_CREDENTIAL',
-              provider,
-              message: `no API key is configured for ${provider}`,
-            });
-          }
-          return withRetries(
-            createAdapter(provider, key, rotation.customBaseUrl, rotation.customFetch, resolveSubscriptionSecret),
-            model,
-            effort,
-          ).generate(request);
-        },
-      });
-      cursor = outcome.index;
-      notifyRotation(rotation.onKeyRotation, { provider, index: outcome.index, skipped: outcome.skipped });
-      return outcome.value;
-    },
-  };
-}
-
-/** Wraps a model so each call is retried by the adapter's own policy before anything else. */
-function withRetries(adapter: LlmAdapter, model: string, effort: string | undefined): ReviewModel {
-  const base = modelFromAdapter(adapter, model, effort);
-  const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
-  return {
-    label: base.label,
-    ...(adapter instanceof SubscriptionAdapter ? { includedInSubscription: true } : {}),
-    ...(base.outputTokensFor ? { outputTokensFor: base.outputTokensFor } : {}),
-    generate(request) {
-      return withRetry(
-        () => base.generate(request),
-        policy,
-        request.signal
-          ? { sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)), random: Math.random, signal: request.signal }
-          : undefined,
-      );
-    },
-  };
 }
 
 /**
@@ -203,6 +84,7 @@ export async function resolveFallbacks(
   customBaseUrl?: string,
   customFetch?: FetchLike,
   rotation?: Pick<RotationContext, 'rosters' | 'onKeyRotation'>,
+  dualMethods?: Partial<Record<ApiProviderId, DualMethodConfig>> | undefined,
 ): Promise<ResolvedFallbacks> {
   const resolved: ResolvedFallbacks = { models: [], secrets: [], skipped: [] };
   for (const entry of config.fallback ?? []) {
@@ -223,21 +105,35 @@ export async function resolveFallbacks(
       resolved.skipped.push({ label, reason: 'no trusted base URL is configured (CUSTOM_LLM_BASE_URL)' });
       continue;
     }
+    const rot: RotationContext = { ...rotation, customBaseUrl, customFetch };
+    const spec = { provider: entry.provider, model: entry.model, effort: entry.effort };
+    const dual = dualMethods?.[entry.provider];
     const resolveSecret = () => store.resolve({ provider: entry.provider }, 'review');
     try {
-      resolved.models.push(roster
-        ? rotatingReviewModel(entry.provider, entry.model, entry.effort, roster, {
-            rosters: rotation?.rosters,
-            onKeyRotation: rotation?.onKeyRotation,
-            customBaseUrl,
-            customFetch,
-          }, resolveSecret)
-        : withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch, resolveSecret), entry.model, entry.effort));
+      const built: MethodModel = dual
+        ? await buildMethodModel(spec, dual.defaultMethod, store, rot)
+        : {
+            model: roster
+              ? rotatingReviewModel(entry.provider, entry.model, entry.effort, roster, rot, resolveSecret)
+              : withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch, resolveSecret), entry.model, entry.effort),
+            secrets: [],
+          };
+      resolved.models.push(built.model);
+      resolved.secrets.push(...built.secrets);
     } catch {
       resolved.skipped.push({ label, reason: 'the provider could not be set up' });
+      continue;
     }
+    // ADR-0027: the same provider and model on its other method, right behind its default.
+    if (dual) addOtherMethod(resolved, await otherMethodEntry(spec, dual.defaultMethod, store, rot));
   }
   return resolved;
+}
+
+function addOtherMethod(resolved: ResolvedFallbacks, other: OtherMethod): void {
+  if (other.model) resolved.models.push(other.model);
+  resolved.secrets.push(...other.secrets);
+  if (other.skipped) resolved.skipped.push(other.skipped);
 }
 
 /**
@@ -312,9 +208,22 @@ export async function createReviewModel(
   }
   const resolveSecret = () => store.resolve({ provider }, 'review');
   const roster = rosterFor(rotation, provider);
-  const model = roster
-    ? rotatingReviewModel(provider, config.model, config.effort, roster, rotation, resolveSecret)
-    : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config.model, config.effort);
-  const fallbacks = await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch, rotation);
-  return { ...model, ...attachments(apiKey, fallbacks, roster ? roster.keys : []) };
+  const spec = { provider, model: config.model, effort: config.effort };
+  const dual = opts.dualMethods?.[provider];
+  const primary: MethodModel = dual
+    ? await buildMethodModel(spec, dual.defaultMethod, store, rotation)
+    : {
+        model: roster
+          ? rotatingReviewModel(provider, config.model, config.effort, roster, rotation, resolveSecret)
+          : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config.model, config.effort),
+        secrets: roster ? [...roster.keys] : [],
+      };
+  // The chain: [primary, primary's other method (ADR-0027), configured fallbacks (ADR-0008)...].
+  const chain: ResolvedFallbacks = { models: [], secrets: [...primary.secrets], skipped: [] };
+  if (dual) addOtherMethod(chain, await otherMethodEntry(spec, dual.defaultMethod, store, rotation));
+  const configured = await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch, rotation, opts.dualMethods);
+  chain.models.push(...configured.models);
+  chain.secrets.push(...configured.secrets);
+  chain.skipped.push(...configured.skipped);
+  return { ...primary.model, ...attachments(apiKey, chain) };
 }

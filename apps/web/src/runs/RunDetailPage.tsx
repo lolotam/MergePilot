@@ -154,6 +154,11 @@ export default function RunDetailPage() {
               fallbackFrom={run.fallbackFrom}
             />
             <RunBotChip run={run} />
+            {result?.fallbackFromMethod && result?.modelUsedMethod && result.fallbackFromMethod !== result.modelUsedMethod && (
+              <p className="text-[10px] text-amber-800 dark:text-amber-200 leading-snug" data-testid="method-fallback-notice">
+                {result.modelUsedMethod === 'api-key' ? t('methodFallbackToApi') : t('methodFallbackToSubscription')}
+              </p>
+            )}
           </div>
         </div>
 

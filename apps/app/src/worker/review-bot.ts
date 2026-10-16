@@ -1,4 +1,4 @@
-import { createReviewModel, redactSecrets, type ReviewModel, type Secret } from '@mergepilot/engine';
+import { createReviewModel, redactSecrets, type ApiProviderId, type ReviewModel, type Secret } from '@mergepilot/engine';
 import type { SemanticDedupeResult } from '@mergepilot/github';
 import {
   MAIN_BOT_SLOT,
@@ -21,6 +21,7 @@ import { prepareRunResult } from './prepare-run-result.js';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewResult } from './types.js';
 import { apiEquivalentFields, apiEquivalentPrice, type ApiEquivalentPrice } from './api-equivalent.js';
+import { apiPricedConfig, dualMethodsForProviders, withinAdmission } from './dual-method-review.js';
 
 export const WORKSPACE_DELETED = 'workspace_deleted';
 
@@ -52,10 +53,15 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       deps.ssrfLookup,
     );
     // Slot 1's config (and its price) was built once by the shared steps; an extra bot prices its own model.
-    const { effectiveConfig, rulesFiles, configHash, pricing: configuredPricing } =
+    const builtConfig =
       slot === MAIN_BOT_SLOT
         ? ctx.mainConfig
         : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store);
+    const providerIds = [choice.provider, ...fallbackList.map((fallback) => fallback.provider)];
+    const dualMethods = withinAdmission(await dualMethodsForProviders(deps.credentials, workspaceId, providerIds, logger), br.admittedFree);
+    const { effectiveConfig, rulesFiles, configHash, pricing: configuredPricing } = dualMethods[choice.provider as ApiProviderId]
+      ? await apiPricedConfig(builtConfig, deps.store, settings, choice)
+      : builtConfig;
 
     const effectiveAuth = await deps.credentials.getEffectiveAuthMethod?.(workspaceId, choice.provider as ApiProvider);
     let primarySecret: Secret;
@@ -86,28 +92,18 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     if (deps.createModelForProvider) {
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
-      const { rosters, keyIds } = await loadRosters(
-        deps.credentials,
-        workspaceId,
-        [choice.provider, ...fallbackList.map((fallback) => fallback.provider)],
-        choice.provider,
-        logger,
-      );
+      const { rosters, keyIds } = await loadRosters(deps.credentials, workspaceId, providerIds, choice.provider, logger, dualMethods);
       credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {
         cwd: process.cwd(),
         keyRosters: rosters,
         onKeyRotation: makeRotationHandler(keyIds),
+        dualMethods,
         ...(customBaseUrl
           ? { customBaseUrl, customFetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup, ...REVIEW_FETCH_LIMITS }) }
           : {}),
       });
     }
-    // A subscription covers the model, so the run's real cost is $0; what the tokens would cost
-    // at the API price is kept for the display-only equivalent (ADR-0024).
-    const pricing: RunPricing = model.includedInSubscription
-      ? { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 }
-      : configuredPricing;
     const apiPrice = await apiEquivalentPrice(deps.store, settings, model, choice, configuredPricing).catch((error: unknown) => {
       // Display only: a price lookup that fails leaves the run without an equivalent, never failed.
       logger.warn(
@@ -118,6 +114,12 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     });
     // A configured fallback left out (no key, or a custom URL that failed the SSRF check) is
     // disclosed in the log and on the run record; it is never called.
+    const recordPricing: RecordPricing = {
+      pricing: configuredPricing,
+      apiPrice,
+      rotation: rotationEvents,
+      onSubscription: model.includedInSubscription === true,
+    };
     const skippedNote = skippedFallbacksNote(model);
     if (skippedNote) deps.log?.(skippedNote);
 
@@ -149,7 +151,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         { knownSecrets, judge: judgeSetup.judge },
       );
       await cursorWrites.flush();
-      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice, rotationEvents);
+      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, recordPricing);
       if (outcome.fallback) {
         const { from, code, detail: why } = outcome.fallback;
         deps.log?.(`Fallback used: ${from} failed (${code})${why ? `: ${why}` : ''}`);
@@ -171,7 +173,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         : {}),
     });
     await cursorWrites.flush();
-    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, pricing, apiPrice, rotationEvents);
+    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, recordPricing);
     record.finish.reviewUrl = reviewResult.reviewUrl ?? null;
     await finishBotRun(ctx, br, record.finish, reviewResult.runResult);
     return { slot, result: record.result, findings: record.finish.findingsCount ?? 0 };
@@ -179,6 +181,16 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     await cursorWrites.flush();
     return { slot, result: await failBotRun(ctx, br, error, credStore?.getKnownSecrets() ?? [], choice) };
   }
+}
+
+interface RecordPricing {
+  /** What priced the bot's own model (ADR-0016). */
+  pricing: RunPricing;
+  /** The display-only API price of a subscription or token-plan model (ADR-0024). */
+  apiPrice: ApiEquivalentPrice | undefined;
+  rotation: readonly KeyRotationDisclosure[];
+  /** The primary model runs on a consumer subscription. */
+  onSubscription: boolean;
 }
 
 interface BotRecord {
@@ -196,10 +208,14 @@ function recordOf(
   judgeSetup: WorkspaceJudge,
   knownSecrets: Secret[],
   skippedNote: string | undefined,
-  pricing: RunPricing,
-  apiPrice?: ApiEquivalentPrice | undefined,
-  rotation: readonly KeyRotationDisclosure[] = [],
+  { pricing, apiPrice, rotation, onSubscription }: RecordPricing,
 ): BotRecord {
+  // `subscription` ($0) only while every call stayed on a subscription; a run that switched to
+  // paid API keys is priced at the API price (ADR-0027). A run that did not complete has no
+  // tally, and without a fallback all its calls were on the primary.
+  const allOnSubscription =
+    review.runResult?.status === 'completed' ? review.runResult.onlySubscriptionCalls : onSubscription && !review.fallbackFrom;
+  const runPricing: RunPricing = allOnSubscription ? { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 } : pricing;
   const status: ReviewRunStatus =
     review.outcome === 'completed'
       ? 'completed'
@@ -229,7 +245,10 @@ function recordOf(
       }),
       // What priced this bot's own model (ADR-0016), plus the display-only API-equivalent of a
       // subscription or token-plan run (ADR-0024), from its own usage before the judge's tokens.
-      pricing: { ...pricing, ...apiEquivalentFields(rr.usage, review.fallbackFrom ? undefined : apiPrice) },
+      pricing: { ...runPricing, ...apiEquivalentFields(rr.usage, review.fallbackFrom ? undefined : apiPrice) },
+      ...(review.fallbackFromMethod && review.modelUsedMethod
+        ? { fallbackFromMethod: review.fallbackFromMethod, modelUsedMethod: review.modelUsedMethod }
+        : {}),
       ...(rotation.length > 0 ? { keyRotation: rotation.slice(0, 20).map((event) => ({ ...event })) } : {}),
     };
     findingsCount = rr.inline.length + rr.summaryOnly.length;
@@ -237,7 +256,14 @@ function recordOf(
     findingsCount = 0;
   }
   const detail = review.detail ?? skippedNote ?? judgeNote ?? null;
-  const used = usedModel(choice, { ...ctx.settings, fallback: br.bot.fallback }, review.modelUsed, review.fallbackFrom);
+  const used = usedModel(
+    choice,
+    { ...ctx.settings, fallback: br.bot.fallback },
+    review.modelUsed,
+    review.fallbackFrom,
+    review.fallbackFromMethod,
+    review.modelUsedMethod,
+  );
   return {
     finish: {
       status,
@@ -270,6 +296,10 @@ export async function finishBotRun(
     event: 'job.end', jobId: ctx.job.deliveryId, runId: br.run.id, status: finish.status,
     ...(ctx.panelActive ? { botSlot: br.bot.slot } : {}),
     provider: finish.provider, model: finish.model, fallbackFrom: finish.fallbackFrom ?? null,
+    // A method fallback (ADR-0027), on failed runs too: the two methods and the failure kind, never a secret.
+    ...(runResult && runResult.status !== 'skipped-budget' && runResult.fallbackFromMethod
+      ? { fallbackFromMethod: runResult.fallbackFromMethod, modelUsedMethod: runResult.modelUsedMethod, fallbackCode: runResult.fallbackCode }
+      : {}),
     findingsCount: finish.findingsCount ?? 0, inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0,
     cost: finish.costUsd, durationMs: Math.round(performance.now() - ctx.startTime), reviewUrl: finish.reviewUrl ?? null,
   }, `Review job ${ctx.job.deliveryId} finished with status ${finish.status}`);

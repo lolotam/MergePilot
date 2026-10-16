@@ -114407,8 +114407,10 @@ var FallbackChain = class {
   #index = 0;
   #from;
   #onlySubscriptionCalls = true;
-  constructor(primary, fallbacks = []) {
+  #mayEnter;
+  constructor(primary, fallbacks = [], mayEnter) {
     this.#models = [primary, ...fallbacks];
+    this.#mayEnter = mayEnter;
   }
   /**
    * The largest output-token limit any model in the chain would request, so a budget
@@ -114441,13 +114443,27 @@ var FallbackChain = class {
         return await model.generate(request2);
       } catch (error62) {
         const kind = failureKindOf(error62);
-        const last = this.#index >= this.#models.length - 1;
-        if (last || request2.signal?.aborted || !kind || !FALLBACK_TRIGGERS.includes(kind))
+        if (request2.signal?.aborted || !kind || !FALLBACK_TRIGGERS.includes(kind))
+          throw error62;
+        const next = this.#nextEntry(kind, request2);
+        if (next === void 0)
           throw error62;
         this.#from ??= { label: model.label, code: kind, detail: detailOf(error62) };
-        this.#index++;
+        this.#index = next;
       }
     }
+  }
+  /** The first later entry that this failure kind lets in and that may take this request. */
+  #nextEntry(kind, request2) {
+    for (let index = this.#index + 1; index < this.#models.length; index++) {
+      const candidate = this.#models[index];
+      if (!candidate || !(candidate.fallbackTriggers ?? FALLBACK_TRIGGERS).includes(kind))
+        continue;
+      if (this.#mayEnter && !this.#mayEnter({ leaving: this.#current(), next: candidate, request: request2 }))
+        continue;
+      return index;
+    }
+    return void 0;
   }
   /**
    * What to disclose about the chain. `secrets` is required: the primary's raw error message is
@@ -114459,8 +114475,17 @@ var FallbackChain = class {
       modelUsed: this.label,
       ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {},
       ...this.#from?.detail ? { fallbackDetail: disclosedDetail(this.#from.detail, secrets) } : {},
-      ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}
+      ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {},
+      ...this.#methodSwitch()
     };
+  }
+  /** The two auth methods, only when the model that answered is the primary's own model. */
+  #methodSwitch() {
+    const from = this.#models[0]?.authMethod;
+    const used = this.#current().authMethod;
+    if (!this.#from || this.#from.label !== this.label || !from || !used || from === used)
+      return {};
+    return { fallbackFromMethod: from, modelUsedMethod: used };
   }
 };
 function detailOf(error62) {
@@ -114701,6 +114726,12 @@ var SpendTracker = class {
     this.#spentUsd += hasRealUsage(usage) ? costUsd(usage, pricing) : this.estimate(promptTokens, outputTokens);
   }
 };
+function paidSwitchFits(spend, apiPricing, { leaving, next, request: request2 }) {
+  if (!apiPricing || !leaving.includedInSubscription || next.includedInSubscription || next.label !== leaving.label)
+    return true;
+  const cost = estimateCostUsd({ inputTokens: estimateTokens(request2.system + request2.user), maxOutputTokens: requestedOutputTokens(next, request2.maxOutputTokens) }, apiPricing);
+  return cost <= spend.remainingUsd;
+}
 function describeCallError(err, knownSecrets = []) {
   if (err && typeof err === "object" && "code" in err && typeof err.code === "string") {
     return err.code;
@@ -114747,6 +114778,8 @@ function withCallTimeout(model, timeoutMs) {
       return model.label;
     },
     ...model.includedInSubscription ? { includedInSubscription: true } : {},
+    ...model.authMethod ? { authMethod: model.authMethod } : {},
+    ...model.fallbackTriggers ? { fallbackTriggers: model.fallbackTriggers } : {},
     ...model.fallbacks ? { fallbacks: model.fallbacks } : {},
     ...model.secrets ? { secrets: model.secrets } : {},
     ...model.skippedFallbacks ? { skippedFallbacks: model.skippedFallbacks } : {},
@@ -115722,7 +115755,7 @@ async function runReview(input2) {
   const limits = reviewLimits(reviewCfg);
   const deadline = new ReviewDeadline(limits.totalTimeoutMs);
   const fallbackModels = input2.fallbackModels ?? input2.model.fallbacks ?? [];
-  const model = new FallbackChain(withCallTimeout(input2.model, limits.callTimeoutMs), fallbackModels.map((m2) => withCallTimeout(m2, limits.callTimeoutMs)));
+  const model = new FallbackChain(withCallTimeout(input2.model, limits.callTimeoutMs), fallbackModels.map((m2) => withCallTimeout(m2, limits.callTimeoutMs)), (move) => paidSwitchFits(spend, budgetCfg.pricing, move));
   const subscriptionPricing = { inputPerMTok: 0, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 };
   const currentPricing = () => model.includedInSubscription ? subscriptionPricing : budgetCfg.pricing;
   const knownSecrets = secretsToRedact(input2.knownSecrets, input2.model, fallbackModels);
@@ -115898,10 +115931,11 @@ async function runReview(input2) {
     incompleteReasons
   };
   const disclosure = model.disclosure(knownSecrets);
+  const methodOnlyFallback = disclosure.fallbackFromMethod !== void 0 && disclosure.modelUsed === disclosure.fallbackFrom;
   let reviewCostUsd;
   if (model.onlySubscriptionCalls) {
     reviewCostUsd = 0;
-  } else if (budgetCfg.pricing && !disclosure.fallbackFrom) {
+  } else if (budgetCfg.pricing && (!disclosure.fallbackFrom || methodOnlyFallback)) {
     reviewCostUsd = spend.spentUsd;
   }
   return {
@@ -115916,7 +115950,8 @@ async function runReview(input2) {
     complete,
     ...verification !== void 0 ? { verification } : {},
     ...judge ? { judge } : {},
-    ...disclosure
+    ...disclosure,
+    onlySubscriptionCalls: model.onlySubscriptionCalls
   };
 }
 function reviewLimits(review) {
@@ -162891,6 +162926,8 @@ function rotatingReviewModel(provider, model, effort, roster, rotation, resolveS
   const sample = withRetries(createAdapter(provider, roster.keys[0], rotation.customBaseUrl, rotation.customFetch, resolveSubscriptionSecret), model, effort);
   return {
     label: sample.label,
+    ...sample.authMethod ? { authMethod: sample.authMethod } : {},
+    ...sample.includedInSubscription ? { includedInSubscription: true } : {},
     ...sample.outputTokensFor ? { outputTokensFor: sample.outputTokensFor } : {},
     async generate(request2) {
       const outcome = await callWithKeyRotation({
@@ -162918,15 +162955,52 @@ function rotatingReviewModel(provider, model, effort, roster, rotation, resolveS
 function withRetries(adapter, model, effort) {
   const base = modelFromAdapter(adapter, model, effort);
   const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
+  const subscription = adapter instanceof SubscriptionAdapter;
   return {
     label: base.label,
-    ...adapter instanceof SubscriptionAdapter ? { includedInSubscription: true } : {},
+    authMethod: subscription ? "subscription" : "api-key",
+    ...subscription ? { includedInSubscription: true } : {},
     ...base.outputTokensFor ? { outputTokensFor: base.outputTokensFor } : {},
     generate(request2) {
       return withRetry(() => base.generate(request2), policy, request2.signal ? { sleep: (ms) => new Promise((resolve3) => setTimeout(resolve3, ms)), random: Math.random, signal: request2.signal } : void 0);
     }
   };
 }
+
+var METHOD_FALLBACK_TRIGGERS = ["quota", "rate-limit"];
+async function buildMethodModel(spec, method, store, rotation) {
+  const { provider, model, effort } = spec;
+  if (method === "api-key") {
+    const roster = rosterFor(rotation, provider);
+    if (!roster) {
+      throw new LlmFailure({ code: "INVALID_CREDENTIAL", provider, message: `no API key is configured for ${provider}` });
+    }
+    return { model: rotatingReviewModel(provider, model, effort, roster, rotation), secrets: [...roster.keys] };
+  }
+  const resolveSubscription = async () => {
+    const secret = await store.resolve({ provider, method: "subscription" }, "review");
+    if (!decodeSubscription(secret.reveal(), provider)) {
+      throw new LlmFailure({ code: "INVALID_CREDENTIAL", provider, message: `no subscription is connected for ${provider}` });
+    }
+    return secret;
+  };
+  const envelope = await resolveSubscription();
+  return {
+    model: withRetries(createAdapter(provider, envelope, rotation.customBaseUrl, rotation.customFetch, resolveSubscription), model, effort),
+    secrets: [envelope]
+  };
+}
+async function otherMethodEntry(spec, defaultMethod, store, rotation) {
+  const method = defaultMethod === "subscription" ? "api-key" : "subscription";
+  try {
+    const built = await buildMethodModel(spec, method, store, rotation);
+    return { model: { ...built.model, fallbackTriggers: METHOD_FALLBACK_TRIGGERS }, secrets: built.secrets };
+  } catch {
+    const reason = method === "subscription" ? "the subscription could not be set up" : "the API keys could not be set up";
+    return { secrets: [], skipped: { label: `${spec.provider}:${spec.model}`, reason } };
+  }
+}
+
 async function resolveKey(store, provider) {
   const info = await store.info({ provider });
   const configured = info.configured && info.provider === provider;
@@ -162937,7 +163011,7 @@ async function resolveKey(store, provider) {
   }
   return store.resolve({ provider }, "review");
 }
-async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rotation) {
+async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rotation, dualMethods) {
   const resolved = { models: [], secrets: [], skipped: [] };
   for (const entry of config2.fallback ?? []) {
     const label = `${entry.provider}:${entry.model}`;
@@ -162959,19 +163033,32 @@ async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rota
       resolved.skipped.push({ label, reason: "no trusted base URL is configured (CUSTOM_LLM_BASE_URL)" });
       continue;
     }
+    const rot = { ...rotation, customBaseUrl, customFetch };
+    const spec = { provider: entry.provider, model: entry.model, effort: entry.effort };
+    const dual = dualMethods?.[entry.provider];
     const resolveSecret = () => store.resolve({ provider: entry.provider }, "review");
     try {
-      resolved.models.push(roster ? rotatingReviewModel(entry.provider, entry.model, entry.effort, roster, {
-        rosters: rotation?.rosters,
-        onKeyRotation: rotation?.onKeyRotation,
-        customBaseUrl,
-        customFetch
-      }, resolveSecret) : withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch, resolveSecret), entry.model, entry.effort));
+      const built = dual ? await buildMethodModel(spec, dual.defaultMethod, store, rot) : {
+        model: roster ? rotatingReviewModel(entry.provider, entry.model, entry.effort, roster, rot, resolveSecret) : withRetries(createAdapter(entry.provider, key, customBaseUrl, customFetch, resolveSecret), entry.model, entry.effort),
+        secrets: []
+      };
+      resolved.models.push(built.model);
+      resolved.secrets.push(...built.secrets);
     } catch {
       resolved.skipped.push({ label, reason: "the provider could not be set up" });
+      continue;
     }
+    if (dual)
+      addOtherMethod(resolved, await otherMethodEntry(spec, dual.defaultMethod, store, rot));
   }
   return resolved;
+}
+function addOtherMethod(resolved, other) {
+  if (other.model)
+    resolved.models.push(other.model);
+  resolved.secrets.push(...other.secrets);
+  if (other.skipped)
+    resolved.skipped.push(other.skipped);
 }
 async function resolveReviewSecrets(config2, store) {
   const primary = config2.provider === "custom" ? await resolveKey(store, "custom") : await store.resolve({ provider: config2.provider }, "review");
@@ -163020,9 +163107,20 @@ async function createReviewModel(config2, store, opts) {
   }
   const resolveSecret = () => store.resolve({ provider }, "review");
   const roster = rosterFor(rotation, provider);
-  const model = roster ? rotatingReviewModel(provider, config2.model, config2.effort, roster, rotation, resolveSecret) : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config2.model, config2.effort);
-  const fallbacks = await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch, rotation);
-  return { ...model, ...attachments(apiKey, fallbacks, roster ? roster.keys : []) };
+  const spec = { provider, model: config2.model, effort: config2.effort };
+  const dual = opts.dualMethods?.[provider];
+  const primary = dual ? await buildMethodModel(spec, dual.defaultMethod, store, rotation) : {
+    model: roster ? rotatingReviewModel(provider, config2.model, config2.effort, roster, rotation, resolveSecret) : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config2.model, config2.effort),
+    secrets: roster ? [...roster.keys] : []
+  };
+  const chain = { models: [], secrets: [...primary.secrets], skipped: [] };
+  if (dual)
+    addOtherMethod(chain, await otherMethodEntry(spec, dual.defaultMethod, store, rotation));
+  const configured = await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch, rotation, opts.dualMethods);
+  chain.models.push(...configured.models);
+  chain.secrets.push(...configured.secrets);
+  chain.skipped.push(...configured.skipped);
+  return { ...primary.model, ...attachments(apiKey, chain) };
 }
 
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
@@ -168733,7 +168831,16 @@ function renderFallbackNotice(modelLabel, fallback, isArabic) {
   const code = neutralize2(fallback.code);
   const detail = fallback.detail ? neutralize2(fallback.detail) : "";
   const why = detail ? `${code}: ${detail}` : code;
+  if (fallback.fromMethod && fallback.usedMethod && fallback.fromMethod !== fallback.usedMethod && modelLabel === fallback.from) {
+    return renderMethodNotice(used, why, fallback.usedMethod, isArabic);
+  }
   return isArabic ? `> \u26A0\uFE0F \u0627\u0633\u062A\u064F\u062E\u062F\u0645 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \`${used}\` \u0644\u0623\u0646 \`${from}\` \u0641\u0634\u0644 (${why})` : `> \u26A0\uFE0F Fallback model \`${used}\` was used because \`${from}\` failed (${why})`;
+}
+function renderMethodNotice(used, why, usedMethod, isArabic) {
+  if (usedMethod === "api-key") {
+    return isArabic ? `> \u26A0\uFE0F \u062A\u0627\u0628\u0639\u062A \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 \u0639\u0644\u0649 \`${used}\` \u0628\u0645\u0641\u062A\u0627\u062D API \u0644\u0623\u0646 \u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643 \u0628\u0644\u063A \u062D\u062F \u0627\u0644\u062D\u0635\u0629 \u0623\u0648 \u0645\u0639\u062F\u0644 \u0627\u0644\u0637\u0644\u0628\u0627\u062A (${why}). \u062A\u064F\u062D\u062A\u0633\u0628 \u0647\u0630\u0647 \u0627\u0644\u0627\u0633\u062A\u062F\u0639\u0627\u0621\u0627\u062A \u0636\u0645\u0646 \u0627\u0644\u0645\u064A\u0632\u0627\u0646\u064A\u0629 \u0627\u0644\u0634\u0647\u0631\u064A\u0629.` : `> \u26A0\uFE0F The review continued on \`${used}\` with an API key because the subscription hit its quota or rate limit (${why}). Those calls count toward the monthly budget.`;
+  }
+  return isArabic ? `> \u26A0\uFE0F \u062A\u0627\u0628\u0639\u062A \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 \u0639\u0644\u0649 \`${used}\` \u0628\u0627\u0644\u0627\u0634\u062A\u0631\u0627\u0643 \u0644\u0623\u0646 \u0645\u0641\u0627\u062A\u064A\u062D API \u0628\u0644\u063A\u062A \u062D\u062F \u0627\u0644\u062D\u0635\u0629 \u0623\u0648 \u0645\u0639\u062F\u0644 \u0627\u0644\u0637\u0644\u0628\u0627\u062A (${why}).` : `> \u26A0\uFE0F The review continued on \`${used}\` with the subscription because the API keys hit their quota or rate limit (${why}).`;
 }
 function renderScopeLine(scope, isArabic) {
   if (scope.mode === "incremental") {
@@ -168893,7 +169000,8 @@ function fallbackReasonOf(disclosure, knownSecrets) {
   if (!disclosure.fallbackFrom || !disclosure.fallbackCode)
     return void 0;
   const detail = disclosure.fallbackDetail ? shorten(redactSecrets(disclosure.fallbackDetail, knownSecrets).text) : "";
-  return { from: disclosure.fallbackFrom, code: disclosure.fallbackCode, ...detail ? { detail } : {} };
+  const methodSwitch = disclosure.fallbackFromMethod && disclosure.modelUsedMethod ? { fromMethod: disclosure.fallbackFromMethod, usedMethod: disclosure.modelUsedMethod } : {};
+  return { from: disclosure.fallbackFrom, code: disclosure.fallbackCode, ...detail ? { detail } : {}, ...methodSwitch };
 }
 function shorten(text) {
   const clean = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();

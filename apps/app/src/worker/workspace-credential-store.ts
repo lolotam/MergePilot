@@ -30,9 +30,17 @@ export class WorkspaceCredentialStore implements CredentialStore {
   }
 
   async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
+    const provider = ref.provider as ApiProvider;
+    if (ref.method === 'subscription') {
+      // The other method of a dual provider (ADR-0027): the parent envelope, refreshed when it is
+      // about to expire, whatever the effective default is. Kept apart from the default's key so
+      // both are redacted.
+      const subscription = await this.credentials.resolve(this.workspaceId, provider);
+      this.secrets.set(`${ref.provider}:subscription`, subscription);
+      return subscription;
+    }
     const existing = this.secrets.get(ref.provider);
     if (existing && !decodeSubscription(existing.reveal(), ref.provider)) return existing;
-    const provider = ref.provider as ApiProvider;
     const effective = await this.credentials.getEffectiveAuthMethod?.(this.workspaceId, provider);
     // API keys are the chosen method: never read (or refresh) the subscription parent instead.
     if (effective === 'api-key') {

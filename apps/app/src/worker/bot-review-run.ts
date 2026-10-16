@@ -133,6 +133,8 @@ export interface ReviewOnlyOutcome {
   runResult?: ReviewRunResult | undefined;
   modelUsed?: string | undefined;
   fallbackFrom?: string | undefined;
+  fallbackFromMethod?: 'subscription' | 'api-key' | undefined;
+  modelUsedMethod?: 'subscription' | 'api-key' | undefined;
   /** Why a fallback model took over: the provider's answer, redacted and cut (ADR-0008). */
   fallback?: FallbackReason | undefined;
   scope?: ReviewScope | undefined;
@@ -152,6 +154,8 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
       costUsd: totals.costUsd,
       ...(r.modelUsed ? { modelUsed: r.modelUsed } : {}),
       ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}),
+      ...(r.fallbackFromMethod ? { fallbackFromMethod: r.fallbackFromMethod } : {}),
+      ...(r.modelUsedMethod ? { modelUsedMethod: r.modelUsedMethod } : {}),
       ...withFallback(r, secrets),
     };
   }
@@ -164,6 +168,8 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
     detail: redactSecrets(r.detail ?? r.reason, secrets).text,
     ...(r.modelUsed ? { modelUsed: r.modelUsed } : {}),
     ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}),
+    ...(r.fallbackFromMethod ? { fallbackFromMethod: r.fallbackFromMethod } : {}),
+    ...(r.modelUsedMethod ? { modelUsedMethod: r.modelUsedMethod } : {}),
     ...withFallback(r, secrets),
   };
 }

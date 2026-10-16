@@ -1,7 +1,11 @@
 import type { Secret } from '../credentials/secret.js';
 import type { LlmAdapter } from '../llm/adapter.js';
 import { collectText } from '../llm/collect.js';
+import type { FailureKind } from '../llm/failure.js';
 import type { FinishReason, TokenUsage } from '../llm/types.js';
+
+/** How a review model authenticates to its provider (ADR-0027). */
+export type ReviewAuthMethod = 'subscription' | 'api-key';
 
 /**
  * What the review orchestrator needs from "a model": one prompt in, one text answer out.
@@ -14,6 +18,13 @@ export interface ReviewModel {
   readonly label: string;
   /** No incremental API charge: access is covered by the connected consumer subscription. */
   readonly includedInSubscription?: boolean;
+  /** Subscription vs API key for this chain entry (ADR-0027 disclosure). */
+  readonly authMethod?: ReviewAuthMethod;
+  /**
+   * Failure kinds that may enter this chain entry (ADR-0027 method fallback). Absent means the
+   * global ADR-0008 triggers (`quota`, `rate-limit`, `server`, `network`, `auth`).
+   */
+  readonly fallbackTriggers?: readonly FailureKind[];
   generate(request: ReviewModelRequest): Promise<ReviewModelResponse>;
   /**
    * Explicit fallback models from the config (ADR-0008), tried in order by the pipeline when
