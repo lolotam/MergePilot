@@ -115576,10 +115576,14 @@ function fitChunks(chunks, maxTokens) {
     }
   }
 }
+function namesPath(text, path11) {
+  const escaped = path11.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\w./-])${escaped}(?![\\w-]|[./][\\w-])`).test(text);
+}
 function pathsFor(finding, known) {
   const text = `${finding.evidence}
 ${finding.body}`;
-  return [finding.path, ...known.filter((path11) => path11 !== finding.path && text.includes(path11))];
+  return [finding.path, ...known.filter((path11) => path11 !== finding.path && namesPath(text, path11))];
 }
 function collectFiles(input2) {
   const patches = new Map(input2.files.map((f3) => [f3.path, f3.patch]));
@@ -169204,16 +169208,17 @@ async function readCandidates(client, params, candidates, leftOut) {
   }
   return found;
 }
-function nearestRules(changedPaths, found) {
-  const nearest = /* @__PURE__ */ new Set();
+function applicableRules(changedPaths, found) {
+  const applicable = /* @__PURE__ */ new Set();
   for (const changed of changedPaths) {
-    for (const name of NESTED_RULES_NAMES) {
-      const dir = ancestorDirectories(changed).find((d) => found.has(`${d}/${name}`));
-      if (dir !== void 0)
-        nearest.add(`${dir}/${name}`);
+    for (const dir of ancestorDirectories(changed)) {
+      for (const name of NESTED_RULES_NAMES) {
+        if (found.has(`${dir}/${name}`))
+          applicable.add(`${dir}/${name}`);
+      }
     }
   }
-  return [...nearest].map((path11) => ({ path: path11, content: found.get(path11) }));
+  return [...applicable].map((path11) => ({ path: path11, content: found.get(path11) }));
 }
 function fitUnderCap(configured, nested, maxTokens, leftOut) {
   let used = configured.reduce((sum, f3) => sum + estimateTokens(f3.content), 0);
@@ -169238,7 +169243,7 @@ async function withNestedRulesFiles(client, params) {
     leftOut.push(`${dir}/ (not looked up)`);
   const candidates = directories.slice(0, MAX_RULES_DIRECTORIES).flatMap((dir) => NESTED_RULES_NAMES.map((name) => `${dir}/${name}`)).filter((path11) => !configured.has(path11));
   const found = await readCandidates(client, params, candidates, leftOut);
-  const nested = fitUnderCap(params.rulesFiles, nearestRules(params.changedPaths, found), params.maxRulesTokens ?? DEFAULT_MAX_RULES_TOKENS, leftOut);
+  const nested = fitUnderCap(params.rulesFiles, applicableRules(params.changedPaths, found), params.maxRulesTokens ?? DEFAULT_MAX_RULES_TOKENS, leftOut);
   return { rulesFiles: [...params.rulesFiles, ...nested], leftOut };
 }
 

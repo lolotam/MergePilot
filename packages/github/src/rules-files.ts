@@ -87,16 +87,20 @@ async function readCandidates(
   return found;
 }
 
-/** For each changed file, the found rules file of each name in its deepest directory. */
-function nearestRules(changedPaths: readonly string[], found: ReadonlyMap<string, string>): FileContent[] {
-  const nearest = new Set<string>();
+/**
+ * For each changed file, every found rules file in any of its directories: a broader
+ * `apps/AGENTS.md` still applies under `apps/api/` next to `apps/api/AGENTS.md`.
+ */
+function applicableRules(changedPaths: readonly string[], found: ReadonlyMap<string, string>): FileContent[] {
+  const applicable = new Set<string>();
   for (const changed of changedPaths) {
-    for (const name of NESTED_RULES_NAMES) {
-      const dir = ancestorDirectories(changed).find((d) => found.has(`${d}/${name}`));
-      if (dir !== undefined) nearest.add(`${dir}/${name}`);
+    for (const dir of ancestorDirectories(changed)) {
+      for (const name of NESTED_RULES_NAMES) {
+        if (found.has(`${dir}/${name}`)) applicable.add(`${dir}/${name}`);
+      }
     }
   }
-  return [...nearest].map((path) => ({ path, content: found.get(path)! }));
+  return [...applicable].map((path) => ({ path, content: found.get(path)! }));
 }
 
 /** Keeps the nested files that fit next to the configured ones, shallowest then smallest first. */
@@ -117,8 +121,9 @@ function fitUnderCap(configured: readonly FileContent[], nested: FileContent[], 
 }
 
 /**
- * Adds, for every changed file, the nearest AGENTS.md and CLAUDE.md in its own directories (e.g.
- * `apps/api/AGENTS.md`), read from the base commit, deduplicated against the configured rules files.
+ * Adds, for every changed file, each AGENTS.md and CLAUDE.md in its own directories (e.g.
+ * `apps/AGENTS.md` and `apps/api/AGENTS.md`), read from the base commit, deduplicated against the
+ * configured rules files.
  * The configured files always go; nested ones fill what is left of `maxRulesTokens`, shallowest and
  * smallest first. Everything left out (over the cap, past the directory limit, or unreadable) is
  * returned in `leftOut` for the summary.
@@ -137,7 +142,7 @@ export async function withNestedRulesFiles(client: GitHubClient, params: NestedR
   const found = await readCandidates(client, params, candidates, leftOut);
   const nested = fitUnderCap(
     params.rulesFiles,
-    nearestRules(params.changedPaths, found),
+    applicableRules(params.changedPaths, found),
     params.maxRulesTokens ?? DEFAULT_MAX_RULES_TOKENS,
     leftOut,
   );

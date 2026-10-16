@@ -44,6 +44,20 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).not.toContain('unrelated');
   });
 
+  it('matches cited paths as whole paths, not as substrings of a longer path', () => {
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ evidence: 'src/store.tsx:2: await db.write(row)', body: 'See src/store.tsx.' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/store.ts', patch: STORE_PATCH },
+        { path: 'src/store.tsx', patch: OTHER_PATCH },
+      ],
+    });
+    expect(user).toContain('Code shown for it: src/api.ts, src/store.tsx');
+    expect(user).not.toContain('<<<UNTRUSTED:HUNKS:src/store.ts>>>');
+  });
+
   it('shows a file once even when several findings need it', () => {
     const { user } = buildVerifyPrompt({
       language: 'en',

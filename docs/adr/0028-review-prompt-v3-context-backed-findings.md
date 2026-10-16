@@ -34,7 +34,7 @@ The five changes the comparison recommended are: (1) repository context outside 
 
 ### Change 5 — owner rules and recalibration
 
-5. **Nested rules files.** For every reviewed file, `withNestedRulesFiles` (`packages/github/src/rules-files.ts`) adds the nearest `AGENTS.md` and `CLAUDE.md` in its own directories, read from the **base** commit like the root ones (owner rules never come from the PR head), deduplicated against `review.rulesFiles`. Both the Action (`reviewPullRequest`) and the App (`runBotReview`) call it after selecting the files to review. Bounds:
+5. **Nested rules files.** For every reviewed file, `withNestedRulesFiles` (`packages/github/src/rules-files.ts`) adds every `AGENTS.md` and `CLAUDE.md` in its own directories (a broader `apps/AGENTS.md` still applies next to `apps/api/AGENTS.md`), read from the **base** commit like the root ones (owner rules never come from the PR head), deduplicated against `review.rulesFiles`. Both the Action (`reviewPullRequest`) and the App (`runBotReview`) call it after selecting the files to review. Bounds:
    - `review.maxRulesTokens` (default 12,000): the configured `rulesFiles` always go, as before; nested files fill what is left, shallowest then smallest first.
    - At most 40 directories are looked up (two reads each, eight at a time), shallowest first; reads are shared per GitHub client, so the bots of one panel look a file up once.
    - Every nested file left out — over the cap, past the directory limit, or unreadable — is named in the summary. This is a disclosure, not an incomplete review: the diff was fully reviewed, so the review is not marked `partial` and still serves as the incremental base.

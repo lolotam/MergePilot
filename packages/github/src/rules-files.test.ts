@@ -32,7 +32,7 @@ describe('ancestorDirectories', () => {
 });
 
 describe('withNestedRulesFiles (ADR-0028)', () => {
-  it('adds the nearest AGENTS.md and CLAUDE.md of each changed file, read from the base commit', async () => {
+  it('adds the AGENTS.md and CLAUDE.md files of each changed file, read from the base commit', async () => {
     const { client, reads } = repoClient({
       'apps/AGENTS.md': 'apps agents',
       'apps/api/AGENTS.md': 'api agents',
@@ -51,6 +51,13 @@ describe('withNestedRulesFiles (ADR-0028)', () => {
     ]);
     expect(out.leftOut).toEqual([]);
     expect(reads.every((r) => r.ref === BASE)).toBe(true);
+  });
+
+  it('adds every ancestor rules file of a changed file, broader ones first', async () => {
+    const { client } = repoClient({ 'apps/AGENTS.md': 'apps agents', 'apps/api/AGENTS.md': 'api agents' });
+    const out = await withNestedRulesFiles(client, { ...params, rulesFiles: [], changedPaths: ['apps/api/src/route.ts'] });
+    expect(out.rulesFiles.map((f) => f.path)).toEqual(['apps/AGENTS.md', 'apps/api/AGENTS.md']);
+    expect(out.leftOut).toEqual([]);
   });
 
   it('does not add a nested file twice, nor one the configured rules already hold', async () => {
@@ -77,7 +84,7 @@ describe('withNestedRulesFiles (ADR-0028)', () => {
       maxRulesTokens: 30, // 10 tokens per 35 chars: root 10 + a/CLAUDE.md 10 + a/b/AGENTS.md 10
     });
     expect(out.rulesFiles.map((f) => f.path)).toEqual(['CLAUDE.md', 'a/CLAUDE.md', 'a/b/AGENTS.md']);
-    expect(out.leftOut).toEqual([]);
+    expect(out.leftOut).toEqual(['a/AGENTS.md']); // 20 tokens: over what is left after a/CLAUDE.md
 
     const tight = await withNestedRulesFiles(client, {
       ...params,
@@ -86,7 +93,7 @@ describe('withNestedRulesFiles (ADR-0028)', () => {
       maxRulesTokens: 20,
     });
     expect(tight.rulesFiles.map((f) => f.path)).toEqual(['CLAUDE.md', 'a/CLAUDE.md']);
-    expect(tight.leftOut).toEqual(['a/b/AGENTS.md']);
+    expect(tight.leftOut).toEqual(['a/AGENTS.md', 'a/b/AGENTS.md']);
   });
 
   it('looks up at most the directory limit, shallowest first, and names the directories it skipped', async () => {

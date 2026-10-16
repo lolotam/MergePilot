@@ -139,10 +139,20 @@ interface ShownFile {
   missing: boolean;
 }
 
+/**
+ * True when `text` names `path` as a whole path: `src/cache.tsx` and `lib/src/cache.ts` do not name
+ * `src/cache.ts`, while `src/cache.ts:12` and a sentence ending in `src/cache.ts.` do.
+ */
+export function namesPath(text: string, path: string): boolean {
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Not preceded by a path character; not followed by a name character, or by `.`/`/` and one.
+  return new RegExp(`(?<![\\w./-])${escaped}(?![\\w-]|[./][\\w-])`).test(text);
+}
+
 /** The finding's own file, then every other known path its evidence or body names. */
 function pathsFor(finding: Finding, known: readonly string[]): string[] {
   const text = `${finding.evidence}\n${finding.body}`;
-  return [finding.path, ...known.filter((path) => path !== finding.path && text.includes(path))];
+  return [finding.path, ...known.filter((path) => path !== finding.path && namesPath(text, path))];
 }
 
 function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFinding: Map<string, string[]> } {

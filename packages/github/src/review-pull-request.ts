@@ -195,7 +195,7 @@ export async function reviewPullRequest(
     return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL, publish: { status: 'skipped-no-changes' } };
   }
 
-  // ADR-0028: the nearest AGENTS.md / CLAUDE.md of each reviewed file, from the base commit.
+  // ADR-0028: every AGENTS.md / CLAUDE.md in the directories of each reviewed file, from the base commit.
   const rules = await withNestedRulesFiles(client, {
     owner,
     repo,
