@@ -31,6 +31,8 @@ export function mergeSettings(
     heavyThresholdLines: keep(update.heavyThresholdLines, current?.heavyThresholdLines),
     fallback: keep(update.fallback, current?.fallback) ?? [],
     minSeverity: keep(update.minSeverity, current?.minSeverity) ?? 'medium',
+    // Undefined keeps the stored value; the stores fill the default (5).
+    maxFindings: update.maxFindings ?? current?.maxFindings,
     // Undefined keeps the stored value; a workspace without settings starts at the 30-day default.
     runRetentionDays:
       update.runRetentionDays !== undefined

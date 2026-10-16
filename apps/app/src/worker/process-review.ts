@@ -206,8 +206,14 @@ async function sharedSteps(
   const mainChoice = chooseModel(settings, changedLines);
   if (mainChoice.heavy) deps.log?.(`Large PR (${changedLines} changed lines): using the heavy-duty model`);
 
-  // The dashboard picks every bot's provider and model, so the repo file may leave them out.
-  const repoConfigResult = await loadRepoConfig(client, { owner, repo, baseSha: job.baseSha, defaults: { provider: mainChoice.provider, model: mainChoice.model } });
+  // The dashboard picks every bot's provider and model, so the repo file may leave them out; the
+  // workspace's findings limit applies unless the file names its own `review.maxFindings` (ADR-0033).
+  const repoConfigResult = await loadRepoConfig(client, {
+    owner,
+    repo,
+    baseSha: job.baseSha,
+    defaults: { provider: mainChoice.provider, model: mainChoice.model, maxFindings: settings.maxFindings },
+  });
   // Slot 1's config, priced for its model (the heavy-duty one when chosen; ADR-0016).
   const mainConfig = await buildBotConfig(
     repoConfigResult,
@@ -225,8 +231,12 @@ async function sharedSteps(
     // holds its paid bots × the per-review budget until it finishes (first come, first served).
     // A subscription bot with no API keys costs nothing extra, so it holds nothing (ADR-0027).
     const admission = deps.budgetAdmission ?? processBudgetAdmission;
-    const free = await Promise.all(runs.map((br) => reviewUsesSubscriptionAdmission(deps.credentials, workspaceId, br.bot.provider)));
-    // The run keeps the decision, so keys connected after admission do not add a paid fallback.
+    // Each bot on the provider it will run on: slot 1 may be on the heavy-duty provider.
+    const free = await Promise.all(
+      runs.map((br) => reviewUsesSubscriptionAdmission(deps.credentials, workspaceId, (br === main ? mainChoice : br.bot).provider)),
+    );
+    // The run keeps the decision (ADR-0033): a free bot stays on that subscription, whatever the
+    // default method or the API keys become before or during its run.
     runs.forEach((br, index) => {
       br.admittedFree = free[index] === true;
     });

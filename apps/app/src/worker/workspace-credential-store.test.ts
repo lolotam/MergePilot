@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createReviewModel, encodeSubscription, Secret, type MergePilotConfig } from '@mergepilot/engine';
+import { createReviewModel, encodeSubscription, LlmFailure, Secret, type MergePilotConfig } from '@mergepilot/engine';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewCredentials } from './types.js';
 import { loadRosters } from './key-roster.js';
@@ -130,5 +130,51 @@ describe('the worker store under createReviewModel (ADR-0027)', () => {
     expect(model.fallbacks?.[0]).toMatchObject({ authMethod: 'subscription', includedInSubscription: true });
     expect(model.secrets).toEqual(expect.arrayContaining([key, envelope]));
     expect(store.getKnownSecrets()).toEqual(expect.arrayContaining([key, envelope]));
+  });
+});
+
+describe('a bot admitted free on its subscription (ADR-0033)', () => {
+  const envelope = new Secret(
+    encodeSubscription('anthropic', { type: 'oauth', access: 'anthropic-access-02', refresh: 'anthropic-refresh-02', expires: Date.now() + 3_600_000 }),
+  );
+  const key = new Secret('anthropic-api-key-after-admission');
+  // An admin switched the default to API keys after the bot was admitted free.
+  const switched = (parent: Secret): ProcessReviewCredentials => ({
+    resolve: vi.fn(async () => parent),
+    resolveKeyRoster: vi.fn(async () => ({ secrets: [key], keyIds: ['k1'], startIndex: 0 })),
+    getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
+  });
+
+  it('keeps answering every resolve of its provider, refreshes included, with the subscription', async () => {
+    const store = new WorkspaceCredentialStore('ws', switched(envelope), 'anthropic', envelope, { subscriptionOnly: true });
+    const config: MergePilotConfig = {
+      provider: 'anthropic',
+      model: 'claude-sonnet-5-5',
+      language: 'en',
+      fallback: [{ provider: 'anthropic', model: 'claude-haiku-5-5' }],
+      review: { maxFindings: 5, minSeverity: 'medium', exclude: [], rulesFiles: [], pathInstructions: [] },
+      budget: { perReviewUsd: 0.5, maxInputTokens: 200_000 },
+      audit: { enabled: false },
+    };
+    const model = await createReviewModel(config, store, { cwd: '/tmp' });
+
+    expect(model).toMatchObject({ includedInSubscription: true });
+    expect(model.fallbacks).toEqual([expect.objectContaining({ includedInSubscription: true })]);
+    expect(await store.resolve({ provider: 'anthropic' }, 'review')).toBe(envelope);
+  });
+
+  it('fails with an auth failure instead of sending the API key that replaced the subscription', async () => {
+    const store = new WorkspaceCredentialStore('ws', switched(key), 'anthropic', envelope, { subscriptionOnly: true });
+
+    const failure = await store.resolve({ provider: 'anthropic' }, 'review').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(LlmFailure);
+    expect(failure).toMatchObject({ code: 'INVALID_CREDENTIAL', provider: 'anthropic' });
+    expect((failure as Error).message).not.toContain(key.reveal());
+  });
+
+  it('leaves other providers on their own effective method', async () => {
+    const store = new WorkspaceCredentialStore('ws', switched(envelope), 'anthropic', envelope, { subscriptionOnly: true });
+
+    expect(await store.resolve({ provider: 'openai' }, 'fallback')).toBe(key);
   });
 });

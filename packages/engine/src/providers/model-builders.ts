@@ -104,6 +104,7 @@ export function rotatingReviewModel(
     ...(sample.authMethod ? { authMethod: sample.authMethod } : {}),
     ...(sample.includedInSubscription ? { includedInSubscription: true } : {}),
     ...(sample.outputTokensFor ? { outputTokensFor: sample.outputTokensFor } : {}),
+    ...(sample.answerTokensFor ? { answerTokensFor: sample.answerTokensFor } : {}),
     async generate(request) {
       const outcome = await callWithKeyRotation({
         provider,
@@ -142,6 +143,7 @@ export function withRetries(adapter: LlmAdapter, model: string, effort: string |
     authMethod: subscription ? 'subscription' : 'api-key',
     ...(subscription ? { includedInSubscription: true } : {}),
     ...(base.outputTokensFor ? { outputTokensFor: base.outputTokensFor } : {}),
+    ...(base.answerTokensFor ? { answerTokensFor: base.answerTokensFor } : {}),
     generate(request) {
       return withRetry(
         () => base.generate(request),

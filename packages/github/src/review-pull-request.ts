@@ -275,6 +275,7 @@ export async function reviewPullRequest(
       verifyRejected: reviewResult.verifyRejected,
       rulesLeftOut: inputs.rulesLeftOut,
       context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut, inputs.openFindings),
+      outputLimit: reviewResult.outputLimit,
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),

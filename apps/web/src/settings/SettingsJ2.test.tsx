@@ -6,6 +6,7 @@ import { api, ApiClientError, type ApiProvider } from '../api/client.js';
 import { EffortSelect } from './EffortSelect.js';
 import { FallbackModelsCard } from './FallbackModelsCard.js';
 import { HeavyModelCard } from './HeavyModelCard.js';
+import { MaxFindingsSelect } from './MaxFindingsSelect.js';
 import { ModelSelect } from './ModelSelect.js';
 import { ReviewSettingsCard } from './ReviewSettingsCard.js';
 import { SeveritySelect } from './SeveritySelect.js';
@@ -152,6 +153,54 @@ describe('J2 settings components', () => {
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ provider: 'openrouter', model: 'openai/gpt-5:free', effort: 'high', minSeverity: 'high', fallback: [] }),
     );
+  });
+
+  it('MaxFindingsSelect offers 5 to 50 in steps of 5 and reports the number picked', async () => {
+    const onChange = vi.fn();
+    renderSettings(<MaxFindingsSelect value={5} onChange={onChange} />, 'en');
+    const select = screen.getByRole('combobox', { name: 'Maximum review comments per PR review' }) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(['5', '10', '15', '20', '25', '30', '35', '40', '45', '50']);
+    expect(select.value).toBe('5');
+    await user.selectOptions(select, '35');
+    expect(onChange).toHaveBeenCalledWith(35);
+  });
+
+  it('ReviewSettingsCard shows the stored findings limit and saves the one picked', async () => {
+    const onSave = vi.fn(async () => undefined);
+    renderSettings(
+      <ReviewSettingsCard
+        workspaceId="ws-1"
+        settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'ar', fallback: [], minSeverity: 'medium', maxFindings: 20 }}
+        isLoading={false}
+        isMember={false}
+        onSave={onSave}
+        isSaving={false}
+        keyedProviders={['openrouter']}
+      />,
+      'en',
+    );
+    const select = screen.getByRole('combobox', { name: /Maximum review comments/ }) as HTMLSelectElement;
+    expect(select.value).toBe('20');
+    await user.selectOptions(select, '50');
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ maxFindings: 50 }));
+  });
+
+  it('ReviewSettingsCard starts the findings limit at 5 and disables it for members', async () => {
+    renderSettings(
+      <ReviewSettingsCard
+        workspaceId="ws-1"
+        settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'ar', fallback: [], minSeverity: 'medium' }}
+        isLoading={false}
+        isMember
+        onSave={vi.fn(async () => undefined)}
+        isSaving={false}
+      />,
+      'en',
+    );
+    const select = screen.getByRole('combobox', { name: /Maximum review comments/ }) as HTMLSelectElement;
+    expect(select.value).toBe('5');
+    expect(select.disabled).toBe(true);
   });
 
   it('ReviewSettingsCard refuses to save an enabled heavy model without a model', async () => {

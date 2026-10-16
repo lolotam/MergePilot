@@ -50,6 +50,11 @@ export class SubscriptionAdapter extends LlmAdapter {
     return subscriptionOutputTokens(model, reasoning, options.maxOutputTokens).requested;
   }
 
+  /** `requestedOutputTokens` already caps every call at the subscription model's own limit. */
+  override outputLimit(): undefined {
+    return undefined;
+  }
+
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     let envelope;
     try {

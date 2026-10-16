@@ -1,7 +1,15 @@
 import { eq } from 'drizzle-orm';
 import { DEFAULT_JUDGE_THRESHOLD, isJudgeUse, legacyJudgeMode, normalizeJudgeUses } from '@mergepilot/engine';
 import { BotNameTakenError, sameBotName } from '../core/types.js';
-import type { ApiProvider, BotLogo, JudgeSettings, PanelMode, PriceOverride, WorkspaceSettings } from '../core/types.js';
+import type {
+  ApiProvider,
+  BotLogo,
+  JudgeSettings,
+  MaxFindingsChoice,
+  PanelMode,
+  PriceOverride,
+  WorkspaceSettings,
+} from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
@@ -24,6 +32,7 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
     heavyThresholdLines: row.heavyThresholdLines !== null ? Number(row.heavyThresholdLines) : 800,
     fallback: Array.isArray(row.fallback) ? (row.fallback as WorkspaceSettings['fallback']) : [],
     minSeverity: (row.minSeverity as WorkspaceSettings['minSeverity']) ?? 'medium',
+    maxFindings: row.maxFindings as MaxFindingsChoice,
     runRetentionDays: row.runRetentionDays !== null ? Number(row.runRetentionDays) : null,
     repoColors: (row.repoColors ?? {}) as WorkspaceSettings['repoColors'],
     judge: row.judgeProvider
@@ -61,10 +70,10 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
 }
 
 /**
- * Upserts the settings. `runRetentionDays`, `repoColors`, `judge`, `priceOverrides` and the panel
- * fields (`botName`, `botLogo`, `panelMode`, `panelMinAgreement`) left undefined keep the stored
- * value (a new row gets the column defaults: 30 days, no colors, no manual prices, the
- * "MergePilot" bot, separate reviews).
+ * Upserts the settings. `maxFindings`, `runRetentionDays`, `repoColors`, `judge`, `priceOverrides`
+ * and the panel fields (`botName`, `botLogo`, `panelMode`, `panelMinAgreement`) left undefined keep
+ * the stored value (a new row gets the column defaults: 5 findings, 30 days, no colors, no manual
+ * prices, the "MergePilot" bot, separate reviews).
  * Throws BotNameTakenError when `botName` matches an extra bot's name.
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
@@ -89,6 +98,7 @@ export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings): P
     minSeverity: settings.minSeverity ?? 'medium',
     updatedAt: new Date(),
   };
+  if (settings.maxFindings !== undefined) values.maxFindings = settings.maxFindings;
   if (settings.runRetentionDays !== undefined) values.runRetentionDays = settings.runRetentionDays;
   if (settings.repoColors !== undefined) values.repoColors = settings.repoColors;
   if (settings.judge !== undefined) Object.assign(values, judgeColumns(settings.judge));

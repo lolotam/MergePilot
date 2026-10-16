@@ -40,6 +40,7 @@ export async function createAdminTestDb(): Promise<AdminTestDb> {
     '0010_judge_uses.sql',
     '0011_provider_api_keys.sql',
     '0012_provider_auth_preferences.sql',
+    '0013_max_findings.sql',
   ]) {
     await client.exec(readFileSync(join(migrationsDir, file), 'utf-8'));
   }
