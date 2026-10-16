@@ -3,6 +3,7 @@ import { isDualMethodProvider, isKeyListProvider } from '../credentials/multi-ke
 import {
   WorkspaceDeletedError,
   type AppStore,
+  type KeyProvider,
   type StoredCredential,
   type StoredProviderKey,
   type Vault,
@@ -41,6 +42,38 @@ async function reencryptParentIfNeeded(
   };
 }
 
+/** Aborts a locked change without writing: returning null there would delete the provider's rows. */
+class CredentialGoneError extends Error {}
+
+type SingleOutcome = 'reencrypted' | 'skipped' | 'gone';
+
+/**
+ * Re-encrypts one credential that has no key slots. It reads and writes under the
+ * workspace/provider credential lock, so a concurrent login, token refresh or disconnect
+ * is never overwritten by a stale read.
+ */
+async function reencryptSingleCredential(
+  store: AppStore,
+  vault: Vault,
+  workspaceId: string,
+  provider: KeyProvider,
+): Promise<SingleOutcome> {
+  let outcome: SingleOutcome = 'skipped';
+  try {
+    await store.modifyCredential(workspaceId, provider, async (current) => {
+      if (!current) throw new CredentialGoneError();
+      const rotated = await reencryptParentIfNeeded(current, vault, workspaceId);
+      outcome = rotated ? 'reencrypted' : 'skipped';
+      // Returning the same object tells the Postgres store there is nothing to write.
+      return rotated ?? current;
+    });
+  } catch (error) {
+    if (error instanceof CredentialGoneError) return 'gone';
+    throw error;
+  }
+  return outcome;
+}
+
 /**
  * Re-encrypts all credentials for the specified workspaces whose keyVersion is older
  * than the current vault keyVersion.
@@ -64,31 +97,16 @@ export async function reencryptAll(
         if (item.keyVersion === vault.keyVersion) {
           skipped++;
         } else {
-          const full = await store.getCredential(workspaceId, item.provider);
-          if (full && full.keyVersion !== vault.keyVersion) {
-            const plaintext = await vault.decrypt(full.ciphertext, {
-              workspaceId,
-              provider: full.provider,
-            });
-            const newCiphertext = await vault.encrypt(plaintext, {
-              workspaceId,
-              provider: full.provider,
-            });
-            try {
-              await store.saveCredential({
-                ...full,
-                ciphertext: newCiphertext,
-                keyVersion: vault.keyVersion,
-              });
-            } catch (error) {
-              // The workspace was deleted mid-rotation: its credentials are gone, nothing to rewrite.
-              if (error instanceof WorkspaceDeletedError) break;
-              throw error;
-            }
-            reencrypted++;
-          } else if (full) {
-            skipped++;
+          let outcome: SingleOutcome;
+          try {
+            outcome = await reencryptSingleCredential(store, vault, workspaceId, item.provider);
+          } catch (error) {
+            // The workspace was deleted mid-rotation: its credentials are gone, nothing to rewrite.
+            if (error instanceof WorkspaceDeletedError) break;
+            throw error;
           }
+          if (outcome === 'reencrypted') reencrypted++;
+          else if (outcome === 'skipped') skipped++;
         }
       }
 
