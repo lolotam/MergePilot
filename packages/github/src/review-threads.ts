@@ -63,7 +63,9 @@ export async function fetchReviewThreads(graphql: GraphqlRequest, params: ListRe
       if (!node) continue;
       threads.push({ isResolved: node.isResolved === true, firstCommentId: firstCommentIdOf(node.comments?.nodes?.[0]) });
     }
-    if (!connection.pageInfo?.hasNextPage || !connection.pageInfo.endCursor) return threads;
+    // Only a page that says it is the last may end the read: a list cut short drops open findings.
+    if (!connection.pageInfo?.hasNextPage) return threads;
+    if (!connection.pageInfo.endCursor) throw new Error('review threads: a next page without a cursor');
     cursor = connection.pageInfo.endCursor;
   }
   // More threads than the page limit: a partial list would silently drop open findings.

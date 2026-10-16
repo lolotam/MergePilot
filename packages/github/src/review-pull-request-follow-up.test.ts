@@ -24,9 +24,10 @@ function finding(id: number, title: string): GitHubReviewComment {
   };
 }
 
-function setup(previousReview: boolean): { client: GitHubClient; created: CreateReviewParams[]; threadReads: number[] } {
+function setup(previousReview: boolean, moreOpen = 0): { client: GitHubClient; created: CreateReviewParams[]; threadReads: number[] } {
   const created: CreateReviewParams[] = [];
   const threadReads: number[] = [];
+  const more = Array.from({ length: moreOpen }, (_, i) => finding(100 + i, `More ${i}`));
   const client: GitHubClient = {
     listPullRequestFilesPage: async ({ page }) =>
       page > 1
@@ -52,12 +53,13 @@ function setup(previousReview: boolean): { client: GitHubClient; created: Create
           }
         : null,
     getFileContent: async () => null,
-    listReviewCommentsPage: async ({ page }) => (page === 1 ? [finding(41, 'Cache grows forever'), finding(42, 'Resolved one')] : []),
+    listReviewCommentsPage: async ({ page }) => (page === 1 ? [finding(41, 'Cache grows forever'), finding(42, 'Resolved one'), ...more] : []),
     listReviewThreads: async ({ pull_number }) => {
       threadReads.push(pull_number);
       return [
         { isResolved: false, firstCommentId: 41 },
         { isResolved: true, firstCommentId: 42 },
+        ...more.map((c) => ({ isResolved: false, firstCommentId: c.id })),
       ];
     },
   };
@@ -72,8 +74,11 @@ const config = {
   budget: { perReviewUsd: 1, maxInputTokens: 200_000 },
 } as unknown as MergePilotConfig;
 
-async function review(previousReview: boolean): Promise<{ request: ReviewModelRequest; summary: string; threadReads: number[] }> {
-  const { client, created, threadReads } = setup(previousReview);
+async function review(
+  previousReview: boolean,
+  moreOpen = 0,
+): Promise<{ request: ReviewModelRequest; summary: string; threadReads: number[] }> {
+  const { client, created, threadReads } = setup(previousReview, moreOpen);
   const requests: ReviewModelRequest[] = [];
   const model: ReviewModel = {
     label: 'anthropic:claude-x',
@@ -103,6 +108,11 @@ describe('reviewPullRequest — follow-up review (ADR-0030)', () => {
     expect(request.user).not.toContain('Resolved one');
     expect(summary).toContain('Rest of the pull request: 2 other changed files sent as context.');
     expect(summary).toContain('Open findings re-checked: 1.');
+  });
+
+  it('says how many open findings there were when more than the cap are open', async () => {
+    const { summary } = await review(true, 31);
+    expect(summary).toContain('Open findings re-checked: 30 of 32.');
   });
 
   it('keeps a first review a whole-PR review: no PR context, no open findings read', async () => {

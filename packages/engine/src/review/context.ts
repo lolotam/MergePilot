@@ -52,8 +52,11 @@ export interface ContextPaths {
  */
 export interface ContextDisclosure extends ContextPaths {
   pr?: ContextPaths | undefined;
-  /** Ids of the open findings shown; `unchecked` when their thread status could not be read. */
-  openFindings?: { shown: string[]; unchecked?: boolean | undefined } | undefined;
+  /**
+   * Ids of the open findings shown; `total` how many were open when that is more than were shown;
+   * `unchecked` when their thread status could not be read.
+   */
+  openFindings?: { shown: string[]; total?: number | undefined; unchecked?: boolean | undefined } | undefined;
 }
 
 /** A single context file never takes more than this many estimated tokens; longer ones are cut. */

@@ -51,6 +51,20 @@ describe('fetchReviewThreads', () => {
     await expect(fetchReviewThreads(graphql, { owner: 'o', repo: 'r', pull_number: 5 })).rejects.toThrow(/exceed/);
   });
 
+  it('fails instead of returning a partial list when a page says more follow but gives no cursor', async () => {
+    const graphql: GraphqlRequest = async () => ({
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            pageInfo: { hasNextPage: true, endCursor: null },
+            nodes: [{ isResolved: false, comments: { nodes: [{ databaseId: 1 }] } }],
+          },
+        },
+      },
+    });
+    await expect(fetchReviewThreads(graphql, { owner: 'o', repo: 'r', pull_number: 5 })).rejects.toThrow(/without a cursor/);
+  });
+
   it('returns no thread when the pull request is not found', async () => {
     expect(await fetchReviewThreads(async () => ({ repository: null }), { owner: 'o', repo: 'r', pull_number: 5 })).toEqual([]);
   });

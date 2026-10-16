@@ -88,13 +88,15 @@ function openFindingsLine(open: ContextDisclosure['openFindings'], isArabic: boo
       : '> ℹ️ Open findings were not re-checked: their thread status could not be read.';
   }
   if (shown === 0) return undefined;
+  // Over the cap, the count says how many open findings there were: «30 of 45».
+  const count = open.total !== undefined && open.total > shown ? `${shown}${isArabic ? ' من ' : ' of '}${open.total}` : `${shown}`;
   if (open.unchecked) {
     // A panel where some bots re-checked and others could not read the thread status.
     return isArabic
-      ? `> ℹ️ ملاحظات مفتوحة أُعيد فحصها: ${shown}، لكن بعض البوتات تعذّر عليها قراءة حالة المحادثات.`
-      : `> ℹ️ Open findings re-checked: ${shown}, but some bots could not read their thread status.`;
+      ? `> ℹ️ ملاحظات مفتوحة أُعيد فحصها: ${count}، لكن بعض البوتات تعذّر عليها قراءة حالة المحادثات.`
+      : `> ℹ️ Open findings re-checked: ${count}, but some bots could not read their thread status.`;
   }
-  return isArabic ? `> ℹ️ ملاحظات مفتوحة أُعيد فحصها: ${shown}.` : `> ℹ️ Open findings re-checked: ${shown}.`;
+  return isArabic ? `> ℹ️ ملاحظات مفتوحة أُعيد فحصها: ${count}.` : `> ℹ️ Open findings re-checked: ${count}.`;
 }
 
 /** The context of several panel bots as one disclosure: sent by any bot, left out by all. */
@@ -108,7 +110,12 @@ export function mergeContextDisclosures(items: ReadonlyArray<ContextDisclosure |
   if (opens.length > 0) {
     const shown = [...new Set(opens.flatMap((o) => o.shown))];
     // One bot that could not re-check is disclosed, even when another could.
-    merged.openFindings = { shown, ...(opens.some((o) => o.unchecked) ? { unchecked: true } : {}) };
+    const totals = opens.flatMap((o) => (o.total !== undefined ? [o.total] : []));
+    merged.openFindings = {
+      shown,
+      ...(totals.length > 0 ? { total: Math.max(...totals) } : {}),
+      ...(opens.some((o) => o.unchecked) ? { unchecked: true } : {}),
+    };
   }
   return merged;
 }

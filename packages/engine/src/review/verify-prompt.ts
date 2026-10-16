@@ -189,11 +189,10 @@ function pathsFor(finding: Finding, known: readonly string[]): string[] {
 
 function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFinding: Map<string, string[]> } {
   const patches = new Map(input.files.map((f) => [f.path, f.patch]));
-  // A path sent both as a PR diff and as its head file (ADR-0030) shows the head file: a superset.
-  const contexts = new Map<string, ContextFile>();
-  for (const c of input.contextFiles ?? []) {
-    if (!contexts.has(c.path) || c.source !== 'pull-request') contexts.set(c.path, c);
-  }
+  // A path can be sent both as a PR diff and as its head file (ADR-0030): the verifier gets both,
+  // the diff for the lines the PR removed, the head file for the lines it left unchanged.
+  const contexts = new Map<string, ContextFile[]>();
+  for (const c of input.contextFiles ?? []) contexts.set(c.path, [...(contexts.get(c.path) ?? []), c]);
   const known = [...patches.keys(), ...[...contexts.keys()].filter((p) => !patches.has(p))];
   const files = new Map<string, ShownFile>();
   const pathsByFinding = new Map<string, string[]>();
@@ -203,7 +202,9 @@ function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFi
     for (const path of paths) {
       if (files.has(path)) continue;
       const patch = patches.get(path);
-      const context = contexts.get(path);
+      const pathContexts = contexts.get(path) ?? [];
+      const context = pathContexts.find((c) => c.source !== 'pull-request');
+      const prContext = pathContexts.find((c) => c.source === 'pull-request');
       if (patch?.trim()) {
         files.set(path, { path, kind: 'HUNKS', chunks: patchChunks(patch), missing: false });
         // The full version of a changed file, sent to the review as context, holds the unchanged
@@ -211,9 +212,12 @@ function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFi
         if (context) {
           files.set(`${path}#context`, { path, kind: 'REPOSITORY_CONTEXT', chunks: [contextChunk(context)], missing: false });
         }
-      } else if (context && !patches.has(path)) {
-        const kind = context.source === 'pull-request' ? 'PR_CONTEXT' : 'REPOSITORY_CONTEXT';
-        files.set(path, { path, kind, chunks: [contextChunk(context)], missing: false });
+      } else if (pathContexts.length > 0 && !patches.has(path)) {
+        if (prContext) files.set(path, { path, kind: 'PR_CONTEXT', chunks: [contextChunk(prContext)], missing: false });
+        if (context) {
+          const key = prContext ? `${path}#context` : path;
+          files.set(key, { path, kind: 'REPOSITORY_CONTEXT', chunks: [contextChunk(context)], missing: false });
+        }
       } else {
         files.set(path, { path, kind: 'HUNKS', chunks: [], missing: true });
       }

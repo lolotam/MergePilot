@@ -35,6 +35,16 @@ describe('follow-up disclosure', () => {
     expect(renderContextNote(unchecked, true)).toBe('> ℹ️ لم يُعَد فحص الملاحظات المفتوحة: تعذّرت قراءة حالة المحادثات.');
   });
 
+  it('says how many open findings there were when the cap left some out, merged across bots', () => {
+    const merged = mergeContextDisclosures([
+      { sent: [], leftOut: [], openFindings: { shown: ['1', '2'], total: 45 } },
+      { sent: [], leftOut: [], openFindings: { shown: ['2', '3'], total: 44 } },
+    ]);
+    expect(renderContextNote(merged, false)).toBe('> ℹ️ Open findings re-checked: 3 of 45.');
+    expect(renderContextNote(merged, true)).toBe('> ℹ️ ملاحظات مفتوحة أُعيد فحصها: 3 من 45.');
+    expect(renderContextNote(contextDisclosureOf(undefined, [], { shown: ['1'] }), false)).toBe('> ℹ️ Open findings re-checked: 1.');
+  });
+
   it('merges the bots of a panel: a PR file any bot sent is sent, open findings are united', () => {
     const merged = mergeContextDisclosures([
       { sent: [], leftOut: [], pr: { sent: ['a.ts'], leftOut: ['b.ts'] }, openFindings: { shown: ['41'] } },

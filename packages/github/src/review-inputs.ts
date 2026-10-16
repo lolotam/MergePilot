@@ -123,7 +123,11 @@ export async function gatherReviewInputs(client: GitHubClient, params: ReviewInp
     ...(followUp && open
       ? {
           followUp: { sinceSha: followUp.sinceSha, openFindings: open.findings },
-          openFindings: { shown: open.findings.map((f) => f.id), ...(open.unchecked ? { unchecked: true } : {}) },
+          openFindings: {
+            shown: open.findings.map((f) => f.id),
+            ...(open.total > open.findings.length ? { total: open.total } : {}),
+            ...(open.unchecked ? { unchecked: true } : {}),
+          },
         }
       : {}),
   };

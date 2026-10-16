@@ -22,11 +22,15 @@ export interface GatherOpenFindingsParams {
 }
 
 export interface GatheredOpenFindings {
-  /** At most {@link OPEN_FINDINGS_MAX}, by path then line. */
+  /** The newest {@link OPEN_FINDINGS_MAX}, listed by path then line. */
   findings: OpenFinding[];
+  /** How many of the bot's findings are open, those past the cap included. */
+  total: number;
   /** The thread state could not be read: no open finding is shown. */
   unchecked: boolean;
 }
+
+const UNCHECKED: GatheredOpenFindings = { findings: [], total: 0, unchecked: true };
 
 /** Where the comment body stops being the finding: its evidence and suggestion are not repeated. */
 const EVIDENCE_LABEL_RE = /\*\*(?:Evidence|الدليل):\*\*/;
@@ -54,7 +58,7 @@ const byPlace = (a: OpenFinding, b: OpenFinding): number =>
   (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || (a.line ?? Number.MAX_SAFE_INTEGER) - (b.line ?? Number.MAX_SAFE_INTEGER);
 
 async function readOpenFindings(client: GitHubClient, params: GatherOpenFindingsParams): Promise<GatheredOpenFindings> {
-  if (!client.listReviewCommentsPage || !client.listReviewThreads) return { findings: [], unchecked: true };
+  if (!client.listReviewCommentsPage || !client.listReviewThreads) return UNCHECKED;
   const { owner, repo, pull_number } = params;
   let comments: GitHubReviewComment[];
   let openThreadRoots: Set<number>;
@@ -67,20 +71,20 @@ async function readOpenFindings(client: GitHubClient, params: GatherOpenFindings
     openThreadRoots = new Set(threads.flatMap((t) => (!t.isResolved && t.firstCommentId !== null ? [t.firstCommentId] : [])));
   } catch {
     // Reading threads is best-effort: a review never fails because its open findings could not be read.
-    return { findings: [], unchecked: true };
+    return UNCHECKED;
   }
   const slot = params.botSlot ?? MAIN_BOT_SLOT;
-  const findings = comments
-    .filter(
-      (c) =>
-        c.user?.login === params.publisherLogin &&
-        parseFingerprintFromComment(c.body) !== null &&
-        commentBotSlot(c.body) === slot &&
-        openThreadRoots.has(c.id),
-    )
-    .map(toOpenFinding)
-    .sort(byPlace);
-  return { findings: findings.slice(0, OPEN_FINDINGS_MAX), unchecked: false };
+  const open = comments.filter(
+    (c) =>
+      c.user?.login === params.publisherLogin &&
+      parseFingerprintFromComment(c.body) !== null &&
+      commentBotSlot(c.body) === slot &&
+      openThreadRoots.has(c.id),
+  );
+  // Over the cap the newest comments (ids grow over time) are kept, so the same files do not
+  // always lose out; the block lists them by place for reading.
+  const newest = [...open].sort((a, b) => b.id - a.id).slice(0, OPEN_FINDINGS_MAX);
+  return { findings: newest.map(toOpenFinding).sort(byPlace), total: open.length, unchecked: false };
 }
 
 /**

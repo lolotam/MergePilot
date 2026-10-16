@@ -76,14 +76,22 @@ describe('gatherOpenFindings', () => {
     expect(result.findings.map((f) => f.id)).toEqual(['6']);
   });
 
-  it(`shows at most ${OPEN_FINDINGS_MAX}`, async () => {
-    const comments = Array.from({ length: OPEN_FINDINGS_MAX + 4 }, (_, i) => comment(i + 1));
+  it(`shows the newest ${OPEN_FINDINGS_MAX} over the cap, by place, and counts them all`, async () => {
+    // The 4 oldest sit first by path: a cut by path order would keep them.
+    const comments = Array.from({ length: OPEN_FINDINGS_MAX + 4 }, (_, i) =>
+      comment(i + 1, { path: i < 4 ? 'a/oldest.ts' : 'z/newer.ts' }),
+    );
     const result = await gatherOpenFindings(client(comments, comments.map((c) => open(c.id))), params);
+
+    expect(result.total).toBe(OPEN_FINDINGS_MAX + 4);
     expect(result.findings).toHaveLength(OPEN_FINDINGS_MAX);
+    expect(result.findings.some((f) => f.path === 'a/oldest.ts')).toBe(false);
+    expect(result.findings.map((f) => f.line)).toEqual([...result.findings.map((f) => f.line!)].sort((a, b) => a - b));
   });
 
   it('shows none, and says so, when the thread status cannot be read', async () => {
-    expect(await gatherOpenFindings(client([comment(1)]), params)).toEqual({ findings: [], unchecked: true });
-    expect(await gatherOpenFindings(client([comment(1)], new Error('graphql 502')), params)).toEqual({ findings: [], unchecked: true });
+    const none = { findings: [], total: 0, unchecked: true };
+    expect(await gatherOpenFindings(client([comment(1)]), params)).toEqual(none);
+    expect(await gatherOpenFindings(client([comment(1)], new Error('graphql 502')), params)).toEqual(none);
   });
 });

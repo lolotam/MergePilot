@@ -116080,10 +116080,8 @@ ${finding.body}`;
 function collectFiles(input2) {
   const patches = new Map(input2.files.map((f3) => [f3.path, f3.patch]));
   const contexts = /* @__PURE__ */ new Map();
-  for (const c of input2.contextFiles ?? []) {
-    if (!contexts.has(c.path) || c.source !== "pull-request")
-      contexts.set(c.path, c);
-  }
+  for (const c of input2.contextFiles ?? [])
+    contexts.set(c.path, [...contexts.get(c.path) ?? [], c]);
   const known = [...patches.keys(), ...[...contexts.keys()].filter((p) => !patches.has(p))];
   const files = /* @__PURE__ */ new Map();
   const pathsByFinding = /* @__PURE__ */ new Map();
@@ -116094,15 +116092,21 @@ function collectFiles(input2) {
       if (files.has(path11))
         continue;
       const patch = patches.get(path11);
-      const context = contexts.get(path11);
+      const pathContexts = contexts.get(path11) ?? [];
+      const context = pathContexts.find((c) => c.source !== "pull-request");
+      const prContext = pathContexts.find((c) => c.source === "pull-request");
       if (patch?.trim()) {
         files.set(path11, { path: path11, kind: "HUNKS", chunks: patchChunks(patch), missing: false });
         if (context) {
           files.set(`${path11}#context`, { path: path11, kind: "REPOSITORY_CONTEXT", chunks: [contextChunk(context)], missing: false });
         }
-      } else if (context && !patches.has(path11)) {
-        const kind = context.source === "pull-request" ? "PR_CONTEXT" : "REPOSITORY_CONTEXT";
-        files.set(path11, { path: path11, kind, chunks: [contextChunk(context)], missing: false });
+      } else if (pathContexts.length > 0 && !patches.has(path11)) {
+        if (prContext)
+          files.set(path11, { path: path11, kind: "PR_CONTEXT", chunks: [contextChunk(prContext)], missing: false });
+        if (context) {
+          const key = prContext ? `${path11}#context` : path11;
+          files.set(key, { path: path11, kind: "REPOSITORY_CONTEXT", chunks: [contextChunk(context)], missing: false });
+        }
       } else {
         files.set(path11, { path: path11, kind: "HUNKS", chunks: [], missing: true });
       }
@@ -168337,8 +168341,10 @@ async function fetchReviewThreads(graphql3, params) {
         continue;
       threads.push({ isResolved: node2.isResolved === true, firstCommentId: firstCommentIdOf(node2.comments?.nodes?.[0]) });
     }
-    if (!connection.pageInfo?.hasNextPage || !connection.pageInfo.endCursor)
+    if (!connection.pageInfo?.hasNextPage)
       return threads;
+    if (!connection.pageInfo.endCursor)
+      throw new Error("review threads: a next page without a cursor");
     cursor = connection.pageInfo.endCursor;
   }
   if (cursor !== null)
@@ -169541,10 +169547,11 @@ function openFindingsLine(open3, isArabic) {
   }
   if (shown2 === 0)
     return void 0;
+  const count = open3.total !== void 0 && open3.total > shown2 ? `${shown2}${isArabic ? " \u0645\u0646 " : " of "}${open3.total}` : `${shown2}`;
   if (open3.unchecked) {
-    return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${shown2}\u060C \u0644\u0643\u0646 \u0628\u0639\u0636 \u0627\u0644\u0628\u0648\u062A\u0627\u062A \u062A\u0639\u0630\u0651\u0631 \u0639\u0644\u064A\u0647\u0627 \u0642\u0631\u0627\u0621\u0629 \u062D\u0627\u0644\u0629 \u0627\u0644\u0645\u062D\u0627\u062F\u062B\u0627\u062A.` : `> \u2139\uFE0F Open findings re-checked: ${shown2}, but some bots could not read their thread status.`;
+    return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${count}\u060C \u0644\u0643\u0646 \u0628\u0639\u0636 \u0627\u0644\u0628\u0648\u062A\u0627\u062A \u062A\u0639\u0630\u0651\u0631 \u0639\u0644\u064A\u0647\u0627 \u0642\u0631\u0627\u0621\u0629 \u062D\u0627\u0644\u0629 \u0627\u0644\u0645\u062D\u0627\u062F\u062B\u0627\u062A.` : `> \u2139\uFE0F Open findings re-checked: ${count}, but some bots could not read their thread status.`;
   }
-  return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${shown2}.` : `> \u2139\uFE0F Open findings re-checked: ${shown2}.`;
+  return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${count}.` : `> \u2139\uFE0F Open findings re-checked: ${count}.`;
 }
 
 function renderHeader(outcome, isArabic) {
@@ -170097,6 +170104,7 @@ function contextDisclosureOf(engine, gathererLeftOut, openFindings) {
   };
 }
 
+var UNCHECKED = { findings: [], total: 0, unchecked: true };
 var EVIDENCE_LABEL_RE = /\*\*(?:Evidence|الدليل):\*\*/;
 var HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
 var HEADING_RE = /^###\s+.+$/m;
@@ -170117,7 +170125,7 @@ function toOpenFinding(comment) {
 var byPlace = (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || (a.line ?? Number.MAX_SAFE_INTEGER) - (b.line ?? Number.MAX_SAFE_INTEGER);
 async function readOpenFindings(client, params) {
   if (!client.listReviewCommentsPage || !client.listReviewThreads)
-    return { findings: [], unchecked: true };
+    return UNCHECKED;
   const { owner, repo, pull_number } = params;
   let comments;
   let openThreadRoots;
@@ -170129,11 +170137,12 @@ async function readOpenFindings(client, params) {
     comments = all;
     openThreadRoots = new Set(threads.flatMap((t2) => !t2.isResolved && t2.firstCommentId !== null ? [t2.firstCommentId] : []));
   } catch {
-    return { findings: [], unchecked: true };
+    return UNCHECKED;
   }
   const slot = params.botSlot ?? MAIN_BOT_SLOT;
-  const findings = comments.filter((c) => c.user?.login === params.publisherLogin && parseFingerprintFromComment(c.body) !== null && commentBotSlot(c.body) === slot && openThreadRoots.has(c.id)).map(toOpenFinding).sort(byPlace);
-  return { findings: findings.slice(0, OPEN_FINDINGS_MAX), unchecked: false };
+  const open3 = comments.filter((c) => c.user?.login === params.publisherLogin && parseFingerprintFromComment(c.body) !== null && commentBotSlot(c.body) === slot && openThreadRoots.has(c.id));
+  const newest = [...open3].sort((a, b) => b.id - a.id).slice(0, OPEN_FINDINGS_MAX);
+  return { findings: newest.map(toOpenFinding).sort(byPlace), total: open3.length, unchecked: false };
 }
 var cache = /* @__PURE__ */ new WeakMap();
 function gatherOpenFindings(client, params) {
@@ -170245,7 +170254,11 @@ async function gatherReviewInputs(client, params) {
     contextLeftOut: context.leftOut,
     ...followUp && open3 ? {
       followUp: { sinceSha: followUp.sinceSha, openFindings: open3.findings },
-      openFindings: { shown: open3.findings.map((f3) => f3.id), ...open3.unchecked ? { unchecked: true } : {} }
+      openFindings: {
+        shown: open3.findings.map((f3) => f3.id),
+        ...open3.total > open3.findings.length ? { total: open3.total } : {},
+        ...open3.unchecked ? { unchecked: true } : {}
+      }
     } : {}
   };
 }
