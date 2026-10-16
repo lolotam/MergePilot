@@ -18,6 +18,7 @@ export * from './review/batch-run.js';
 export * from './review/truncation.js';
 export * from './review/call.js';
 export * from './review/context.js';
+export * from './review/follow-up.js';
 export * from './llm/index.js';
 export * from './security/index.js';
 export * from './validate/index.js';

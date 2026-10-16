@@ -19,12 +19,14 @@ import {
   withJudgeUsage,
   type FallbackReason,
   type FileContent,
+  type FollowUpParams,
   type GitHubClient,
   type PullRequestFile,
   type ReviewJudge,
   type ReviewScope,
   type SelectIncrementalFilesResult,
 } from '@mergepilot/github';
+import { MAIN_BOT_SLOT } from '../core/types.js';
 
 /** What one bot needs to review a PR head (ADR-0017: every bot of the panel runs this). */
 export interface BotReviewParams {
@@ -123,8 +125,9 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     return { kind: 'nothing-new' };
   }
 
-  // Nested owner rules at the base commit (ADR-0028), repository context at the head (ADR-0029);
-  // reads are cached per client, so the bots of one panel share them.
+  // Nested owner rules at the base commit (ADR-0028), repository context at the head (ADR-0029)
+  // and, on an incremental run, the rest of the PR and the open findings (ADR-0030); reads are
+  // cached per client, so the bots of one panel share them.
   const inputs = await gatherReviewInputs(params.client, {
     owner: params.owner,
     repo: params.repo,
@@ -133,6 +136,7 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     config,
     rulesFiles,
     files: filesToReview,
+    followUp: followUpOf(params, incremental, prFiles),
     log,
   });
 
@@ -144,6 +148,7 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     anchorFiles: prFiles,
     rulesFiles: inputs.rulesFiles,
     contextFiles: inputs.contextFiles,
+    followUp: inputs.followUp,
     model,
     knownSecrets,
     judge,
@@ -152,8 +157,30 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
   const context = contextDisclosureOf(
     reviewResult.status === 'completed' ? reviewResult.context : undefined,
     inputs.contextLeftOut,
+    inputs.openFindings,
   );
   return { kind: 'reviewed', reviewResult, scope, rulesLeftOut: inputs.rulesLeftOut, ...(context ? { context } : {}) };
+}
+
+/**
+ * The follow-up of an incremental run (ADR-0030). Its open findings are those of the slot whose
+ * reviews were the incremental base: slot 1's when the caller made the selection (a consensus
+ * panel publishes as slot 1), else this bot's own.
+ */
+function followUpOf(
+  params: BotReviewParams,
+  selection: SelectIncrementalFilesResult,
+  prFiles: PullRequestFile[],
+): FollowUpParams | undefined {
+  if (selection.mode !== 'incremental') return undefined;
+  const callerSelected = params.selection !== undefined && params.prFiles !== undefined;
+  return {
+    sinceSha: selection.sinceSha,
+    prFiles,
+    pullNumber: params.pullNumber,
+    publisherLogin: params.publisherLogin ?? DEFAULT_PUBLISHER_LOGIN,
+    botSlot: callerSelected ? MAIN_BOT_SLOT : params.botSlot,
+  };
 }
 
 /** The outcome of a bot's review that is not published by itself (consensus mode). */

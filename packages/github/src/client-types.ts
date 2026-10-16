@@ -106,6 +106,18 @@ export interface ListReviewCommentsParams {
   per_page?: number;
 }
 
+export interface ListReviewThreadsParams {
+  owner: string;
+  repo: string;
+  pull_number: number;
+}
+
+/** A review thread (GraphQL): whether it was resolved, and the REST id of its first comment. */
+export interface GitHubReviewThread {
+  isResolved: boolean;
+  firstCommentId: number | null;
+}
+
 export interface GitHubIssueComment {
   id: number;
   body?: string | null;
@@ -174,6 +186,8 @@ export interface GitHubClient {
   compareCommits(params: CompareCommitsParams): Promise<CompareCommitsResult | null>;
   createIssue?(params: CreateIssueParams): Promise<GitHubCreatedIssue>;
   listReviewCommentsPage?(params: ListReviewCommentsParams): Promise<GitHubReviewComment[]>;
+  /** Every review thread of the PR, all pages (GraphQL); open findings need it (ADR-0030). */
+  listReviewThreads?(params: ListReviewThreadsParams): Promise<GitHubReviewThread[]>;
   listIssueCommentsPage?(params: ListIssueCommentsParams): Promise<GitHubIssueComment[]>;
   createIssueComment?(params: CreateIssueCommentParams): Promise<{ id: number }>;
   addLabels?(params: AddLabelsParams): Promise<void>;

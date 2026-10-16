@@ -96,3 +96,7 @@
     - the "already reviewed this head" check in `publishReview` is skipped;
     - a paused PR is reviewed too, because pause stops automatic reviews only and the label stays.
   - Findings already posted are still dropped by the duplicate check, and the monthly budget still applies.
+
+## Amendment (2026-10-16): follow-up reviews see the rest of the PR
+
+ADR-0030: an incremental run still reviews only the changes since the last reviewed head, and its inline comments land only on those files, but the model is told it is a follow-up, sees the PR's other changed files as read-only `PR_CONTEXT`, and sees this bot's own findings whose threads are still open (GraphQL `isResolved`), so its summary can say which ones the push fixed. No thread is resolved automatically; the duplicate check above is unchanged.

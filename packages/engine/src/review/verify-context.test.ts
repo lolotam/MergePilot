@@ -81,6 +81,26 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).toContain('  1   export function release() {}');
   });
 
+  it('shows both the PR diff and the head file of a path sent as both, so removed lines are there (ADR-0030)', () => {
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'src/lock.ts no longer checks owner.', evidence: 'src/lock.ts:1: export function release() {}' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+      contextFiles: [
+        { path: 'src/lock.ts', content: 'export function release() {}', reason: 'imported by src/api.ts' },
+        {
+          path: 'src/lock.ts',
+          content: '@@ -1,2 +1,1 @@\n-if (!owner) throw new Error();\n export function release() {}',
+          reason: 'changed earlier in this pull request',
+          source: 'pull-request',
+        },
+      ],
+    });
+    expect(user).toContain('<<<UNTRUSTED:PR_CONTEXT:src/lock.ts>>>');
+    expect(user).toContain('1 - if (!owner) throw new Error();');
+    expect(user).toContain('<<<UNTRUSTED:REPOSITORY_CONTEXT:src/lock.ts>>>');
+  });
+
   it("shows a changed file's full version next to its hunks, so a cited unchanged line is there", () => {
     const { user } = buildVerifyPrompt({
       language: 'en',

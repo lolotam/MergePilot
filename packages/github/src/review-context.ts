@@ -74,7 +74,7 @@ interface Lookup {
   disclose: boolean;
 }
 
-const dirOf = (path: string): string => path.split('/').slice(0, -1).join('/');
+export const dirOf = (path: string): string => path.split('/').slice(0, -1).join('/');
 const extOf = (path: string): string => {
   const base = path.split('/').pop() ?? '';
   return base.includes('.') ? (base.split('.').pop() ?? '').toLowerCase() : '';
@@ -182,7 +182,7 @@ export function pairCandidates(path: string): PairLookup | undefined {
 }
 
 /** The new side of a patch (added and context lines): the whole file when the file was added. */
-function patchNewSide(patch: string): string {
+export function patchNewSide(patch: string): string {
   return patch
     .split('\n')
     .filter((line) => line.startsWith('+') || line.startsWith(' '))
@@ -190,17 +190,26 @@ function patchNewSide(patch: string): string {
     .join('\n');
 }
 
-/** Every import lookup of one reviewed file, from its head content. */
-function importLookups(path: string, content: string): Lookup[] {
+/** The candidate paths of each local import of a file (JS/TS or Python), found in its content. */
+export function importCandidateGroups(path: string, content: string): string[][] {
   const ext = extOf(path);
   const groups = JS_EXTENSIONS.has(ext)
     ? localImportSpecifiers(content).map((s) => resolveImportCandidates(path, s))
     : ext === 'py'
       ? pythonImportCandidates(path, content)
       : [];
-  return groups
-    .filter((candidates) => candidates.length > 0)
-    .map((candidates) => ({ candidates, kind: 'import' as const, reason: `imported by ${path}`, forPath: path, disclose: true }));
+  return groups.filter((candidates) => candidates.length > 0);
+}
+
+/** Every import lookup of one reviewed file, from its head content. */
+function importLookups(path: string, content: string): Lookup[] {
+  return importCandidateGroups(path, content).map((candidates) => ({
+    candidates,
+    kind: 'import' as const,
+    reason: `imported by ${path}`,
+    forPath: path,
+    disclose: true,
+  }));
 }
 
 /** Runs `fn` over the items, {@link READ_CONCURRENCY} at a time. */
@@ -332,11 +341,20 @@ export async function gatherRepositoryContext(client: GitHubClient, params: Gath
   return { files: reader.found, leftOut: reader.leftOut };
 }
 
-/** The summary's context line: what the engine sent and left out, plus what the gatherer could not read. */
+/**
+ * The summary's context lines: what the engine sent and left out, plus what the gatherer could
+ * not read and, on a follow-up review, the open findings shown (ADR-0030).
+ */
 export function contextDisclosureOf(
   engine: ContextDisclosure | undefined,
   gathererLeftOut: readonly string[],
+  openFindings?: ContextDisclosure['openFindings'],
 ): ContextDisclosure | undefined {
-  if (!engine && gathererLeftOut.length === 0) return undefined;
-  return { sent: engine?.sent ?? [], leftOut: [...(engine?.leftOut ?? []), ...gathererLeftOut] };
+  if (!engine && gathererLeftOut.length === 0 && !openFindings) return undefined;
+  return {
+    sent: engine?.sent ?? [],
+    leftOut: [...(engine?.leftOut ?? []), ...gathererLeftOut],
+    ...(engine?.pr ? { pr: engine.pr } : {}),
+    ...(openFindings ? { openFindings } : {}),
+  };
 }

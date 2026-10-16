@@ -54,3 +54,7 @@ The five changes the comparison recommended are: (1) repository context outside 
 ## Amendment (2026-10-16): context is read at the head
 
 ADR-0029 fills `contextFiles` (change 1). The `REPOSITORY_CONTEXT` blocks hold files read at the pull request's **head** commit, not the base, and `WHAT_YOU_SEE` says so. Owner rules (point 5) still come only from the base commit.
+
+## Amendment (2026-10-16): follow-up reviews
+
+ADR-0030 (change 3) gives an incremental run its own `WHAT_YOU_SEE`: the PATCH blocks hold only the changes since the last reviewed head, the rest of the PR is shown as `PR_CONTEXT`, and the bot's open findings as `OPEN_FINDINGS`. A whole-PR review keeps the wording above, byte for byte. The verify pass labels a PR file it shows `PR_CONTEXT`.

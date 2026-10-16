@@ -8,10 +8,12 @@ const mockListReviews = vi.fn();
 const mockCreateReview = vi.fn();
 const mockGetContent = vi.fn();
 const mockCompareCommitsWithBasehead = vi.fn();
+const mockGraphql = vi.fn();
 
 vi.mock('@octokit/rest', () => {
   return {
     Octokit: class MockOctokit {
+      graphql = mockGraphql;
       rest = {
         pulls: {
           listFiles: mockListFiles,
@@ -30,6 +32,19 @@ vi.mock('@octokit/rest', () => {
 
 describe('createOctokitClient', () => {
   const secretToken = 'sk-test-secret-token-123456';
+
+  it('reads review threads through GraphQL and redacts the token from its errors (ADR-0030)', async () => {
+    const client = createOctokitClient(secretToken);
+    mockGraphql.mockResolvedValueOnce({
+      repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ isResolved: true, comments: { nodes: [{ databaseId: 4 }] } }] } } },
+    });
+    expect(await client.listReviewThreads!({ owner: 'org', repo: 'repo', pull_number: 2 })).toEqual([{ isResolved: true, firstCommentId: 4 }]);
+
+    mockGraphql.mockRejectedValueOnce(new Error(`GraphQL 401 for ${secretToken}`));
+    const error = await client.listReviewThreads!({ owner: 'org', repo: 'repo', pull_number: 2 }).catch((e: unknown) => e);
+    expect(String(error)).not.toContain(secretToken);
+    expect(String(error)).toContain('[REDACTED]');
+  });
 
   it('never leaks the token in any thrown error message', async () => {
     mockGet.mockRejectedValueOnce(

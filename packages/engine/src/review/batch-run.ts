@@ -10,6 +10,7 @@ import type { TokenUsage } from '../llm/types.js';
 import { FINDINGS_MISSING_REASON, parseReviewAnswer, type ParseReviewAnswerResult } from './answer.js';
 import { estimateTokens } from './budget.js';
 import { describePaths, retryUnusableAnswer, type ReviewDeadline } from './call.js';
+import type { PromptPr } from './follow-up.js';
 import { renderManifest, type ManifestFile } from './manifest.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { buildReviewPrompt, type ContextFile, type LibraryDoc } from './prompt.js';
@@ -35,7 +36,8 @@ export function parseReviewResponse(response: ReviewModelResponse): ParseReviewA
 export interface ExecuteBatchedReviewInput {
   batches: ReviewableFileWithPatch[][];
   config: MergePilotConfig;
-  pr: { title: string; body: string };
+  /** Passed through unchanged: a follow-up review's `followUp` must reach every batch (ADR-0030). */
+  pr: PromptPr;
   rulesFiles: RulesFileInput[];
   model: ReviewModel;
   maxOutputTokens: number;
