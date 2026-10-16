@@ -271,13 +271,15 @@ describe('reviewPullRequest', () => {
   });
 
   it('handles budget skip and publishes summary-only', async () => {
-    const { ctx, createdReviews } = createSetup();
+    const { ctx, createdReviews, logs } = createSetup();
     ctx.config.budget.maxInputTokens = 1; // triggers budget check failure
 
     const result = await reviewPullRequest(ctx);
 
     expect(result.outcome).toBe('skipped-budget');
     expect(result.detail).toContain('maxInputTokens');
+    // The Action's log says why, not only that the review was skipped.
+    expect(logs).toContain(`MergePilot skipped this review for its budget: ${result.detail}`);
     expect(createdReviews).toHaveLength(1);
     expect(createdReviews[0]?.comments).toHaveLength(0);
     expect(createdReviews[0]?.body).toContain('maxInputTokens');

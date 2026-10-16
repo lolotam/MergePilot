@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkBudget, estimateTokens } from './budget.js';
+import { checkBudget, costOverBudgetReason, estimateTokens, parseBudgetSkipReason } from './budget.js';
 
 describe('estimateTokens', () => {
   it('returns ceil(chars / 3.5)', () => {
@@ -41,5 +41,25 @@ describe('checkBudget', () => {
       expect(result.reason).toContain('500000');
       expect(result.reason).toContain('200000');
     }
+  });
+});
+
+describe('parseBudgetSkipReason', () => {
+  it('reads back the token-limit reason checkBudget builds', () => {
+    const result = checkBudget({ promptTokens: 380276, maxInputTokens: 300000 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(parseBudgetSkipReason(result.reason)).toEqual({ kind: 'input-tokens', promptTokens: 380276, maxInputTokens: 300000 });
+    }
+  });
+
+  it('reads back the per-review cost reason', () => {
+    expect(costOverBudgetReason(1.234, 0.5)).toBe('estimated $1.23 > limit $0.50');
+    expect(parseBudgetSkipReason(costOverBudgetReason(1.234, 0.5))).toEqual({ kind: 'cost', estimatedUsd: 1.23, limitUsd: 0.5 });
+  });
+
+  it('returns undefined for any other text', () => {
+    expect(parseBudgetSkipReason('monthly budget reached')).toBeUndefined();
+    expect(parseBudgetSkipReason('Estimated prompt tokens (x) exceed maxInputTokens limit (1).')).toBeUndefined();
   });
 });

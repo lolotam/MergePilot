@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MergePilotConfig } from '../config/schema.js';
+import { MergePilotConfigSchema, type MergePilotConfig } from '../config/schema.js';
 import { LlmFailure } from '../llm/failure.js';
 import type { TokenUsage } from '../llm/types.js';
 import { OpenAICompatibleAdapter } from '../providers/compatible/adapter.js';
 import { mockFetch, sseResponse } from '../providers/fetch-mock.fixtures.js';
+import { estimateTokens } from './budget.js';
 import { modelFromAdapter, type ReviewModel, type ReviewModelRequest, type ReviewModelResponse } from './model.js';
 import { makeAnswerJson, makeConfig, validFindingJson } from './pipeline.fixtures.js';
 import { runReview, type PrFile } from './pipeline.js';
@@ -88,6 +89,26 @@ describe('runReview — huge PRs (ADR-0013)', () => {
       expect(result.complete).toBe(true);
       expect(result.usage?.outputTokens).toBe(300);
     }
+  });
+
+  it('reviews a ~380k-token PR in capped batches with the default budget instead of skipping it', async () => {
+    // eyadex#78: 312 files, about 380,000 prompt tokens, skipped under the old 200,000 default.
+    const files: PrFile[] = Array.from({ length: 312 }, (_, i) => ({
+      path: `src/m${i}.ts`,
+      status: 'added',
+      patch: patchOf(260),
+      changes: 260,
+    }));
+    const config = MergePilotConfigSchema.parse({ provider: 'anthropic', model: 'claude-test', language: 'en' });
+    const { model, calls } = scripted(() => ({ text: makeAnswerJson([]), finishReason: 'stop' }));
+
+    const result = await run(config, model, files);
+
+    expect(estimateTokens(files.map((f) => f.patch).join(''))).toBeGreaterThan(370_000);
+    expect(result.status).toBe('completed');
+    expect(calls.length).toBeGreaterThan(10);
+    // Every call stays bounded: no single call carries the whole PR.
+    expect(calls.every((c) => estimateTokens(c.system + c.user) < config.review.maxPromptTokens)).toBe(true);
   });
 
   it('keeps the single whole-PR call when the prompt fits maxPromptTokens', async () => {

@@ -277,7 +277,7 @@ function recordOf(
       result: payload,
       reviewUrl: null,
     },
-    result: { status, costUsd, detail },
+    result: { status, costUsd, detail, ...(review.outcome === 'skipped-budget' ? { skippedForBudget: true as const } : {}) },
     modelLabel: `${used.provider}:${used.model}`,
   };
 }

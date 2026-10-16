@@ -62,6 +62,13 @@ const DEFAULT_INCLUDE = ['**/*'];
 const DEFAULT_EXCLUDE = ['**/*.lock', '**/dist/**', '**/*.min.*', '**/*.snap', 'docs/**'];
 const DEFAULT_MAX_FILES = 200;
 
+/**
+ * The audit sends whole files in each chunk, so its chunk size stays where it was before the
+ * review's `budget.maxInputTokens` default rose to 1,000,000 (ADR-0013 amendment): 70% of 200,000
+ * tokens per call. A lower `budget.maxInputTokens` still shrinks the chunks.
+ */
+export const AUDIT_MAX_INPUT_TOKENS = 200_000;
+
 export function planAudit(input: PlanAuditInput): PlanAuditResult {
   const {
     files,
@@ -115,7 +122,7 @@ export function planAudit(input: PlanAuditInput): PlanAuditResult {
   skipped.sort((a, b) => compareText(a.path, b.path));
 
   // Chunking
-  const maxChunkTokens = Math.floor(maxInputTokens * 0.7);
+  const maxChunkTokens = Math.floor(Math.min(maxInputTokens, AUDIT_MAX_INPUT_TOKENS) * 0.7);
   const chunks: string[][] = [];
   let currentChunk: string[] = [];
   let currentChunkTokens = 0;

@@ -109,9 +109,16 @@ export const ModelPricingSchema = z
 
 export type ModelPricing = z.infer<typeof ModelPricingSchema>;
 
+/** Default `budget.maxInputTokens` (ADR-0013 amendment, eyadex#78). */
+export const DEFAULT_MAX_INPUT_TOKENS = 1_000_000;
+
 const BudgetSchema = z.strictObject({
   perReviewUsd: z.number().positive().default(0.5),
-  maxInputTokens: z.number().int().positive().default(200000),
+  /**
+   * Whole-PR cap on the estimated prompt. Huge PRs are reviewed in capped batches (ADR-0013), so
+   * this only stops absurd PRs; each model call stays bounded by `review.batchTokens`.
+   */
+  maxInputTokens: z.number().int().positive().default(DEFAULT_MAX_INPUT_TOKENS),
   pricing: ModelPricingSchema.optional(),
 });
 
