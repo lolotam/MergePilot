@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { MergePilotConfigSchema, type MergePilotConfig, type ModelPricing } from '@mergepilot/engine';
+import { DEFAULT_MAX_FINDINGS, MergePilotConfigSchema, type MergePilotConfig, type ModelPricing } from '@mergepilot/engine';
 import type { FileContent, LoadRepoConfigResult } from '@mergepilot/github';
 import type { ApiProvider, WorkspaceSettings } from '../core/types.js';
 import type { ModelChoice } from './model-choice.js';
@@ -43,18 +43,19 @@ export function effectiveConfigFor(
         },
       }),
       rulesFiles: [],
-      configHash: createHash('sha256')
-        .update(JSON.stringify({ provider, model, language: settings.language }))
-        .digest('hex')
-        .slice(0, 12),
+      configHash: configHashOf(JSON.stringify({ provider, model, language: settings.language }), settings.maxFindings),
     };
   }
   if ('errors' in repoConfigResult) {
     throw new Error(`Invalid .mergepilot.yml:\n${repoConfigResult.errors.join('\n')}`);
   }
   const { baseUrl: _repoBaseUrl, effort: _repoEffort, ...repoConfig } = repoConfigResult.config;
+  const defaulted = repoConfigResult.defaulted ?? [];
   // Repo pricing applies only to a provider and model the file itself names, never filled ones.
-  const sameModel = !repoConfigResult.defaulted && repoConfig.provider === provider && repoConfig.model === model;
+  const sameModel =
+    !defaulted.includes('provider') && !defaulted.includes('model') && repoConfig.provider === provider && repoConfig.model === model;
+  // The workspace limit is part of the config only where the file leaves review.maxFindings out.
+  const inheritedLimit = defaulted.includes('maxFindings') ? repoConfig.review.maxFindings : undefined;
   return {
     config: {
       ...repoConfig,
@@ -70,7 +71,18 @@ export function effectiveConfigFor(
       budget: { ...repoConfig.budget, pricing: undefined },
     },
     rulesFiles: repoConfigResult.rulesFiles,
-    configHash: createHash('sha256').update(repoConfigResult.configText).digest('hex').slice(0, 12),
+    configHash: configHashOf(repoConfigResult.configText, inheritedLimit),
     ...(sameModel && repoConfig.budget.pricing ? { repoPricing: repoConfig.budget.pricing } : {}),
   };
+}
+
+/**
+ * The short config hash of the review marker: a change makes the next review a full one. A
+ * workspace findings limit the review inherits is part of it (ADR-0033), except the default 5, so
+ * the hashes of reviews from before the setting existed stay the same.
+ */
+function configHashOf(base: string, inheritedLimit: number | undefined): string {
+  const hash = createHash('sha256').update(base);
+  if (inheritedLimit !== undefined && inheritedLimit !== DEFAULT_MAX_FINDINGS) hash.update(`\nmaxFindings=${inheritedLimit}`);
+  return hash.digest('hex').slice(0, 12);
 }

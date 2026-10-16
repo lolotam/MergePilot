@@ -116,11 +116,12 @@ describe('parseConfig', () => {
     const defaults = { provider: 'openai', model: 'gpt-x', maxFindings: 25 };
     const none = parseConfig('language: en\n', { defaults });
     expect(none.ok && none.config.review.maxFindings).toBe(25);
-    expect(none.ok && none.defaulted).toEqual(['provider', 'model']);
+    expect(none.ok && none.defaulted).toEqual(['provider', 'model', 'maxFindings']);
     const otherKeys = parseConfig('review:\n  minSeverity: high\n', { defaults });
     expect(otherKeys.ok && [otherKeys.config.review.maxFindings, otherKeys.config.review.minSeverity]).toEqual([25, 'high']);
     const named = parseConfig('review:\n  maxFindings: 3\n', { defaults });
     expect(named.ok && named.config.review.maxFindings).toBe(3);
+    expect(named.ok && named.defaulted).toEqual(['provider', 'model']);
     const noDefault = parseConfig('', { defaults: { provider: 'openai', model: 'gpt-x' } });
     expect(noDefault.ok && noDefault.config.review.maxFindings).toBe(5);
   });

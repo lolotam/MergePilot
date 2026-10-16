@@ -2,7 +2,8 @@ import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { MergePilotConfigSchema, type MergePilotConfig } from './schema.js';
 
-export type DefaultedKey = 'provider' | 'model';
+/** `maxFindings` stands for `review.maxFindings`. */
+export type DefaultedKey = 'provider' | 'model' | 'maxFindings';
 
 /** `defaulted` lists the keys filled from `options.defaults` (absent when none was). */
 export type ConfigResult =
@@ -73,13 +74,17 @@ export function parseConfig(yamlText: string, options: ParseConfigOptions = {}):
     return { ok: false, errors: ['config: must be a mapping of keys to values'] };
   }
 
-  const filled: Partial<Record<DefaultedKey, string>> = {};
+  const filled: Partial<Record<'provider' | 'model', string>> = {};
   if (options.defaults && !('provider' in data)) filled.provider = options.defaults.provider;
   if (options.defaults?.model !== undefined && !('model' in data)) filled.model = options.defaults.model;
-  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...withDefaultMaxFindings(data, options.defaults?.maxFindings) });
+  const withLimit = withDefaultMaxFindings(data, options.defaults?.maxFindings);
+  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...withLimit });
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((issue) => formatIssue(issue, data)) };
   }
-  const defaulted = Object.keys(filled) as DefaultedKey[];
+  const defaulted: DefaultedKey[] = [
+    ...(Object.keys(filled) as DefaultedKey[]),
+    ...(withLimit !== data ? ['maxFindings' as const] : []),
+  ];
   return { ok: true, config: parsed.data, ...(defaulted.length > 0 ? { defaulted } : {}) };
 }
