@@ -131,6 +131,11 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
     expect(truncatedPaths).toEqual([]);
   });
 
+  it('in a mixed directory split over the cap, schedules source units before test-only units', () => {
+    const files = [sized('src/a.test.ts', 100), sized('src/b.ts', 100)];
+    expect(pathsOf(batchFilesByTokenCap(files, 100).batches)).toEqual([['src/b.ts'], ['src/a.test.ts']]);
+  });
+
   it('orders source, then tests, then config and CI, then docs', () => {
     const files = [
       sized('README.md', 100),
