@@ -136,6 +136,11 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
     expect(pathsOf(batchFilesByTokenCap(files, 100).batches)).toEqual([['src/b.ts'], ['src/a.test.ts']]);
   });
 
+  it("places every directory's source before the tests split out of an oversized source group", () => {
+    const files = [sized('src/a/main.ts', 100), sized('src/a/orphan.test.ts', 100), sized('src/b/main.ts', 100)];
+    expect(pathsOf(batchFilesByTokenCap(files, 100).batches)).toEqual([['src/a/main.ts'], ['src/b/main.ts'], ['src/a/orphan.test.ts']]);
+  });
+
   it('orders source, then tests, then config and CI, then docs', () => {
     const files = [
       sized('README.md', 100),

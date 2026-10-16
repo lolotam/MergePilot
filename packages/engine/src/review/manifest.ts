@@ -35,8 +35,11 @@ export interface ManifestSource {
 
 function countPatchLines(patch: string | undefined, sign: '+' | '-'): number {
   if (!patch) return 0;
-  // The `+++ b/…` / `--- a/…` file headers are not changed lines.
-  return patch.split('\n').filter((line) => line.startsWith(sign) && !line.startsWith(sign.repeat(3))).length;
+  // Only the `--- a/…` / `+++ b/…` file headers before the first hunk are skipped: a changed line
+  // whose text is `---` (a Markdown rule) still counts.
+  const lines = patch.split('\n');
+  const firstHunk = lines.findIndex((line) => line.startsWith('@@'));
+  return lines.slice(Math.max(firstHunk, 0)).filter((line) => line.startsWith(sign)).length;
 }
 
 /** A PR file as a manifest entry. */

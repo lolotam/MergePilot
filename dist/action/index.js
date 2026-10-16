@@ -114962,7 +114962,9 @@ var MAX_PATH_CHARS = 200;
 function countPatchLines(patch, sign) {
   if (!patch)
     return 0;
-  return patch.split("\n").filter((line) => line.startsWith(sign) && !line.startsWith(sign.repeat(3))).length;
+  const lines = patch.split("\n");
+  const firstHunk = lines.findIndex((line) => line.startsWith("@@"));
+  return lines.slice(Math.max(firstHunk, 0)).filter((line) => line.startsWith(sign)).length;
 }
 function manifestFileOf(file2, knownSecrets) {
   return {
@@ -115150,8 +115152,8 @@ ${prBody}`;
     parts.push(wrapUntrusted(`LIBRARY_DOCS:${doc.name}@${doc.version}`, doc.content));
   }
   if (input2.batch) {
-    parts.push(`This is batch ${input2.batch.number} of ${input2.batch.count} of this pull request.`);
     parts.push(wrapUntrusted("PR_MANIFEST", input2.batch.manifest));
+    parts.push(`This is batch ${input2.batch.number} of ${input2.batch.count} of this pull request.`);
   }
   for (const file2 of input2.files) {
     const annotated = annotatePatch(file2.patch);
@@ -115227,6 +115229,7 @@ function nodeOf(members2, children) {
   return {
     files: members2.map((m2) => m2.file),
     tokens: members2.reduce((sum, m2) => sum + m2.tokens, 0),
+    tier: Math.min(...members2.map((m2) => m2.tier)),
     ...children ? { children } : {}
   };
 }
@@ -115348,6 +115351,10 @@ function batchFilesByTokenCap(files, capTokens) {
     current = [];
     currentTokens = 0;
   };
+  const deferredTests = [];
+  const placeDeferred = () => {
+    deferredTests.splice(0).forEach(place);
+  };
   const place = (node2) => {
     if (node2.tokens <= capTokens) {
       if (currentTokens + node2.tokens > capTokens)
@@ -115355,7 +115362,12 @@ function batchFilesByTokenCap(files, capTokens) {
       current.push(...node2.files.map((f3) => ({ ...f3 })));
       currentTokens += node2.tokens;
     } else if (node2.children) {
-      node2.children.forEach(place);
+      for (const child of node2.children) {
+        if (node2.tier === FileTier.Source && child.tier !== FileTier.Source)
+          deferredTests.push(child);
+        else
+          place(child);
+      }
     } else {
       const file2 = node2.files[0];
       flush();
@@ -115363,7 +115375,12 @@ function batchFilesByTokenCap(files, capTokens) {
       truncatedPaths.push(file2.path);
     }
   };
-  groupFilesForBatches(files, (f3) => estimateTokens(f3.patch)).forEach(place);
+  for (const group of groupFilesForBatches(files, (f3) => estimateTokens(f3.patch))) {
+    if (group.tier !== FileTier.Source)
+      placeDeferred();
+    place(group);
+  }
+  placeDeferred();
   flush();
   return { batches, truncatedPaths };
 }

@@ -75,6 +75,8 @@ export function implementationKeyOf(path: string): string {
 export interface BatchNode<T> {
   files: T[];
   tokens: number;
+  /** The tier of its most valuable file. */
+  tier: FileTier;
   /** Absent on a single file: a file bigger than the cap is truncated (ADR-0013). */
   children?: BatchNode<T>[] | undefined;
 }
@@ -92,6 +94,7 @@ function nodeOf<T>(members: readonly Member<T>[], children?: BatchNode<T>[]): Ba
   return {
     files: members.map((m) => m.file),
     tokens: members.reduce((sum, m) => sum + m.tokens, 0),
+    tier: Math.min(...members.map((m) => m.tier)) as FileTier,
     ...(children ? { children } : {}),
   };
 }
