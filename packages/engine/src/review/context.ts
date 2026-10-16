@@ -133,6 +133,9 @@ export class ContextPlan {
     let left = maxTokens;
     for (const file of this.files) {
       if (file.tokens > left || !file.forPaths.some((p) => wanted.has(p))) continue;
+      // Not even its first line fit the per-file cap (a one-line or minified file): sending an
+      // empty block would count it as sent; it stays left out instead.
+      if (file.truncated && file.content === '') continue;
       // An added file imported by another file of this call: its patch here already shows all of it.
       if (file.kind !== 'changed-file' && wanted.has(file.path)) continue;
       chosen.push({ path: file.path, content: file.content, reason: file.reason, truncated: file.truncated });

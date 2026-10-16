@@ -153,10 +153,11 @@ function jsPair(path: string, dir: string, stem: string, ext: string): PairLooku
   return testsOf(path, [inDir(dir, `${stem}.test.${ext}`), inDir(dir, `${stem}.spec.${ext}`), inDir(dir, `__tests__/${stem}.test.${ext}`)]);
 }
 
-/** `x.py` ↔ `test_x.py`, `x_test.py`, `tests/test_x.py`. */
+/** `x.py` ↔ `test_x.py`, `x_test.py`, `tests/test_x.py`, in both directions. */
 function pyPair(path: string, dir: string, stem: string): PairLookup {
-  if (stem.startsWith('test_')) {
-    const name = `${stem.slice('test_'.length)}.py`;
+  const tested = stem.startsWith('test_') ? stem.slice('test_'.length) : stem.endsWith('_test') ? stem.slice(0, -'_test'.length) : undefined;
+  if (tested) {
+    const name = `${tested}.py`;
     return implementationOf(path, [inDir(dir, name), inDir(outOfTestDir(dir, 'tests'), name)]);
   }
   return testsOf(path, [inDir(dir, `test_${stem}.py`), inDir(dir, `${stem}_test.py`), inDir(dir, `tests/test_${stem}.py`)]);
@@ -209,8 +210,11 @@ async function inChunks<T>(items: readonly T[], fn: (item: T) => Promise<void>):
   }
 }
 
-/** A read's content, null when the path does not exist, or why it was not read. */
-type ReadOutcome = string | null | 'limit' | 'failed';
+/**
+ * A read's content (null when the path does not exist), or why it was not read. The content is
+ * wrapped so a file whose text is literally "limit" or "failed" is never taken for a sentinel.
+ */
+type ReadOutcome = { content: string | null } | 'limit' | 'failed';
 
 /** Runs lookups a few at a time within the read limit; returns the files found. */
 class ContextReader {
@@ -240,7 +244,7 @@ class ContextReader {
     if (this.reads >= MAX_CONTEXT_READS) return 'limit';
     this.reads++;
     try {
-      return await readAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, path);
+      return { content: await readAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, path) };
     } catch {
       // A failed read (rate limit, 5xx) leaves one context file out; it is counted, never fatal.
       this.leftOut.push(`${path} (could not be read)`);
@@ -254,9 +258,10 @@ class ContextReader {
 
   /** a: the full version of a changed file, recorded in `known` for the later lookups. */
   async readChangedFile(file: ReviewedFile): Promise<void> {
-    const content = await this.read(file.path);
-    if (content === 'limit') this.leftOut.push(`${file.path} (not looked up)`);
-    const full = typeof content === 'string' ? capFileContent(content) : null;
+    const outcome = await this.read(file.path);
+    if (outcome === 'limit') this.leftOut.push(`${file.path} (not looked up)`);
+    const content = typeof outcome === 'object' ? outcome.content : null;
+    const full = content !== null ? capFileContent(content) : null;
     if (full) this.add({ kind: 'changed-file', reason: 'changed file, full version', forPath: file.path }, file.path, full);
     this.known.set(file.path, full);
   }
@@ -270,14 +275,14 @@ class ContextReader {
         return; // a reviewed file: its own entry (or its patch) already covers it
       }
       if (!isContextPathAllowed(path, { exclude: this.params.exclude, isSensitivePath })) return;
-      const content = await this.read(path);
-      if (content === 'limit') {
+      const outcome = await this.read(path);
+      if (outcome === 'limit') {
         if (lookup.disclose) this.leftOut.push(`${lookup.candidates[0]} (not looked up)`);
         return;
       }
-      if (content === 'failed') return;
-      if (content !== null) {
-        this.add(lookup, path, capFileContent(content));
+      if (outcome === 'failed') return;
+      if (outcome.content !== null) {
+        this.add(lookup, path, capFileContent(outcome.content));
         return;
       }
     }

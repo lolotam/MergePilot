@@ -81,6 +81,15 @@ describe('ContextPlan', () => {
     expect(plan.forBatch([{ path: 'src/a.ts' }]).map((f) => f.path)).toEqual(['src/b.ts']);
   });
 
+  it('leaves out a file of which not even the first line fits, instead of sending an empty block', () => {
+    const oneLine = `export const data = [${'1, '.repeat(5000)}];`;
+    const plan = new ContextPlan([file('src/data.ts', 'import', oneLine), file('src/ok.ts', 'import')], options({ contextTokens: 800 }));
+    const whole = plan.whole();
+    expect(whole.map((f) => f.path)).toEqual(['src/ok.ts']);
+    plan.markSent(whole);
+    expect(plan.disclosure()?.leftOut).toContain('src/data.ts');
+  });
+
   it('sends nothing and discloses nothing when review.contextTokens is 0', () => {
     const plan = new ContextPlan([file('src/dep.ts', 'import')], options({ contextTokens: 0 }));
     expect(plan.whole()).toEqual([]);

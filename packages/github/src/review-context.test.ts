@@ -74,6 +74,7 @@ describe('pairCandidates', () => {
     expect(pairCandidates('src/__tests__/lock.test.ts')?.candidates).toEqual(['src/lock.ts']);
     expect(pairCandidates('pkg/store.go')?.candidates).toEqual(['pkg/store_test.go']);
     expect(pairCandidates('app/tests/test_views.py')?.candidates).toEqual(['app/tests/views.py', 'app/views.py']);
+    expect(pairCandidates('app/views_test.py')?.candidates).toEqual(['app/views.py']);
     expect(pairCandidates('README.md')).toBeUndefined();
   });
 });
@@ -166,6 +167,15 @@ describe('gatherRepositoryContext', () => {
     );
     expect(result.files.find((f) => f.path === 'src/new.ts')).toMatchObject({ kind: 'import', content: 'export const fresh = 1;' });
     expect(reads.map((r) => r.path)).not.toContain('src/new.ts');
+  });
+
+  it('never takes a failed read or the read limit for file content', async () => {
+    const imports = Array.from({ length: MAX_CONTEXT_READS }, (_, i) => `import './m${i}.ts';`).join('\n');
+    const { client } = fakeClient({ 'src/api.ts': imports }, ['src/broken.ts']);
+    const result = await gatherRepositoryContext(client, params([modified('src/api.ts'), modified('src/broken.ts'), modified('src/late.ts')]));
+    expect(result.files.filter((f) => f.content === 'failed' || f.content === 'limit')).toEqual([]);
+    expect(result.files.map((f) => f.path)).not.toContain('src/broken.ts');
+    expect(result.leftOut).toContain('src/broken.ts (could not be read)');
   });
 
   it('counts imports past the read limit and failed reads as left out', async () => {

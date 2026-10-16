@@ -115413,6 +115413,8 @@ var ContextPlan = class {
     for (const file2 of this.files) {
       if (file2.tokens > left || !file2.forPaths.some((p) => wanted.has(p)))
         continue;
+      if (file2.truncated && file2.content === "")
+        continue;
       if (file2.kind !== "changed-file" && wanted.has(file2.path))
         continue;
       chosen.push({ path: file2.path, content: file2.content, reason: file2.reason, truncated: file2.truncated });
@@ -169576,8 +169578,9 @@ function jsPair(path11, dir, stem, ext) {
   return testsOf(path11, [inDir(dir, `${stem}.test.${ext}`), inDir(dir, `${stem}.spec.${ext}`), inDir(dir, `__tests__/${stem}.test.${ext}`)]);
 }
 function pyPair(path11, dir, stem) {
-  if (stem.startsWith("test_")) {
-    const name = `${stem.slice("test_".length)}.py`;
+  const tested = stem.startsWith("test_") ? stem.slice("test_".length) : stem.endsWith("_test") ? stem.slice(0, -"_test".length) : void 0;
+  if (tested) {
+    const name = `${tested}.py`;
     return implementationOf(path11, [inDir(dir, name), inDir(outOfTestDir(dir, "tests"), name)]);
   }
   return testsOf(path11, [inDir(dir, `test_${stem}.py`), inDir(dir, `${stem}_test.py`), inDir(dir, `tests/test_${stem}.py`)]);
@@ -169637,7 +169640,7 @@ var ContextReader = class {
       return "limit";
     this.reads++;
     try {
-      return await readAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, path11);
+      return { content: await readAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, path11) };
     } catch {
       this.leftOut.push(`${path11} (could not be read)`);
       return "failed";
@@ -169648,10 +169651,11 @@ var ContextReader = class {
   }
   /** a: the full version of a changed file, recorded in `known` for the later lookups. */
   async readChangedFile(file2) {
-    const content = await this.read(file2.path);
-    if (content === "limit")
+    const outcome = await this.read(file2.path);
+    if (outcome === "limit")
       this.leftOut.push(`${file2.path} (not looked up)`);
-    const full = typeof content === "string" ? capFileContent(content) : null;
+    const content = typeof outcome === "object" ? outcome.content : null;
+    const full = content !== null ? capFileContent(content) : null;
     if (full)
       this.add({ kind: "changed-file", reason: "changed file, full version", forPath: file2.path }, file2.path, full);
     this.known.set(file2.path, full);
@@ -169661,23 +169665,23 @@ var ContextReader = class {
       if (path11 === lookup.forPath)
         return;
       if (this.known.has(path11)) {
-        const content2 = this.known.get(path11);
-        if (content2)
-          this.add(lookup, path11, content2);
+        const content = this.known.get(path11);
+        if (content)
+          this.add(lookup, path11, content);
         return;
       }
       if (!isContextPathAllowed(path11, { exclude: this.params.exclude, isSensitivePath }))
         return;
-      const content = await this.read(path11);
-      if (content === "limit") {
+      const outcome = await this.read(path11);
+      if (outcome === "limit") {
         if (lookup.disclose)
           this.leftOut.push(`${lookup.candidates[0]} (not looked up)`);
         return;
       }
-      if (content === "failed")
+      if (outcome === "failed")
         return;
-      if (content !== null) {
-        this.add(lookup, path11, capFileContent(content));
+      if (outcome.content !== null) {
+        this.add(lookup, path11, capFileContent(outcome.content));
         return;
       }
     }
