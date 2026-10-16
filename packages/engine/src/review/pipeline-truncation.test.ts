@@ -78,7 +78,7 @@ describe('runReview — truncation recovery & batch splitting (P0.1)', () => {
           };
         }
         // Subsequent calls are batches
-        if (req.user.includes('src/a.ts')) {
+        if (req.user.includes('PATCH:src/a.ts')) {
           return {
             text: JSON.stringify({
               summary: 'Batch A looks good.',
@@ -147,7 +147,7 @@ describe('runReview — truncation recovery & batch splitting (P0.1)', () => {
           };
         }
         // Batches succeed with finding for each file
-        const fileMatch = req.user.match(/src\/file(\d)\.ts/);
+        const fileMatch = req.user.match(/PATCH:src\/file(\d)\.ts/);
         const fileNum = fileMatch ? fileMatch[1] : '1';
         return {
           text: JSON.stringify({
