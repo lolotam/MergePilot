@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Secret } from '@mergepilot/engine';
+import { createReviewModel, encodeSubscription, Secret, type MergePilotConfig } from '@mergepilot/engine';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewCredentials } from './types.js';
 import { loadRosters } from './key-roster.js';
@@ -97,5 +97,38 @@ describe('loadRosters behind a subscription default (ADR-0027)', () => {
   it('does not fail the review when the keys behind a subscription primary are gone', async () => {
     const { rosters } = await loadRosters(credentials(null), 'ws', ['openai'], 'openai', loggerStub(), { openai: { defaultMethod: 'subscription' } });
     expect(rosters).toEqual({});
+  });
+});
+
+describe('the worker store under createReviewModel (ADR-0027)', () => {
+  it('builds the subscription behind an API-key default and redacts both methods', async () => {
+    const key = new Secret('anthropic-default-api-key-001');
+    const envelope = new Secret(
+      encodeSubscription('anthropic', { type: 'oauth', access: 'anthropic-access-01', refresh: 'anthropic-refresh-01', expires: Date.now() + 3_600_000 }),
+    );
+    const credentials: ProcessReviewCredentials = {
+      resolve: vi.fn(async () => envelope),
+      resolveKeyRoster: vi.fn(async () => ({ secrets: [key], keyIds: ['k1'], startIndex: 0 })),
+      getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
+    };
+    const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', key);
+    const config: MergePilotConfig = {
+      provider: 'anthropic',
+      model: 'claude-sonnet-5-5',
+      language: 'en',
+      review: { maxFindings: 5, minSeverity: 'medium', exclude: [], rulesFiles: [], pathInstructions: [] },
+      budget: { perReviewUsd: 0.5, maxInputTokens: 200_000 },
+      audit: { enabled: false },
+    };
+    const model = await createReviewModel(config, store, {
+      cwd: '/tmp',
+      dualMethods: { anthropic: { defaultMethod: 'api-key' } },
+      keyRosters: { anthropic: { keys: [key], startIndex: 0 } },
+    });
+
+    expect(model).toMatchObject({ authMethod: 'api-key' });
+    expect(model.fallbacks?.[0]).toMatchObject({ authMethod: 'subscription', includedInSubscription: true });
+    expect(model.secrets).toEqual(expect.arrayContaining([key, envelope]));
+    expect(store.getKnownSecrets()).toEqual(expect.arrayContaining([key, envelope]));
   });
 });

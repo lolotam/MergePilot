@@ -76,6 +76,15 @@ describe('processReviewJob — method fallback from a subscription to API keys (
     expect(run?.status).toBe('failed');
   });
 
+  it('keeps the subscription price record when a configured fallback answered on its own subscription', async () => {
+    const otherSubscription: ReviewModel = { label: 'openai:gpt-5', authMethod: 'subscription', includedInSubscription: true, generate: answer() };
+    const model: ReviewModel = { ...chain(failWith('INVALID_CREDENTIAL'), answer()), fallbacks: [...chain(answer(), answer()).fallbacks!, otherSubscription] };
+    const { run } = await dualReview(model);
+
+    expect(run?.costUsd).toBe(0);
+    expect(run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 });
+  });
+
   it('keeps an all-subscription run at $0 with its API-equivalent', async () => {
     const keys = answer();
     const { run } = await dualReview(chain(answer(), keys));

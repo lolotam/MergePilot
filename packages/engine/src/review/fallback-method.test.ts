@@ -99,6 +99,16 @@ describe('FallbackChain — method fallback entries (ADR-0027)', () => {
     expect(disclosure.modelUsedMethod).toBeUndefined();
   });
 
+  it('discloses no method switch when both entries use the same method', async () => {
+    const sameModelAgain = model('openai:gpt-5', 'api-key', { reply: 'again' });
+    const chain = new FallbackChain(model('openai:gpt-5', 'api-key', { fail: failure('SERVER') }), [sameModelAgain]);
+    await chain.generate(req);
+
+    const disclosure = chain.disclosure([]);
+    expect(disclosure.fallbackFrom).toBe('openai:gpt-5');
+    expect(disclosure.fallbackFromMethod).toBeUndefined();
+  });
+
   it('skips an entry the budget hook refuses', async () => {
     const keys = keysBehind({ reply: 'paid' });
     const chain = new FallbackChain(subscription({ fail: failure('QUOTA') }), [keys], ({ next }) => next !== keys);

@@ -89,6 +89,8 @@ export type ReviewRunResult =
       complete: boolean;
       verification?: { checked: number; rejected: number } | undefined;
       judge?: JudgeFilterSummary | undefined;
+      /** Every attempted call, failures included, was on a subscription: the run cost $0. */
+      onlySubscriptionCalls: boolean;
     } & Partial<FallbackDisclosure>)
   | { status: 'skipped-budget'; reason: string }
   | ({
@@ -381,6 +383,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     ...(verification !== undefined ? { verification } : {}),
     ...(judge ? { judge } : {}),
     ...disclosure,
+    onlySubscriptionCalls: model.onlySubscriptionCalls,
   };
 }
 

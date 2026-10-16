@@ -210,10 +210,11 @@ function recordOf(
   skippedNote: string | undefined,
   { pricing, apiPrice, rotation, onSubscription }: RecordPricing,
 ): BotRecord {
-  // Without a fallback every call stayed on the primary, so a subscription primary means every
-  // call was on the subscription: $0, and the API-equivalent may be shown (ADR-0024). After a
-  // switch to paid API keys the run is priced at the API price (ADR-0027).
-  const allOnSubscription = onSubscription && !review.fallbackFrom;
+  // `subscription` ($0) only while every call stayed on a subscription; a run that switched to
+  // paid API keys is priced at the API price (ADR-0027). A run that did not complete has no
+  // tally, and without a fallback all its calls were on the primary.
+  const allOnSubscription =
+    review.runResult?.status === 'completed' ? review.runResult.onlySubscriptionCalls : onSubscription && !review.fallbackFrom;
   const runPricing: RunPricing = allOnSubscription ? { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 } : pricing;
   const status: ReviewRunStatus =
     review.outcome === 'completed'

@@ -115950,7 +115950,8 @@ async function runReview(input2) {
     complete,
     ...verification !== void 0 ? { verification } : {},
     ...judge ? { judge } : {},
-    ...disclosure
+    ...disclosure,
+    onlySubscriptionCalls: model.onlySubscriptionCalls
   };
 }
 function reviewLimits(review) {
