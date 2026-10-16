@@ -1,7 +1,14 @@
 import type { FastifyInstance } from 'fastify';
+import { isSubscriptionAvailable, isSubscriptionOnlyProvider } from '@mergepilot/engine';
 import { requireRole } from '../auth/guard.js';
 import { SubscriptionLogins } from '../credentials/subscription-login.js';
-import { SubscriptionInputSchema, SubscriptionProviderSchema } from './contract-subscriptions.js';
+import {
+  SubscriptionInputSchema,
+  SubscriptionProviderSchema,
+  SubscriptionStartSchema,
+  type SubscriptionAvailability,
+  type SubscriptionProvider,
+} from './contract-subscriptions.js';
 import { sendError } from './helpers.js';
 import { allow, invalidateModelsCache } from './provider-routes.js';
 import type { DashboardApiDeps } from './routes.js';
@@ -10,11 +17,21 @@ export function registerSubscriptionRoutes(app: FastifyInstance, deps: Dashboard
   const logins = new SubscriptionLogins(deps.subscriptionLogin);
   app.addHook('onClose', async () => { logins.close(); });
   const guard = { preHandler: [requireRole('admin', deps.auth)] };
+  const available = deps.subscriptionAvailable ?? ((provider: SubscriptionProvider) => isSubscriptionAvailable(provider));
   const root = '/api/workspaces/:workspaceId/subscriptions';
+  app.get(root, guard, async (_request, reply) => {
+    const body: SubscriptionAvailability = { providers: SubscriptionProviderSchema.options.filter((provider) => available(provider)) };
+    return reply.send(body);
+  });
   app.post(`${root}/:provider`, guard, async (request, reply) => {
     const { workspaceId, provider } = request.params as { workspaceId: string; provider: string };
     const parsed = SubscriptionProviderSchema.safeParse(provider);
-    if (!parsed.success) return sendError(reply, 400, 'invalid_provider', 'Subscription login is unavailable for this provider');
+    if (!parsed.success || !available(parsed.data)) return sendError(reply, 400, 'invalid_provider', 'Subscription login is unavailable for this provider');
+    const start = SubscriptionStartSchema.safeParse(request.body ?? {});
+    if (!start.success) return sendError(reply, 400, 'validation_error', 'Invalid sign-in request');
+    if (isSubscriptionOnlyProvider(parsed.data) && start.data.acknowledgedTerms !== true) {
+      return sendError(reply, 400, 'terms_not_acknowledged', 'Confirm that you understand the account risk before signing in');
+    }
     if (!allow(`${workspaceId}:subscription-login`, 5)) return sendError(reply, 429, 'rate_limited', 'Too many sign-in attempts; try again in a minute');
     try { return reply.send(logins.start(workspaceId, request.auth!.userId, parsed.data)); }
     catch { return sendError(reply, 429, 'rate_limited', 'Too many active sign-ins; try again later'); }

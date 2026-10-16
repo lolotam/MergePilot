@@ -1,6 +1,6 @@
 import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai/models';
 import type { CredentialStore, Message, ThinkingLevel } from '@earendil-works/pi-ai';
-import { decodeSubscription, type SubscriptionProvider } from '../../credentials/subscription.js';
+import { decodeSubscription, type PiSubscriptionProvider, type SubscriptionProvider } from '../../credentials/subscription.js';
 import type { Secret } from '../../credentials/secret.js';
 import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
@@ -10,8 +10,9 @@ import { redactSecrets } from '../../security/redact.js';
 import { subscriptionProvider } from './auth.js';
 import { failureFromResponse } from '../http.js';
 import { subscriptionOutputTokens } from './output-tokens.js';
+import { AntigravityAdapter } from './antigravity/adapter.js';
 
-export function subscriptionModels(provider: SubscriptionProvider) {
+export function subscriptionModels(provider: PiSubscriptionProvider) {
   return subscriptionProvider(provider).getModels().map((model) => ({
     id: model.id,
     name: model.name,
@@ -39,7 +40,7 @@ function reasoningFor(level: ModelLevel | undefined): ThinkingLevel | undefined 
 /** Streams only model text; no agent tools or subprocesses are enabled. */
 export class SubscriptionAdapter extends LlmAdapter {
   override readonly retryPolicy = DEFAULT_RETRY_POLICY;
-  constructor(override readonly provider: SubscriptionProvider, private secret: Secret,
+  constructor(override readonly provider: PiSubscriptionProvider, private secret: Secret,
     private readonly resolveSecret?: () => Promise<Secret>) { super(); }
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
@@ -137,4 +138,16 @@ export class SubscriptionAdapter extends LlmAdapter {
         message: 'Subscription request failed; test the connection or sign in again' });
     }
   }
+}
+
+/** The adapter for a stored subscription envelope: pi-ai's protocols, or Google Antigravity's own (ADR-0032). */
+export function createSubscriptionAdapter(provider: SubscriptionProvider, secret: Secret,
+  resolveSecret?: () => Promise<Secret>): LlmAdapter {
+  if (provider === 'google-antigravity') return new AntigravityAdapter(secret, resolveSecret);
+  return new SubscriptionAdapter(provider, secret, resolveSecret);
+}
+
+/** True for adapters billed to a consumer subscription: $0 incremental cost (ADR-0020, ADR-0024). */
+export function isSubscriptionAdapter(adapter: LlmAdapter): boolean {
+  return adapter instanceof SubscriptionAdapter || adapter instanceof AntigravityAdapter;
 }

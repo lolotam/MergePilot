@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Auth } from '../auth/auth.js';
 import { isUserPlatformAdmin } from '../admin/guard.js';
 import { requireRole } from '../auth/guard.js';
-import { SUBSCRIPTION_PREFIX, type FetchLike } from '@mergepilot/engine';
+import { isSubscriptionOnlyProvider, SUBSCRIPTION_PREFIX, type FetchLike, type SubscriptionProvider } from '@mergepilot/engine';
 import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
@@ -52,6 +52,8 @@ export interface DashboardApiDeps {
   /** Test seam: live stream limits and keep-alive interval. */
   runStreams?: Partial<RunStreamOptions> | undefined;
   subscriptionLogin?: SubscriptionLoginFn | undefined;
+  /** Test seam: which subscriptions this deployment offers (default: the server environment). */
+  subscriptionAvailable?: ((provider: SubscriptionProvider) => boolean) | undefined;
 }
 
 const toIso = (d: Date | string) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
@@ -225,6 +227,9 @@ export function registerDashboardApi(
         return sendError(reply, 400, 'invalid_provider', `Invalid provider: ${rawProvider}`);
       }
       const provider = providerParse.data;
+      if (isSubscriptionOnlyProvider(provider)) {
+        return sendError(reply, 400, 'subscription_only', 'This provider has no API keys; use its subscription sign-in');
+      }
 
       const rawBody = request.body;
       const rawList = rawBody && typeof rawBody === 'object' && 'apiKeys' in rawBody

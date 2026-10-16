@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type {
   DUAL_METHOD_PROVIDER_IDS as ServerDualIds,
   MAX_PROVIDER_KEYS as ServerMaxKeys,
@@ -14,6 +15,7 @@ import { AddKeyModalDualSubscription } from './AddKeyModalDualSubscription.js';
 import { AddKeyModalFooter } from './AddKeyModalFooter.js';
 import { blankField, outcomeColor, quotaOutcome, type KeyField } from './add-key-modal-utils.js';
 import { SubscriptionSignIn } from '../settings/SubscriptionSignIn.js';
+import { isSubscriptionOnlyProvider } from '../settings/subscription-only.js';
 
 /** The server's cap and provider list, checked by type so a drift fails `pnpm typecheck`. The web does not load app runtime code. */
 const MAX_PROVIDER_KEYS: typeof ServerMaxKeys = 20;
@@ -41,9 +43,18 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
   const { t } = useI18n();
   const testReason = useTestReason();
   const [keyProvider, setKeyProvider] = useState<KeyProvider>('anthropic');
-  const [authMethod, setAuthMethod] = useState<'api-key' | 'subscription'>('api-key');
   const dualProvider = isDualMethodProvider(keyProvider);
-  const supportsSubscription = dualProvider;
+  const subscriptionOnly = isSubscriptionOnlyProvider(keyProvider);
+  const availability = useQuery({
+    queryKey: ['workspaces', workspaceId, 'subscriptions', 'available'],
+    queryFn: () => api.getSubscriptionAvailability(workspaceId!),
+    enabled: isOpen && Boolean(workspaceId),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  // A subscription-only provider is offered only where the server has its sign-in configured.
+  const offeredProviders = KEY_PROVIDERS.filter((provider) =>
+    !isSubscriptionOnlyProvider(provider) || availability.data?.providers.includes(provider));
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [baseUrlInput, setBaseUrlInput] = useState('');
   const [keyError, setKeyError] = useState('');
@@ -61,7 +72,6 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
 
   /** Everything the user typed or chose; shared by both close paths. */
   const resetForm = () => {
-    setAuthMethod('api-key');
     setApiKeyInput('');
     setBaseUrlInput('');
     setKeyError('');
@@ -156,7 +166,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (authMethod === 'subscription') return;
+    if (subscriptionOnly) return;
     setKeyError('');
 
     if (multi) {
@@ -197,18 +207,17 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={t(authMethod === 'subscription' ? 'subscriptionModalTitle' : 'addKeyModalTitle')}
-      {...(authMethod === 'subscription' ? {} : { description: t('addKeyModalDesc') })}
+      title={t(subscriptionOnly ? 'subscriptionModalTitle' : 'addKeyModalTitle')}
+      {...(subscriptionOnly ? {} : { description: t('addKeyModalDesc') })}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
         <ProviderSelect<KeyProvider>
           id="key-provider-select"
           label={t('keyProviderCol')}
           value={keyProvider}
-          options={KEY_PROVIDERS}
+          options={offeredProviders}
           onChange={(next) => {
             setKeyProvider(next);
-            setAuthMethod('api-key');
             setApiKeyInput('');
             setTestResult(null);
             setKeyError('');
@@ -218,20 +227,10 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
 
         {dualProvider && workspaceId && <AddKeyModalDualSubscription workspaceId={workspaceId} provider={keyProvider as 'anthropic' | 'openai' | 'xai'} />}
 
-        {!dualProvider && supportsSubscription && workspaceId && <div>
-          <label htmlFor="credential-auth-method" className="block text-xs font-semibold mb-1.5">{t('authMethodLabel')}</label>
-          <select id="credential-auth-method" value={authMethod} onChange={(event) => {
-            setAuthMethod(event.target.value as 'api-key' | 'subscription'); setApiKeyInput(''); setKeyError(''); setTestResult(null);
-          }} className="w-full px-3.5 py-2 rounded-full border border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-xs">
-            <option value="api-key">{t('authMethodApi')}</option>
-            <option value="subscription">{t('authMethodSubscription')}</option>
-          </select>
-        </div>}
-
-        {!dualProvider && authMethod === 'subscription' && workspaceId && supportsSubscription ? <>
+        {subscriptionOnly ? (workspaceId ? <>
           <SubscriptionSignIn key={keyProvider} workspaceId={workspaceId} provider={keyProvider} onConnected={handleClose} />
           <button type="button" onClick={handleClose} className="px-4 py-2 rounded-full border border-ink-300 dark:border-ink-700 text-xs">{t('cancel')}</button>
-        </> : (!dualProvider && authMethod === 'subscription' ? null : <>
+        </> : null) : <>
 
         {keyProvider === 'custom' && (
           <div>
@@ -374,7 +373,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
           onClose={handleClose}
           testReason={testReason}
         />
-        </>)}
+        </>}
       </form>
     </Modal>
   );

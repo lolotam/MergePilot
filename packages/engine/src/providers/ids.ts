@@ -7,6 +7,7 @@ export const API_PROVIDER_IDS = [
   'anthropic',
   'openai',
   'gemini',
+  'google-antigravity',
   'xai',
   'deepseek',
   'nvidia',

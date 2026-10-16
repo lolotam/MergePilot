@@ -1,7 +1,17 @@
 import { z } from 'zod';
 
-export const SUBSCRIPTION_PROVIDERS = ['openai', 'anthropic', 'xai'] as const;
+export const SUBSCRIPTION_PROVIDERS = ['openai', 'anthropic', 'xai', 'google-antigravity'] as const;
 export type SubscriptionProvider = (typeof SUBSCRIPTION_PROVIDERS)[number];
+
+/** Providers that have no API-key method at all (ADR-0032, decisions log س46-د). */
+export const SUBSCRIPTION_ONLY_PROVIDERS = ['google-antigravity'] as const;
+export type SubscriptionOnlyProvider = (typeof SUBSCRIPTION_ONLY_PROVIDERS)[number];
+/** Subscriptions whose login and request protocol come from pi-ai (ADR-0020). */
+export type PiSubscriptionProvider = Exclude<SubscriptionProvider, SubscriptionOnlyProvider>;
+
+export function isSubscriptionOnlyProvider(provider: string): provider is SubscriptionOnlyProvider {
+  return (SUBSCRIPTION_ONLY_PROVIDERS as readonly string[]).includes(provider);
+}
 export const SUBSCRIPTION_PREFIX = 'mergepilot:oauth:v1:';
 
 const CredentialSchema = z.object({

@@ -19,10 +19,11 @@ import type {
   ExportBackupBody,
   SubscriptionLogin,
   SubscriptionProvider,
+  SubscriptionAvailability,
 } from '@mergepilot/app/contract';
 
 export type { PricesResponse } from '@mergepilot/app/contract';
-export type { SubscriptionLogin, SubscriptionProvider } from '@mergepilot/app/contract';
+export type { SubscriptionAvailability, SubscriptionLogin, SubscriptionLoginErrorCode, SubscriptionProvider } from '@mergepilot/app/contract';
 export type {
   BackupPreview,
   BackupSection,
@@ -229,8 +230,13 @@ function runsQueryString(params: GetRunsParams | undefined, groupBy?: 'pr'): str
 }
 
 export const api = {
-  startSubscription: (workspaceId: string, provider: SubscriptionProvider) =>
-    fetchApi<SubscriptionLogin>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions/${provider}`, { method: 'POST', body: '{}' }),
+  getSubscriptionAvailability: (workspaceId: string) =>
+    fetchApi<SubscriptionAvailability>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions`),
+  startSubscription: (workspaceId: string, provider: SubscriptionProvider, acknowledgedTerms = false) =>
+    fetchApi<SubscriptionLogin>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions/${provider}`, {
+      method: 'POST',
+      body: JSON.stringify(acknowledgedTerms ? { acknowledgedTerms: true } : {}),
+    }),
   getSubscriptionLogin: (workspaceId: string, id: string) =>
     fetchApi<SubscriptionLogin>(`/api/workspaces/${encodeURIComponent(workspaceId)}/subscriptions/sessions/${encodeURIComponent(id)}`),
   answerSubscription: (workspaceId: string, id: string, promptId: string, value: string) =>

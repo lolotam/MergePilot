@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loginSubscription } from './auth.js';
+import { isSubscriptionAvailable, loginSubscription, refreshSubscription } from './auth.js';
+import { ANTIGRAVITY_CLIENT_ID_ENV, ANTIGRAVITY_CLIENT_SECRET_ENV } from './antigravity/index.js';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('headless subscription login', () => {
@@ -44,5 +45,27 @@ describe('headless subscription login', () => {
     const notify = vi.fn(() => controller.abort());
     await expect(loginSubscription('xai', { signal: controller.signal, notify, prompt: async () => '' })).rejects.toThrow();
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'device_code', userCode: 'GROK-CODE' }));
+  });
+});
+
+describe('Google Antigravity availability', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('is offered only when both OAuth client values are configured', () => {
+    expect(isSubscriptionAvailable('google-antigravity', {})).toBe(false);
+    expect(isSubscriptionAvailable('google-antigravity', { [ANTIGRAVITY_CLIENT_ID_ENV]: 'fake-id' })).toBe(false);
+    expect(isSubscriptionAvailable('google-antigravity', { [ANTIGRAVITY_CLIENT_ID_ENV]: 'fake-id', [ANTIGRAVITY_CLIENT_SECRET_ENV]: 'fake-secret' })).toBe(true);
+    expect(isSubscriptionAvailable('openai', {})).toBe(true);
+  });
+
+  it('refuses to sign in or refresh without the client configuration, before any request', async () => {
+    vi.stubEnv(ANTIGRAVITY_CLIENT_ID_ENV, '');
+    vi.stubEnv(ANTIGRAVITY_CLIENT_SECRET_ENV, '');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(loginSubscription('google-antigravity', { notify: () => undefined, prompt: async () => '' })).rejects.toThrow(/not configured/);
+    await expect(refreshSubscription('google-antigravity', { type: 'oauth', access: 'a', refresh: 'r', expires: 0 }, new AbortController().signal))
+      .rejects.toThrow('Subscription token refresh failed; sign in again');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

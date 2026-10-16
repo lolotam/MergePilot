@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { loginSubscription, type SubscriptionCredential, type SubscriptionInteraction, type SubscriptionProvider } from '@mergepilot/engine';
+import { loginSubscription, SubscriptionLoginError, type SubscriptionCredential, type SubscriptionInteraction, type SubscriptionProvider } from '@mergepilot/engine';
 import type { SubscriptionLogin } from '../api/contract-subscriptions.js';
 
 export type SubscriptionLoginFn = (provider: SubscriptionProvider, interaction: SubscriptionInteraction) => Promise<SubscriptionCredential>;
@@ -68,10 +68,12 @@ export class SubscriptionLogins {
       attempt.credential = credential;
       attempt.state.status = 'ready';
       delete attempt.state.prompt;
-    } catch {
+    } catch (error) {
       if (attempt.controller.signal.aborted) return;
       attempt.state.status = 'failed';
       attempt.state.error = 'Subscription sign-in failed. Start a new sign-in and try again.';
+      // Only the fixed reason travels; the provider's own error text never reaches the dashboard.
+      if (error instanceof SubscriptionLoginError) attempt.state.errorCode = error.reason;
       delete attempt.state.prompt;
       delete attempt.answer;
     }

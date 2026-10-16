@@ -27,9 +27,9 @@ import {
 } from './http.js';
 import type { ApiProviderId } from './ids.js';
 import { providerEntry, resolveBaseUrl } from './registry.js';
-import { decodeSubscription } from '../credentials/subscription.js';
+import { decodeSubscription, isSubscriptionOnlyProvider } from '../credentials/subscription.js';
 import { Secret } from '../credentials/secret.js';
-import { SubscriptionAdapter } from './subscription/adapter.js';
+import { createSubscriptionAdapter } from './subscription/adapter.js';
 
 export interface TestConnectionOptions {
   baseUrl?: string;
@@ -201,8 +201,11 @@ export async function testConnection(
 
   try {
     const subscription = decodeSubscription(keyValue(apiKey) ?? '', provider);
+    if (!subscription && isSubscriptionOnlyProvider(provider)) {
+      return { ok: false, ms: elapsed(), code: 'auth', message: `${providerEntry(provider).label} needs a subscription sign-in, not an API key` };
+    }
     if (subscription) {
-      const adapter = new SubscriptionAdapter(subscription.provider, new Secret(keyValue(apiKey)!));
+      const adapter = createSubscriptionAdapter(subscription.provider, new Secret(keyValue(apiKey)!));
       let reply = '';
       for await (const chunk of adapter.stream({ model, messages: [{ role: 'user', content: PROMPT }],
         maxOutputTokens: 1024, signal: controller.signal, ...(options.effort ? { effort: options.effort } : {}) })) {

@@ -2,19 +2,42 @@ import type { AuthInteraction } from '@earendil-works/pi-ai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai';
-import type { SubscriptionCredential, SubscriptionProvider } from '../../credentials/subscription.js';
+import type { PiSubscriptionProvider, SubscriptionCredential, SubscriptionProvider } from '../../credentials/subscription.js';
+import { antigravityClientFromEnv, isAntigravityConfigured, loginAntigravity, refreshAntigravity, type AntigravityDeps } from './antigravity/index.js';
 
 export type { AuthEvent as SubscriptionAuthEvent, AuthPrompt as SubscriptionAuthPrompt } from '@earendil-works/pi-ai';
 export type SubscriptionInteraction = AuthInteraction;
+export {
+  ANTIGRAVITY_CLIENT_ID_ENV,
+  ANTIGRAVITY_CLIENT_SECRET_ENV,
+  SUBSCRIPTION_LOGIN_FAILURES,
+  SubscriptionLoginError,
+  type SubscriptionLoginFailure,
+} from './antigravity/index.js';
 
 /** Provider-owned OAuth and request protocols, shared with DeepSeek Harness's pi-ai integration. */
-export function subscriptionProvider(provider: SubscriptionProvider) {
+export function subscriptionProvider(provider: PiSubscriptionProvider) {
   if (provider === 'openai') return openaiCodexProvider();
   if (provider === 'anthropic') return anthropicProvider();
   return xaiProvider();
 }
 
+/**
+ * Whether this deployment can offer the subscription. Google Antigravity needs its OAuth client
+ * configured on the server (ADR-0032); the pi-ai subscriptions are always available.
+ */
+export function isSubscriptionAvailable(provider: SubscriptionProvider, env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  return provider === 'google-antigravity' ? isAntigravityConfigured(env) : true;
+}
+
+function antigravityDeps(): AntigravityDeps {
+  const client = antigravityClientFromEnv();
+  if (!client) throw new Error('Google Antigravity sign-in is not configured on this server');
+  return { client };
+}
+
 export async function loginSubscription(provider: SubscriptionProvider, interaction: SubscriptionInteraction): Promise<SubscriptionCredential> {
+  if (provider === 'google-antigravity') return loginAntigravity(interaction, antigravityDeps());
   const oauth = subscriptionProvider(provider).auth.oauth!;
   return oauth.login({
     ...interaction,
@@ -32,6 +55,7 @@ export async function loginSubscription(provider: SubscriptionProvider, interact
 
 export async function refreshSubscription(provider: SubscriptionProvider, credential: SubscriptionCredential, signal: AbortSignal): Promise<SubscriptionCredential> {
   try {
+    if (provider === 'google-antigravity') return await refreshAntigravity(credential, antigravityDeps(), signal);
     return await subscriptionProvider(provider).auth.oauth!.refresh(credential, signal);
   } catch {
     // Upstream errors may contain token-response bodies; never return them to the dashboard or logs.
