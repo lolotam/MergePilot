@@ -21,7 +21,7 @@ import { prepareRunResult } from './prepare-run-result.js';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewResult } from './types.js';
 import { apiEquivalentFields, apiEquivalentPrice, type ApiEquivalentPrice } from './api-equivalent.js';
-import { apiPricedConfig, dualMethodsForProviders, withinAdmission } from './dual-method-review.js';
+import { admittedSubscription, apiPricedConfig, dualMethodsForProviders, withinAdmission } from './dual-method-review.js';
 
 export const WORKSPACE_DELETED = 'workspace_deleted';
 
@@ -58,14 +58,23 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         ? ctx.mainConfig
         : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store);
     const providerIds = [choice.provider, ...fallbackList.map((fallback) => fallback.provider)];
-    const dualMethods = withinAdmission(await dualMethodsForProviders(deps.credentials, workspaceId, providerIds, logger), br.admittedFree);
+    // Admitted free, the bot keeps that decision for its whole run (ADR-0033): its provider runs on
+    // the subscription it was admitted with, whatever the default method is now.
+    const subscriptionOnly = br.admittedFree === true;
+    const dualMethods = withinAdmission(
+      await dualMethodsForProviders(deps.credentials, workspaceId, providerIds, logger),
+      br.admittedFree,
+      choice.provider,
+    );
     const { effectiveConfig, rulesFiles, configHash, pricing: configuredPricing } = dualMethods[choice.provider as ApiProviderId]
       ? await apiPricedConfig(builtConfig, deps.store, settings, choice)
       : builtConfig;
 
     const effectiveAuth = await deps.credentials.getEffectiveAuthMethod?.(workspaceId, choice.provider as ApiProvider);
     let primarySecret: Secret;
-    if (effectiveAuth === 'api-key' && deps.credentials.resolveKeyRoster) {
+    if (subscriptionOnly) {
+      primarySecret = await admittedSubscription(deps.credentials, workspaceId, choice.provider);
+    } else if (effectiveAuth === 'api-key' && deps.credentials.resolveKeyRoster) {
       const roster = await deps.credentials.resolveKeyRoster(workspaceId, choice.provider as ApiProvider);
       if (!roster || roster.secrets.length === 0) {
         throw new Error(`No API key roster is available for provider "${choice.provider}"`);
@@ -75,7 +84,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     } else {
       primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
     }
-    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret);
+    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnly });
     const rotationEvents: KeyRotationDisclosure[] = [];
     const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>
       rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds, cursorWrites);
@@ -92,7 +101,9 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     if (deps.createModelForProvider) {
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
-      const { rosters, keyIds } = await loadRosters(deps.credentials, workspaceId, providerIds, choice.provider, logger, dualMethods);
+      // No key roster for a subscription-only provider: the engine would rotate over paid keys.
+      const rosterProviders = subscriptionOnly ? providerIds.filter((provider) => provider !== choice.provider) : providerIds;
+      const { rosters, keyIds } = await loadRosters(deps.credentials, workspaceId, rosterProviders, choice.provider, logger, dualMethods);
       credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {
         cwd: process.cwd(),

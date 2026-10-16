@@ -19,6 +19,7 @@ check racy: every job read the same month spend before any of them recorded its 
   - an admitted review holds its paid bots × the per-review budget until it finishes, and then releases it. A bot whose effective default is subscription **and** has no API keys holds nothing. A dual-method bot (ADR-0027) with API keys connected reserves like a paid bot, because it may fall back to priced API calls;
   - a review is admitted when the month spend plus what admitted reviews hold is below the budget;
   - admission is first come, first served, and queued reviews never count against another;
-  - a review that is not admitted is skipped with `monthly budget reached`, as before.
+  - a review that is not admitted is skipped with `monthly budget reached`, as before;
+  - each bot is admitted on the provider it will run on (slot 1 may be on the heavy-duty provider), and a bot admitted free stays on that subscription for its whole run (ADR-0033).
 - The reservations live in memory. A second worker process would admit on its own, so scaling
   out to several worker replicas needs a shared reservation (Postgres or Redis) first.
