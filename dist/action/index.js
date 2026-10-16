@@ -114057,8 +114057,10 @@ var REVIEW_LIMIT_DEFAULTS = Object.freeze({
 var DEFAULT_MAX_RULES_TOKENS = 12e3;
 var DEFAULT_CONTEXT_TOKENS = 3e4;
 var DEFAULT_PR_CONTEXT_TOKENS = 15e3;
+var DEFAULT_MAX_FINDINGS = 5;
+var MAX_FINDINGS_LIMIT = 50;
 var ReviewSettingsSchema = external_exports.strictObject({
-  maxFindings: external_exports.number().int().min(1).max(20).default(5),
+  maxFindings: external_exports.number().int().min(1).max(MAX_FINDINGS_LIMIT).default(DEFAULT_MAX_FINDINGS),
   minSeverity: SeveritySchema.default("medium"),
   exclude: external_exports.array(external_exports.string()).default(["**/*.lock", "**/dist/**", "**/*.min.*", "**/*.snap"]),
   rulesFiles: external_exports.array(external_exports.string()).default(["CLAUDE.md", "AGENTS.md"]),
@@ -114153,6 +114155,16 @@ var MergePilotConfigSchema = external_exports.strictObject({
   rejectPresetBaseUrl(config2, ctx);
 });
 
+function withDefaultMaxFindings(data, maxFindings) {
+  if (maxFindings === void 0)
+    return data;
+  const review = data.review;
+  if (review === void 0)
+    return { ...data, review: { maxFindings } };
+  if (typeof review !== "object" || review === null || Array.isArray(review) || "maxFindings" in review)
+    return data;
+  return { ...data, review: { ...review, maxFindings } };
+}
 function valueAt(data, path11) {
   let current = data;
   for (const key of path11) {
@@ -114185,7 +114197,7 @@ function parseConfig(yamlText, options = {}) {
     filled.provider = options.defaults.provider;
   if (options.defaults?.model !== void 0 && !("model" in data))
     filled.model = options.defaults.model;
-  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...data });
+  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...withDefaultMaxFindings(data, options.defaults?.maxFindings) });
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((issue2) => formatIssue(issue2, data)) };
   }
@@ -115906,6 +115918,26 @@ var ContextPlan = class {
   }
 };
 
+var BASE_REVIEW_OUTPUT_TOKENS = 4096;
+var REVIEW_SUMMARY_TOKENS = 1024;
+var REVIEW_TOKENS_PER_FINDING = 300;
+var REVIEW_RETRY_MAX_TOKENS = 32768;
+var BASE_VERIFY_OUTPUT_TOKENS = 2048;
+var VERIFY_TOKENS_PER_FINDING = 128;
+var VERIFY_MAX_TOKENS = 16384;
+function reviewOutputTokensFor(maxFindings) {
+  return Math.max(BASE_REVIEW_OUTPUT_TOKENS, REVIEW_SUMMARY_TOKENS + maxFindings * REVIEW_TOKENS_PER_FINDING);
+}
+function reviewRetryOutputTokens(maxOutputTokens) {
+  return Math.min(maxOutputTokens * 2, REVIEW_RETRY_MAX_TOKENS);
+}
+function verifyOutputTokensFor(findings) {
+  return Math.min(Math.max(BASE_VERIFY_OUTPUT_TOKENS, findings * VERIFY_TOKENS_PER_FINDING), VERIFY_MAX_TOKENS);
+}
+function verifyRetryOutputTokens(maxOutputTokens) {
+  return Math.min(maxOutputTokens * 2, VERIFY_MAX_TOKENS);
+}
+
 function makeRedactionFinding(path11, line, kind, idIndex) {
   return {
     id: `sec${idIndex}`,
@@ -115988,7 +116020,7 @@ async function recoverReviewTruncation(input2) {
   if (!needsTruncationRetry(parseResult, modelResponse.finishReason)) {
     return { parseResult, totalUsage, incompleteReasons };
   }
-  const retryOutputTokens = Math.min(maxOutputTokens * 2, 16384);
+  const retryOutputTokens = reviewRetryOutputTokens(maxOutputTokens);
   const retryRequested = requestedOutputTokens(model, retryOutputTokens);
   if (!spend.canAfford(promptTokens, retryRequested)) {
     incompleteReasons.push("truncation retry skipped: budget limit reached");
@@ -116135,7 +116167,7 @@ async function runBatchedPass(ctx, batches) {
     rulesFiles: ctx.redactedRulesFiles,
     model: ctx.model,
     maxOutputTokens: ctx.maxOutputTokens,
-    retryOutputTokens: Math.min(ctx.maxOutputTokens * 2, 16384),
+    retryOutputTokens: reviewRetryOutputTokens(ctx.maxOutputTokens),
     reviewOutputTokens: ctx.reviewOutputTokens,
     spend: ctx.spend,
     knownSecrets: ctx.knownSecrets,
@@ -116469,8 +116501,6 @@ function applyVerdicts(findings, verdicts) {
   return { kept, rejected };
 }
 
-var VERIFY_MAX_OUTPUT_TOKENS = 2048;
-var VERIFY_RETRY_OUTPUT_TOKENS = Math.min(VERIFY_MAX_OUTPUT_TOKENS * 2, 8192);
 async function runVerifyPass(input2) {
   const { model, spend, signal } = input2;
   let totalUsage = input2.totalUsage;
@@ -116489,7 +116519,9 @@ async function runVerifyPass(input2) {
     maxCodeTokens: input2.maxCodeTokens
   });
   const promptTokens = estimateTokens(verifyPrompt.system + verifyPrompt.user);
-  const firstRequested = requestedOutputTokens(model, VERIFY_MAX_OUTPUT_TOKENS);
+  const maxOutputTokens = verifyOutputTokensFor(input2.findings.length);
+  const retryOutputTokens = verifyRetryOutputTokens(maxOutputTokens);
+  const firstRequested = requestedOutputTokens(model, maxOutputTokens);
   const responseSchema = external_exports.toJSONSchema(VerifyAnswerSchema);
   if (input2.deadline?.expired) {
     return unchanged("time limit reached");
@@ -116501,7 +116533,7 @@ async function runVerifyPass(input2) {
   const request2 = {
     system: verifyPrompt.system,
     user: verifyPrompt.user,
-    maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
+    maxOutputTokens,
     responseSchema,
     ...signal ? { signal } : {}
   };
@@ -116525,14 +116557,14 @@ async function runVerifyPass(input2) {
     if (empty.note)
       incompleteReasons.push(`verification ${empty.note}`);
     if (needsTruncationRetry(verifyParsed, (empty.response ?? res).finishReason)) {
-      const retryRequested = requestedOutputTokens(model, VERIFY_RETRY_OUTPUT_TOKENS);
+      const retryRequested = requestedOutputTokens(model, retryOutputTokens);
       if (!spend.canAfford(promptTokens, retryRequested)) {
         incompleteReasons.push("verification retry skipped: budget limit reached");
       } else {
         try {
           const retryRes = await model.generate({
             ...request2,
-            maxOutputTokens: VERIFY_RETRY_OUTPUT_TOKENS,
+            maxOutputTokens: retryOutputTokens,
             ...empty.thinkingOff ? { thinking: "off" } : {}
           });
           spend.record(promptTokens, retryRequested, retryRes.usage);
@@ -116646,9 +116678,9 @@ async function runReview(input2) {
     const batchPrompt = buildBatchPrompt({ ...promptArgs, batches }, index);
     return estimateTokens(batchPrompt.system + batchPrompt.user);
   }) : [promptTokens];
-  const maxOutputTokens = 4096;
+  const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
-  const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
+  const verifyOutputTokens = model.outputTokensFor(verifyOutputTokensFor(reviewCfg.maxFindings * callPromptTokens.length));
   const initialPricing = currentPricing();
   if (initialPricing) {
     const estimatedCostUsd = estimateReviewCostUsd({
