@@ -114981,7 +114981,10 @@ function manifestFileOf(file2, knownSecrets) {
   };
 }
 function shown(text) {
-  const isControl = (ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127;
+  const isControl = (ch) => {
+    const code = ch.codePointAt(0);
+    return code < 32 || code >= 127 && code <= 159 || code === 8232 || code === 8233;
+  };
   const flat = [...text].map((ch) => isControl(ch) ? "?" : ch).join("");
   return flat.length <= MAX_PATH_CHARS ? flat : `\u2026${flat.slice(flat.length - MAX_PATH_CHARS + 1)}`;
 }
@@ -115304,7 +115307,7 @@ function groupFilesForBatches(files, tokensOf) {
     const nodes = [...units.values()].map((unit) => {
       const members3 = [...unit].sort((a, b) => a.tier - b.tier || a.index - b.index);
       return { members: members3, node: nodeOf(members3, members3.map((m2) => nodeOf([m2]))) };
-    });
+    }).sort((a, b) => a.members[0].tier - b.members[0].tier || a.members[0].index - b.members[0].index);
     const members2 = nodes.flatMap((n) => n.members);
     return {
       tier: Math.min(...members2.map((m2) => m2.tier)),
@@ -115653,6 +115656,8 @@ var ContextPlan = class {
     let left = maxTokens;
     for (const file2 of [...this.prFiles.filter(related), ...this.prFiles.filter((f3) => !related(f3))]) {
       if (file2.tokens > prLeft)
+        continue;
+      if (file2.truncated && file2.content.split("\n").every((line) => line === "" || line.startsWith("@@")))
         continue;
       chosen.push(shownOf(file2));
       prLeft -= file2.tokens;

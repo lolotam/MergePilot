@@ -209,6 +209,9 @@ export class ContextPlan {
     let left = maxTokens;
     for (const file of [...this.prFiles.filter(related), ...this.prFiles.filter((f) => !related(f))]) {
       if (file.tokens > prLeft) continue;
+      // As for repository context: a patch of which not one changed or context line fit (only its
+      // hunk header, or nothing) is left out instead of being counted as sent.
+      if (file.truncated && file.content.split('\n').every((line) => line === '' || line.startsWith('@@'))) continue;
       chosen.push(shownOf(file));
       prLeft -= file.tokens;
       left -= file.tokens;

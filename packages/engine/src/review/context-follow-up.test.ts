@@ -48,6 +48,15 @@ describe('ContextPlan — PR context on a follow-up review (ADR-0030)', () => {
     expect(plan.disclosure()?.pr).toEqual({ sent: ['deep/dir/related.ts'], leftOut: ['x.ts'] });
   });
 
+  it('leaves out a PR file of which not even the first line fits, instead of sending an empty block', () => {
+    const oneLine = prChange('lib/data.ts', ['src/a.ts'], `@@ -0,0 +1 @@\n+export const data = [${'1, '.repeat(2000)}];`);
+    const plan = new ContextPlan([oneLine], options({ prContextTokens: 120 }));
+    const whole = plan.whole();
+    plan.markSent(whole);
+    expect(whole).toEqual([]);
+    expect(plan.disclosure()?.pr).toEqual({ sent: [], leftOut: ['lib/data.ts'] });
+  });
+
   it('keeps PR context within its share, so repository context still fits', () => {
     const pr = [prChange('lib/one.ts', ['src/a.ts']), prChange('lib/two.ts', ['src/a.ts'])];
     const share = blockTokens(pr[0]!) + 2;
