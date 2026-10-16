@@ -108,7 +108,8 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
  * of the implementation they belong to, so `src/x.ts`, `src/x.test.ts` and
  * `src/__tests__/y.test.ts` share a group; config and docs files group by directory among their
  * own tier. A group takes the tier of its most valuable file; groups of one tier keep the PR's
- * order. Within a group each implementation comes right before its tests (one unit node).
+ * order. Within a group, units with source come before test-only units, and each implementation
+ * comes right before its tests (one unit node).
  */
 export function groupFilesForBatches<T extends { path: string }>(
   files: readonly T[],
@@ -123,10 +124,14 @@ export function groupFilesForBatches<T extends { path: string }>(
     push(groups.get(key)!, unit, { file, index, tier, tokens: tokensOf(file) });
   });
   const ordered = [...groups.values()].map((units) => {
-    const nodes = [...units.values()].map((unit) => {
-      const members = [...unit].sort((a, b) => a.tier - b.tier || a.index - b.index);
-      return { members, node: nodeOf(members, members.map((m) => nodeOf([m]))) };
-    });
+    const nodes = [...units.values()]
+      .map((unit) => {
+        const members = [...unit].sort((a, b) => a.tier - b.tier || a.index - b.index);
+        return { members, node: nodeOf(members, members.map((m) => nodeOf([m]))) };
+      })
+      // Units with source first, so a group split over the cap never schedules a test-only batch
+      // ahead of its source; then the PR's order.
+      .sort((a, b) => a.members[0]!.tier - b.members[0]!.tier || a.members[0]!.index - b.members[0]!.index);
     const members = nodes.flatMap((n) => n.members);
     return {
       tier: Math.min(...members.map((m) => m.tier)),

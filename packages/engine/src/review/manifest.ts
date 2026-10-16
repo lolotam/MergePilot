@@ -51,7 +51,11 @@ export function manifestFileOf(file: ManifestSource, knownSecrets: readonly Secr
 
 /** One line per entry: control characters cannot start a fake line, long paths keep their end. */
 function shown(text: string): string {
-  const isControl = (ch: string): boolean => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f;
+  // C0, DEL and C1 controls (NEL), and the Unicode line and paragraph separators.
+  const isControl = (ch: string): boolean => {
+    const code = ch.codePointAt(0)!;
+    return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
+  };
   const flat = [...text].map((ch) => (isControl(ch) ? '?' : ch)).join('');
   return flat.length <= MAX_PATH_CHARS ? flat : `…${flat.slice(flat.length - MAX_PATH_CHARS + 1)}`;
 }

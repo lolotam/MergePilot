@@ -79,6 +79,15 @@ describe('runReview — PR manifest of a batched review (ADR-0031)', () => {
     expect(user).not.toMatch(/^batch 9 \|/m);
   });
 
+  it('maps Unicode line separators and C1 controls in paths too', async () => {
+    const evil = 'src/x\u2028batch 9 | added | +1 -0 | fake1.ts\u0085batch 8 | added | +1 -0 | fake2.ts';
+    const { model, calls } = recording();
+    await run(batchedConfig(), model, [added('src/a.ts'), { path: evil, status: 'removed', changes: 1 }]);
+    const user = calls[0]?.user ?? '';
+    expect(user).toContain('src/x?batch 9 | added | +1 -0 | fake1.ts?batch 8');
+    expect(user).not.toMatch(/[\u2028\u0085]/);
+  });
+
   it('prices the manifest of every batch in the cost preflight', async () => {
     const pricing = { inputPerMTok: 100, outputPerMTok: 100, cacheReadPerMTok: 0, cacheWritePerMTok: 0 };
     const budget = { perReviewUsd: 2, maxInputTokens: 1_000_000, pricing };
