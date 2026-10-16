@@ -70,6 +70,9 @@ export const REVIEW_LIMIT_DEFAULTS: Readonly<ReviewLimits> = Object.freeze({
 /** Default `review.maxRulesTokens` (ADR-0028). */
 export const DEFAULT_MAX_RULES_TOKENS = 12_000;
 
+/** Default `review.contextTokens` (ADR-0029). */
+export const DEFAULT_CONTEXT_TOKENS = 30_000;
+
 const ReviewSettingsSchema = z.strictObject({
   maxFindings: z.number().int().min(1).max(20).default(5),
   minSeverity: SeveritySchema.default('medium'),
@@ -81,6 +84,12 @@ const ReviewSettingsSchema = z.strictObject({
    * smallest first, and the ones left out are disclosed in the summary (ADR-0028).
    */
   maxRulesTokens: z.number().int().positive().default(DEFAULT_MAX_RULES_TOKENS),
+  /**
+   * Estimated tokens of repository context (files outside the diff, read at the PR head) per review
+   * call: the whole-PR call gets up to this much; each batch up to `min(contextTokens, batchTokens)`
+   * from its own files. 0 turns it off. What is left out is counted in the summary (ADR-0029).
+   */
+  contextTokens: z.number().int().min(0).default(DEFAULT_CONTEXT_TOKENS),
   pathInstructions: z.array(PathInstructionSchema).default([]),
   /** Second model pass that re-checks every finding against the code before publishing. */
   verify: z.boolean().default(true),

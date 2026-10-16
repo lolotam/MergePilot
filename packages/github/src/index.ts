@@ -109,6 +109,8 @@ export * from './fallback-reason.js';
 export * from './judge-summary.js';
 export * from './review-notes.js';
 export * from './rules-files.js';
+export * from './review-context.js';
+export * from './review-inputs.js';
 export {
   loadRepoConfig,
   type LoadRepoConfigResult,

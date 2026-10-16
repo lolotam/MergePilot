@@ -11,7 +11,7 @@ import { FINDINGS_MISSING_REASON, parseReviewAnswer, type ParseReviewAnswerResul
 import { estimateTokens } from './budget.js';
 import { describePaths, retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
-import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
+import { buildReviewPrompt, type ContextFile, type LibraryDoc } from './prompt.js';
 import {
   combineUsage,
   dedupeFindings,
@@ -45,6 +45,8 @@ export interface ExecuteBatchedReviewInput {
   spend: SpendTracker;
   knownSecrets?: readonly Secret[] | undefined;
   libraryDocs?: LibraryDoc[] | undefined;
+  /** The repository context of a batch: only its own files' context (ADR-0029). */
+  contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
   signal?: AbortSignal | undefined;
   initialUsage?: TokenUsage | undefined;
   /** Overall review time limit: once expired, no new batch starts. */
@@ -60,9 +62,10 @@ export interface ExecuteBatchedReviewResult {
 
 /** The prompt for one batch of files. */
 export function buildBatchPrompt(
-  input: Pick<ExecuteBatchedReviewInput, 'config' | 'pr' | 'rulesFiles' | 'libraryDocs'>,
+  input: Pick<ExecuteBatchedReviewInput, 'config' | 'pr' | 'rulesFiles' | 'libraryDocs' | 'contextFor'>,
   files: ReviewableFileWithPatch[],
 ): { system: string; user: string } {
+  const contextFiles = input.contextFor?.(files) ?? [];
   return buildReviewPrompt({
     language: input.config.language,
     maxFindings: input.config.review.maxFindings,
@@ -71,6 +74,7 @@ export function buildBatchPrompt(
     pathInstructions: input.config.review.pathInstructions,
     files,
     ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
+    ...(contextFiles.length > 0 ? { contextFiles } : {}),
   });
 }
 

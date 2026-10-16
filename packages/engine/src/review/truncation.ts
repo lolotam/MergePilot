@@ -10,7 +10,7 @@ import type { ParseReviewAnswerResult } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import type { ReviewDeadline } from './call.js';
 import type { ReviewModel } from './model.js';
-import type { LibraryDoc } from './prompt.js';
+import type { ContextFile, LibraryDoc } from './prompt.js';
 import {
   batchFilesBySize,
   combineUsage,
@@ -38,6 +38,8 @@ export interface RecoverReviewTruncationInput {
   redactedRulesFiles: RulesFileInput[];
   redactedReviewableFiles: ReviewableFileWithPatch[];
   libraryDocs?: LibraryDoc[] | undefined;
+  /** The repository context of each recovery batch (ADR-0029). */
+  contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
   signal?: AbortSignal | undefined;
   totalUsage?: TokenUsage | undefined;
   /** The answer came from a retry with thinking off: the truncation retry keeps it off. */
@@ -111,6 +113,7 @@ export async function recoverReviewTruncation(
       spend,
       knownSecrets: input.knownSecrets,
       libraryDocs,
+      contextFor: input.contextFor,
       signal,
       initialUsage: totalUsage,
       deadline: input.deadline,

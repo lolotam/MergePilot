@@ -8,7 +8,7 @@
  * Everything arrives through `RunReviewInput` (ADR-0001).
  */
 
-import { REVIEW_LIMIT_DEFAULTS, type MergePilotConfig, type ReviewLimits } from '../config/schema.js';
+import { DEFAULT_CONTEXT_TOKENS, REVIEW_LIMIT_DEFAULTS, type MergePilotConfig, type ReviewLimits } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import { classifyFile } from '../diff/classify-file.js';
 import { parsePatch, type ParsedPatch } from '../diff/parse-patch.js';
@@ -20,7 +20,7 @@ import { selectFindings } from '../validate/select.js';
 import { buildBatchPrompt } from './batch-run.js';
 import { checkBudget, costOverBudgetReason, estimateTokens } from './budget.js';
 import { ReviewDeadline, withCallTimeout } from './call.js';
-import { estimateCostUsd } from '../budget/cost.js';
+import { ContextPlan, type ContextDisclosure, type RepositoryContextFile } from './context.js';
 import { runFalsePositiveFilter, type FalsePositiveOutcome } from '../judge/false-positive.js';
 import { hasJudgeUse, type JudgeUses } from '../judge/uses.js';
 import type { Judge } from '../judge/judge.js';
@@ -31,7 +31,7 @@ import type { Finding, ReviewResult, Severity } from './types.js';
 import { redactPatches } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, type CappedBatches } from './split.js';
-import { paidSwitchFits, SpendTracker } from './spend.js';
+import { estimateReviewCostUsd, paidSwitchFits, SpendTracker } from './spend.js';
 import { runVerifyPass, VERIFY_MAX_OUTPUT_TOKENS } from './verify-pass.js';
 import type { VerifyRejectedFinding } from './verify.js';
 
@@ -61,6 +61,11 @@ export interface RunReviewInput {
   fallbackModels?: readonly ReviewModel[] | undefined;
   knownSecrets: Secret[];
   libraryDocs?: LibraryDoc[] | undefined;
+  /**
+   * Repository files outside the diff, read at the PR head (ADR-0029). The pipeline filters,
+   * redacts and fits them to each call's `review.contextTokens` share; untrusted like the patches.
+   */
+  contextFiles?: RepositoryContextFile[] | undefined;
   signal?: AbortSignal | undefined;
   /**
    * Optional Jev judge (ADR-0015); its false-positive check runs after the verify pass when `uses`
@@ -89,6 +94,8 @@ export type ReviewRunResult =
       /** Findings the verification pass rejected, listed in the summary (ADR-0028). */
       verifyRejected?: VerifyRejectedFinding[] | undefined;
       judge?: JudgeFilterSummary | undefined;
+      /** Repository context sent and left out (ADR-0029); a disclosure, not an incomplete reason. */
+      context?: ContextDisclosure | undefined;
       /** Every attempted call, failures included, was on a subscription: the run cost $0. */
       onlySubscriptionCalls: boolean;
     } & Partial<FallbackDisclosure>)
@@ -157,6 +164,16 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // Redact patches; a secret on an added line becomes a security finding.
   const { files: redactedReviewableFiles, securityFindings } = redactPatches(reviewableFiles, knownSecrets);
 
+  // Repository context, redacted with the same secrets; each call gets its own share (ADR-0029).
+  const context = new ContextPlan(input.contextFiles ?? [], {
+    exclude: reviewCfg.exclude,
+    knownSecrets,
+    reviewedPaths: redactedReviewableFiles.map((f) => f.path),
+    contextTokens: reviewCfg.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
+    batchTokens: limits.batchTokens,
+  });
+  const wholeContext = context.whole();
+
   // ── Step c: build prompt + budget check ───────────────────────────────
   const prompt = buildReviewPrompt({
     language: config.language,
@@ -166,8 +183,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     pathInstructions: reviewCfg.pathInstructions,
     files: redactedReviewableFiles,
     ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
+    ...(wholeContext.length > 0 ? { contextFiles: wholeContext } : {}),
   });
 
+  // Context counts in the size guard, maxInputTokens and the cost estimate (ADR-0013 consistency).
   const promptTokens = estimateTokens(prompt.system + prompt.user);
   const budgetResult = checkBudget({
     promptTokens,
@@ -185,12 +204,15 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     for (const path of plan.truncatedPaths) {
       incompleteReasons.push(`${path}: patch truncated to fit review.batchTokens`);
     }
+  } else {
+    context.markSent(wholeContext);
   }
   const promptArgs = {
     config,
     pr: { title: redactedPrTitle, body: redactedPrBody },
     rulesFiles: redactedRulesFiles,
     libraryDocs: input.libraryDocs,
+    contextFor: context.forBatch,
   };
   const callPromptTokens = plan
     ? plan.batches.map((batch) => {
@@ -204,22 +226,19 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // (largest across the chain). Thinking is billed as output, so pricing less could overspend.
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
   const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
-  let estimatedCostUsd: number | undefined;
   const initialPricing = currentPricing();
   if (initialPricing) {
-    const pricing = initialPricing;
-    estimatedCostUsd = callPromptTokens.reduce(
-      (sum, tokens) => sum + estimateCostUsd({ inputTokens: tokens, maxOutputTokens: reviewOutputTokens }, pricing),
-      0,
+    // Worst case for the verification call: it shows each file at most once (capped at
+    // review.batchTokens), so its code is a subset of the whole-PR prompt, context included.
+    const estimatedCostUsd = estimateReviewCostUsd(
+      {
+        callPromptTokens,
+        reviewOutputTokens,
+        verifyPromptTokens: reviewCfg.verify ? promptTokens : undefined,
+        verifyOutputTokens,
+      },
+      initialPricing,
     );
-    if (reviewCfg.verify) {
-      // Worst case for the verification call: it shows each file at most once (capped at
-      // review.batchTokens), so its code is a subset of the review prompt.
-      estimatedCostUsd += estimateCostUsd(
-        { inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens },
-        pricing,
-      );
-    }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return { status: 'skipped-budget', reason: costOverBudgetReason(estimatedCostUsd, budgetCfg.perReviewUsd) };
     }
@@ -245,6 +264,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     redactedRulesFiles,
     redactedReviewableFiles,
     libraryDocs: input.libraryDocs,
+    contextFor: context.forBatch,
   };
   const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
   if (!pass.ok) {
@@ -269,6 +289,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       language: config.language,
       findings: modelFindings,
       files: redactedReviewableFiles,
+      contextFiles: context.sentFiles(),
       maxCodeTokens: limits.batchTokens,
       model,
       spend,
@@ -334,6 +355,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     incompleteReasons,
   };
 
+  const contextDisclosure = context.disclosure();
   // Pricing belongs to the configured model; after a model fallback the cost is unknown (tokens still count).
   const disclosure = model.disclosure(knownSecrets);
   const methodOnlyFallback =
@@ -360,6 +382,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     ...(verification !== undefined ? { verification } : {}),
     ...(verifyRejected.length > 0 ? { verifyRejected } : {}),
     ...(judge ? { judge } : {}),
+    ...(contextDisclosure ? { context: contextDisclosure } : {}),
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls,
   };

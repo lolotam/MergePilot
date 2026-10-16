@@ -86,6 +86,37 @@ function isGeneratedPath(filePath: string): boolean {
   return false;
 }
 
+/** Extensions of files that are never text worth showing a model (images, archives, fonts, media). */
+const BINARY_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'tif', 'tiff', 'avif', 'psd',
+  'pdf', 'zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'jar', 'war',
+  'woff', 'woff2', 'ttf', 'otf', 'eot',
+  'mp3', 'mp4', 'mov', 'avi', 'webm', 'wav', 'ogg', 'flac',
+  'exe', 'dll', 'so', 'dylib', 'bin', 'class', 'o', 'a', 'wasm', 'pyc', 'sqlite', 'db',
+]);
+
+/** `*.lock` files and lockfiles without that extension (Go's checksum file included). */
+function isLockfile(base: string): boolean {
+  return LOCKFILES.has(base) || base.endsWith('.lock') || base === 'go.sum';
+}
+
+/**
+ * Whether a repository file outside the diff may be shown to the model as context (ADR-0029):
+ * the review's own skip rules (sensitive, `review.exclude`, generated) plus binaries, lockfiles,
+ * snapshots and vendored code. Checked by the GitHub gatherer before reading and again by the engine.
+ */
+export function isContextPathAllowed(path: string, opts: ClassifyFileOptions): boolean {
+  const normalized = path.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  const base = (segments[segments.length - 1] ?? '').toLowerCase();
+  const extension = base.includes('.') ? (base.split('.').pop() ?? '') : '';
+  if (opts.isSensitivePath(normalized)) return false;
+  if (opts.exclude.some((pattern) => matchesGlobPattern(normalized, pattern))) return false;
+  if (isGeneratedPath(normalized) || isLockfile(base)) return false;
+  if (BINARY_EXTENSIONS.has(extension) || base.endsWith('.snap')) return false;
+  return !segments.slice(0, -1).some((s) => s === 'node_modules' || s === 'vendor' || s === 'out');
+}
+
 /**
  * Classifies a file from a pull request diff to determine whether it should be reviewed
  * or skipped, according to PRD v0.2 §7 step 2.

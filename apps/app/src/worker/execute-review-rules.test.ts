@@ -88,7 +88,8 @@ describe('executeReview — nested rules and verification disclosure (ADR-0028)'
     });
 
     expect(result.outcome).toBe('completed');
-    expect(env.reads.every((r) => r.ref === baseSha)).toBe(true);
+    // Owner rules come from the base; only repository context (ADR-0029) is read at the head.
+    expect(env.reads.filter((r) => /(AGENTS|CLAUDE)\.md$/.test(r.path)).every((r) => r.ref === baseSha)).toBe(true);
     const reviewPrompt = env.requests[0]?.user ?? '';
     expect(reviewPrompt).toContain('<<<REVIEW_CRITERIA:RULES_FILE:svc/AGENTS.md>>>');
     expect(reviewPrompt).toContain('Every endpoint needs a rate limit.');

@@ -9,7 +9,7 @@
 import { REVIEW_LIMIT_DEFAULTS } from '../config/schema.js';
 import { estimateTokens } from './budget.js';
 import { ESCAPED_MARKER_NOTE, escapeDelimiters, escapeLabel } from './delimiters.js';
-import { numberLines, type ContextFile } from './prompt.js';
+import { renderContextFile, type ContextFile } from './prompt.js';
 import type { Finding } from './types.js';
 
 export interface VerifyReviewableFile {
@@ -97,7 +97,7 @@ function patchChunks(patch: string): Chunk[] {
 }
 
 function contextChunk(file: ContextFile): Chunk {
-  return { text: `Reason: ${file.reason}\n${numberLines(file.content)}`, ranges: [], findingLines: [] };
+  return { text: renderContextFile(file), ranges: [], findingLines: [] };
 }
 
 /** A chunk cut at a line break to about `tokens`, ending with the visible marker. */

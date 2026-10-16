@@ -1,20 +1,22 @@
 import {
   redactSecrets,
   runReview,
+  type ContextDisclosure,
   type MergePilotConfig,
   type ReviewModel,
   type ReviewRunResult,
   type Secret,
 } from '@mergepilot/engine';
 import {
+  contextDisclosureOf,
   fallbackReasonOf,
+  gatherReviewInputs,
   hasNothingNewToReview,
   listPullRequestFiles,
   NOTHING_NEW_DETAIL,
   reviewScopeOf,
   selectIncrementalFiles,
   withJudgeUsage,
-  withNestedRulesFiles,
   type FallbackReason,
   type FileContent,
   type GitHubClient,
@@ -58,8 +60,17 @@ export interface BotReviewParams {
 
 export type BotReviewRun =
   | { kind: 'nothing-new' }
-  /** `rulesLeftOut`: nested rules files the review could not include (ADR-0028), for the summary. */
-  | { kind: 'reviewed'; reviewResult: ReviewRunResult; scope: ReviewScope; rulesLeftOut: string[] };
+  /**
+   * `rulesLeftOut`: nested rules files the review could not include (ADR-0028); `context`: the
+   * repository context sent and left out (ADR-0029). Both for the summary.
+   */
+  | {
+      kind: 'reviewed';
+      reviewResult: ReviewRunResult;
+      scope: ReviewScope;
+      rulesLeftOut: string[];
+      context?: ContextDisclosure | undefined;
+    };
 
 export const DEFAULT_PUBLISHER_LOGIN = 'github-actions[bot]';
 
@@ -112,16 +123,18 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     return { kind: 'nothing-new' };
   }
 
-  // ADR-0028: the nearest AGENTS.md / CLAUDE.md of each reviewed file, from the base commit.
-  const rules = await withNestedRulesFiles(params.client, {
+  // Nested owner rules at the base commit (ADR-0028), repository context at the head (ADR-0029);
+  // reads are cached per client, so the bots of one panel share them.
+  const inputs = await gatherReviewInputs(params.client, {
     owner: params.owner,
     repo: params.repo,
     baseSha: params.baseSha,
+    headSha: params.headSha,
+    config,
     rulesFiles,
-    changedPaths: filesToReview.map((f) => f.path),
-    maxRulesTokens: config.review.maxRulesTokens,
+    files: filesToReview,
+    log,
   });
-  if (rules.leftOut.length > 0) log?.(`Rules files not sent with the review: ${rules.leftOut.join(', ')}`);
 
   log?.('Running review...');
   const reviewResult = await runReview({
@@ -129,13 +142,18 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     pr: { title: params.prTitle, body: params.prBody },
     files: filesToReview,
     anchorFiles: prFiles,
-    rulesFiles: rules.rulesFiles,
+    rulesFiles: inputs.rulesFiles,
+    contextFiles: inputs.contextFiles,
     model,
     knownSecrets,
     judge,
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
-  return { kind: 'reviewed', reviewResult, scope, rulesLeftOut: rules.leftOut };
+  const context = contextDisclosureOf(
+    reviewResult.status === 'completed' ? reviewResult.context : undefined,
+    inputs.contextLeftOut,
+  );
+  return { kind: 'reviewed', reviewResult, scope, rulesLeftOut: inputs.rulesLeftOut, ...(context ? { context } : {}) };
 }
 
 /** The outcome of a bot's review that is not published by itself (consensus mode). */
@@ -153,6 +171,8 @@ export interface ReviewOnlyOutcome {
   scope?: ReviewScope | undefined;
   /** Nested rules files the review could not include (ADR-0028). */
   rulesLeftOut?: string[] | undefined;
+  /** Repository context sent and left out (ADR-0029). */
+  context?: ContextDisclosure | undefined;
 }
 
 /** Status, cost (with the judge's) and a redacted detail, as `executeReview` records them. */
@@ -160,7 +180,7 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
   if (run.kind === 'nothing-new') return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL };
   const secrets = params.knownSecrets ?? [];
   const r = run.reviewResult;
-  const base = { runResult: r, scope: run.scope, rulesLeftOut: run.rulesLeftOut };
+  const base = { runResult: r, scope: run.scope, rulesLeftOut: run.rulesLeftOut, context: run.context };
   if (r.status === 'completed') {
     const totals = withJudgeUsage(r.costUsd, r.usage, params.judge?.judge.report());
     return {

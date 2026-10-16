@@ -12,7 +12,7 @@ import { FINDINGS_MISSING_REASON } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
-import type { LibraryDoc } from './prompt.js';
+import type { ContextFile, LibraryDoc } from './prompt.js';
 import { combineUsage, reviewJsonSchema, type ReviewableFileWithPatch, type RulesFileInput } from './split.js';
 import type { SpendTracker } from './spend.js';
 import { recoverReviewTruncation } from './truncation.js';
@@ -36,6 +36,8 @@ export interface ReviewPassContext {
   redactedRulesFiles: RulesFileInput[];
   redactedReviewableFiles: ReviewableFileWithPatch[];
   libraryDocs?: LibraryDoc[] | undefined;
+  /** The repository context of a batch (ADR-0029), for up-front and recovery batches alike. */
+  contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
 }
 
 export type ReviewPassResult =
@@ -126,6 +128,7 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     redactedRulesFiles: ctx.redactedRulesFiles,
     redactedReviewableFiles: ctx.redactedReviewableFiles,
     libraryDocs: ctx.libraryDocs,
+    contextFor: ctx.contextFor,
     signal,
     totalUsage: combineUsage(response.usage, empty.usage),
     thinkingOff: empty.thinkingOff,
@@ -170,6 +173,7 @@ export async function runBatchedPass(
     spend: ctx.spend,
     knownSecrets: ctx.knownSecrets,
     libraryDocs: ctx.libraryDocs,
+    contextFor: ctx.contextFor,
     signal: ctx.signal,
     deadline: ctx.deadline,
   });
