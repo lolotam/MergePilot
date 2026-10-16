@@ -1,4 +1,5 @@
-import { isMultiKeyProvider } from '../credentials/multi-key.js';
+import { isSubscriptionParentLocked } from '../credentials/key-list-helpers.js';
+import { isDualMethodProvider, isKeyListProvider } from '../credentials/multi-key.js';
 import {
   WorkspaceDeletedError,
   type AppStore,
@@ -26,6 +27,20 @@ export interface RotateResult {
   skipped: number;
 }
 
+async function reencryptParentIfNeeded(
+  parent: StoredCredential,
+  vault: Vault,
+  workspaceId: string,
+): Promise<StoredCredential | null> {
+  if (parent.keyVersion === vault.keyVersion) return null;
+  const plaintext = await vault.decrypt(parent.ciphertext, { workspaceId, provider: parent.provider });
+  return {
+    ...parent,
+    ciphertext: await vault.encrypt(plaintext, { workspaceId, provider: parent.provider }),
+    keyVersion: vault.keyVersion,
+  };
+}
+
 /**
  * Re-encrypts all credentials for the specified workspaces whose keyVersion is older
  * than the current vault keyVersion.
@@ -41,9 +56,9 @@ export async function reencryptAll(
   for (const workspaceId of workspaceIds) {
     const credList = await store.listCredentials(workspaceId);
     for (const item of credList) {
-      const multi = isMultiKeyProvider(item.provider);
-      const slotRows = multi ? await store.listProviderKeys(workspaceId, item.provider) : [];
-      const multiWithSlots = multi && slotRows.length > 0;
+      const keyList = isKeyListProvider(item.provider);
+      const slotRows = keyList ? await store.listProviderKeys(workspaceId, item.provider) : [];
+      const multiWithSlots = keyList && slotRows.length > 0;
 
       if (!multiWithSlots) {
         if (item.keyVersion === vault.keyVersion) {
@@ -77,17 +92,14 @@ export async function reencryptAll(
         }
       }
 
-      if (!multi || slotRows.length === 0) continue;
+      if (!keyList || slotRows.length === 0) continue;
 
       let slotReencrypted = 0;
       let slotSkipped = 0;
       try {
-        await store.modifyProviderKeys(workspaceId, item.provider, async (current) => {
+        await store.modifyProviderKeys(workspaceId, item.provider, async (current, parent) => {
           slotReencrypted = 0;
           slotSkipped = 0;
-          if (current.length === 0) {
-            return { keys: [], parent: null };
-          }
           const updated: StoredProviderKey[] = [];
           for (const slot of current) {
             if (slot.keyVersion === vault.keyVersion) {
@@ -105,8 +117,16 @@ export async function reencryptAll(
           }
           const sorted = [...updated].sort((a, b) => a.position - b.position);
           const first = sorted[0];
-          if (!first) return { keys: [], parent: null };
-          return { keys: sorted, parent: parentFromSlot(first) };
+          let parentNext: StoredCredential | null | undefined = parent;
+          if (parent && isDualMethodProvider(item.provider) && await isSubscriptionParentLocked(vault, parent)) {
+            const rotated = await reencryptParentIfNeeded(parent, vault, workspaceId);
+            parentNext = rotated ?? parent;
+          } else if (first) {
+            parentNext = parentFromSlot(first);
+          } else if (!parent) {
+            parentNext = undefined;
+          }
+          return { keys: sorted, parent: parentNext };
         });
       } catch (error) {
         if (error instanceof WorkspaceDeletedError) break;

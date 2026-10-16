@@ -26,7 +26,7 @@ describe('subscription attempt lifecycle', () => {
     const store = new MemoryStore();
     const service = new CredentialService({ store, vault: new EnvelopeVault(Buffer.alloc(32, 8).toString('base64')) });
     await service.saveKey({ workspaceId: 'ws', provider: 'xai', apiKey: ['previous', 'api', 'key'].join('-'), userId: 'user' });
-    const modify = vi.spyOn(store, 'modifyCredential');
+    const modifyKeys = vi.spyOn(store, 'modifyProviderKeys');
     let release!: () => void;
     let acquired!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -38,12 +38,11 @@ describe('subscription attempt lifecycle', () => {
     await Promise.resolve();
     const attempt = logins.get('ws', 'user', state.id)!;
     const finishing = logins.finish(attempt, (provider, credential, signal) => service.saveSubscription('ws', provider, credential, 'user', signal));
-    const rejected = expect(finishing).rejects.toThrow();
-    await vi.waitFor(() => expect(modify).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(modifyKeys).toHaveBeenCalledTimes(1));
     logins.cancel(attempt);
     release();
     await holding;
-    await rejected;
+    await expect(finishing).rejects.toThrow();
     expect((await service.resolve('ws', 'xai')).reveal()).toBe('previous-api-key');
     expect(logins.snapshot(attempt).status).toBe('cancelled');
     logins.close();

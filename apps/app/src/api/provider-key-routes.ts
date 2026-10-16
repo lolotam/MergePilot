@@ -1,8 +1,15 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireRole } from '../auth/guard.js';
 import type { KeyProvider } from '../core/types.js';
-import { isMultiKeyProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
-import { KeyOrderError, SingleKeyProviderError, TooManyKeysError, type CredentialService } from '../credentials/service.js';
+import { isKeyListProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
+import {
+  KeyOrderError,
+  SingleKeyProviderError,
+  SubscriptionEnvelopeInKeyListError,
+  TooManyKeysError,
+  UnreadableCredentialError,
+  type CredentialService,
+} from '../credentials/service.js';
 import { AppendKeyRequestSchema, KeyProviderSchema, ReorderKeysRequestSchema } from './contract.js';
 import { sendError } from './helpers.js';
 import { invalidateModelsCache } from './provider-routes.js';
@@ -27,6 +34,12 @@ function knownKeyError(err: unknown): { status: number; code: string; message: s
   }
   if (err instanceof KeyOrderError) {
     return { status: 400, code: 'key_order', message: 'Key order must list every stored key exactly once' };
+  }
+  if (err instanceof SubscriptionEnvelopeInKeyListError) {
+    return { status: 400, code: 'subscription_in_key_list', message: err.message };
+  }
+  if (err instanceof UnreadableCredentialError) {
+    return { status: 500, code: 'credential_unreadable', message: 'The stored credential could not be read' };
   }
   return null;
 }
@@ -54,7 +67,7 @@ function parseProvider(request: FastifyRequest, reply: FastifyReply): KeyProvide
     void sendError(reply, 400, 'invalid_provider', `Invalid provider: ${raw}`);
     return undefined;
   }
-  if (!isMultiKeyProvider(parsed.data)) {
+  if (!isKeyListProvider(parsed.data)) {
     void sendError(reply, 400, 'single_key_provider', 'This provider stores one credential');
     return undefined;
   }

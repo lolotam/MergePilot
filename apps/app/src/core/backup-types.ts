@@ -1,7 +1,18 @@
 import type { ReviewerBot } from './bot-types.js';
-import type { StoredCredential, StoredProviderKey, WorkspaceSettings } from './types.js';
+import type { KeyProvider, ProviderKeyChange, StoredCredential, StoredProviderKey, WorkspaceSettings } from './types.js';
 
 // Settings restore (ADR-0018). Re-exported by types.ts.
+
+export type RestoreProviderKeyChange = (
+  current: StoredProviderKey[],
+  parent: StoredCredential | null,
+) => Promise<ProviderKeyChange>;
+
+/** One dual-method provider applied atomically inside restoreWorkspace. */
+export interface RestoreProviderKeyEntry {
+  provider: KeyProvider;
+  change: RestoreProviderKeyChange;
+}
 
 /** What one restore writes; a section left undefined is not touched. */
 export interface WorkspaceRestore {
@@ -16,6 +27,8 @@ export interface WorkspaceRestore {
    * untouched. An empty array is a no-op. A non-empty list replaces that provider's slots.
    */
   providerKeys?: StoredProviderKey[] | undefined;
+  /** ADR-0027 dual providers: one locked change per entry inside the restore transaction. */
+  dualProviderKeyChanges?: RestoreProviderKeyEntry[] | undefined;
 }
 
 /** The restore part of AppStore. */

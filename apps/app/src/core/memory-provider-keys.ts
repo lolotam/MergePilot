@@ -1,11 +1,13 @@
 import { clampKeyCursor } from './key-cursor.js';
-import type { KeyProvider, KeyQuotaStatus, ProviderKeyChange, StoredCredential, StoredProviderKey } from './types.js';
+import { deleteMemoryAuthPreference, writeMemoryAuthPreference } from './memory-auth-preferences.js';
+import type { KeyProvider, KeyQuotaStatus, ProviderAuthMethod, ProviderKeyChange, StoredCredential, StoredProviderKey } from './types.js';
 
 /** In-memory twin of the provider-key tables. Keyed like credentials (`workspaceId:provider`). */
 export interface MemoryKeyTables {
   credentials: Map<string, StoredCredential>;
   providerKeys: Map<string, StoredProviderKey[]>;
   keyCursors: Map<string, number>;
+  authPreferences: Map<string, ProviderAuthMethod>;
 }
 
 type Locked = <T>(work: () => Promise<T>) => Promise<T>;
@@ -38,30 +40,61 @@ export function listMemoryWorkspaceProviderKeys(tables: MemoryKeyTables, workspa
 }
 
 /** Applies a slot change under the caller's credential lock. An empty list drops the cursor. */
+function applyMemoryAuthPreference(
+  tables: MemoryKeyTables,
+  workspaceId: string,
+  provider: KeyProvider,
+  authPreference: ProviderAuthMethod | null | undefined,
+): void {
+  if (authPreference === undefined) return;
+  if (authPreference === null) deleteMemoryAuthPreference(tables, workspaceId, provider);
+  else writeMemoryAuthPreference(tables, workspaceId, provider, authPreference);
+}
+
+/** Applies a computed change to the in-memory tables (caller holds the credential lock). */
+export function writeMemoryProviderKeyChange(
+  tables: MemoryKeyTables,
+  workspaceId: string,
+  provider: KeyProvider,
+  next: ProviderKeyChange,
+  signal?: AbortSignal,
+): void {
+  signal?.throwIfAborted();
+  const key = slotKey(workspaceId, provider);
+  if (next.parent === null) tables.credentials.delete(key);
+  else if (next.parent) tables.credentials.set(key, { ...next.parent });
+  const keys = copies(next.keys).sort((a, b) => a.position - b.position);
+  if (keys.length === 0) {
+    tables.providerKeys.delete(key);
+    tables.keyCursors.delete(key);
+  } else {
+    tables.providerKeys.set(key, keys);
+    if (next.cursor !== undefined) tables.keyCursors.set(key, clampKeyCursor(next.cursor, keys.length));
+    else if (tables.keyCursors.has(key)) tables.keyCursors.set(key, clampKeyCursor(tables.keyCursors.get(key) ?? 0, keys.length));
+  }
+  applyMemoryAuthPreference(tables, workspaceId, provider, next.authPreference);
+  signal?.throwIfAborted();
+}
+
 export async function modifyMemoryProviderKeys(
   lock: MemoryKeyLock,
   workspaceId: string,
   provider: KeyProvider,
-  change: (current: StoredProviderKey[]) => Promise<ProviderKeyChange>,
+  change: (current: StoredProviderKey[], parent: StoredCredential | null) => Promise<ProviderKeyChange>,
+  signal?: AbortSignal,
 ): Promise<StoredProviderKey[]> {
   const { tables } = lock;
   return lock.runLocked(async () => {
     lock.assertLive(workspaceId);
     const key = slotKey(workspaceId, provider);
-    const next = await change(copies(tables.providerKeys.get(key) ?? []));
+    const parentRow = tables.credentials.get(key);
+    const parent = parentRow ? { ...parentRow } : null;
+    const next = await change(copies(tables.providerKeys.get(key) ?? []), parent);
+    signal?.throwIfAborted();
     lock.assertLive(workspaceId);
-    if (next.parent === null) tables.credentials.delete(key);
-    else if (next.parent) tables.credentials.set(key, { ...next.parent });
-    const keys = copies(next.keys).sort((a, b) => a.position - b.position);
-    if (keys.length === 0) {
-      tables.providerKeys.delete(key);
-      tables.keyCursors.delete(key);
-      return [];
-    }
-    tables.providerKeys.set(key, keys);
-    if (next.cursor !== undefined) tables.keyCursors.set(key, clampKeyCursor(next.cursor, keys.length));
-    else if (tables.keyCursors.has(key)) tables.keyCursors.set(key, clampKeyCursor(tables.keyCursors.get(key) ?? 0, keys.length));
-    return copies(keys);
+    writeMemoryProviderKeyChange(tables, workspaceId, provider, next, signal);
+    const keys = tables.providerKeys.get(key) ?? [];
+    return keys.length === 0 ? [] : copies(keys);
   });
 }
 

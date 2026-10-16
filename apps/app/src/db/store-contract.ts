@@ -14,6 +14,7 @@ import { definePricesContract } from './store-contract-prices.js';
 import { defineReviewerBotContract } from './store-contract-bots.js';
 import { defineBackupRestoreContract } from './store-contract-backup.js';
 import { defineProviderKeyCursorContract } from './store-contract-provider-keys.js';
+import { defineDualAuthStoreContract } from './store-contract-dual-auth.js';
 
 /** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
 export const STORE_CONTRACT_WORKSPACES = [
@@ -384,5 +385,6 @@ export function describeStoreContract(
     defineReviewerBotContract(createStore, cleanup);
     defineBackupRestoreContract(createStore, cleanup);
     defineProviderKeyCursorContract(createStore, cleanup);
+    defineDualAuthStoreContract(createStore, cleanup);
   });
 }

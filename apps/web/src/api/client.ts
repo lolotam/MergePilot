@@ -55,6 +55,8 @@ export interface KeySlotItem {
   lastTestedAt: string | null;
 }
 
+export type ProviderAuthMethod = 'subscription' | 'api-key';
+
 export interface KeyItem {
   provider: KeyProvider;
   authMethod?: 'api-key' | 'subscription' | 'unknown';
@@ -62,7 +64,9 @@ export interface KeyItem {
   createdAt: string;
   createdBy: string;
   baseUrl?: string | null;
-  /** Present for gemini, openrouter and opencode-zen. Never includes the secret. */
+  hasSubscription?: boolean | undefined;
+  defaultMethod?: ProviderAuthMethod | undefined;
+  /** Present for key-list providers. Never includes the secret. */
   keys?: KeySlotItem[] | undefined;
 }
 
@@ -284,6 +288,15 @@ export const api = {
     ),
   deleteKey: (workspaceId: string, provider: KeyProvider) =>
     fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys/${encodeURIComponent(provider)}`, {
+      method: 'DELETE',
+    }),
+  setProviderDefaultMethod: (workspaceId: string, provider: KeyProvider, method: ProviderAuthMethod) =>
+    fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys/${encodeURIComponent(provider)}/default-method`, {
+      method: 'PUT',
+      body: JSON.stringify({ method }),
+    }),
+  disconnectSubscription: (workspaceId: string, provider: KeyProvider) =>
+    fetchApi<void>(`/api/workspaces/${encodeURIComponent(workspaceId)}/keys/${encodeURIComponent(provider)}/subscription`, {
       method: 'DELETE',
     }),
   /** The fixed Jev-only model table (ADR-0015). */

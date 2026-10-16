@@ -1,8 +1,22 @@
 import { z } from 'zod';
 import { API_PROVIDER_IDS } from '@mergepilot/engine';
-import { isMultiKeyProvider, MAX_PROVIDER_KEYS, MULTI_KEY_PROVIDER_IDS } from '../credentials/multi-key.js';
+import {
+  DUAL_METHOD_PROVIDER_IDS,
+  isDualMethodProvider,
+  isKeyListProvider,
+  isMultiKeyProvider,
+  MAX_PROVIDER_KEYS,
+  MULTI_KEY_PROVIDER_IDS,
+} from '../credentials/multi-key.js';
 
-export { isMultiKeyProvider, MAX_PROVIDER_KEYS, MULTI_KEY_PROVIDER_IDS };
+export {
+  DUAL_METHOD_PROVIDER_IDS,
+  isDualMethodProvider,
+  isKeyListProvider,
+  isMultiKeyProvider,
+  MAX_PROVIDER_KEYS,
+  MULTI_KEY_PROVIDER_IDS,
+};
 
 // Model choice shapes shared by the settings and the reviewer panel's bots. Re-exported by contract.ts.
 

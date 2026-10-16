@@ -7,9 +7,12 @@ import {
   sameBotName,
   type ReviewerBot,
 } from './bot-types.js';
+import type { KeyProvider, ProviderKeyChange, StoredCredential, StoredProviderKey, WorkspaceSettings } from './types.js';
 import { deleteMemoryWorkspaceBots, listMemoryBots, upsertMemoryBot, type MemoryBots } from './memory-bots.js';
+import { deleteMemoryWorkspaceAuthPreferences } from './memory-auth-preferences.js';
+import { listMemoryProviderKeys } from './memory-provider-keys.js';
 import type { MemoryStore } from './memory-store.js';
-import type { KeyProvider, StoredCredential, StoredProviderKey, WorkspaceSettings } from './types.js';
+import type { MemoryKeyTables } from './memory-provider-keys.js';
 
 // Workspace-wide writes of the MemoryStore: a settings restore (the twin of pg-backup.ts, ADR-0018)
 // and deleting a workspace.
@@ -17,13 +20,83 @@ import type { KeyProvider, StoredCredential, StoredProviderKey, WorkspaceSetting
 export interface MemoryRestoreTarget {
   readonly bots: MemoryBots;
   readonly settings: Map<string, WorkspaceSettings>;
+  readonly credentials: Map<string, StoredCredential>;
+  readonly providerKeys: Map<string, StoredProviderKey[]>;
   saveSettings(settings: WorkspaceSettings): Promise<void>;
   saveCredential(credential: StoredCredential): Promise<void>;
   modifyProviderKeys(
     workspaceId: string,
     provider: KeyProvider,
-    change: (current: StoredProviderKey[]) => Promise<{ keys: StoredProviderKey[]; cursor?: number }>,
+    change: (current: StoredProviderKey[], parent: StoredCredential | null) => Promise<ProviderKeyChange>,
   ): Promise<StoredProviderKey[]>;
+}
+
+const slotKey = (workspaceId: string, provider: string): string => `${workspaceId}:${provider}`;
+
+interface WorkspaceSnapshot {
+  settings: WorkspaceSettings | undefined;
+  bots: ReviewerBot[];
+  credentials: StoredCredential[];
+  providerKeys: StoredProviderKey[];
+  keyCursors: Array<[string, number]>;
+  authPrefs: Array<[string, import('./types.js').ProviderAuthMethod]>;
+}
+
+function snapshotWorkspace(store: MemoryRestoreTarget, workspaceId: string): WorkspaceSnapshot {
+  const credentials: StoredCredential[] = [];
+  for (const cred of store.credentials.values()) {
+    if (cred.workspaceId === workspaceId) credentials.push({ ...cred });
+  }
+  const providerKeys: StoredProviderKey[] = [];
+  for (const rows of store.providerKeys.values()) {
+    for (const row of rows) {
+      if (row.workspaceId === workspaceId) providerKeys.push({ ...row });
+    }
+  }
+  const mem = store as MemoryStore;
+  const keyCursors = [...mem.keyCursors.entries()].filter(([key]) => key.startsWith(`${workspaceId}:`));
+  const authPrefs = [...mem.authPreferences.entries()].filter(([key]) => key.startsWith(`${workspaceId}:`));
+  return {
+    settings: store.settings.get(workspaceId) ? { ...store.settings.get(workspaceId)! } : undefined,
+    bots: listMemoryBots(store.bots, workspaceId),
+    credentials,
+    providerKeys,
+    keyCursors,
+    authPrefs,
+  };
+}
+
+function revertWorkspace(store: MemoryRestoreTarget, workspaceId: string, snap: WorkspaceSnapshot): void {
+  const mem = store as MemoryStore;
+  if (snap.settings) store.settings.set(workspaceId, { ...snap.settings });
+  else store.settings.delete(workspaceId);
+  deleteMemoryWorkspaceBots(store.bots, workspaceId);
+  for (const bot of snap.bots) upsertMemoryBot(store.bots, workspaceId, bot, snap.settings?.botName);
+  for (const key of [...store.credentials.keys()]) {
+    const cred = store.credentials.get(key);
+    if (cred?.workspaceId === workspaceId) store.credentials.delete(key);
+  }
+  for (const cred of snap.credentials) store.credentials.set(slotKey(workspaceId, cred.provider), { ...cred });
+  for (const key of [...store.providerKeys.keys()]) {
+    if (key.startsWith(`${workspaceId}:`)) store.providerKeys.delete(key);
+  }
+  const groups = new Map<KeyProvider, StoredProviderKey[]>();
+  for (const row of snap.providerKeys) {
+    const list = groups.get(row.provider) ?? [];
+    list.push({ ...row });
+    groups.set(row.provider, list);
+  }
+  for (const [provider, rows] of groups) {
+    store.providerKeys.set(slotKey(workspaceId, provider), rows.map((row) => ({ ...row })));
+  }
+  for (const key of [...mem.keyCursors.keys()]) {
+    if (key.startsWith(`${workspaceId}:`)) mem.keyCursors.delete(key);
+  }
+  for (const [key, cursor] of snap.keyCursors) mem.keyCursors.set(key, cursor);
+  deleteMemoryWorkspaceAuthPreferences(mem, workspaceId);
+  for (const [key, method] of snap.authPrefs) {
+    mem.authPreferences.set(key, method);
+  }
 }
 
 /** Throws BotNameTakenError / InvalidBotSlotError when the restored names or slots would clash. */
@@ -46,27 +119,63 @@ export async function restoreMemoryWorkspace(
   const mainName = restore.settings?.botName ?? store.settings.get(workspaceId)?.botName ?? DEFAULT_BOT_NAME;
   checkBots(mainName, restore.bots ?? listMemoryBots(store.bots, workspaceId));
 
+  const tables: MemoryKeyTables = {
+    credentials: store.credentials,
+    providerKeys: store.providerKeys,
+    keyCursors: (store as MemoryStore).keyCursors,
+    authPreferences: (store as MemoryStore).authPreferences,
+  };
+  // Tests and local dev only: these changes are planned without the per-provider lock. The
+  // Postgres store plans and applies each one under that lock inside the restore transaction.
+  const dualWrites: Array<{ provider: KeyProvider; next: ProviderKeyChange }> = [];
+  for (const entry of restore.dualProviderKeyChanges ?? []) {
+    const key = slotKey(workspaceId, entry.provider);
+    const parentRow = tables.credentials.get(key);
+    const parent = parentRow ? { ...parentRow } : null;
+    const current = listMemoryProviderKeys(tables, workspaceId, entry.provider);
+    dualWrites.push({ provider: entry.provider, next: await entry.change(current, parent) });
+  }
+
+  const snapshot = snapshotWorkspace(store, workspaceId);
+  try {
   if (restore.bots) {
     deleteMemoryWorkspaceBots(store.bots, workspaceId);
     for (const bot of restore.bots) upsertMemoryBot(store.bots, workspaceId, bot, mainName);
   }
   if (restore.settings) await store.saveSettings({ ...restore.settings, workspaceId });
-  for (const credential of restore.credentials ?? []) await store.saveCredential({ ...credential, workspaceId });
+  const dualProviders = new Set((restore.dualProviderKeyChanges ?? []).map((entry) => entry.provider));
+  for (const credential of restore.credentials ?? []) {
+    if (dualProviders.has(credential.provider)) continue;
+    await store.saveCredential({ ...credential, workspaceId });
+  }
   const groups = new Map<KeyProvider, StoredProviderKey[]>();
   for (const key of restore.providerKeys ?? []) {
+    if (dualProviders.has(key.provider)) continue;
     const list = groups.get(key.provider) ?? [];
     list.push({ ...key, workspaceId });
     groups.set(key.provider, list);
   }
   for (const [provider, keys] of groups) {
     const ordered = [...keys].sort((a, b) => a.position - b.position);
-    await store.modifyProviderKeys(workspaceId, provider, async () => ({ keys: ordered, cursor: 0 }));
+    const parentCred = restore.credentials?.find((c) => c.provider === provider) ?? null;
+    await store.modifyProviderKeys(workspaceId, provider, async () => ({
+      keys: ordered,
+      cursor: 0,
+      parent: parentCred,
+    }));
+  }
+  for (const { provider, next } of dualWrites) {
+    await store.modifyProviderKeys(workspaceId, provider, async () => next);
+  }
+  } catch (error) {
+    revertWorkspace(store, workspaceId, snapshot);
+    throw error;
   }
 }
 
 /** Drops the workspace's keys, settings, bots, runs and usage, and unlinks its installations. */
 export function deleteMemoryWorkspace(
-  store: Pick<MemoryStore, 'deletedWorkspaces' | 'credentials' | 'providerKeys' | 'keyCursors' | 'settings' | 'bots' | 'runs' | 'usage' | 'installations'>,
+  store: Pick<MemoryStore, 'deletedWorkspaces' | 'credentials' | 'providerKeys' | 'keyCursors' | 'authPreferences' | 'settings' | 'bots' | 'runs' | 'usage' | 'installations'>,
   workspaceId: string,
 ): void {
   store.deletedWorkspaces.add(workspaceId);
@@ -81,6 +190,7 @@ export function deleteMemoryWorkspace(
   for (const key of store.keyCursors.keys()) {
     if (key.startsWith(`${workspaceId}:`)) store.keyCursors.delete(key);
   }
+  deleteMemoryWorkspaceAuthPreferences(store, workspaceId);
   store.settings.delete(workspaceId);
   deleteMemoryWorkspaceBots(store.bots, workspaceId);
   for (const [key, run] of store.runs.entries()) {

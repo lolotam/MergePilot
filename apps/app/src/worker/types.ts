@@ -11,6 +11,7 @@ import type { DnsLookupFn } from '../core/ssrf.js';
 
 export interface ProcessReviewCredentials {
   resolve(workspaceId: string, provider: KeyProvider): Promise<Secret>;
+  getEffectiveAuthMethod?(workspaceId: string, provider: string): Promise<'subscription' | 'api-key' | null>;
   /**
    * Ordered keys for gemini, openrouter and opencode-zen (ADR-0026). Null when that provider
    * stores one credential. Optional so existing test fakes that only resolve one key still compile.

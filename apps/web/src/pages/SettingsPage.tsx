@@ -10,7 +10,10 @@ import {
   useKeysQuery,
   useSaveKeyMutation,
   useDeleteKeyMutation,
+  useDisconnectSubscriptionMutation,
+  useSetProviderDefaultMethodMutation,
 } from '../api/hooks.js';
+import type { KeyItem } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { AddKeyModal } from '../components/AddKeyModal.js';
@@ -38,6 +41,10 @@ export function SettingsPage() {
   const updateSettingsMutation = useUpdateSettingsMutation(workspaceId);
   const saveKeyMutation = useSaveKeyMutation(workspaceId);
   const deleteKeyMutation = useDeleteKeyMutation(workspaceId);
+  const defaultMethodMutation = useSetProviderDefaultMethodMutation(workspaceId);
+  const disconnectSubscriptionMutation = useDisconnectSubscriptionMutation(workspaceId);
+
+  const isDualProviderRow = (k: KeyItem) => k.hasSubscription !== undefined;
 
   const currentWorkspace = meData?.workspaces.find((w) => w.id === workspaceId);
   const isMember = currentWorkspace?.role === 'member';
@@ -161,7 +168,15 @@ export function SettingsPage() {
                         )}
                       </div>
                     </td>
-                    <td className="py-2.5 px-3 font-mono text-xs">{k.authMethod === 'subscription' ? t('authMethodSubscription') : k.authMethod === 'unknown' ? t('authMethodUnknown') : `••••${k.last4}`}</td>
+                    <td className="py-2.5 px-3 font-mono text-xs">
+                      {isDualProviderRow(k) ? (
+                        <div className="flex flex-col gap-1 font-sans">
+                          {k.hasSubscription && <span>{t('authMethodSubscription')}</span>}
+                          {k.keys?.map((slot) => <span key={slot.id}>••••{slot.last4}</span>)}
+                          {!k.hasSubscription && !k.keys?.length && (k.authMethod === 'unknown' ? t('authMethodUnknown') : `••••${k.last4}`)}
+                        </div>
+                      ) : k.authMethod === 'subscription' ? t('authMethodSubscription') : k.authMethod === 'unknown' ? t('authMethodUnknown') : `••••${k.last4}`}
+                    </td>
                     <td className="py-2.5 px-3 text-xs text-ink-500 dark:text-ink-400 truncate max-w-[150px]">
                       {k.createdBy}
                     </td>
@@ -170,7 +185,33 @@ export function SettingsPage() {
                     </td>
                     {!isMember && (
                       <td className="py-2.5 px-3 text-end">
-                        <div className="inline-flex items-center gap-2 justify-end">
+                        <div className="inline-flex flex-wrap items-center gap-2 justify-end">
+                          {isDualProviderRow(k) && k.hasSubscription && (k.keys?.length ?? 0) > 0 && (
+                            <select
+                              aria-label={t('defaultMethodLabel')}
+                              className="px-2 py-1 rounded-full border border-ink-300 dark:border-ink-700 text-[11px]"
+                              value={k.defaultMethod ?? 'subscription'}
+                              disabled={defaultMethodMutation.isPending}
+                              onChange={(e) => defaultMethodMutation.mutate({ provider: k.provider, method: e.target.value as 'subscription' | 'api-key' })}
+                            >
+                              <option value="subscription">{t('defaultMethodSubscription')}</option>
+                              <option value="api-key">{t('defaultMethodApiKey')}</option>
+                            </select>
+                          )}
+                          {isDualProviderRow(k) && k.hasSubscription && (
+                            <button
+                              type="button"
+                              className="px-2 py-1 rounded-full border border-ink-300 dark:border-ink-700 text-[11px]"
+                              disabled={disconnectSubscriptionMutation.isPending}
+                              onClick={() => {
+                                if (window.confirm(t('disconnectSubscriptionConfirm', { provider: providerLabel(k.provider) }))) {
+                                  disconnectSubscriptionMutation.mutate(k.provider);
+                                }
+                              }}
+                            >
+                              {t('disconnectSubscription')}
+                            </button>
+                          )}
                           {isJudgeKeyOnly(k.provider) ? (
                             <JudgeTestButton workspaceId={workspaceId} provider={k.provider} disabled={isMember} />
                           ) : (

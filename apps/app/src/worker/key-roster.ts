@@ -1,6 +1,7 @@
 import type { KeyRoster, KeyRotationEvent, Secret } from '@mergepilot/engine';
 import type { Logger } from 'pino';
-import { isMultiKeyProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
+import { isKeyListProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
+import type { KeyProvider, ProviderAuthMethod } from '../core/types.js';
 import type { ProcessReviewCredentials } from './types.js';
 
 /** What a finished run records: which key answered, and how many were skipped. Never the key. */
@@ -28,15 +29,41 @@ export async function loadRosters(
   if (!credentials.resolveKeyRoster) return { rosters, keyIds };
   const seen = new Set<string>();
   for (const provider of providers) {
-    if (seen.has(provider) || !isMultiKeyProvider(provider)) continue;
+    if (seen.has(provider) || !isKeyListProvider(provider)) continue;
     seen.add(provider);
+    let effective: ProviderAuthMethod | null | undefined;
     try {
-      const roster = await credentials.resolveKeyRoster(workspaceId, provider);
-      if (!roster || roster.secrets.length === 0) continue;
+      // Inside the try: a fallback whose method cannot be read is skipped, never the whole review.
+      effective = await credentials.getEffectiveAuthMethod?.(workspaceId, provider as KeyProvider);
+      if (effective === 'subscription') continue;
+      const roster = await credentials.resolveKeyRoster(workspaceId, provider as KeyProvider);
+      if (!roster || roster.secrets.length === 0) {
+        if (provider === primaryProvider) {
+          throw new Error(`No API key roster is available for provider "${provider}"`);
+        }
+        if (effective === 'api-key') {
+          logger.warn(
+            { event: 'credential.key_roster_empty', provider },
+            'Could not load the API key roster for a fallback provider',
+          );
+        }
+        continue;
+      }
       keyIds[provider] = [...roster.keyIds];
       rosters[provider] = { keys: roster.secrets, startIndex: roster.startIndex };
     } catch (error) {
       if (provider === primaryProvider) throw error;
+      if (effective === 'api-key') {
+        logger.warn(
+          {
+            event: 'credential.key_roster_failed',
+            provider,
+            error: error instanceof Error ? error.name : 'unknown',
+          },
+          'Could not load the API key roster for a fallback provider',
+        );
+        continue;
+      }
       logger.warn(
         {
           event: 'credential.key_roster_failed',
@@ -90,12 +117,12 @@ export function rotationHandler(
       { event: 'credential.key_rotation', provider: event.provider, keyIndex: event.index, skipped: event.skipped },
       `API key ${event.index} answered after skipping ${event.skipped}`,
     );
-    if (!credentials.rememberSuccessfulKey || !isMultiKeyProvider(event.provider)) return;
+    if (!credentials.rememberSuccessfulKey || !isKeyListProvider(event.provider)) return;
     const provider = event.provider;
     const keyId = keyIdsByProvider[provider]?.[event.index];
     if (!keyId) return;
     // Called on the object: CredentialService uses private fields, so the method needs its receiver.
-    writes.enqueue(() => Promise.resolve(credentials.rememberSuccessfulKey?.(workspaceId, provider, keyId)).catch((error: unknown) => {
+    writes.enqueue(() => Promise.resolve(credentials.rememberSuccessfulKey?.(workspaceId, provider as KeyProvider, keyId)).catch((error: unknown) => {
       logger.warn(
         {
           event: 'credential.key_cursor_failed',

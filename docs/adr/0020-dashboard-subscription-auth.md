@@ -10,7 +10,7 @@ The dashboard offers API-key and consumer-subscription methods for OpenAI/Codex,
 
 Provider-owned OAuth and model protocols come from `@earendil-works/pi-ai`. Headless server login uses Codex/Grok device codes and Claude copy-code authorization. Other providers retain their existing API-key methods.
 
-Each workspace/provider retains one active credential. A versioned subscription envelope stores access, refresh, expiry and account-specific data inside the existing vault-encrypted column. Replacing a method replaces that credential. No schema migration is required.
+Each workspace/provider retains one active credential, except ADR-0027 dual-method providers (`anthropic`, `openai`, `xai`) which may store a subscription parent and API-key slots together. A versioned subscription envelope stores access, refresh, expiry and account-specific data inside the existing vault-encrypted column. For non-dual providers, replacing a method replaces that credential.
 
 Login attempts are bound to the initiating user/workspace, cancellable and limited to 15 minutes. An authenticated admin completion request persists the credentials. Attempts are process-local, so multiple web replicas require sticky routing until login completes.
 

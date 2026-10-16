@@ -160,7 +160,12 @@ export interface ProviderKeyChange {
   keys: StoredProviderKey[];
   parent?: StoredCredential | null | undefined;
   cursor?: number | undefined;
+  /** ADR-0027: undefined leaves the preference row untouched; null deletes it. */
+  authPreference?: ProviderAuthMethod | null | undefined;
 }
+
+/** ADR-0027: selectable default for dual-method providers. */
+export type ProviderAuthMethod = 'subscription' | 'api-key';
 
 export type ReviewRunStatus = 'queued' | 'running' | 'completed' | 'skipped' | 'failed';
 
@@ -334,8 +339,14 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
   modifyProviderKeys(
     workspaceId: string,
     provider: KeyProvider,
-    change: (current: StoredProviderKey[]) => Promise<ProviderKeyChange>,
+    change: (current: StoredProviderKey[], parent: StoredCredential | null) => Promise<ProviderKeyChange>,
+    signal?: AbortSignal,
   ): Promise<StoredProviderKey[]>;
+  /** Stored default method; null when unset. Not locked — read under modifyProviderKeys when writing slots. */
+  getProviderAuthPreference(workspaceId: string, provider: KeyProvider): Promise<ProviderAuthMethod | null>;
+  /** Upserts the preference under the provider credential lock. */
+  setProviderAuthPreference(workspaceId: string, provider: KeyProvider, method: ProviderAuthMethod): Promise<void>;
+  deleteProviderAuthPreference(workspaceId: string, provider: KeyProvider): Promise<void>;
   /** 0 when missing, when there are no slots, or when the stored index is outside the list. */
   getKeyCursor(workspaceId: string, provider: KeyProvider): Promise<number>;
   /** Stores the 0-based index of `keyId` in the current slot list. No-op when the id is absent. */

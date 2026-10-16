@@ -31,13 +31,13 @@ export function defineProviderKeyCursorContract(
       try {
         const idA = randomUUID();
         const idB = randomUUID();
-        await store.modifyProviderKeys(workspaceId, provider, async () => ({
+        await store.modifyProviderKeys(workspaceId, provider, async (_current, _parent) => ({
           keys: [slot(idA, 0, 'aaa1'), slot(idB, 1, 'bbb2')],
           cursor: 0,
         }));
         await store.setKeyCursor(workspaceId, provider, idB);
         expect(await store.getKeyCursor(workspaceId, provider)).toBe(1);
-        await store.modifyProviderKeys(workspaceId, provider, async (current) => {
+        await store.modifyProviderKeys(workspaceId, provider, async (current, _parent) => {
           const byId = new Map(current.map((row) => [row.id, row]));
           return {
             keys: [idB, idA].map((id, position) => ({ ...byId.get(id)!, position })),

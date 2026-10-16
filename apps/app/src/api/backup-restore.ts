@@ -14,7 +14,11 @@ import {
   type WorkspaceRestore,
   type WorkspaceSettings,
 } from '../core/types.js';
-import { isMultiKeyProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
+import { decodeSubscription } from '@mergepilot/engine';
+import { assertPlaintextNotSubscriptionEnvelope } from '../credentials/key-list-helpers.js';
+import { dualRestoreOverlayCredential, type DualProviderRestorePlan } from '../credentials/dual-restore.js';
+import { isDualMethodProvider, isKeyListProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
+import { SubscriptionEnvelopeInKeyListError } from '../credentials/service.js';
 import type { CredentialService } from '../credentials/service.js';
 import { ReviewerBotInputSchema, SaveKeyRequestSchema, SettingsUpdateSchema } from './contract.js';
 import {
@@ -120,11 +124,15 @@ async function planCredentials(
   deps: RestoreDeps,
   req: RestoreRequest,
   file: BackupFile,
-): Promise<{ credentials: StoredCredential[]; providerKeys: StoredProviderKey[] }> {
+): Promise<{
+  credentials: StoredCredential[];
+  providerKeys: StoredProviderKey[];
+  dualProviderPlans: DualProviderRestorePlan[];
+}> {
   const sealed = file.credentials.flatMap((c, index) =>
     c.key || (c.keys && c.keys.length > 0) ? [{ ...c, index }] : [],
   );
-  if (sealed.length === 0) return { credentials: [], providerKeys: [] };
+  if (sealed.length === 0) return { credentials: [], providerKeys: [], dualProviderPlans: [] };
   if (!req.passphrase) throw new RestoreProblem(400, 'passphrase_required', 'This file has encrypted keys: type its passphrase', 'passphrase');
   const passphrase = req.passphrase;
 
@@ -132,6 +140,7 @@ async function planCredentials(
   const derived = new Map<string, Promise<Buffer>>();
   const out: StoredCredential[] = [];
   const providerKeys: StoredProviderKey[] = [];
+  const dualProviderPlans: DualProviderRestorePlan[] = [];
   for (const entry of sealed) {
     const field = `credentials[${entry.index}]`;
     if (seen.has(entry.provider)) throw new RestoreProblem(400, 'validation_error', `${field}.provider: ${entry.provider} appears twice`, `${field}.provider`);
@@ -148,11 +157,14 @@ async function planCredentials(
     if (sources.length > MAX_PROVIDER_KEYS) {
       throw new RestoreProblem(400, 'too_many_keys', `This provider accepts at most ${MAX_PROVIDER_KEYS} API keys`, field);
     }
-    if (!isMultiKeyProvider(entry.provider) && entry.keys && entry.keys.length > 0) {
+    if (!isKeyListProvider(entry.provider) && entry.keys && entry.keys.length > 0) {
       throw new RestoreProblem(400, 'single_key_provider', 'This provider stores one credential', field);
     }
+    if (entry.defaultMethod && !isDualMethodProvider(entry.provider)) {
+      throw new RestoreProblem(400, 'validation_error', 'defaultMethod is only for dual-method providers', `${field}.defaultMethod`);
+    }
 
-    const openSealed = async (sealedKey: SealedKey, keyField: string): Promise<StoredCredential> => {
+    const openSealed = async (sealedKey: SealedKey, keyField: string): Promise<{ credential: StoredCredential; plaintext: string }> => {
       let apiKey: string;
       try {
         const salt = sealedKeySalt(sealedKey);
@@ -179,22 +191,84 @@ async function planCredentials(
         }
       }
       try {
-        return await deps.credentials.sealKey(
+        const credential = await deps.credentials.sealKey(
           { workspaceId: req.workspaceId, provider: entry.provider, apiKey, userId: req.userId, baseUrl },
           { validate: false },
         );
+        return { credential, plaintext: apiKey.trim() };
       } catch (err) {
         const message = (err instanceof Error ? err.message : 'Key rejected').replaceAll(apiKey, '[REDACTED]');
         throw new RestoreProblem(400, 'credential_rejected', message, keyField);
       }
     };
 
-    if (isMultiKeyProvider(entry.provider)) {
+    if (isKeyListProvider(entry.provider) && isDualMethodProvider(entry.provider)) {
+      const defaultMethod = entry.defaultMethod ?? null;
+      const openSlotKey = async (sealedKey: SealedKey, keyField: string, position: number) => {
+        const { credential, plaintext } = await openSealed(sealedKey, keyField);
+        try {
+          assertPlaintextNotSubscriptionEnvelope(plaintext, entry.provider);
+        } catch (err) {
+          if (err instanceof SubscriptionEnvelopeInKeyListError) {
+            throw new RestoreProblem(400, 'subscription_in_key_list', err.message, keyField);
+          }
+          throw err;
+        }
+        return slotFromCredential(credential, position);
+      };
+      const keysFieldPresent = Object.hasOwn(entry, 'keys');
+      if (entry.key) {
+        const { credential: parentCred, plaintext } = await openSealed(entry.key, `${field}.key`);
+        if (decodeSubscription(plaintext, entry.provider)) {
+          const keys: StoredProviderKey[] = keysFieldPresent
+            ? await Promise.all(
+                (entry.keys ?? []).map((sealedKey, position) =>
+                  openSlotKey(sealedKey, `${field}.keys[${position}]`, position),
+                ),
+              )
+            : [];
+          dualProviderPlans.push({
+            provider: entry.provider,
+            subscriptionParent: parentCred,
+            keys,
+            defaultMethod,
+            subscriptionParentFromFile: true,
+            keysFieldPresent,
+          });
+          continue;
+        }
+      }
+      const keySources = keysFieldPresent ? [...(entry.keys ?? [])] : sources;
+      const keys: StoredProviderKey[] = [];
+      for (const [position, sealedKey] of keySources.entries()) {
+        keys.push(await openSlotKey(sealedKey, `${field}.keys[${position}]`, position));
+      }
+      dualProviderPlans.push({
+        provider: entry.provider,
+        subscriptionParent: null,
+        keys,
+        defaultMethod,
+        subscriptionParentFromFile: false,
+        keysFieldPresent,
+      });
+      continue;
+    }
+
+    if (isKeyListProvider(entry.provider)) {
+      const keySources = entry.keys && entry.keys.length > 0 ? [...entry.keys] : sources;
       const sealedCreds: StoredCredential[] = [];
-      for (const [position, sealedKey] of sources.entries()) {
-        sealedCreds.push(await openSealed(sealedKey, `${field}.${entry.keys && entry.keys.length > 0 ? 'keys' : 'key'}`));
-        const credential = sealedCreds[position];
-        if (credential) providerKeys.push(slotFromCredential(credential, position));
+      for (const [position, sealedKey] of keySources.entries()) {
+        const { credential, plaintext } = await openSealed(sealedKey, `${field}.${entry.keys && entry.keys.length > 0 ? 'keys' : 'key'}`);
+        try {
+          assertPlaintextNotSubscriptionEnvelope(plaintext, entry.provider);
+        } catch (err) {
+          if (err instanceof SubscriptionEnvelopeInKeyListError) {
+            throw new RestoreProblem(400, 'subscription_in_key_list', err.message, field);
+          }
+          throw err;
+        }
+        sealedCreds.push(credential);
+        providerKeys.push(slotFromCredential(credential, position));
       }
       const first = sealedCreds[0];
       if (first) out.push(first);
@@ -203,21 +277,35 @@ async function planCredentials(
 
     const only = sources[0];
     if (!only) continue;
-    out.push(await openSealed(only, `${field}.key`));
+    out.push((await openSealed(only, `${field}.key`)).credential);
   }
-  return { credentials: out, providerKeys };
+  return { credentials: out, providerKeys, dualProviderPlans };
 }
 
 /**
  * The store as the checks should see it after the restore: the restored keys on top of the stored
  * ones, so a fallback or the judge may use a key restored in the same request.
  */
-function overlayStore(store: AppStore, credentials: readonly StoredCredential[]): AppStore {
+function overlayStore(
+  store: AppStore,
+  credentials: readonly StoredCredential[],
+  dualPlans: readonly DualProviderRestorePlan[] = [],
+  hasConnectedSubscription: (workspaceId: string, provider: KeyProvider) => Promise<boolean> = async () => false,
+): AppStore {
   return new Proxy(store, {
     get(target, prop, receiver) {
       if (prop === 'getCredential') {
-        return async (workspaceId: string, provider: KeyProvider) =>
-          credentials.find((c) => c.provider === provider) ?? target.getCredential(workspaceId, provider);
+        return async (workspaceId: string, provider: KeyProvider) => {
+          const dual = dualPlans.find((plan) => plan.provider === provider);
+          if (dual) {
+            const overlay = dualRestoreOverlayCredential(dual);
+            if (overlay) return { ...overlay, workspaceId };
+            // No subscription and no keys in the file: only a connected subscription survives the restore.
+            if (!(await hasConnectedSubscription(workspaceId, provider))) return null;
+            return target.getCredential(workspaceId, provider);
+          }
+          return credentials.find((c) => c.provider === provider) ?? target.getCredential(workspaceId, provider);
+        };
       }
       const value: unknown = Reflect.get(target, prop, receiver);
       return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
@@ -296,11 +384,14 @@ export async function planRestore(deps: RestoreDeps, req: RestoreRequest): Promi
 
   const planned = sections.includes('credentials')
     ? await planCredentials(deps, req, file)
-    : { credentials: [], providerKeys: [] };
+    : { credentials: [], providerKeys: [], dualProviderPlans: [] };
   const credentials = planned.credentials;
+  const dualProviderPlans = planned.dualProviderPlans;
   const incomingBots = sections.includes('bots') ? file.bots : undefined;
   const previous = await deps.store.getSettings(ws);
-  const checkStore = overlayStore(deps.store, credentials);
+  const checkStore = overlayStore(deps.store, credentials, dualProviderPlans, (ws, provider) =>
+    deps.credentials.hasConnectedSubscription(ws, provider),
+  );
 
   let settingsChanged: string[] = [];
   let mainName = previous?.botName ?? DEFAULT_BOT_NAME;
@@ -320,19 +411,33 @@ export async function planRestore(deps: RestoreDeps, req: RestoreRequest): Promi
   if (sections.includes('credentials')) {
     restore.credentials = credentials;
     if (planned.providerKeys.length > 0) restore.providerKeys = planned.providerKeys;
+    if (dualProviderPlans.length > 0) {
+      restore.dualProviderKeyChanges = dualProviderPlans.map((plan) => ({
+        provider: plan.provider,
+        change: deps.credentials.buildDualProviderRestoreChange(plan),
+      }));
+    }
   }
 
   const preview: RestorePlan['preview'] = {
     sections: [...sections],
     settingsChanged,
     bots: restore.bots?.length ?? 0,
-    credentials: await Promise.all(
-      credentials.map(async (c) => ({
-        provider: c.provider,
-        last4: c.last4,
-        action: (await deps.store.getCredential(ws, c.provider)) ? ('replace' as const) : ('add' as const),
-      })),
-    ),
+    credentials: (
+      await Promise.all(
+        [
+          ...credentials,
+          ...dualProviderPlans.map((dual) => ({
+            provider: dual.provider,
+            last4: dual.subscriptionParent?.last4 ?? dual.keys[0]?.last4 ?? '????',
+          })),
+        ].map(async (c) => ({
+          provider: c.provider,
+          last4: c.last4,
+          action: (await deps.store.getCredential(ws, c.provider)) ? ('replace' as const) : ('add' as const),
+        })),
+      )
+    ).sort((a, b) => a.provider.localeCompare(b.provider)),
     keysTested: false,
   };
   return { restore, preview };

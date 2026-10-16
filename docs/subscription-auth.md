@@ -12,7 +12,7 @@ MergePilot's dashboard offers **API key** and **Subscription** methods for OpenA
    - **xAI / Grok:** sign in with SuperGrok or X Premium and enter the displayed device code.
 4. When sign-in succeeds, MergePilot saves the encrypted credentials and closes the dialog. Select a model from the refreshed model list, save your review settings, and use **Test connection** to verify access.
 
-Each workspace has one active credential per provider. Connecting a subscription replaces that provider's API key; saving an API key replaces its subscription. Gemini, OpenRouter and OpenCode Zen are the exception: each stores an ordered list of up to 20 API keys (ADR-0026). A review keeps the same provider and model and tries the next key only after a quota or rate-limit failure. Subscriptions for OpenAI, Anthropic and xAI still replace the whole credential. Primary, heavy-duty, fallback, and reviewer-panel models use the provider's active credential. Switching methods does not automatically change the selected model; API and subscription model lists can differ.
+Each workspace has one active credential per provider, except where ADR-0026 and ADR-0027 say otherwise. Gemini, OpenRouter and OpenCode Zen store an ordered list of up to 20 API keys (ADR-0026). OpenAI, Anthropic and xAI may keep a consumer subscription and up to 20 API keys together, with a stored default method (ADR-0027). Phase A reviews use only that default method; method fallback is ADR-0027 phase B. Primary, heavy-duty, fallback, and reviewer-panel models use the effective default for dual providers. Switching methods does not automatically change the selected model; API and subscription model lists can differ.
 
 ## Storage and refresh
 

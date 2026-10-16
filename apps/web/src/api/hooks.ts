@@ -79,6 +79,39 @@ export function useSaveKeyMutation(workspaceId: string) {
   });
 }
 
+export function useSetProviderDefaultMethodMutation(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+  return useMutation({
+    mutationFn: ({ provider, method }: { provider: KeyProvider; method: 'subscription' | 'api-key' }) =>
+      api.setProviderDefaultMethod(workspaceId, provider, method),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+    },
+    onError: (err: Error) => {
+      showToast(err.message || t('error'), 'error');
+    },
+  });
+}
+
+export function useDisconnectSubscriptionMutation(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { t } = useI18n();
+  return useMutation({
+    mutationFn: (provider: KeyProvider) => api.disconnectSubscription(workspaceId, provider),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+    },
+    onError: (err: Error) => {
+      showToast(err.message || t('error'), 'error');
+    },
+  });
+}
+
 export function useDeleteKeyMutation(workspaceId: string) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();

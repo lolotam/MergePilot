@@ -32,6 +32,23 @@ describe('loadRosters', () => {
     expect(logger._warns[0]).toMatchObject({ event: 'credential.key_roster_failed', provider: 'openrouter' });
   });
 
+  it('skips a fallback whose auth method cannot be read and keeps the primary roster', async () => {
+    const secret = new Secret('fallback-method-secret-xyz');
+    const credentials: ProcessReviewCredentials = {
+      resolve: vi.fn(),
+      getEffectiveAuthMethod: vi.fn(async (_ws, provider) => {
+        if (provider === 'openai') throw new Error(`cannot read ${secret.reveal()}`);
+        return 'api-key' as const;
+      }),
+      resolveKeyRoster: vi.fn(async () => ({ secrets: [new Secret('primary-key-value-abc')], keyIds: ['k1'], startIndex: 0 })),
+    };
+    const logger = loggerStub();
+    const { rosters } = await loadRosters(credentials, 'ws', ['anthropic', 'openai'], 'anthropic', logger);
+    expect(Object.keys(rosters)).toEqual(['anthropic']);
+    expect(logger._warns[0]).toMatchObject({ event: 'credential.key_roster_failed', provider: 'openai' });
+    expect(JSON.stringify(logger._warns)).not.toContain(secret.reveal());
+  });
+
   it('rethrows when the primary provider roster cannot be loaded', async () => {
     const credentials: ProcessReviewCredentials = {
       resolve: vi.fn(),

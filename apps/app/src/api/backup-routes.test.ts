@@ -79,7 +79,9 @@ describe('settings backup: export and restore (ADR-0018)', { timeout: 60000 }, (
       sections: ['settings', 'bots', 'credentials'],
       bots: 2,
       keysTested: false,
-      credentials: SEEDED.map((provider) => ({ provider, last4: fakeKey(provider).slice(-4), action: 'add' })),
+      credentials: [...SEEDED]
+        .sort((a, b) => a.localeCompare(b))
+        .map((provider) => ({ provider, last4: fakeKey(provider).slice(-4), action: 'add' })),
     });
 
     expect(await get('settings', 'ws-2')).toEqual({ settings: { ...(await get('settings', 'ws-1')).settings, workspaceId: 'ws-2' } });

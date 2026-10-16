@@ -98,7 +98,7 @@ describe('multi-key roster', () => {
     expect([0, 1]).toContain(await store.getKeyCursor('ws', 'gemini'));
   });
 
-  it('stores the cursor by key id so a reorder moves the remembered index with the key', async () => {
+  it('resets the cursor to 0 when provider keys are reordered', async () => {
     const { store, service } = fixture();
     await service.saveKeyList({ workspaceId: 'ws', provider: 'gemini', apiKeys: [keyA, keyB], userId: 'u' });
     const slots = await store.listProviderKeys('ws', 'gemini');
@@ -107,6 +107,17 @@ describe('multi-key roster', () => {
     await service.rememberSuccessfulKey('ws', 'gemini', idB);
     expect(await store.getKeyCursor('ws', 'gemini')).toBe(1);
     await service.reorderProviderKeys('ws', 'gemini', [idB, idA]);
+    expect(await store.getKeyCursor('ws', 'gemini')).toBe(0);
+  });
+
+  it('resets the cursor to 0 when a provider key is deleted', async () => {
+    const { store, service } = fixture();
+    await service.saveKeyList({ workspaceId: 'ws', provider: 'gemini', apiKeys: [keyA, keyB], userId: 'u' });
+    const slots = await store.listProviderKeys('ws', 'gemini');
+    const idB = slots[1]!.id;
+    await service.rememberSuccessfulKey('ws', 'gemini', idB);
+    expect(await store.getKeyCursor('ws', 'gemini')).toBe(1);
+    await service.deleteProviderKey('ws', 'gemini', idB);
     expect(await store.getKeyCursor('ws', 'gemini')).toBe(0);
   });
 

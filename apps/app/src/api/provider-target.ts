@@ -1,7 +1,8 @@
 import { SUBSCRIPTION_PREFIX, type ApiProviderId, type FetchLike } from '@mergepilot/engine';
 import { createSafeFetch, DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
-import type { AppStore } from '../core/types.js';
+import type { AppStore, KeyProvider } from '../core/types.js';
+import { isKeyListProvider } from '../credentials/multi-key.js';
 import type { CredentialService } from '../credentials/service.js';
 
 /**
@@ -63,7 +64,16 @@ export async function storedTarget(
   if (!cred) return fail(404, 'key_not_found', `No API key configured for provider "${provider}"`);
   let apiKey: string;
   try {
-    apiKey = (await deps.credentials.resolve(workspaceId, provider)).reveal();
+    const effective = await deps.credentials.getEffectiveAuthMethod(workspaceId, provider as KeyProvider);
+    if (effective === 'api-key' && isKeyListProvider(provider)) {
+      const roster = await deps.credentials.resolveKeyRoster(workspaceId, provider as KeyProvider);
+      const start = roster?.startIndex ?? 0;
+      const secret = roster?.secrets[start];
+      if (!secret) return fail(404, 'key_not_found', `No API key configured for provider "${provider}"`);
+      apiKey = secret.reveal();
+    } else {
+      apiKey = (await deps.credentials.resolve(workspaceId, provider)).reveal();
+    }
   } catch {
     return fail(404, 'key_not_found', `The stored key for "${provider}" could not be read`);
   }

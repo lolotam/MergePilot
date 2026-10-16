@@ -13,7 +13,8 @@ import {
 import type { ReviewJudge, SemanticDedupeResult } from '@mergepilot/github';
 import type { Logger } from 'pino';
 import type { ReviewRunJudge, WorkspaceSettings } from '../core/types.js';
-import { isMultiKeyProvider } from '../credentials/multi-key.js';
+import type { KeyProvider } from '../core/types.js';
+import { isKeyListProvider } from '../credentials/multi-key.js';
 import type { ProcessReviewCredentials } from './types.js';
 
 export interface WorkspaceJudge {
@@ -50,9 +51,10 @@ export async function workspaceJudge(
   const entries: JudgeEntry[] = [];
   for (const entry of [{ provider: config.provider, model: config.model }, ...config.fallback]) {
     try {
-      if (credentials.resolveKeyRoster && isMultiKeyProvider(entry.provider)) {
+      const effective = await credentials.getEffectiveAuthMethod?.(workspaceId, entry.provider as KeyProvider);
+      if (credentials.resolveKeyRoster && isKeyListProvider(entry.provider) && effective !== 'subscription') {
         const roster = await credentials.resolveKeyRoster(workspaceId, entry.provider).catch((error: unknown) => {
-          // One unreadable key must not leave the judge keyless: fall back to the single credential.
+          if (effective === 'api-key') throw error;
           logger.warn(
             { event: 'credential.key_roster_failed', provider: entry.provider, error: error instanceof Error ? error.name : 'unknown' },
             'Could not load the API key roster for a judge provider',
@@ -73,6 +75,10 @@ export async function workspaceJudge(
               ? { onKeyRotation: context.makeRotationHandler(keyIdsSnapshot) }
               : {}),
           });
+          continue;
+        }
+        if (effective === 'api-key') {
+          entries.push(entry);
           continue;
         }
       }

@@ -32,7 +32,18 @@ export class WorkspaceCredentialStore implements CredentialStore {
   async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
     const existing = this.secrets.get(ref.provider);
     if (existing && !decodeSubscription(existing.reveal(), ref.provider)) return existing;
-    const resolved = await this.credentials.resolve(this.workspaceId, ref.provider as ApiProvider);
+    const provider = ref.provider as ApiProvider;
+    const effective = await this.credentials.getEffectiveAuthMethod?.(this.workspaceId, provider);
+    // API keys are the chosen method: never read (or refresh) the subscription parent instead.
+    if (effective === 'api-key') {
+      const roster = await this.credentials.resolveKeyRoster?.(this.workspaceId, provider);
+      const start = roster && roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;
+      const secret = roster?.secrets[start];
+      if (!secret) throw new Error(`No API key is available for provider "${provider}"`);
+      this.secrets.set(ref.provider, secret);
+      return secret;
+    }
+    const resolved = await this.credentials.resolve(this.workspaceId, provider);
     this.secrets.set(ref.provider, resolved);
     return resolved;
   }
