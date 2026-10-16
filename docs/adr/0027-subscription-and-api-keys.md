@@ -90,6 +90,7 @@ Until this amendment a run that ended `failed` stored `cost_usd: null` and `resu
    - `costUsd` follows the point 7 rules for a completed run, from one shared function (`knownCostUsd` in `pipeline.ts`): $0 when every call was on a subscription, the tracked spend after no fallback or a method-only fallback, and unknown (absent) after a configured model fallback.
    - The tracked spend is the same `SpendTracker` total a completed run uses. It holds the real cost where usage was reported, and the estimate for a retry or batch that threw (ADR-0011).
    - `usage` sums the calls that answered. A failure on the first call has none.
+   - A priced review that fails on its first whole-PR call, before any answer, now records a known `cost_usd: 0` instead of null, because the tracker charged nothing. (A thrown batch or retry is charged at its estimate, as above.) `null` keeps meaning an unknown cost: after a configured model fallback, without pricing, or outside the engine (point 5).
 2. **Worker.** `executeReview` and `reviewOnlyOutcome` pass the failed run's `costUsd` on, and `recordOf` stores it in `cost_usd`.
    - `recordOf` also stores a reduced `result` for the failed run: `v: 1`, with an empty `summary`, `highlights` and `findings`, plus the run language, `usage`, `pricing` (with the ADR-0024 API-equivalent when every call was on the subscription), the method switch and the key rotation. It holds no provider text or model answer. The redacted error stays in `detail`, and the answers without JSON stay in the logs.
    - `findings_count` stays null.
