@@ -148,7 +148,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       exclude: reviewCfg.exclude,
       isSensitivePath,
     });
-    if (classification !== 'skip-sensitive') manifestFiles.push(manifestFileOf(file, knownSecrets));
+    // On the path itself, not the classification: a removed or excluded `.env` is classified
+    // before sensitivity, and its name must still never reach the model.
+    if (!isSensitivePath(file.path)) manifestFiles.push(manifestFileOf(file, knownSecrets));
 
     if (classification === 'incomplete-truncated') {
       incompleteReasons.push(`${file.path}: patch truncated`);

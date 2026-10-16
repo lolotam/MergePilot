@@ -50,6 +50,7 @@ describe('runReview — PR manifest of a batched review (ADR-0031)', () => {
       { path: 'src/b.ts', status: 'modified', patch: patchOf(), changes: 9, additions: 7, deletions: 2 },
       { path: 'src/old.ts', status: 'removed', changes: 4, additions: 0, deletions: 4 },
       { path: '.env', status: 'modified', patch: '@@ -1 +1 @@\n-A=1\n+A=2', changes: 2 },
+      { path: 'certs/server.key', status: 'removed', changes: 3, additions: 0, deletions: 3 },
     ];
     const { model, calls } = recording();
     await run(batchedConfig(), model, files);
@@ -63,6 +64,7 @@ describe('runReview — PR manifest of a batched review (ADR-0031)', () => {
       expect(manifest).toContain('batch 2 | modified | +7 -2 | src/b.ts');
       expect(manifest).toContain('not reviewed | removed | +0 -4 | src/old.ts');
       expect(manifest).not.toContain('.env');
+      expect(manifest).not.toContain('server.key'); // removed: classified before its sensitivity
     });
   });
 

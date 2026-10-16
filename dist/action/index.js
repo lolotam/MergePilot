@@ -113873,7 +113873,7 @@ var PathInstructionSchema = external_exports.strictObject({
   instructions: external_exports.string().min(1)
 });
 var REVIEW_LIMIT_DEFAULTS = Object.freeze({
-  maxPromptTokens: 12e4,
+  maxPromptTokens: 9e4,
   batchTokens: 24e3,
   callTimeoutMs: 3e5,
   totalTimeoutMs: 12e5
@@ -115173,7 +115173,8 @@ var DOC_NAMES = /^(license|licence|changelog|changes|authors|notice|copying|code
 var GENERATED_SEGMENTS = /* @__PURE__ */ new Set(["__snapshots__", "generated", "vendor"]);
 var CI_SEGMENTS = /* @__PURE__ */ new Set([".github", ".circleci", ".gitlab", ".husky", ".devcontainer", ".vscode"]);
 var CONFIG_EXTENSIONS = /* @__PURE__ */ new Set(["json", "jsonc", "json5", "yml", "yaml", "toml", "ini", "cfg", "conf", "properties"]);
-var CONFIG_NAMES = /^(dockerfile|makefile|procfile|jenkinsfile|cmakelists\.txt|requirements[^/]*\.txt|docker-compose[^/]*|.*\.dockerfile|.*\.config\.[cm]?[jt]s)$/i;
+var CONFIG_NAMES = /^(dockerfile|makefile|procfile|jenkinsfile|cmakelists\.txt|requirements[^/]*\.txt|docker-compose[^/]*|.*\.dockerfile)$/i;
+var TOOL_CONFIG_NAMES = /^(vite|vitest|eslint|jest|webpack|rollup|babel|postcss|tailwind|prettier|next|nuxt|svelte|astro|playwright|cypress|tsup|esbuild|karma|commitlint|stylelint|metro|drizzle|turbo|lint-staged)\.config\.[cm]?[jt]s$/i;
 var TEST_SEGMENTS = /* @__PURE__ */ new Set(["__tests__", "__mocks__", "__fixtures__", "test", "tests", "spec", "specs", "testdata"]);
 var TEST_NAME = /(\.(test|spec|fixtures?)\.[^.]+$)|(^test_.+\.py$)|(_test\.(py|go)$)|(^conftest\.py$)/;
 function splitPath(path11) {
@@ -115185,7 +115186,7 @@ function splitPath(path11) {
 function fileTierOf(path11) {
   const { dirs, base, extension: extension2 } = splitPath(path11);
   const lower2 = base.toLowerCase();
-  if (CONFIG_NAMES.test(lower2))
+  if (CONFIG_NAMES.test(lower2) || TOOL_CONFIG_NAMES.test(lower2))
     return FileTier.Config;
   if (DOC_EXTENSIONS.has(extension2) || DOC_NAMES.test(lower2) || isLockfile(lower2) || lower2.endsWith(".snap")) {
     return FileTier.Docs;
@@ -115202,11 +115203,11 @@ function fileTierOf(path11) {
 }
 function implementationKeyOf(path11) {
   const { dirs, base } = splitPath(path11);
-  let stem = base.includes(".") ? base.slice(0, base.indexOf(".")) : base;
+  let stem = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
   let parent = dirs;
   const jsTest = /^(.+)\.(test|spec)\.[^.]+$/.exec(base);
   if (jsTest) {
-    stem = jsTest[1].split(".")[0];
+    stem = jsTest[1];
     if (parent[parent.length - 1] === "__tests__")
       parent = parent.slice(0, -1);
   } else if (/^test_.+\.py$/.test(base)) {
@@ -116247,7 +116248,7 @@ async function runReview(input2) {
       exclude: reviewCfg.exclude,
       isSensitivePath
     });
-    if (classification !== "skip-sensitive")
+    if (!isSensitivePath(file2.path))
       manifestFiles.push(manifestFileOf(file2, knownSecrets));
     if (classification === "incomplete-truncated") {
       incompleteReasons.push(`${file2.path}: patch truncated`);
@@ -169582,7 +169583,12 @@ function readAtRef(client, owner, repo, ref, path11) {
   const key = `${owner}/${repo}@${ref}:${path11}`;
   let read = cache.get(key);
   if (!read) {
-    read = client.getFileContent({ owner, repo, path: path11, ref });
+    const pending = client.getFileContent({ owner, repo, path: path11, ref });
+    pending.catch(() => {
+      if (cache?.get(key) === pending)
+        cache.delete(key);
+    });
+    read = pending;
     cache.set(key, read);
   }
   return read;
@@ -169806,10 +169812,9 @@ var ContextReader = class {
     if (outcome === "limit")
       this.leftOut.push(`${file2.path} (not looked up)`);
     const content = typeof outcome === "object" ? outcome.content : null;
-    const full = content !== null ? capFileContent(content) : null;
-    if (full)
-      this.add({ kind: "changed-file", reason: "changed file, full version", forPath: file2.path }, file2.path, full);
-    this.known.set(file2.path, full);
+    if (content)
+      this.add({ kind: "changed-file", reason: "changed file, full version", forPath: file2.path }, file2.path, content);
+    this.known.set(file2.path, content);
   }
   async lookUp(lookup) {
     for (const path11 of lookup.candidates) {
@@ -169834,7 +169839,7 @@ var ContextReader = class {
       if (outcome === "failed")
         return;
       if (outcome.content !== null) {
-        this.add(lookup, path11, capFileContent(outcome.content));
+        this.add(lookup, path11, outcome.content);
         return;
       }
     }

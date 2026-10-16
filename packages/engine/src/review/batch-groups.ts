@@ -18,7 +18,10 @@ const DOC_NAMES = /^(license|licence|changelog|changes|authors|notice|copying|co
 const GENERATED_SEGMENTS = new Set(['__snapshots__', 'generated', 'vendor']);
 const CI_SEGMENTS = new Set(['.github', '.circleci', '.gitlab', '.husky', '.devcontainer', '.vscode']);
 const CONFIG_EXTENSIONS = new Set(['json', 'jsonc', 'json5', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'conf', 'properties']);
-const CONFIG_NAMES = /^(dockerfile|makefile|procfile|jenkinsfile|cmakelists\.txt|requirements[^/]*\.txt|docker-compose[^/]*|.*\.dockerfile|.*\.config\.[cm]?[jt]s)$/i;
+const CONFIG_NAMES = /^(dockerfile|makefile|procfile|jenkinsfile|cmakelists\.txt|requirements[^/]*\.txt|docker-compose[^/]*|.*\.dockerfile)$/i;
+/** Tool configs by name only: an application `app.config.ts` is code and stays with its test. */
+const TOOL_CONFIG_NAMES =
+  /^(vite|vitest|eslint|jest|webpack|rollup|babel|postcss|tailwind|prettier|next|nuxt|svelte|astro|playwright|cypress|tsup|esbuild|karma|commitlint|stylelint|metro|drizzle|turbo|lint-staged)\.config\.[cm]?[jt]s$/i;
 const TEST_SEGMENTS = new Set(['__tests__', '__mocks__', '__fixtures__', 'test', 'tests', 'spec', 'specs', 'testdata']);
 const TEST_NAME = /(\.(test|spec|fixtures?)\.[^.]+$)|(^test_.+\.py$)|(_test\.(py|go)$)|(^conftest\.py$)/;
 
@@ -33,7 +36,7 @@ function splitPath(path: string): { dirs: string[]; base: string; extension: str
 export function fileTierOf(path: string): FileTier {
   const { dirs, base, extension } = splitPath(path);
   const lower = base.toLowerCase();
-  if (CONFIG_NAMES.test(lower)) return FileTier.Config;
+  if (CONFIG_NAMES.test(lower) || TOOL_CONFIG_NAMES.test(lower)) return FileTier.Config;
   // Lockfiles, dist/, minified and *.generated.* files never reach a batch: classifyFile skips them.
   if (DOC_EXTENSIONS.has(extension) || DOC_NAMES.test(lower) || isLockfile(lower) || lower.endsWith('.snap')) {
     return FileTier.Docs;
@@ -52,11 +55,12 @@ export function fileTierOf(path: string): FileTier {
  */
 export function implementationKeyOf(path: string): string {
   const { dirs, base } = splitPath(path);
-  let stem = base.includes('.') ? base.slice(0, base.indexOf('.')) : base;
+  // Only the final extension goes: `user.service.ts` and `user.controller.ts` are two units.
+  let stem = base.includes('.') ? base.slice(0, base.lastIndexOf('.')) : base;
   let parent = dirs;
   const jsTest = /^(.+)\.(test|spec)\.[^.]+$/.exec(base);
   if (jsTest) {
-    stem = jsTest[1]!.split('.')[0]!;
+    stem = jsTest[1]!;
     if (parent[parent.length - 1] === '__tests__') parent = parent.slice(0, -1);
   } else if (/^test_.+\.py$/.test(base)) {
     stem = stem.slice('test_'.length);
