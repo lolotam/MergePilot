@@ -227,6 +227,8 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
   return {
     ...base,
     outcome: 'failed',
+    // What the calls before the failure cost; the judge never ran (ADR-0027 amendment).
+    costUsd: r.costUsd,
     detail: redactSecrets(r.detail ?? r.reason, secrets).text,
     ...(r.modelUsed ? { modelUsed: r.modelUsed } : {}),
     ...(r.fallbackFrom ? { fallbackFrom: r.fallbackFrom } : {}),

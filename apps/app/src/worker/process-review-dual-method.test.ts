@@ -96,6 +96,42 @@ describe('processReviewJob — method fallback from a subscription to API keys (
   });
 });
 
+describe('processReviewJob — a failed run keeps its spend and methods (ADR-0027 amendment)', () => {
+  const brokenAnswer = () =>
+    vi.fn(async () => ({ text: 'Here is my review, no JSON.', finishReason: 'stop' as const, usage }));
+
+  it('records what the paid calls cost before the failure, counts it in the month and shows the switch', async () => {
+    const keys = brokenAnswer();
+    const { run, store } = await dualReview(chain(failWith('RATE_LIMIT'), keys));
+
+    expect(run?.status).toBe('failed');
+    const paid = keys.mock.calls.length * ((50 * 3 + 20 * 15) / 1_000_000);
+    expect(paid).toBeGreaterThan(0);
+    expect(run?.costUsd).toBeCloseTo(paid, 12);
+    expect(await store.monthCostUsd(WORKSPACE_ID, new Date(Date.UTC(2000, 0, 1)))).toBeCloseTo(paid, 12);
+    expect(run?.result).toMatchObject({
+      summary: '',
+      findings: [],
+      fallbackFromMethod: 'subscription',
+      modelUsedMethod: 'api-key',
+      usage: { inputTokens: 50 * keys.mock.calls.length, outputTokens: 20 * keys.mock.calls.length },
+      pricing: { source: 'catalog:models.dev' },
+    });
+    // Only counts and methods are stored: neither the provider's error nor the model's answer.
+    expect(JSON.stringify(run?.result)).not.toMatch(/RATE_LIMIT from anthropic|no JSON/);
+  });
+
+  it('records $0 for a failed run that stayed on the subscription', async () => {
+    const keys = answer();
+    const { run } = await dualReview(chain(brokenAnswer(), keys));
+
+    expect(keys).not.toHaveBeenCalled();
+    expect(run).toMatchObject({ status: 'failed', costUsd: 0 });
+    expect(run?.result?.pricing).toMatchObject({ source: 'subscription' });
+    expect(run?.result?.fallbackFromMethod).toBeUndefined();
+  });
+});
+
 describe('processReviewJob — budget admission of a subscription bot (ADR-0027)', () => {
   it('reserves the per-review budget when API keys stand behind the subscription', async () => {
     const { admit } = await dualReview(chain(answer(), answer()), { monthlyBudgetUsd: 10 });

@@ -116116,7 +116116,13 @@ async function runSinglePass(ctx) {
   if (!parsed.ok) {
     const detail = [...notes, ...recovery.incompleteReasons].join("; ");
     const answerAttempts = parsed.code === "invalid-json" ? [response, empty.response].filter((r2) => r2 !== void 0).map((r2) => answerAttemptOf(r2, ctx.knownSecrets)) : void 0;
-    return { ok: false, reason: parsed.error, ...detail ? { detail } : {}, ...answerAttempts ? { answerAttempts } : {} };
+    return {
+      ok: false,
+      reason: parsed.error,
+      ...detail ? { detail } : {},
+      ...answerAttempts ? { answerAttempts } : {},
+      ...recovery.totalUsage ? { totalUsage: recovery.totalUsage } : {}
+    };
   }
   return {
     ok: true,
@@ -116150,7 +116156,8 @@ async function runBatchedPass(ctx, batches) {
     return {
       ok: false,
       reason: `no batch produced an answer (${batches.length} batches)`,
-      ...detail ? { detail } : {}
+      ...detail ? { detail } : {},
+      ...result.totalUsage ? { totalUsage: result.totalUsage } : {}
     };
   }
   return {
@@ -116682,12 +116689,17 @@ async function runReview(input2) {
   };
   const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
   if (!pass.ok) {
+    const disclosure2 = model.disclosure(knownSecrets);
+    const failedCostUsd = knownCostUsd(model, disclosure2, budgetCfg.pricing, spend);
     return {
       status: "failed",
       reason: pass.reason,
       ...pass.detail ? { detail: pass.detail } : {},
       ...pass.answerAttempts ? { answerAttempts: pass.answerAttempts } : {},
-      ...model.disclosure(knownSecrets)
+      ...pass.totalUsage ? { usage: pass.totalUsage } : {},
+      ...failedCostUsd !== void 0 ? { costUsd: failedCostUsd } : {},
+      ...disclosure2,
+      onlySubscriptionCalls: model.onlySubscriptionCalls
     };
   }
   let totalUsage = pass.totalUsage;
@@ -116746,13 +116758,7 @@ async function runReview(input2) {
   };
   const contextDisclosure = context.disclosure();
   const disclosure = model.disclosure(knownSecrets);
-  const methodOnlyFallback = disclosure.fallbackFromMethod !== void 0 && disclosure.modelUsed === disclosure.fallbackFrom;
-  let reviewCostUsd;
-  if (model.onlySubscriptionCalls) {
-    reviewCostUsd = 0;
-  } else if (budgetCfg.pricing && (!disclosure.fallbackFrom || methodOnlyFallback)) {
-    reviewCostUsd = spend.spentUsd;
-  }
+  const reviewCostUsd = knownCostUsd(model, disclosure, budgetCfg.pricing, spend);
   return {
     status: "completed",
     summary: pass.summary,
@@ -116770,6 +116776,12 @@ async function runReview(input2) {
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls
   };
+}
+function knownCostUsd(model, disclosure, pricing, spend) {
+  if (model.onlySubscriptionCalls)
+    return 0;
+  const methodOnlyFallback = disclosure.fallbackFromMethod !== void 0 && disclosure.modelUsed === disclosure.fallbackFrom;
+  return pricing && (!disclosure.fallbackFrom || methodOnlyFallback) ? spend.spentUsd : void 0;
 }
 function reviewLimits(review) {
   return {

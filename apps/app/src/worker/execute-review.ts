@@ -196,6 +196,7 @@ export async function executeReview(
   } else {
     outcome = 'failed';
     inlineFindings = [];
+    costUsd = reviewResult.costUsd;
     let reason: string;
     if (reviewResult.reason === 'INVALID_CREDENTIAL') {
       reason = `Review failed: invalid credential for provider "${config.provider}". Please check the ${envVar} secret.`;

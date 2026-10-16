@@ -174,6 +174,11 @@ export default function RunDetailPage() {
               {result.usage.inputTokens.toLocaleString()} in / {result.usage.outputTokens.toLocaleString()} out
             </span>
           )}
+          {run.status === 'failed' && run.costUsd !== null && run.costUsd > 0 && (
+            <p className="text-[10px] text-ink-500 leading-snug" data-testid="failed-run-spend">
+              {t('failedRunSpend')}
+            </p>
+          )}
         </div>
 
         {/* Duration & Date */}
@@ -206,8 +211,8 @@ export default function RunDetailPage() {
         </div>
       )}
 
-      {/* Review Result Content */}
-      {result ? (
+      {/* Review Result Content; a failed run's result holds only its spend and methods */}
+      {result && run.status !== 'failed' ? (
         <div className="flex flex-col gap-6">
           {/* Summary Card */}
           <div className="p-5 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs flex flex-col gap-4">

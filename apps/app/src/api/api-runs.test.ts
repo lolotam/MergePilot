@@ -161,6 +161,44 @@ describe('dashboard api - runs routes (list, repos, detail, filters, sorting)', 
     expect(item).not.toHaveProperty('result');
   });
 
+  it('lists a failed run with the cost and tokens it spent and no severity counts', async () => {
+    const run = await store.createReviewRun({
+      workspaceId: 'ws-1',
+      installationId: 10,
+      repoFullName: 'acme/frontend',
+      pullNumber: 43,
+      headSha: 'head-sha-2',
+      status: 'running',
+      costUsd: null,
+      detail: null,
+    });
+    await store.finishReviewRun('ws-1', run.id, {
+      status: 'failed',
+      costUsd: 0.0009,
+      detail: 'invalid-json',
+      findingsCount: null,
+      result: {
+        v: 1,
+        summary: '',
+        highlights: [],
+        findings: [],
+        language: 'en',
+        usage: { inputTokens: 100, outputTokens: 40 },
+        fallbackFromMethod: 'subscription',
+        modelUsedMethod: 'api-key',
+      },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/workspaces/ws-1/runs',
+      headers: { cookie: signedSessionCookie(TOKEN_USER1, config.authSecret) },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().runs[0]).toMatchObject({ status: 'failed', costUsd: 0.0009, inputTokens: 100, outputTokens: 40, severityCounts: null });
+  });
+
   it('GET /api/workspaces/:workspaceId/runs/repos returns distinct repositories for workspace', async () => {
     await store.createReviewRun({
       workspaceId: 'ws-1',

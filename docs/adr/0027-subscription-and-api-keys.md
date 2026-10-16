@@ -82,6 +82,24 @@ The change is delivered in two phases, each in its own pull request:
 
 9. **Backup** (ADR-0018). Export carries the sealed subscription envelope, the sealed key list and the **effective** default method (not only a stored preference row). Restore applies each dual provider as one locked change inside the same restore transaction, so a failed restore still changes nothing (ADR-0018): a file with a subscription envelope sets the parent to that envelope and keeps the file's key slots when present, otherwise the current slots after legacy materialisation; a keys-only file replaces the slots and keeps a subscription parent when one is connected, otherwise mirrors slot 0; the preference row is set from `defaultMethod` or deleted when the field is absent. The file wins over an unreadable current credential, so a restore can still repair a workspace after a lost master key. Subscription envelopes inside the key list are rejected. Non-dual providers and backups from before ADR-0027 restore unchanged.
 
+## Amendment (2026-10-17): a failed run keeps its spend and its method switch
+
+Until this amendment a run that ended `failed` stored `cost_usd: null` and `result: null`, even when it had already paid for API calls. The monthly spend missed that money, and the dashboard could not show a fallback or method switch that happened before the failure. The gap was older than this ADR and applied to every provider.
+
+1. **Engine.** A failed `ReviewRunResult` carries `usage`, `costUsd` and `onlySubscriptionCalls`, next to the fallback disclosure it already had.
+   - `costUsd` follows the point 7 rules for a completed run, from one shared function (`knownCostUsd` in `pipeline.ts`): $0 when every call was on a subscription, the tracked spend after no fallback or a method-only fallback, and unknown (absent) after a configured model fallback.
+   - The tracked spend is the same `SpendTracker` total a completed run uses. It holds the real cost where usage was reported, and the estimate for a retry or batch that threw (ADR-0011).
+   - `usage` sums the calls that answered. A failure on the first call has none.
+2. **Worker.** `executeReview` and `reviewOnlyOutcome` pass the failed run's `costUsd` on, and `recordOf` stores it in `cost_usd`.
+   - `recordOf` also stores a reduced `result` for the failed run: `v: 1`, with an empty `summary`, `highlights` and `findings`, plus the run language, `usage`, `pricing` (with the ADR-0024 API-equivalent when every call was on the subscription), the method switch and the key rotation. It holds no provider text or model answer. The redacted error stays in `detail`, and the answers without JSON stay in the logs.
+   - `findings_count` stays null.
+   - The subscription price record uses the engine's tally, like a completed run.
+3. **Spend.** `workspace_usage_monthly` already summed `cost_usd` and `result.usage` for every finished status, so a failed run's spend and tokens now count toward `monthCostUsd`, the budget admission (ADR-0022) and the group sums. A retry of the same job reuses the failed row, and each attempt still counts once (ADR-0014).
+4. **API and dashboard.** The run's `result` schema is unchanged; a failed run's payload is the reduced shape above.
+   - The runs list reports `severityCounts: null` for a failed run.
+   - The run detail page shows the cost, the tokens and the method notice of a failed run, plus one line (en and ar) saying the cost is for the calls made before the failure and is counted in the monthly budget. The summary and findings cards stay hidden.
+5. **Not covered.** A run failed by `failBotRun` (a worker exception outside the engine, or a consensus publish that failed after the reviews) and a run failed by the stale-run sweep still record `cost_usd: null`. Neither one has the engine's spend.
+
 ## Consequences
 
 - AGENTS.md "one active credential per provider; saving either method replaces the other" now has an exception for these three providers. ADR-0020 (one credential, replacement), ADR-0026 (scope and the parent mirror) and `docs/subscription-auth.md` are amended to point here.

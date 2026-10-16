@@ -308,6 +308,7 @@ export const en: I18nDictionary = {
   methodFallbackToApi:
     'Continued with an API key after the subscription hit its quota or rate limit. Those calls count toward the monthly budget.',
   methodFallbackToSubscription: 'Continued with the subscription after the API keys hit their quota or rate limit.',
+  failedRunSpend: 'Spent on the calls made before the review failed; counted in the monthly budget.',
   noFindings: 'No findings',
   severityCritical: 'Critical',
   severityHigh: 'High',

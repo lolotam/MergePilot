@@ -43,7 +43,7 @@ export async function apiEquivalentPrice(
   return resolved.pricing ? { pricing: resolved.pricing, source: resolved.record.source } : undefined;
 }
 
-/** The equivalent of a completed run's own model usage (the judge's tokens are not part of it). */
+/** The equivalent of a run's own model usage (the judge's tokens are not part of it). */
 export function apiEquivalentFields(
   usage: TokenUsage | undefined,
   price: ApiEquivalentPrice | undefined,
