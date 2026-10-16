@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ReviewModel } from './model.js';
+import { modelFromAdapter, type ReviewModel } from './model.js';
 import {
   makeAnswerJson,
   makeConfig,
@@ -8,6 +8,8 @@ import {
 } from './pipeline.fixtures.js';
 import { runReview } from './pipeline.js';
 import { LlmFailure } from '../llm/failure.js';
+import { Secret } from '../credentials/secret.js';
+import { AnthropicAdapter } from '../providers/anthropic/adapter.js';
 
 describe('runReview - USD budget and pricing', () => {
   it('reports zero cost when one subscription falls back to another subscription', async () => {
@@ -88,6 +90,24 @@ describe('runReview - USD budget and pricing', () => {
     if (result.status === 'skipped-budget') {
       expect(result.reason).toMatch(/estimated \$[0-9.]+ > limit \$0\.10/);
     }
+  });
+
+  it('prices an adaptive Claude review at its full thinking headroom before calling it', async () => {
+    const stream = vi.fn();
+    const adapter = new AnthropicAdapter({ apiKey: new Secret('sk-test-000'), client: { messages: { stream } } });
+    // Output alone: (4096 answer + 32768 high-effort headroom) x $25/MTok = $0.92 > $0.80.
+    // The old 16384 headroom priced it at $0.51 and let the call through.
+    const config = makeConfig({ budget: { perReviewUsd: 0.8, maxInputTokens: 200000,
+      pricing: { inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 } } });
+    config.review.verify = false;
+
+    const result = await runReview({ config, pr: { title: 'T', body: 'B' },
+      files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }], rulesFiles: [],
+      model: modelFromAdapter(adapter, 'claude-opus-5-5', 'high'), knownSecrets: [] });
+
+    expect(result.status).toBe('skipped-budget');
+    if (result.status === 'skipped-budget') expect(result.reason).toMatch(/estimated \$0\.9\d* > limit \$0\.80/);
+    expect(stream).not.toHaveBeenCalled();
   });
 
   it('passes USD gate when estimated cost is under perReviewUsd and calls model', async () => {

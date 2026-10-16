@@ -112993,6 +112993,176 @@ function bearerHeaders(key) {
   return value ? { Authorization: `Bearer ${value}` } : {};
 }
 
+var FALLBACK_EFFORTS = Object.freeze({
+  reasoning_effort: ["off", "low", "medium", "high"],
+  glm: ["on", "off"],
+  deepseek: ["off", "low", "high", "max"],
+  gemini: ["minimal", "low", "medium", "high"],
+  anthropic: ["off", "low", "medium", "high"],
+  none: []
+});
+var REASONING_EFFORT_VALUES = /* @__PURE__ */ new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+var THINKING_BUDGET_TOKENS = Object.freeze({
+  minimal: 1024,
+  low: 2048,
+  medium: 8192,
+  high: 16384,
+  xhigh: 24576,
+  max: 32e3
+});
+var DEFAULT_THINKING_HEADROOM = 8192;
+function normalize(effort) {
+  return (effort ?? "").trim().toLowerCase();
+}
+function thinkingHeadroom(effort) {
+  return THINKING_BUDGET_TOKENS[normalize(effort)] ?? 0;
+}
+var OPENAI_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
+var OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
+function openAIThinksByDefault(model) {
+  return OPENAI_REASONING_MODEL.test(model);
+}
+function openAIReasoningEffort(model, effort) {
+  const value = normalize(effort);
+  return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : void 0;
+}
+function compatibleEffortFields(style, effort) {
+  const value = normalize(effort);
+  if (!value || style === "none")
+    return {};
+  if (style === "glm") {
+    if (value === "off")
+      return { thinking: { type: "disabled" } };
+    if (value === "on")
+      return { thinking: { type: "enabled" } };
+    return {};
+  }
+  if (style === "deepseek") {
+    if (value === "off" || value === "none")
+      return { thinking: { type: "disabled" } };
+    const graded = deepseekEffort(value);
+    return graded ? { thinking: { type: "enabled" }, reasoning_effort: graded } : {};
+  }
+  return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
+}
+var DEEPSEEK_EFFORTS = Object.freeze({
+  minimal: "low",
+  low: "low",
+  medium: "high",
+  high: "high",
+  xhigh: "high",
+  max: "max"
+});
+function deepseekEffort(effort) {
+  return DEEPSEEK_EFFORTS[normalize(effort)];
+}
+function defaultThinkingHeadroom(style) {
+  return style === "deepseek" ? THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM : DEFAULT_THINKING_HEADROOM;
+}
+var ADAPTIVE_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]|4-[6-9])(?:\b|-)/;
+var ANTHROPIC_EFFORTS = /* @__PURE__ */ new Set(["low", "medium", "high", "xhigh", "max"]);
+function anthropicThinking(model, effort) {
+  const value = normalize(effort);
+  if (!ANTHROPIC_EFFORTS.has(value))
+    return void 0;
+  if (ADAPTIVE_CLAUDE.test(model)) {
+    return {
+      thinking: { type: "adaptive" },
+      output_config: { effort: value }
+    };
+  }
+  return { thinking: { type: "enabled", budget_tokens: thinkingHeadroom(value) } };
+}
+var ADAPTIVE_THINKING_HEADROOM = Object.freeze({
+  low: 4096,
+  medium: 16384,
+  high: 32768,
+  xhigh: 32768,
+  max: 32768
+});
+function adaptiveThinkingHeadroom(effort) {
+  const value = normalize(effort);
+  return ADAPTIVE_THINKING_HEADROOM[value === "minimal" ? "low" : value] ?? ADAPTIVE_THINKING_HEADROOM.high ?? 0;
+}
+var THINKS_BY_DEFAULT_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-[5-9](?:\b|-)/;
+function anthropicThinkingHeadroom(model, effort) {
+  const thinking = anthropicThinking(model, effort);
+  if (!thinking)
+    return THINKS_BY_DEFAULT_CLAUDE.test(model) ? adaptiveThinkingHeadroom(void 0) : 0;
+  return thinking.thinking.type === "adaptive" ? adaptiveThinkingHeadroom(effort) : thinkingHeadroom(effort);
+}
+var GEMINI_BUDGET_MODEL = /^gemini-(?:1|2)\./;
+var GEMINI_LEVELS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
+function geminiThinkingConfig(model, effort) {
+  const value = normalize(effort);
+  const id = model.replace(/^models\//, "");
+  if (GEMINI_BUDGET_MODEL.test(id)) {
+    if (value === "off")
+      return /-pro/.test(id) ? void 0 : { thinkingBudget: 0 };
+    return GEMINI_LEVELS.has(value) ? { thinkingBudget: thinkingHeadroom(value) } : void 0;
+  }
+  return GEMINI_LEVELS.has(value) ? { thinkingLevel: value.toUpperCase() } : void 0;
+}
+function geminiThinksByDefault(model) {
+  const id = model.replace(/^models\//, "").toLowerCase();
+  return /^gemini-(?:[3-9]|\d{2,}|2\.[5-9])/.test(id) || id.includes("-thinking");
+}
+var R1_TOKEN = /(?:^|[/:._-])r1(?:$|[/:._-])/;
+function isCompatibleReasoningModel(provider, model, style) {
+  const lowerModel = model.toLowerCase();
+  if (lowerModel.includes("reasoner") || R1_TOKEN.test(lowerModel)) {
+    return true;
+  }
+  if (style === "glm" || provider === "zai" || provider === "zai-coding") {
+    return true;
+  }
+  if ((style === "deepseek" || provider === "deepseek") && /deepseek-(?:v(?:[4-9]|\d{2})|flash|pro)\b/.test(lowerModel)) {
+    return true;
+  }
+  if (provider === "nvidia" && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
+    return true;
+  }
+  if (provider === "openrouter" || provider === "vercel-gateway") {
+    if (lowerModel.includes(":thinking") || /nemotron|qwq|deepseek-r1/.test(lowerModel) || lowerModel.includes("reasoner") || lowerModel.includes("r1") || lowerModel.includes("thinking") || /\b(?:o1|o3|o4|gpt-5)\b/.test(lowerModel) || /gemini-(?:[3-9]|2\.[5-9])/.test(lowerModel)) {
+      return true;
+    }
+  }
+  if (/mimo-v2-(?:pro|omni)|mimo-v(?:2\.(?:[5-9]|\d{2})|[3-9]|\d{2})/.test(lowerModel)) {
+    return true;
+  }
+  return false;
+}
+
+function subscriptionOutputTokens(model, reasoning, answerTokens) {
+  const capped = (tokens) => Math.min(tokens, model.maxTokens);
+  if (model.api === "openai-responses") {
+    const tokens = capped(answerTokens + responsesReasoningHeadroom(model, reasoning));
+    return { send: tokens, requested: tokens };
+  }
+  if (model.api !== "anthropic-messages")
+    return { send: answerTokens, requested: answerTokens };
+  const compat = model.compat;
+  if (compat?.supportsMidConvoEffort === true || reasoning && compat?.forceAdaptiveThinking === true) {
+    const tokens = capped(answerTokens + adaptiveThinkingHeadroom(reasoning));
+    return { send: tokens, requested: tokens };
+  }
+  if (reasoning)
+    return { send: answerTokens, requested: capped(answerTokens + thinkingHeadroom(reasoning)) };
+  return { send: answerTokens, requested: answerTokens };
+}
+function responsesReasoningHeadroom(model, reasoning) {
+  if (reasoning)
+    return thinkingHeadroom(reasoning);
+  return model.reasoning && model.thinkingLevelMap?.off === null ? DEFAULT_THINKING_HEADROOM : 0;
+}
+
+function levelFor(levels, options) {
+  const effort = options.thinking === "off" && levels.includes("off") ? "off" : options.effort;
+  return levels.find((level) => level === effort || effort === "none" && level === "off");
+}
+function reasoningFor(level) {
+  return level === "off" ? void 0 : level;
+}
 var SubscriptionAdapter = class extends LlmAdapter {
   provider;
   secret;
@@ -113003,6 +113173,13 @@ var SubscriptionAdapter = class extends LlmAdapter {
     this.provider = provider;
     this.secret = secret;
     this.resolveSecret = resolveSecret;
+  }
+  requestedOutputTokens(options) {
+    const model = subscriptionProvider(this.provider).getModels().find((entry) => entry.id === options.model);
+    if (!model)
+      return options.maxOutputTokens;
+    const reasoning = reasoningFor(levelFor(getSupportedThinkingLevels(model), options));
+    return subscriptionOutputTokens(model, reasoning, options.maxOutputTokens).requested;
   }
   async *stream(options) {
     let envelope;
@@ -113039,12 +113216,11 @@ var SubscriptionAdapter = class extends LlmAdapter {
     const model = models.getModel(provider.id, options.model);
     if (!model)
       throw new LlmFailure({ provider: this.provider, code: "BAD_REQUEST", message: `Unknown subscription model: ${options.model}` });
-    const efforts = getSupportedThinkingLevels(model);
-    const requestedEffort = options.thinking === "off" && efforts.includes("off") ? "off" : options.effort;
-    const effort = efforts.find((level) => level === requestedEffort || requestedEffort === "none" && level === "off");
-    if (options.effort !== void 0 && !effort) {
+    const level = levelFor(getSupportedThinkingLevels(model), options);
+    if (options.effort !== void 0 && !level) {
       throw new LlmFailure({ provider: this.provider, code: "BAD_REQUEST", message: `Unsupported subscription effort: ${options.effort}` });
     }
+    const reasoning = reasoningFor(level);
     const messages = options.messages.map((message) => message.role === "assistant" ? {
       role: "assistant",
       content: [{ type: "text", text: message.content }],
@@ -113062,9 +113238,9 @@ var SubscriptionAdapter = class extends LlmAdapter {
     try {
       for await (const event of models.streamSimple(model, { messages }, {
         ...options.signal ? { signal: options.signal } : {},
-        ...effort ? { thinking: effort } : {},
+        ...reasoning ? { reasoning } : {},
         ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
-        maxTokens: options.maxOutputTokens,
+        maxTokens: subscriptionOutputTokens(model, reasoning, options.maxOutputTokens).send,
         maxRetries: 0,
         transport: "sse",
         fetch: async (input2, init) => {
@@ -139284,128 +139460,6 @@ function isUndiciDispatcherVersionMismatchError2(error62) {
 var _a11;
 _a11 = brand_privateBedrockClient2;
 
-var FALLBACK_EFFORTS = Object.freeze({
-  reasoning_effort: ["off", "low", "medium", "high"],
-  glm: ["on", "off"],
-  deepseek: ["off", "low", "high", "max"],
-  gemini: ["minimal", "low", "medium", "high"],
-  anthropic: ["off", "low", "medium", "high"],
-  none: []
-});
-var REASONING_EFFORT_VALUES = /* @__PURE__ */ new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
-var THINKING_BUDGET_TOKENS = Object.freeze({
-  minimal: 1024,
-  low: 2048,
-  medium: 8192,
-  high: 16384,
-  xhigh: 24576,
-  max: 32e3
-});
-var DEFAULT_THINKING_HEADROOM = 8192;
-function normalize(effort) {
-  return (effort ?? "").trim().toLowerCase();
-}
-function thinkingHeadroom(effort) {
-  return THINKING_BUDGET_TOKENS[normalize(effort)] ?? 0;
-}
-var OPENAI_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
-var OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
-function openAIThinksByDefault(model) {
-  return OPENAI_REASONING_MODEL.test(model);
-}
-function openAIReasoningEffort(model, effort) {
-  const value = normalize(effort);
-  return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : void 0;
-}
-function compatibleEffortFields(style, effort) {
-  const value = normalize(effort);
-  if (!value || style === "none")
-    return {};
-  if (style === "glm") {
-    if (value === "off")
-      return { thinking: { type: "disabled" } };
-    if (value === "on")
-      return { thinking: { type: "enabled" } };
-    return {};
-  }
-  if (style === "deepseek") {
-    if (value === "off" || value === "none")
-      return { thinking: { type: "disabled" } };
-    const graded = deepseekEffort(value);
-    return graded ? { thinking: { type: "enabled" }, reasoning_effort: graded } : {};
-  }
-  return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
-}
-var DEEPSEEK_EFFORTS = Object.freeze({
-  minimal: "low",
-  low: "low",
-  medium: "high",
-  high: "high",
-  xhigh: "high",
-  max: "max"
-});
-function deepseekEffort(effort) {
-  return DEEPSEEK_EFFORTS[normalize(effort)];
-}
-function defaultThinkingHeadroom(style) {
-  return style === "deepseek" ? THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM : DEFAULT_THINKING_HEADROOM;
-}
-var ADAPTIVE_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]|4-[6-9])(?:\b|-)/;
-var ANTHROPIC_EFFORTS = /* @__PURE__ */ new Set(["low", "medium", "high", "xhigh", "max"]);
-function anthropicThinking(model, effort) {
-  const value = normalize(effort);
-  if (!ANTHROPIC_EFFORTS.has(value))
-    return void 0;
-  if (ADAPTIVE_CLAUDE.test(model)) {
-    return {
-      thinking: { type: "adaptive" },
-      output_config: { effort: value }
-    };
-  }
-  return { thinking: { type: "enabled", budget_tokens: thinkingHeadroom(value) } };
-}
-var GEMINI_BUDGET_MODEL = /^gemini-(?:1|2)\./;
-var GEMINI_LEVELS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
-function geminiThinkingConfig(model, effort) {
-  const value = normalize(effort);
-  const id = model.replace(/^models\//, "");
-  if (GEMINI_BUDGET_MODEL.test(id)) {
-    if (value === "off")
-      return /-pro/.test(id) ? void 0 : { thinkingBudget: 0 };
-    return GEMINI_LEVELS.has(value) ? { thinkingBudget: thinkingHeadroom(value) } : void 0;
-  }
-  return GEMINI_LEVELS.has(value) ? { thinkingLevel: value.toUpperCase() } : void 0;
-}
-function geminiThinksByDefault(model) {
-  const id = model.replace(/^models\//, "").toLowerCase();
-  return /^gemini-(?:[3-9]|\d{2,}|2\.[5-9])/.test(id) || id.includes("-thinking");
-}
-var R1_TOKEN = /(?:^|[/:._-])r1(?:$|[/:._-])/;
-function isCompatibleReasoningModel(provider, model, style) {
-  const lowerModel = model.toLowerCase();
-  if (lowerModel.includes("reasoner") || R1_TOKEN.test(lowerModel)) {
-    return true;
-  }
-  if (style === "glm" || provider === "zai" || provider === "zai-coding") {
-    return true;
-  }
-  if ((style === "deepseek" || provider === "deepseek") && /deepseek-(?:v(?:[4-9]|\d{2})|flash|pro)\b/.test(lowerModel)) {
-    return true;
-  }
-  if (provider === "nvidia" && (/nemotron|-reasoning|thinking|qwq/.test(lowerModel) || R1_TOKEN.test(lowerModel))) {
-    return true;
-  }
-  if (provider === "openrouter" || provider === "vercel-gateway") {
-    if (lowerModel.includes(":thinking") || /nemotron|qwq|deepseek-r1/.test(lowerModel) || lowerModel.includes("reasoner") || lowerModel.includes("r1") || lowerModel.includes("thinking") || /\b(?:o1|o3|o4|gpt-5)\b/.test(lowerModel) || /gemini-(?:[3-9]|2\.[5-9])/.test(lowerModel)) {
-      return true;
-    }
-  }
-  if (/mimo-v2-(?:pro|omni)|mimo-v(?:2\.(?:[5-9]|\d{2})|[3-9]|\d{2})/.test(lowerModel)) {
-    return true;
-  }
-  return false;
-}
-
 function extractHeaders(rawHeaders) {
   const result = {};
   if (!rawHeaders || typeof rawHeaders !== "object") {
@@ -139628,8 +139682,7 @@ var AnthropicAdapter = class extends LlmAdapter {
     this.#client = options.client ?? new Anthropic2({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
   requestedOutputTokens(options) {
-    const thinks = anthropicThinking(options.model, options.effort) !== void 0;
-    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+    return options.maxOutputTokens + anthropicThinkingHeadroom(options.model, options.effort);
   }
   async *stream(options) {
     if (options.signal?.aborted) {

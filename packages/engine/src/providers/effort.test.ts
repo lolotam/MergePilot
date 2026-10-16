@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   anthropicThinking,
+  anthropicThinkingHeadroom,
   compatibleEffortFields,
   FALLBACK_EFFORTS,
   geminiThinkingConfig,
@@ -79,6 +80,37 @@ describe('anthropicThinking', () => {
     expect(anthropicThinking('claude-sonnet-5-5', 'off')).toBeUndefined();
     expect(anthropicThinking('claude-sonnet-5-5', undefined)).toBeUndefined();
     expect(anthropicThinking('claude-sonnet-5-5', 'minimal')).toBeUndefined();
+  });
+});
+
+describe('anthropicThinkingHeadroom', () => {
+  it.each(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5'])(
+    'leaves %s room to think adaptively and still finish the answer',
+    (model) => {
+      expect(anthropicThinkingHeadroom(model, 'low')).toBe(4096);
+      expect(anthropicThinkingHeadroom(model, 'medium')).toBe(16384);
+      expect(anthropicThinkingHeadroom(model, 'high')).toBe(32768);
+      expect(anthropicThinkingHeadroom(model, 'xhigh')).toBe(32768);
+      expect(anthropicThinkingHeadroom(model, 'max')).toBe(32768);
+    },
+  );
+
+  it('keeps the budget table for models before adaptive thinking', () => {
+    expect(anthropicThinkingHeadroom('claude-sonnet-4-5', 'medium')).toBe(8192);
+    expect(anthropicThinkingHeadroom('claude-sonnet-4-5', 'high')).toBe(16384);
+  });
+
+  it.each(['claude-opus-5-5', 'claude-sonnet-5', 'claude-fable-5'])(
+    'reserves the high headroom for %s, which thinks even when no thinking is sent',
+    (model) => {
+      expect(anthropicThinkingHeadroom(model, undefined)).toBe(32768);
+      expect(anthropicThinkingHeadroom(model, 'off')).toBe(32768);
+    },
+  );
+
+  it('adds nothing for models that run without thinking when none is sent', () => {
+    expect(anthropicThinkingHeadroom('claude-opus-4-8', undefined)).toBe(0);
+    expect(anthropicThinkingHeadroom('claude-sonnet-4-5', 'off')).toBe(0);
   });
 });
 

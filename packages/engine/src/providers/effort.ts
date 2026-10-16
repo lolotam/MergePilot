@@ -147,6 +147,43 @@ export function anthropicThinking(model: string, effort: string | undefined): An
   return { thinking: { type: 'enabled', budget_tokens: thinkingHeadroom(value) } };
 }
 
+/**
+ * Output tokens reserved for adaptive Claude thinking, by Anthropic effort. Adaptive thinking
+ * takes no budget: Claude decides how long to think and its thinking shares `max_tokens` with
+ * the answer, so at high effort a large review batch outgrows the budget table above and the
+ * JSON answer is cut (ADR-0011 amendment, 2026-10-16). Every Claude 5.x model allows 128k output.
+ */
+const ADAPTIVE_THINKING_HEADROOM: Readonly<Record<string, number>> = Object.freeze({
+  low: 4096,
+  medium: 16384,
+  high: 32768,
+  xhigh: 32768,
+  max: 32768,
+});
+
+/** Headroom for adaptive Claude thinking at this effort; an absent or unknown effort runs at `high`. */
+export function adaptiveThinkingHeadroom(effort: string | undefined): number {
+  const value = normalize(effort);
+  return ADAPTIVE_THINKING_HEADROOM[value === 'minimal' ? 'low' : value] ?? ADAPTIVE_THINKING_HEADROOM.high ?? 0;
+}
+
+/**
+ * Claude 5 and later think adaptively when a request sends no `thinking` (Opus 5.5, Sonnet 5.5 and
+ * Fable 5 cannot turn it off); Claude 4.6 to 4.8 run without thinking then.
+ */
+const THINKS_BY_DEFAULT_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-[5-9](?:\b|-)/;
+
+/**
+ * Anthropic API: output tokens added on top of the answer for this model's thinking. A request
+ * without `thinking` reserves the `high` headroom on a model that thinks anyway, since the default
+ * effort is `high` on most of them (`medium` on Opus 5.5 and Haiku 5.5); otherwise 0.
+ */
+export function anthropicThinkingHeadroom(model: string, effort: string | undefined): number {
+  const thinking = anthropicThinking(model, effort);
+  if (!thinking) return THINKS_BY_DEFAULT_CLAUDE.test(model) ? adaptiveThinkingHeadroom(undefined) : 0;
+  return thinking.thinking.type === 'adaptive' ? adaptiveThinkingHeadroom(effort) : thinkingHeadroom(effort);
+}
+
 export type GeminiThinkingConfig = { thinkingBudget: number } | { thinkingLevel: string };
 
 const GEMINI_BUDGET_MODEL = /^gemini-(?:1|2)\./;
