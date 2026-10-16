@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import type { TokenUsage } from '../llm/types.js';
+import { FileTier, groupFilesForBatches, type BatchNode } from './batch-groups.js';
 import { estimateTokens } from './budget.js';
 import { ReviewAnswerSchema } from './answer.js';
 import type { Finding } from './types.js';
@@ -131,8 +132,10 @@ export interface CappedBatches {
 }
 
 /**
- * Splits files into batches of at most `capTokens` diff tokens each, in order (ADR-0013).
- * A single file bigger than the cap is its own batch, its patch truncated to the cap.
+ * Splits files into batches of at most `capTokens` diff tokens each (ADR-0013), grouped and
+ * ordered by `groupFilesForBatches` (ADR-0031): a group that fits the cap shares one batch; a
+ * bigger group is split between implementations, then between files. A single file bigger than
+ * the cap is its own batch, its patch truncated to the cap.
  */
 export function batchFilesByTokenCap(
   files: readonly ReviewableFileWithPatch[],
@@ -147,19 +150,35 @@ export function batchFilesByTokenCap(
     current = [];
     currentTokens = 0;
   };
-
-  for (const file of files) {
-    const tokens = estimateTokens(file.patch);
-    if (tokens > capTokens) {
+  // Test-only units split out of an oversized source group wait until every source group is
+  // placed, so a big directory never puts its tests ahead of another directory's source.
+  const deferredTests: BatchNode<ReviewableFileWithPatch>[] = [];
+  const placeDeferred = (): void => {
+    deferredTests.splice(0).forEach(place);
+  };
+  const place = (node: BatchNode<ReviewableFileWithPatch>): void => {
+    if (node.tokens <= capTokens) {
+      if (currentTokens + node.tokens > capTokens) flush();
+      current.push(...node.files.map((f) => ({ ...f })));
+      currentTokens += node.tokens;
+    } else if (node.children) {
+      for (const child of node.children) {
+        if (node.tier === FileTier.Source && child.tier !== FileTier.Source) deferredTests.push(child);
+        else place(child);
+      }
+    } else {
+      const file = node.files[0]!;
       flush();
       batches.push([{ path: file.path, patch: truncatePatch(file.patch, capTokens) }]);
       truncatedPaths.push(file.path);
-      continue;
     }
-    if (currentTokens + tokens > capTokens) flush();
-    current.push({ ...file });
-    currentTokens += tokens;
+  };
+
+  for (const group of groupFilesForBatches(files, (f) => estimateTokens(f.patch))) {
+    if (group.tier !== FileTier.Source) placeDeferred();
+    place(group);
   }
+  placeDeferred();
   flush();
   return { batches, truncatedPaths };
 }

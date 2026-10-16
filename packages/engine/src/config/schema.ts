@@ -61,7 +61,7 @@ export interface ReviewLimits {
 }
 
 export const REVIEW_LIMIT_DEFAULTS: Readonly<ReviewLimits> = Object.freeze({
-  maxPromptTokens: 60_000,
+  maxPromptTokens: 90_000,
   batchTokens: 24_000,
   callTimeoutMs: 300_000,
   totalTimeoutMs: 1_200_000,

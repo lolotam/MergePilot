@@ -29,7 +29,7 @@ describe('parseConfig', () => {
           pathInstructions: [],
           verify: true,
           libraryDocs: { source: 'npm', maxCharsPerLibrary: 8000, maxLibraries: 5 },
-          maxPromptTokens: 60_000,
+          maxPromptTokens: 90_000,
           batchTokens: 24_000,
           callTimeoutMs: 300_000,
           totalTimeoutMs: 1_200_000,

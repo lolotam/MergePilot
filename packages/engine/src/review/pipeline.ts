@@ -26,6 +26,7 @@ import { hasJudgeUse, type JudgeUses } from '../judge/uses.js';
 import type { Judge } from '../judge/judge.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
+import { manifestFileOf, type ManifestFile } from './manifest.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 import { redactPatches } from './patch-helpers.js';
@@ -42,6 +43,9 @@ export interface PrFile {
   status: string;
   patch?: string | undefined;
   changes: number;
+  /** GitHub's line counts, for the PR manifest of a batched review; counted from the patch when absent. */
+  additions?: number | undefined;
+  deletions?: number | undefined;
 }
 
 export interface RulesFile {
@@ -136,12 +140,17 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // ── Step a: classify files ─────────────────────────────────────────────
   const incompleteReasons: string[] = [];
   const reviewableFiles: Array<{ path: string; patch: string }> = [];
+  // Every changed file but sensitive ones, for the manifest of each batch (ADR-0031).
+  const manifestFiles: ManifestFile[] = [];
 
   for (const file of files) {
     const classification = classifyFile(file, {
       exclude: reviewCfg.exclude,
       isSensitivePath,
     });
+    // On the path itself, not the classification: a removed or excluded `.env` is classified
+    // before sensitivity, and its name must still never reach the model.
+    if (!isSensitivePath(file.path)) manifestFiles.push(manifestFileOf(file, knownSecrets));
 
     if (classification === 'incomplete-truncated') {
       incompleteReasons.push(`${file.path}: patch truncated`);
@@ -213,10 +222,12 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     rulesFiles: redactedRulesFiles,
     libraryDocs: input.libraryDocs,
     contextFor: context.forBatch,
+    manifestFiles,
   };
+  // Each batch prompt is priced with its context and its manifest.
   const callPromptTokens = plan
-    ? plan.batches.map((batch) => {
-        const batchPrompt = buildBatchPrompt(promptArgs, batch);
+    ? plan.batches.map((_, index, batches) => {
+        const batchPrompt = buildBatchPrompt({ ...promptArgs, batches }, index);
         return estimateTokens(batchPrompt.system + batchPrompt.user);
       })
     : [promptTokens];
@@ -265,6 +276,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     redactedReviewableFiles,
     libraryDocs: input.libraryDocs,
     contextFor: context.forBatch,
+    manifestFiles,
   };
   const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
   if (!pass.ok) {
