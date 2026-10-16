@@ -3,6 +3,7 @@
  * API keys, how such a bot is admitted against the monthly budget, and how it is priced.
  */
 import { SUBSCRIPTION_PREFIX, type ApiProviderId, type DualMethodConfig } from '@mergepilot/engine';
+import type { Logger } from 'pino';
 import { resolvePricing } from '../core/model-pricing.js';
 import type { ModelPriceStore } from '../core/price-types.js';
 import type { KeyProvider, WorkspaceSettings } from '../core/types.js';
@@ -22,15 +23,29 @@ async function readDualAuth(
   return (await credentials.getDualAuthState?.(workspaceId, provider as KeyProvider)) ?? null;
 }
 
-/** The providers among `providers` that have both a subscription and API keys, with their default. */
+/**
+ * The providers among `providers` that have both a subscription and API keys, with their default.
+ * A provider whose state cannot be read stays on its default method alone (the Phase A behaviour),
+ * so an optional method fallback never fails a review the provider could still run.
+ */
 export async function dualMethodsForProviders(
   credentials: ProcessReviewCredentials,
   workspaceId: string,
   providers: readonly string[],
+  logger: Pick<Logger, 'warn'>,
 ): Promise<DualMethods> {
   const out: DualMethods = {};
   for (const provider of new Set(providers)) {
-    const dual = await readDualAuth(credentials, workspaceId, provider);
+    let dual: DualAuthState | null;
+    try {
+      dual = await readDualAuth(credentials, workspaceId, provider);
+    } catch (error) {
+      logger.warn(
+        { event: 'credential.dual_state_failed', provider, error: error instanceof Error ? error.name : 'unknown' },
+        'Could not read both auth methods of a provider; it runs on its default method only',
+      );
+      continue;
+    }
     if (!dual?.effective || !dual.hasSubscription || !dual.hasApiKeys) continue;
     out[provider as ApiProviderId] = { defaultMethod: dual.effective };
   }

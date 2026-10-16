@@ -58,7 +58,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         ? ctx.mainConfig
         : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store);
     const providerIds = [choice.provider, ...fallbackList.map((fallback) => fallback.provider)];
-    const dualMethods = withinAdmission(await dualMethodsForProviders(deps.credentials, workspaceId, providerIds), br.admittedFree);
+    const dualMethods = withinAdmission(await dualMethodsForProviders(deps.credentials, workspaceId, providerIds, logger), br.admittedFree);
     const { effectiveConfig, rulesFiles, configHash, pricing: configuredPricing } = dualMethods[choice.provider as ApiProviderId]
       ? await apiPricedConfig(builtConfig, deps.store, settings, choice)
       : builtConfig;

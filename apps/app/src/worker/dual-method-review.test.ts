@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DualAuthState } from '../credentials/dual-auth.js';
 import type { WorkspaceSettings } from '../core/types.js';
-import { reviewUsesSubscriptionAdmission, withinAdmission } from './dual-method-review.js';
+import { dualMethodsForProviders, reviewUsesSubscriptionAdmission, withinAdmission } from './dual-method-review.js';
 import { usedModel } from './model-choice.js';
 import type { ProcessReviewCredentials } from './types.js';
 
@@ -28,6 +28,22 @@ describe('reviewUsesSubscriptionAdmission (ADR-0027)', () => {
     ['a state that cannot be read counts as paid instead of failing the review', new Error('db down'), false],
   ] as const)('%s', async (_scenario, dual, free) => {
     expect(await reviewUsesSubscriptionAdmission(credentials(dual), 'ws', 'openai')).toBe(free);
+  });
+});
+
+describe('dualMethodsForProviders', () => {
+  it('leaves a provider whose state cannot be read on its default method, without failing the review', async () => {
+    const creds: ProcessReviewCredentials = {
+      resolve: vi.fn(),
+      getDualAuthState: vi.fn(async (_ws, provider) => {
+        if (provider === 'xai') throw new Error('db down');
+        return state({});
+      }),
+    };
+    const logger = { warn: vi.fn() };
+
+    expect(await dualMethodsForProviders(creds, 'ws', ['openai', 'xai'], logger)).toEqual({ openai: { defaultMethod: 'subscription' } });
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'credential.dual_state_failed', provider: 'xai' }), expect.any(String));
   });
 });
 
