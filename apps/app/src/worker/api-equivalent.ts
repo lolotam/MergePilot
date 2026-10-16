@@ -7,7 +7,7 @@ import type { WorkspaceSettings } from '../core/types.js';
 const TOKEN_PLAN_API_PROVIDER: Record<string, string> = { 'zai-coding': 'zai' };
 
 /**
- * Google Antigravity serves other vendors' models (decisions log س46-ز): the API price is the same
+ * Google Antigravity serves other vendors' models (decisions log س47-ز): the API price is the same
  * model at its own vendor. `-thinking` variants are priced as the base model. Undefined for a
  * model no API provider sells (`gpt-oss-*`), so no equivalent is shown.
  */

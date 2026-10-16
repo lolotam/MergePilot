@@ -1,6 +1,6 @@
 # ADR-0032: Google Antigravity consumer-subscription login
 
-**Date:** 2026-10-16 · **Status:** Accepted (owner, 2026-10-16, decisions log س46) · **Owner decisions:** س45 (third-party client IDs allowed), س46 (scope and design)
+**Date:** 2026-10-16 · **Status:** Accepted (owner, 2026-10-16, decisions log س47) · **Owner decisions:** س45 (third-party client IDs allowed), س47 (scope and design)
 
 **Related:** ADR-0004, ADR-0006, ADR-0008, ADR-0020, ADR-0022, ADR-0024, ADR-0026, ADR-0027, `docs/subscription-auth.md`.
 
@@ -11,7 +11,7 @@ The owner asked for a Google subscription login that works the way the Codex, Cl
 Research findings, 2026-10-16 (sources at the end):
 
 1. **The Gemini CLI consumer path is gone.** Google stopped serving Gemini CLI and the Gemini Code Assist IDE extensions for Google AI Pro/Ultra subscribers and free "Code Assist for individuals" users on 2026-06-18. Code Assist Standard/Enterprise licences (bound to a Google Cloud project) and API-key users kept access. The successor for consumers is the Antigravity CLI (`agy`).
-2. **Google's terms forbid exactly this use.** The Antigravity FAQ states that using third-party software, tools or services to access Antigravity violates the Terms of Service and may lead to suspension or termination. It recommends a Gemini Enterprise or AI Studio API key for third-party agents, and says wrapping headless `agy -p` or automating account switching is unsupported on consumer plans. Community reports describe 403 "ToS violation" suspensions of Antigravity/Gemini CLI access, appeals, and reinstatements. This is a stronger statement than the risk note recorded in س45, so the owner was asked again in س46 (answer: go ahead, with the acknowledgement below).
+2. **Google's terms forbid exactly this use.** The Antigravity FAQ states that using third-party software, tools or services to access Antigravity violates the Terms of Service and may lead to suspension or termination. It recommends a Gemini Enterprise or AI Studio API key for third-party agents, and says wrapping headless `agy -p` or automating account switching is unsupported on consumer plans. Community reports describe 403 "ToS violation" suspensions of Antigravity/Gemini CLI access, appeals, and reinstatements. This is a stronger statement than the risk note recorded in س45, so the owner was asked again in س47 (answer: go ahead, with the acknowledgement below).
 3. **`agy` is closed source.** `github.com/google-antigravity/antigravity-cli` holds docs, examples and the changelog, not the source. Official docs say `agy` signs in with a Google account (Free, Pro, Ultra, or business through Gemini Enterprise), keeps tokens in the OS keyring, and on SSH prints an authorization URL whose browser page shows a code the user pastes back.
 4. **The protocol is public through Gemini CLI (Apache-2.0) and third-party MIT plugins:**
    - **OAuth:** Google's standard authorization endpoint, Authorization Code + PKCE S256 + `state`, token exchange and refresh at `https://oauth2.googleapis.com/token`. Scopes: `cloud-platform`, `userinfo.email`, `userinfo.profile` (the third-party Antigravity plugins also ask for `cclog` and `experimentsandconfigs`). Both clients are Google "installed application" clients whose client ID and non-confidential client secret ship inside the official tool. Gemini CLI's client publishes them in its source; the Antigravity values are those that ship inside the Antigravity application, as used by the third-party plugins.
@@ -25,7 +25,7 @@ Research findings, 2026-10-16 (sources at the end):
 
 ## Decision
 
-The owner accepted every recommendation in س46 and confirmed (د): the new provider is sign-in only.
+The owner accepted every recommendation in س47 and confirmed (د): the new provider is sign-in only.
 
 1. **A separate provider, subscription only.**
    - `google-antigravity` ("Google Antigravity") is in `API_PROVIDER_IDS`, `SUBSCRIPTION_PROVIDERS` and the new `SUBSCRIPTION_ONLY_PROVIDERS` (`packages/engine/src/credentials/subscription.ts`), and in the dashboard's `SubscriptionProviderSchema`.
@@ -46,9 +46,9 @@ The owner accepted every recommendation in س46 and confirmed (د): the new prov
 
    `subscription/auth.ts` dispatches `loginSubscription`/`refreshSubscription` for `google-antigravity` to this module; the other subscriptions keep pi-ai. `createSubscriptionAdapter` and `isSubscriptionAdapter` (`subscription/adapter.ts`) pick the adapter and mark it as subscription-billed. The engine does not import from `apps/` (ADR-0001).
 
-   This is a written exception to AGENTS.md's "delegate OAuth protocol details to pi-ai" (س46-ح); if pi-ai adds a maintained Google provider, this module moves to it. The code is written from the protocol description above. Nothing is copied from Gemini CLI (Apache-2.0, outside the MIT copying rule) or from the plugins.
+   This is a written exception to AGENTS.md's "delegate OAuth protocol details to pi-ai" (س47-ح); if pi-ai adds a maintained Google provider, this module moves to it. The code is written from the protocol description above. Nothing is copied from Gemini CLI (Apache-2.0, outside the MIT copying rule) or from the plugins.
 
-3. **Client credentials.** The OAuth client ID and its non-confidential installed-app secret come from server configuration, `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_ID` and `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_SECRET`, never from the repository (س46-ب). Without both:
+3. **Client credentials.** The OAuth client ID and its non-confidential installed-app secret come from server configuration, `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_ID` and `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_SECRET`, never from the repository (س47-ب). Without both:
    - `GET /api/workspaces/:ws/subscriptions` leaves the provider out, so the add-credential dialog does not offer it;
    - `POST …/subscriptions/google-antigravity` answers `400 invalid_provider`;
    - a refresh fails with "sign in again".
@@ -62,7 +62,7 @@ The owner accepted every recommendation in س46 and confirmed (د): the new prov
    4. `codeFromPastedUrl` rejects an address with no `code` or with a missing or wrong `state`, then the code is exchanged with the verifier.
    5. `loadCodeAssist` gives the project and tier. A new account is onboarded on its default tier with `onboardUser`, polled every 5 s for up to 2 minutes.
 
-   Failures carry a fixed `SubscriptionLoginError.reason`: `denied`, `state-mismatch`, `invalid-paste`, `token-exchange`, `validation-required`, `ineligible` or `project-required`. A tier that needs the user's own Google Cloud project (a business account) fails with `project-required`; only personal accounts are in scope (س46-هـ). The login snapshot exposes only `errorCode`, never Google's body.
+   Failures carry a fixed `SubscriptionLoginError.reason`: `denied`, `state-mismatch`, `invalid-paste`, `token-exchange`, `validation-required`, `ineligible` or `project-required`. A tier that needs the user's own Google Cloud project (a business account) fails with `project-required`; only personal accounts are in scope (س47-هـ). The login snapshot exposes only `errorCode`, never Google's body.
 
    The terms acknowledgement is required twice: the dashboard enables **Sign in** only after the checkbox is ticked, and the start route refuses a request without `acknowledgedTerms: true` (`400 terms_not_acknowledged`). Everything else is today's rule: admin only, bound to user and workspace, 15-minute expiry, cancellable, sticky routing for several web replicas, saved only by the authenticated `finish` request.
 
@@ -115,7 +115,7 @@ The owner accepted every recommendation in س46 and confirmed (د): the new prov
 
 10. **Pricing and accounting (ADR-0024).**
     - Calls are subscription-billed: `includedInSubscription`, `authMethod: 'subscription'`, run price source `subscription`, and $0 incremental cost, with token usage kept. Budget admission treats the bot as free (ADR-0022).
-    - The display-only API-equivalent uses the same model at its own vendor (س46-ز). `antigravityApiModel` in `apps/app/src/worker/api-equivalent.ts` maps `claude-*` to `anthropic` and `gemini-*` to `gemini`, and prices `-thinking` variants as their base model. `gpt-oss-*` has no API vendor, so no equivalent is shown, never $0.
+    - The display-only API-equivalent uses the same model at its own vendor (س47-ز). `antigravityApiModel` in `apps/app/src/worker/api-equivalent.ts` maps `claude-*` to `anthropic` and `gemini-*` to `gemini`, and prices `-thinking` variants as their base model. `gpt-oss-*` has no API vendor, so no equivalent is shown, never $0.
 
 11. **Dashboard.**
     - **Add credential.** The dialog offers "Google Antigravity" only when `GET …/subscriptions` lists it. It then shows sign-in only, with no API-key field.
@@ -165,8 +165,8 @@ The owner accepted every recommendation in س46 and confirmed (د): the new prov
 
 - Workspaces gain a Google consumer-subscription bot that serves Claude and Gemini models on the user's Google AI plan.
 - Google's terms forbid this use, and the dashboard says so before every sign-in. Google can suspend the account's Antigravity access, and it can change the client, headers or hosts at any time, so the feature can break without notice. Every such failure surfaces as `LlmFailure`; nothing falls back silently.
-- MergePilot owns this protocol code instead of pi-ai (AGENTS.md exception, س46-ح).
-- Business accounts (Code Assist Standard/Enterprise with their own Google Cloud project) use the same protocol. They can be added later with a user-supplied project id (س46-هـ).
+- MergePilot owns this protocol code instead of pi-ai (AGENTS.md exception, س47-ح).
+- Business accounts (Code Assist Standard/Enterprise with their own Google Cloud project) use the same protocol. They can be added later with a user-supplied project id (س47-هـ).
 - ADR-0006's "Gemini has no subscription mode" lines are amended to point here.
 
 ## Sources (read 2026-10-16)

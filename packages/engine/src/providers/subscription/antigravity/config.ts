@@ -1,7 +1,7 @@
 /**
  * Google Antigravity subscription (ADR-0032). The OAuth client is a Google "installed application"
  * client whose ID and non-confidential secret ship inside the official Antigravity application.
- * MergePilot does not commit them: the deployment supplies both (decisions log س46-ب), and the
+ * MergePilot does not commit them: the deployment supplies both (decisions log س47-ب), and the
  * provider stays unavailable without them.
  */
 export const ANTIGRAVITY_CLIENT_ID_ENV = 'GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_ID';

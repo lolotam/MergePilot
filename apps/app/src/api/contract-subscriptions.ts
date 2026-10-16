@@ -26,7 +26,7 @@ export const SubscriptionInputSchema = z.object({ promptId: z.string().uuid(), v
 
 /**
  * Starting a sign-in. `acknowledgedTerms` is required for Google Antigravity: Google's terms
- * forbid third-party access and the account may be suspended (decisions log س46-أ).
+ * forbid third-party access and the account may be suspended (decisions log س47-أ).
  */
 export const SubscriptionStartSchema = z.object({ acknowledgedTerms: z.boolean().optional() }).strict();
 

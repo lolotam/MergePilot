@@ -157,7 +157,7 @@ function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** The Cloud Code Assist project and tier of a personal account (decisions log س46-هـ). */
+/** The Cloud Code Assist project and tier of a personal account (decisions log س47-هـ). */
 export async function setupCodeAssist(deps: AntigravityDeps, access: string, signal: AbortSignal): Promise<{ projectId: string; tier: string }> {
   const loaded = (await postCodeAssist(deps, access, 'loadCodeAssist', { metadata: { ...ANTIGRAVITY_CLIENT_METADATA } }, signal)) as LoadCodeAssistResponse;
   const ineligible = loaded.ineligibleTiers ?? [];
@@ -171,7 +171,7 @@ export async function setupCodeAssist(deps: AntigravityDeps, access: string, sig
   }
   const tier = loaded.allowedTiers?.find((entry) => entry.isDefault === true);
   if (!tier || typeof tier.id !== 'string') throw new SubscriptionLoginError('ineligible');
-  // A tier that needs the user's own Google Cloud project is a business account: not in scope (س46-هـ).
+  // A tier that needs the user's own Google Cloud project is a business account: not in scope (س47-هـ).
   if (tier.userDefinedCloudaicompanionProject === true) throw new SubscriptionLoginError('project-required');
   return { projectId: await onboard(deps, access, tier.id, signal), tier: tier.id };
 }

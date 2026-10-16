@@ -14,7 +14,7 @@ function priceStore() {
 const subscription = { includedInSubscription: true };
 const zero = { inputPerMTok: 0, outputPerMTok: 0 };
 
-describe('Google Antigravity API-equivalent (decisions log س46-ز)', () => {
+describe('Google Antigravity API-equivalent (decisions log س47-ز)', () => {
   it('maps each model to its own vendor, pricing -thinking variants as the base model', () => {
     expect(antigravityApiModel('claude-opus-4-6-thinking')).toEqual({ provider: 'anthropic', model: 'claude-opus-4-6' });
     expect(antigravityApiModel('gemini-3.1-pro')).toEqual({ provider: 'gemini', model: 'gemini-3.1-pro' });
