@@ -114962,7 +114962,7 @@ var MAX_PATH_CHARS = 200;
 function countPatchLines(patch, sign) {
   if (!patch)
     return 0;
-  return patch.split("\n").filter((line) => line.startsWith(sign)).length;
+  return patch.split("\n").filter((line) => line.startsWith(sign) && !line.startsWith(sign.repeat(3))).length;
 }
 function manifestFileOf(file2, knownSecrets) {
   return {
@@ -114978,8 +114978,8 @@ function shown(text) {
     const code = ch.codePointAt(0);
     return code < 32 || code >= 127 && code <= 159 || code === 8232 || code === 8233;
   };
-  const flat = [...text].map((ch) => isControl(ch) ? "?" : ch).join("");
-  return flat.length <= MAX_PATH_CHARS ? flat : `\u2026${flat.slice(flat.length - MAX_PATH_CHARS + 1)}`;
+  const chars = [...text].map((ch) => isControl(ch) ? "?" : ch);
+  return chars.length <= MAX_PATH_CHARS ? chars.join("") : `\u2026${chars.slice(chars.length - MAX_PATH_CHARS + 1).join("")}`;
 }
 function renderManifest(files, batches) {
   const batchOf = /* @__PURE__ */ new Map();
