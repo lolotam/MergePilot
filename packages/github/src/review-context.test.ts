@@ -48,6 +48,11 @@ describe('import resolution', () => {
     expect(resolveImportCandidates('src/x.ts', './user.service')[0]).toBe('src/user.service.ts');
   });
 
+  it('treats a dotted name that matches an Object.prototype key as an extensionless module', () => {
+    expect(() => resolveImportCandidates('src/x.ts', './service.constructor')).not.toThrow();
+    expect(resolveImportCandidates('src/x.ts', './service.constructor')[0]).toBe('src/service.constructor.ts');
+  });
+
   it('ignores asset imports and paths that climb above the repository root', () => {
     expect(resolveImportCandidates('src/x.ts', './styles.css')).toEqual([]);
     expect(resolveImportCandidates('src/x.ts', '../../outside.js')).toEqual([]);
@@ -167,6 +172,15 @@ describe('gatherRepositoryContext', () => {
     );
     expect(result.files.find((f) => f.path === 'src/new.ts')).toMatchObject({ kind: 'import', content: 'export const fresh = 1;' });
     expect(reads.map((r) => r.path)).not.toContain('src/new.ts');
+  });
+
+  it('tries the next candidate of a lookup when one is not allowed as context', async () => {
+    const { client } = fakeClient({ 'app/tests/test_views.py': 'def test(): pass', 'app/views.py': 'def view(): pass' });
+    const result = await gatherRepositoryContext(
+      client,
+      params([modified('app/tests/test_views.py')], { exclude: ['app/tests/views.py'] }),
+    );
+    expect(result.files.map((f) => f.path)).toContain('app/views.py');
   });
 
   it('never takes a failed read or the read limit for file content', async () => {

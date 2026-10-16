@@ -118,6 +118,8 @@ function prepare(files: readonly RepositoryContextFile[], opts: ContextPlanOptio
 export class ContextPlan {
   private readonly files: PreparedContextFile[];
   private readonly sent = new Map<string, ContextFile>();
+  /** Context skipped because the file's own patch was in the call: shown, so never left out. */
+  private readonly shownAsPatch = new Set<string>();
 
   constructor(
     offered: readonly RepositoryContextFile[],
@@ -137,7 +139,10 @@ export class ContextPlan {
       // empty block would count it as sent; it stays left out instead.
       if (file.truncated && file.content === '') continue;
       // An added file imported by another file of this call: its patch here already shows all of it.
-      if (file.kind !== 'changed-file' && wanted.has(file.path)) continue;
+      if (file.kind !== 'changed-file' && wanted.has(file.path)) {
+        this.shownAsPatch.add(file.path);
+        continue;
+      }
       chosen.push({ path: file.path, content: file.content, reason: file.reason, truncated: file.truncated });
       left -= file.tokens;
     }
@@ -172,7 +177,7 @@ export class ContextPlan {
     if (this.files.length === 0) return undefined;
     return {
       sent: [...this.sent.keys()],
-      leftOut: this.files.filter((f) => !this.sent.has(f.path)).map((f) => f.path),
+      leftOut: this.files.filter((f) => !this.sent.has(f.path) && !this.shownAsPatch.has(f.path)).map((f) => f.path),
     };
   }
 }

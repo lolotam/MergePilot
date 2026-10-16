@@ -81,6 +81,12 @@ describe('ContextPlan', () => {
     expect(plan.forBatch([{ path: 'src/a.ts' }]).map((f) => f.path)).toEqual(['src/b.ts']);
   });
 
+  it('does not disclose a file as left out when its own patch was in the call', () => {
+    const plan = new ContextPlan([file('src/b.ts', 'import', 'export const b = 1;', ['src/a.ts'])], options());
+    plan.markSent(plan.whole());
+    expect(plan.disclosure()).toEqual({ sent: [], leftOut: [] });
+  });
+
   it('leaves out a file of which not even the first line fits, instead of sending an empty block', () => {
     const oneLine = `export const data = [${'1, '.repeat(5000)}];`;
     const plan = new ContextPlan([file('src/data.ts', 'import', oneLine), file('src/ok.ts', 'import')], options({ contextTokens: 800 }));

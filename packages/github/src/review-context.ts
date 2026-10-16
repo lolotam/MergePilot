@@ -106,7 +106,8 @@ export function resolveImportCandidates(fromPath: string, specifier: string): st
   const target = joinRelative(dirOf(fromPath), specifier);
   if (!target) return [];
   const ext = extOf(target);
-  const emitted = SOURCE_FOR_EMITTED[ext];
+  // Own keys only: `./service.constructor` must not resolve through Object.prototype.
+  const emitted = Object.hasOwn(SOURCE_FOR_EMITTED, ext) ? SOURCE_FOR_EMITTED[ext] : undefined;
   if (emitted) return emitted.map((e) => `${target.slice(0, -ext.length)}${e}`);
   if (JS_EXTENSIONS.has(ext)) return [target];
   if (NON_CODE_EXTENSIONS.has(ext)) return [];
@@ -274,7 +275,11 @@ class ContextReader {
         if (content) this.add(lookup, path, content);
         return; // a reviewed file: its own entry (or its patch) already covers it
       }
-      if (!isContextPathAllowed(path, { exclude: this.params.exclude, isSensitivePath })) return;
+      // A sensitive name (`./.env` → `.env.ts`, `.env/index.ts`) ends the lookup: no form of it is
+      // read. Any other candidate context may not hold (excluded, generated) is skipped, and a later
+      // candidate of the same lookup may still be fine.
+      if (isSensitivePath(path) || isSensitivePath(lookup.candidates[0] ?? path)) return;
+      if (!isContextPathAllowed(path, { exclude: this.params.exclude, isSensitivePath })) continue;
       const outcome = await this.read(path);
       if (outcome === 'limit') {
         if (lookup.disclose) this.leftOut.push(`${lookup.candidates[0]} (not looked up)`);

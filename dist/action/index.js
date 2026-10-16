@@ -115401,6 +115401,8 @@ var ContextPlan = class {
   opts;
   files;
   sent = /* @__PURE__ */ new Map();
+  /** Context skipped because the file's own patch was in the call: shown, so never left out. */
+  shownAsPatch = /* @__PURE__ */ new Set();
   constructor(offered, opts) {
     this.opts = opts;
     this.files = opts.contextTokens > 0 ? prepare(offered, opts) : [];
@@ -115415,8 +115417,10 @@ var ContextPlan = class {
         continue;
       if (file2.truncated && file2.content === "")
         continue;
-      if (file2.kind !== "changed-file" && wanted.has(file2.path))
+      if (file2.kind !== "changed-file" && wanted.has(file2.path)) {
+        this.shownAsPatch.add(file2.path);
         continue;
+      }
       chosen.push({ path: file2.path, content: file2.content, reason: file2.reason, truncated: file2.truncated });
       left -= file2.tokens;
     }
@@ -115448,7 +115452,7 @@ var ContextPlan = class {
       return void 0;
     return {
       sent: [...this.sent.keys()],
-      leftOut: this.files.filter((f3) => !this.sent.has(f3.path)).map((f3) => f3.path)
+      leftOut: this.files.filter((f3) => !this.sent.has(f3.path) && !this.shownAsPatch.has(f3.path)).map((f3) => f3.path)
     };
   }
 };
@@ -169540,7 +169544,7 @@ function resolveImportCandidates(fromPath, specifier) {
   if (!target)
     return [];
   const ext = extOf(target);
-  const emitted = SOURCE_FOR_EMITTED[ext];
+  const emitted = Object.hasOwn(SOURCE_FOR_EMITTED, ext) ? SOURCE_FOR_EMITTED[ext] : void 0;
   if (emitted)
     return emitted.map((e2) => `${target.slice(0, -ext.length)}${e2}`);
   if (JS_EXTENSIONS.has(ext))
@@ -169670,8 +169674,10 @@ var ContextReader = class {
           this.add(lookup, path11, content);
         return;
       }
-      if (!isContextPathAllowed(path11, { exclude: this.params.exclude, isSensitivePath }))
+      if (isSensitivePath(path11) || isSensitivePath(lookup.candidates[0] ?? path11))
         return;
+      if (!isContextPathAllowed(path11, { exclude: this.params.exclude, isSensitivePath }))
+        continue;
       const outcome = await this.read(path11);
       if (outcome === "limit") {
         if (lookup.disclose)
