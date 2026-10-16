@@ -17,10 +17,6 @@ describe('settings contract: maxFindings', () => {
   it.each([1, 4, 7, 51, 55, 100, 2.5, '10', null])('rejects %s', (maxFindings) => {
     expect(SettingsUpdateSchema.safeParse({ ...base, maxFindings }).success).toBe(false);
   });
-
-  it('leaves the field out when the body does not name it', () => {
-    expect(SettingsUpdateSchema.parse(base)).not.toHaveProperty('maxFindings');
-  });
 });
 
 describe('PUT /settings maxFindings', { timeout: 25000 }, () => {

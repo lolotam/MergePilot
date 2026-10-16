@@ -160,7 +160,7 @@ function capClusters(
       b.foundBy.length - a.foundBy.length ||
       byImportance(a, b),
   );
-  const chosen = new Set(ranked.slice(0, Math.max(0, max)));
+  const chosen = new Set(ranked.slice(0, max));
   return { kept: clusters.filter((c) => chosen.has(c)), overLimit: clusters.filter((c) => !chosen.has(c)) };
 }
 

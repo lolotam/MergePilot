@@ -25,7 +25,8 @@ export interface ConsensusPublish {
 /**
  * Consensus mode (ADR-0017): merges the findings of every bot that completed, drops what is
  * below the minimum agreement (except critical and high, and listed in the summary), keeps at
- * most `review.maxFindings` of the rest (the others are listed too; ADR-0033), and publishes one review as slot 1 under «Review panel». Publishes nothing when no bot completed.
+ * most `review.maxFindings` of the rest (the others are listed too; ADR-0033), and publishes one
+ * review as slot 1 under «Review panel». Publishes nothing when no bot completed.
  * The judge's same-issue cost is added to the record of the bot whose run carries the review
  * (slot 1 when it completed, otherwise the lowest completed slot).
  */

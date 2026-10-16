@@ -23,14 +23,14 @@ A consensus panel (ADR-0017) merged the reviews of up to five bots without cappi
 4. **What the limit counts.** It counts the findings of one published review: inline comments and findings outside the diff together. (`selectFindings` caps the list before anchoring splits it.)
    - **One bot, or a panel in separate mode:** each bot publishes its own review, so the cap applies per bot. Three bots at 20 can publish up to 60 comments on a PR, in three reviews.
    - **Batched review:** each batch call is asked for at most N, and the bot's review keeps N in total, most severe first (`selectFindings` after the batches merge). A batch that finds fewer leaves room for the others.
-   - **Consensus mode:** the panel publishes one review, so the cap applies to that merged review. `mergePanelFindings` gets `maxFindings` and keeps that many agreed clusters: most severe first, then those the most bots found, then by path and line. The clusters over the limit are returned as `overLimit`, and the panel summary lists them under «Over the findings limit (n)», next to «Below agreement». Nothing is dropped silently. Critical and high findings bypass the agreement threshold, but not this limit: when there are more than N of them, the least agreed ones are listed over the limit.
+   - **Consensus mode:** the panel publishes one review, so the cap applies to that merged review. `mergePanelFindings` gets `maxFindings` and keeps that many agreed clusters: most severe first, then those the most bots found, then by path and line. The clusters over the limit are returned as `overLimit`, and the panel summary lists them under «Over the findings limit (n)», next to «Below agreement». Nothing is dropped silently. Critical and high findings bypass the agreement threshold, but not this limit: when there are more than N of them, high ones are left out before critical ones, and within one severity the least agreed are left out first.
 5. **Output budget.** `review/output-budget.ts`:
    - Review call: `max(4096, 1024 + 300 × N)` answer tokens, which is 4096 up to 10 findings and 16,024 at 50.
    - Truncation retry: twice the first budget, at most 32,768 (it was at most 16,384).
    - Verification call: `max(2048, 128 × findings checked)`, at most 16,384. Its retry is twice that, at most 16,384.
 
    Adapters still add their thinking headroom on top. At the default 5 every budget is what it was. The budget preflight prices these larger limits. For verification it assumes the worst case: every call returned N findings.
-6. **Safety caps that stay.** The run record keeps at most 200 findings (`prepare-run-result.ts`). The audit keeps its `min(N × chunks, 50)`. The judge's same-issue pairs stay capped at 50 per request (`MAX_CONSENSUS_PAIRS`, `MAX_SEMANTIC_PAIRS`). Findings past those pairs are merged by title only. The GitHub publish path has no cap of its own.
+6. **Safety caps that stay.** The run record keeps at most 200 findings (`prepare-run-result.ts`). The audit keeps its `min(N × chunks, 50)`. The judge's same-issue pairs stay capped at 50 per request (`MAX_CONSENSUS_PAIRS`, `MAX_SEMANTIC_PAIRS`). Pairs past that cap are compared by title only. The GitHub publish path has no cap of its own.
 
 ## Consequences
 

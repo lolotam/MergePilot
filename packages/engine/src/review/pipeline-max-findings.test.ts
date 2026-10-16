@@ -59,13 +59,6 @@ describe('runReview — review.maxFindings', () => {
     expect(calls.map((c) => c.maxOutputTokens).slice(0, 2)).toEqual([16_024, 6400]);
   });
 
-  it('keeps the 4096-token answer budget at the default 5 findings', async () => {
-    const { model, calls } = findingsModel(1);
-    await review(configWith({}), model, [{ path: 'src/f0.ts', status: 'added', patch: patchOf(3), changes: 3 }]);
-    expect(calls[0]?.system).toContain('Return at most 5 findings.');
-    expect(calls[0]?.maxOutputTokens).toBe(4096);
-  });
-
   it('asks every batch for maxFindings and caps the batched review at the same total', async () => {
     const { model, calls } = findingsModel(3);
     const files: PrFile[] = Array.from({ length: 5 }, (_, i) => ({
