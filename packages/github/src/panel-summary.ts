@@ -2,8 +2,14 @@ import { escapeInline, renderBotLogo } from './bot-identity.js';
 import { foundByLabel, type ConsensusCluster, type MergePanelResult } from './consensus.js';
 import type { FallbackReason } from './fallback-reason.js';
 import { renderFallbackNotice, renderScopeLine, type ReviewScope } from './summary.js';
-import type { ContextDisclosure } from '@mergepilot/engine';
-import { renderContextNote, renderRulesLeftOut, renderVerifyRejected, type VerifyRejectedItem } from './review-notes.js';
+import type { ContextDisclosure, OutputLimitDisclosure } from '@mergepilot/engine';
+import {
+  renderContextNote,
+  renderOutputLimitNote,
+  renderRulesLeftOut,
+  renderVerifyRejected,
+  type VerifyRejectedItem,
+} from './review-notes.js';
 import { neutralize } from './text-safety.js';
 
 /** One bot's row in the consensus summary table (ADR-0017). */
@@ -42,6 +48,8 @@ export interface PanelSummaryInput {
   rulesLeftOut?: readonly string[] | undefined;
   /** Repository context of the bots, merged (ADR-0029). */
   context?: ContextDisclosure | undefined;
+  /** The bots whose model's output limit clamped their answer budget (ADR-0033). */
+  outputLimits?: ReadonlyArray<OutputLimitDisclosure & { bot: string }> | undefined;
 }
 
 interface Labels {
@@ -53,6 +61,7 @@ interface Labels {
   incomplete: string;
   outside: string;
   below: (n: number) => string;
+  overLimit: (n: number) => string;
   summaries: string;
   counts: (inline: number, outside: number) => string;
   disclaimer: string;
@@ -68,6 +77,7 @@ const EN: Labels = {
   incomplete: '### ⚠️ Warning: Incomplete review',
   outside: '### Findings outside the diff',
   below: (n) => `Below agreement (${n})`,
+  overLimit: (n) => `Over the findings limit (${n})`,
   summaries: 'Bot summaries',
   counts: (inline, outside) => `Inline comments: ${inline} · Outside diff: ${outside}`,
   disclaimer: 'MergePilot only comments and never approves or blocks merging.',
@@ -83,6 +93,7 @@ const AR: Labels = {
   incomplete: '### ⚠️ تحذير: مراجعة غير مكتملة',
   outside: '### ملاحظات خارج التغييرات',
   below: (n) => `أقل من حد الاتفاق (${n})`,
+  overLimit: (n) => `فوق الحد الأقصى للملاحظات (${n})`,
   summaries: 'ملخصات المراجعين',
   counts: (inline, outside) => `تعليقات مضمنة: ${inline} · خارج التغييرات: ${outside}`,
   disclaimer: '`MergePilot` يكتفي بالتعليق فقط ولا يوافق على الدمج أو يمنعه.',
@@ -113,8 +124,8 @@ function details(summary: string, body: string): string {
 
 /**
  * The body of the one review a consensus panel publishes: the «Review panel» header, a table of
- * the bots, the merged findings outside the diff, and everything set aside below the agreement,
- * so nothing is dropped silently. The hidden marker is appended by `publishReview`.
+ * the bots, the merged findings outside the diff, and everything set aside below the agreement or
+ * over the findings limit, so nothing is dropped silently. The hidden marker is appended by `publishReview`.
  */
 export function renderPanelSummary(input: PanelSummaryInput): string {
   const isArabic = input.language === 'ar';
@@ -148,6 +159,10 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
     const items = merge.below.map((c) => `- ${clusterLine(c, merge.total, input.language)}`);
     sections.push(details(labels.below(merge.below.length), items.join('\n')));
   }
+  if (merge.overLimit.length > 0) {
+    const items = merge.overLimit.map((c) => `- ${clusterLine(c, merge.total, input.language)}`);
+    sections.push(details(labels.overLimit(merge.overLimit.length), items.join('\n')));
+  }
 
   const rejected = renderVerifyRejected(input.verifyRejected ?? [], isArabic);
   if (rejected) sections.push(rejected);
@@ -155,6 +170,10 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   if (rulesLeftOut) sections.push(rulesLeftOut);
   const contextNote = renderContextNote(input.context, isArabic);
   if (contextNote) sections.push(contextNote);
+  for (const limit of input.outputLimits ?? []) {
+    const note = renderOutputLimitNote(limit, isArabic, limit.bot);
+    if (note) sections.push(note);
+  }
 
   const summaries = input.bots.filter((b) => b.status === 'completed' && b.summary?.trim());
   if (summaries.length > 0) {

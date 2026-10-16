@@ -60,6 +60,11 @@ export const arSettings = {
   severityHigh: 'عالية (High)',
   severityCritical: 'حرجة (Critical)',
 
+  // حد الملاحظات (ADR-0033)
+  maxFindingsLabel: 'أقصى عدد للملاحظات في مراجعة الـ PR الواحدة',
+  maxFindingsHint:
+    'أكبر عدد من الملاحظات تكتبه مراجعة واحدة على الـ Pull Request. إذا حدّد ملف .mergepilot.yml في المستودع review.maxFindings، فسيُستخدم الرقم الموجود فيه.',
+
   // Key testing & Base URL
   testKeyAction: 'اختبار الاتصال',
   testingKey: 'جاري الاختبار...',

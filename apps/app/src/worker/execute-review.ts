@@ -171,6 +171,7 @@ export async function executeReview(
       verifyRejected: reviewResult.verifyRejected,
       rulesLeftOut: run.rulesLeftOut,
       context: run.context,
+      outputLimit: reviewResult.outputLimit,
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),
