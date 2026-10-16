@@ -5,6 +5,18 @@
  * thinking headroom on top (`ReviewModel.outputTokensFor`).
  */
 
+/**
+ * The model's known output limit left a review call less answer room than `review.maxFindings`
+ * findings are sized for (ADR-0033): the calls were clamped to fit, and the summary says so.
+ */
+export interface OutputLimitDisclosure {
+  maxFindings: number;
+  /** Answer tokens each review call got within the model's limit. */
+  answerTokens: number;
+  /** Answer tokens `maxFindings` findings are sized for (`reviewOutputTokensFor`). */
+  neededTokens: number;
+}
+
 /** Answer budget of one review call at the default findings limit. */
 export const BASE_REVIEW_OUTPUT_TOKENS = 4096;
 /** Room for the review's summary, beside its findings. */

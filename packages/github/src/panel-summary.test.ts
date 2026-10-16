@@ -71,6 +71,13 @@ describe('renderPanelSummary (consensus, ADR-0017)', () => {
     expect(unlimited).not.toContain('Over the findings limit');
   });
 
+  it('names each bot whose model output limit clamped its answer (ADR-0033)', async () => {
+    const outputLimits = [{ maxFindings: 50, answerTokens: 6144, neededTokens: 16_024, bot: 'Owl' }];
+    const body = renderPanelSummary({ language: 'en', baseUrl: BASE, bots, merge: await merged(), minAgreement: 2, inlineCount: 1, outputLimits });
+    expect(body).toContain('allowed 6144 answer tokens instead of the 16024 sized for 50 findings');
+    expect(body).toContain('may hold fewer findings. — **Owl**');
+  });
+
   it('renders in Arabic inside an RTL block', async () => {
     const body = renderPanelSummary({ language: 'ar', baseUrl: BASE, bots, merge: await merged(), minAgreement: 1, inlineCount: 1 });
     expect(body.startsWith('<div dir="rtl">\n\n## لوحة المراجعين')).toBe(true);

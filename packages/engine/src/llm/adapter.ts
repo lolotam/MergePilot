@@ -1,3 +1,4 @@
+import { knownMaxOutputTokens } from '../providers/output-limits.js';
 import type { RetryPolicy } from './retry.js';
 import type { GenerateOptions, ModelEntry, StreamChunk } from './types.js';
 
@@ -22,6 +23,11 @@ export abstract class LlmAdapter {
    */
   requestedOutputTokens(options: OutputTokenRequest): number {
     return options.maxOutputTokens;
+  }
+
+  /** The most output tokens one call to `model` may ask for; undefined when unknown (ADR-0033). */
+  outputLimit(model: string): number | undefined {
+    return knownMaxOutputTokens(this.provider, model);
   }
 
   listModels?(): Promise<ModelEntry[]>;

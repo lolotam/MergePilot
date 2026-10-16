@@ -1,8 +1,14 @@
-import type { ContextDisclosure, Finding } from '@mergepilot/engine';
+import type { ContextDisclosure, Finding, OutputLimitDisclosure } from '@mergepilot/engine';
 import type { FallbackReason } from './fallback-reason.js';
 import { renderBotIdentity, type BotIdentity } from './bot-identity.js';
 import type { JudgeSummaryInput } from './judge-summary.js';
-import { renderContextNote, renderRulesLeftOut, renderVerifyRejected, type VerifyRejectedItem } from './review-notes.js';
+import {
+  renderContextNote,
+  renderOutputLimitNote,
+  renderRulesLeftOut,
+  renderVerifyRejected,
+  type VerifyRejectedItem,
+} from './review-notes.js';
 import { neutralize } from './text-safety.js';
 
 export type ReviewScope =
@@ -43,6 +49,8 @@ export interface ReviewSummaryInput {
   rulesLeftOut?: readonly string[] | undefined;
   /** Repository context sent and left out (ADR-0029). */
   context?: ContextDisclosure | undefined;
+  /** The model's output limit clamped the answer budget (ADR-0033). */
+  outputLimit?: OutputLimitDisclosure | undefined;
 }
 
 function renderHeader(outcome: ReviewSummaryInput['outcome'], isArabic: boolean): string {
@@ -275,6 +283,8 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
   if (rulesLeftOut) sections.push(rulesLeftOut);
   const contextNote = renderContextNote(input.context, isArabic);
   if (contextNote) sections.push(contextNote);
+  const outputLimitNote = renderOutputLimitNote(input.outputLimit, isArabic);
+  if (outputLimitNote) sections.push(outputLimitNote);
 
   if (input.summaryOnly && input.summaryOnly.length > 0) {
     sections.push(renderFindingsOutsideDiff(input.summaryOnly, isArabic));

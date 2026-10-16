@@ -51,6 +51,23 @@ describe('runReview — review.maxFindings', () => {
     if (result.status === 'completed') expect(result.result.findings).toHaveLength(50);
   });
 
+  it('discloses when the model output limit leaves less answer room than the limit needs', async () => {
+    const { model } = findingsModel(5);
+    const limited: ReviewModel = { ...model, answerTokensFor: (max) => Math.min(max, 6000) };
+    const files: PrFile[] = [{ path: 'src/f0.ts', status: 'added', patch: patchOf(10), changes: 10 }];
+
+    const clamped = await review(configWith({ maxFindings: 50 }), limited, files);
+    expect(clamped.status).toBe('completed');
+    if (clamped.status === 'completed') {
+      expect(clamped.outputLimit).toEqual({ maxFindings: 50, answerTokens: 6000, neededTokens: 16_024 });
+      // A disclosure, not an incomplete review.
+      expect(clamped.complete).toBe(true);
+    }
+
+    const roomy = await review(configWith({ maxFindings: 10 }), limited, files);
+    expect(roomy.status === 'completed' && roomy.outputLimit).toBeUndefined();
+  });
+
   it('sizes the verification answer for the findings it checks', async () => {
     const { model, calls } = findingsModel(50);
     const files: PrFile[] = [{ path: 'src/f0.ts', status: 'added', patch: patchOf(50), changes: 50 }];

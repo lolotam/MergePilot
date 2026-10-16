@@ -77,6 +77,23 @@ describe('renderReviewSummary', () => {
     });
   });
 
+  describe('output limit note (ADR-0033)', () => {
+    const outputLimit = { maxFindings: 50, answerTokens: 6144, neededTokens: 16_024 };
+
+    it('says the model output limit clamped the answer, in English and Arabic', () => {
+      expect(renderReviewSummary({ ...baseInput, outputLimit })).toContain(
+        "> ⚠️ The model's output limit allowed 6144 answer tokens instead of the 16024 sized for 50 findings (`review.maxFindings`), so the answer may hold fewer findings.",
+      );
+      expect(renderReviewSummary({ ...baseInput, language: 'ar', outputLimit })).toContain(
+        '> ⚠️ حد مخرجات النموذج سمح بـ 6144 توكن للرد بدل 16024 محسوبة لـ 50 ملاحظة (`review.maxFindings`)',
+      );
+    });
+
+    it('stays silent when the answer budget was not clamped', () => {
+      expect(renderReviewSummary(baseInput)).not.toContain('output limit');
+    });
+  });
+
   describe('rtl wrapper only for ar', () => {
     it('wraps Arabic output in div with dir="rtl"', () => {
       const rendered = renderReviewSummary({ ...baseInput, language: 'ar' });

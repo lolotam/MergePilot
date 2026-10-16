@@ -3,6 +3,7 @@ import type { LlmAdapter } from '../llm/adapter.js';
 import { collectText } from '../llm/collect.js';
 import type { FailureKind } from '../llm/failure.js';
 import type { FinishReason, TokenUsage } from '../llm/types.js';
+import { answerTokensWithin } from '../providers/output-limits.js';
 
 /** How a review model authenticates to its provider (ADR-0027). */
 export type ReviewAuthMethod = 'subscription' | 'api-key';
@@ -43,6 +44,11 @@ export interface ReviewModel {
    * (thinking headroom included). Absent means exactly `maxOutputTokens`.
    */
   outputTokensFor?(maxOutputTokens: number): number;
+  /**
+   * The answer budget a call really gets for `maxOutputTokens`: lower when the model's known output
+   * limit leaves less room beside its thinking headroom (ADR-0033). Absent means `maxOutputTokens`.
+   */
+  answerTokensFor?(maxOutputTokens: number): number;
 }
 
 /** The caller's known secrets plus every key the model and its fallbacks send, for redaction. */
@@ -83,11 +89,15 @@ export interface ReviewModelResponse {
 
 /** Adapts any API `LlmAdapter` to the orchestrator's `ReviewModel`; `effort` is the configured thinking effort. */
 export function modelFromAdapter(adapter: LlmAdapter, model: string, effort?: string): ReviewModel {
+  const requested = (maxOutputTokens: number): number =>
+    adapter.requestedOutputTokens({ model, maxOutputTokens, ...(effort ? { effort } : {}) });
+  // Every call stays within the model's known output limit, its thinking headroom kept (ADR-0033).
+  const answerTokensFor = (maxOutputTokens: number): number =>
+    answerTokensWithin(adapter.outputLimit(model), maxOutputTokens, requested(maxOutputTokens));
   return {
     label: `${adapter.provider}:${model}`,
-    outputTokensFor(maxOutputTokens) {
-      return adapter.requestedOutputTokens({ model, maxOutputTokens, ...(effort ? { effort } : {}) });
-    },
+    outputTokensFor: (maxOutputTokens) => requested(answerTokensFor(maxOutputTokens)),
+    answerTokensFor,
     async generate(request) {
       const result = await collectText(
         adapter.stream({
@@ -96,7 +106,7 @@ export function modelFromAdapter(adapter: LlmAdapter, model: string, effort?: st
             { role: 'system', content: request.system },
             { role: 'user', content: request.user },
           ],
-          maxOutputTokens: request.maxOutputTokens,
+          maxOutputTokens: answerTokensFor(request.maxOutputTokens),
           ...(effort ? { effort } : {}),
           ...(request.responseSchema ? { responseSchema: request.responseSchema } : {}),
           ...(request.thinking ? { thinking: request.thinking } : {}),

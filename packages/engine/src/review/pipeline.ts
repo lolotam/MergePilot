@@ -33,7 +33,7 @@ import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { prepareFollowUp, promptPrOf, type FollowUp } from './follow-up.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
 import { manifestFileOf, type ManifestFile } from './manifest.js';
-import { reviewOutputTokensFor, verifyOutputTokensFor } from './output-budget.js';
+import { reviewOutputTokensFor, verifyOutputTokensFor, type OutputLimitDisclosure } from './output-budget.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 import { anchorIndexOf, redactPatches } from './patch-helpers.js';
@@ -116,6 +116,8 @@ export type ReviewRunResult =
       judge?: JudgeFilterSummary | undefined;
       /** Repository context sent and left out (ADR-0029); a disclosure, not an incomplete reason. */
       context?: ContextDisclosure | undefined;
+      /** The model's output limit clamped the answer budget below what maxFindings needs (ADR-0033). */
+      outputLimit?: OutputLimitDisclosure | undefined;
       /** Every attempted call, failures included, was on a subscription: the run cost $0. */
       onlySubscriptionCalls: boolean;
     } & Partial<FallbackDisclosure>)
@@ -255,6 +257,12 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   // Each call may return up to maxFindings findings, so its answer budget grows with them (ADR-0033).
   const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
+  // The configured model's known output limit may leave less room; each call is clamped to fit.
+  const answerTokens = model.answerTokensFor(maxOutputTokens);
+  const outputLimit: OutputLimitDisclosure | undefined =
+    answerTokens < maxOutputTokens
+      ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens }
+      : undefined;
   // Price the output limit each call really requests: answer budget + effort's thinking headroom
   // (largest across the chain). Thinking is billed as output, so pricing less could overspend.
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
@@ -408,6 +416,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     ...(verifyRejected.length > 0 ? { verifyRejected } : {}),
     ...(judge ? { judge } : {}),
     ...(contextDisclosure ? { context: contextDisclosure } : {}),
+    ...(outputLimit ? { outputLimit } : {}),
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls,
   };

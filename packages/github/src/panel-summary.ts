@@ -2,8 +2,14 @@ import { escapeInline, renderBotLogo } from './bot-identity.js';
 import { foundByLabel, type ConsensusCluster, type MergePanelResult } from './consensus.js';
 import type { FallbackReason } from './fallback-reason.js';
 import { renderFallbackNotice, renderScopeLine, type ReviewScope } from './summary.js';
-import type { ContextDisclosure } from '@mergepilot/engine';
-import { renderContextNote, renderRulesLeftOut, renderVerifyRejected, type VerifyRejectedItem } from './review-notes.js';
+import type { ContextDisclosure, OutputLimitDisclosure } from '@mergepilot/engine';
+import {
+  renderContextNote,
+  renderOutputLimitNote,
+  renderRulesLeftOut,
+  renderVerifyRejected,
+  type VerifyRejectedItem,
+} from './review-notes.js';
 import { neutralize } from './text-safety.js';
 
 /** One bot's row in the consensus summary table (ADR-0017). */
@@ -42,6 +48,8 @@ export interface PanelSummaryInput {
   rulesLeftOut?: readonly string[] | undefined;
   /** Repository context of the bots, merged (ADR-0029). */
   context?: ContextDisclosure | undefined;
+  /** The bots whose model's output limit clamped their answer budget (ADR-0033). */
+  outputLimits?: ReadonlyArray<OutputLimitDisclosure & { bot: string }> | undefined;
 }
 
 interface Labels {
@@ -162,6 +170,10 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   if (rulesLeftOut) sections.push(rulesLeftOut);
   const contextNote = renderContextNote(input.context, isArabic);
   if (contextNote) sections.push(contextNote);
+  for (const limit of input.outputLimits ?? []) {
+    const note = renderOutputLimitNote(limit, isArabic, limit.bot);
+    if (note) sections.push(note);
+  }
 
   const summaries = input.bots.filter((b) => b.status === 'completed' && b.summary?.trim());
   if (summaries.length > 0) {
