@@ -175,7 +175,12 @@ export async function runPanel(ctx: PanelContext, runs: BotRun[], noKey: PanelBo
       if (!outcome || !pending) continue;
       const finish = { ...pending.finish, reviewUrl };
       await finishBotRun(ctx, br, finish, pending.outcome.runResult);
-      outcome.result = { status: finish.status, costUsd: finish.costUsd, detail: finish.detail };
+      outcome.result = {
+        status: finish.status,
+        costUsd: finish.costUsd,
+        detail: finish.detail,
+        ...(pending.outcome.outcome === 'skipped-budget' ? { skippedForBudget: true as const } : {}),
+      };
     }
   }
   if (ctx.panelActive && !consensus) {

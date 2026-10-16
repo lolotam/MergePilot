@@ -266,7 +266,8 @@ export async function reviewPullRequest(
     });
   } else if (reviewResult.status === 'skipped-budget') {
     outcome = 'skipped-budget';
-    detail = reviewResult.reason;
+    detail = redactSecrets(reviewResult.reason, knownSecrets).text;
+    log?.(`MergePilot skipped this review for its budget: ${detail}`);
     inlineFindings = [];
     summaryMarkdown = renderReviewSummary({
       language: config.language,

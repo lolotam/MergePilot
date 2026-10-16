@@ -110,3 +110,34 @@ model can answer in prose.
 - When there is no JSON object at all, the error now says so and gives the answer's length:
   `invalid-json: the answer has no JSON object (N characters)`.
 - The retry applies to the single pass, each batch, and the verify pass alike.
+
+## Amendment (2026-10-16): `budget.maxInputTokens` default 1,000,000 and a note for budget skips
+
+**Context:** On lolotam/eyadex#78 (312 files, about 18k lines) all three panel bots finished
+`skipped` within 4 s with `Estimated prompt tokens (380276) exceed maxInputTokens limit (200000).`
+The panel ran in consensus mode, which publishes nothing when no bot completed, so nothing appeared
+on the PR, neither for the automatic review nor for `@mergepilot review`. The whole-PR check of
+point 7 ran before the batches of points 1 and 2 could take over. Owner decision: `docs/decisions.ar.md` س43.
+
+**Decision:**
+- The default of `budget.maxInputTokens` is now 1,000,000 (`DEFAULT_MAX_INPUT_TOKENS`). Each model
+  call is already bounded by `review.batchTokens`, the per-call and total timeouts and the
+  per-batch budget preflight, so the larger limit does not make any single call bigger. The
+  whole-PR check stays and now only stops absurdly large PRs. A repository that sets the key keeps
+  its own value.
+- The audit chunks whole files by `budget.maxInputTokens × 0.7`. Its chunk size is capped at
+  `AUDIT_MAX_INPUT_TOKENS` (200,000), so audits keep the chunk size they had (140,000 tokens). A
+  lower `budget.maxInputTokens` still shrinks the chunks.
+- When every bot that ran skipped a head for its budget (the token limit or `budget.perReviewUsd`),
+  the App posts one issue comment as the publisher, once per head
+  (`<!-- mergepilot:budget-skip head=… -->`). The comment gives the reason in plain words and says
+  which setting to change: split the PR or raise `budget.maxInputTokens`, or raise
+  `budget.perReviewUsd`. The numbers come from `parseBudgetSkipReason`. That function lives next
+  to the reason builders in `review/budget.ts`, so the two cannot drift apart. Any other reason is
+  quoted after redaction, cut to one line and neutralized. The comment is in the workspace
+  language. It is posted in consensus and separate mode and for `@mergepilot review`. In separate
+  mode each bot also publishes its own skipped review. The comment is best effort: a failure is
+  logged by error name only and never fails the job. The monthly-budget skip already publishes a
+  summary review and does not get the comment.
+- The GitHub Action already publishes a skipped-budget summary review. Its log now also gives the
+  redacted reason.

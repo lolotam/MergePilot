@@ -18,7 +18,7 @@ import { isSensitivePath } from '../security/sensitive-path.js';
 import { anchorFindings } from '../validate/anchor.js';
 import { selectFindings } from '../validate/select.js';
 import { buildBatchPrompt } from './batch-run.js';
-import { checkBudget, estimateTokens } from './budget.js';
+import { checkBudget, costOverBudgetReason, estimateTokens } from './budget.js';
 import { ReviewDeadline, withCallTimeout } from './call.js';
 import { estimateCostUsd } from '../budget/cost.js';
 import { runFalsePositiveFilter, type FalsePositiveOutcome } from '../judge/false-positive.js';
@@ -244,10 +244,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       );
     }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
-      return {
-        status: 'skipped-budget',
-        reason: `estimated $${estimatedCostUsd.toFixed(2)} > limit $${budgetCfg.perReviewUsd.toFixed(2)}`,
-      };
+      return { status: 'skipped-budget', reason: costOverBudgetReason(estimatedCostUsd, budgetCfg.perReviewUsd) };
     }
   }
 

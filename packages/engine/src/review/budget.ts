@@ -35,3 +35,28 @@ export function checkBudget(input: CheckBudgetInput): CheckBudgetResult {
       `maxInputTokens limit (${input.maxInputTokens}).`,
   };
 }
+
+/** The `skipped-budget` reason when the estimated cost of a review is over `budget.perReviewUsd`. */
+export function costOverBudgetReason(estimatedUsd: number, limitUsd: number): string {
+  return `estimated $${estimatedUsd.toFixed(2)} > limit $${limitUsd.toFixed(2)}`;
+}
+
+/** What a `skipped-budget` reason says, for a plain-words note on the PR. */
+export type BudgetSkipReason =
+  | { kind: 'input-tokens'; promptTokens: number; maxInputTokens: number }
+  | { kind: 'cost'; estimatedUsd: number; limitUsd: number };
+
+const INPUT_TOKENS_REASON = /^Estimated prompt tokens \((\d+)\) exceed maxInputTokens limit \((\d+)\)\.$/;
+const COST_REASON = /^estimated \$(\d+(?:\.\d+)?) > limit \$(\d+(?:\.\d+)?)$/;
+
+/**
+ * Reads back a reason built by `checkBudget` or `costOverBudgetReason` (they live here together so
+ * the formats cannot drift apart); undefined for any other text.
+ */
+export function parseBudgetSkipReason(reason: string): BudgetSkipReason | undefined {
+  const tokens = INPUT_TOKENS_REASON.exec(reason);
+  if (tokens) return { kind: 'input-tokens', promptTokens: Number(tokens[1]), maxInputTokens: Number(tokens[2]) };
+  const cost = COST_REASON.exec(reason);
+  if (cost) return { kind: 'cost', estimatedUsd: Number(cost[1]), limitUsd: Number(cost[2]) };
+  return undefined;
+}

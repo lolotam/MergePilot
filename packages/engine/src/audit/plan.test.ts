@@ -45,6 +45,15 @@ describe('planAudit', () => {
     expect(result.chunks[2]).toHaveLength(1);
   });
 
+  it('keeps chunks at 70% of 200,000 tokens when maxInputTokens is the 1,000,000 default', () => {
+    // 40,000 tokens each: 3 files fit in 140,000 tokens, a 4th would not.
+    const files = Array.from({ length: 6 }, (_, i) => ({ path: `src/big_${i}.ts`, size: 140_000 }));
+
+    const result = planAudit({ files, maxInputTokens: 1_000_000 });
+
+    expect(result.chunks.map((chunk) => chunk.length)).toEqual([3, 3]);
+  });
+
   it('skips sensitive paths', () => {
     const result = planAudit({
       files: [

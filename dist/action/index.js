@@ -113177,6 +113177,9 @@ function checkBudget(input2) {
     reason: `Estimated prompt tokens (${input2.promptTokens}) exceed maxInputTokens limit (${input2.maxInputTokens}).`
   };
 }
+function costOverBudgetReason(estimatedUsd, limitUsd) {
+  return `estimated $${estimatedUsd.toFixed(2)} > limit $${limitUsd.toFixed(2)}`;
+}
 
 var JUDGE_PROVIDER_IDS = ["typesafe", "openrouter", "vercel-gateway", "opencode-zen"];
 var JUDGE_PROVIDERS = {
@@ -113905,9 +113908,14 @@ var ModelPricingSchema = external_exports.strictObject({
   cacheReadPerMTok: val.cacheReadPerMTok ?? val.inputPerMTok,
   cacheWritePerMTok: val.cacheWritePerMTok ?? val.inputPerMTok
 }));
+var DEFAULT_MAX_INPUT_TOKENS = 1e6;
 var BudgetSchema = external_exports.strictObject({
   perReviewUsd: external_exports.number().positive().default(0.5),
-  maxInputTokens: external_exports.number().int().positive().default(2e5),
+  /**
+   * Whole-PR cap on the estimated prompt. Huge PRs are reviewed in capped batches (ADR-0013), so
+   * this only stops absurd PRs; each model call stays bounded by `review.batchTokens`.
+   */
+  maxInputTokens: external_exports.number().int().positive().default(DEFAULT_MAX_INPUT_TOKENS),
   pricing: ModelPricingSchema.optional()
 });
 var AuditSchema = external_exports.strictObject({
@@ -114799,8 +114807,8 @@ var ReviewDeadline = class {
   }
 };
 function describePaths(paths, max = 10, maxLength = 60) {
-  const shorten2 = (path11) => path11.length <= maxLength ? path11 : `\u2026${path11.slice(path11.length - maxLength + 1)}`;
-  const shown = paths.slice(0, max).map(shorten2).join(", ");
+  const shorten = (path11) => path11.length <= maxLength ? path11 : `\u2026${path11.slice(path11.length - maxLength + 1)}`;
+  const shown = paths.slice(0, max).map(shorten).join(", ");
   return paths.length > max ? `${shown} +${paths.length - max} more` : shown;
 }
 var JSON_ONLY_REMINDER = "\n\nIMPORTANT: your previous reply was not the required JSON. Reply with only the JSON object described above: no prose, no markdown fences, nothing before or after it.";
@@ -115839,10 +115847,7 @@ async function runReview(input2) {
       estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens }, pricing);
     }
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
-      return {
-        status: "skipped-budget",
-        reason: `estimated $${estimatedCostUsd.toFixed(2)} > limit $${budgetCfg.perReviewUsd.toFixed(2)}`
-      };
+      return { status: "skipped-budget", reason: costOverBudgetReason(estimatedCostUsd, budgetCfg.perReviewUsd) };
     }
   }
   const spend = new SpendTracker(currentPricing, budgetCfg.perReviewUsd);
@@ -163181,6 +163186,7 @@ function compareText2(a, b) {
 var DEFAULT_INCLUDE = ["**/*"];
 var DEFAULT_EXCLUDE = ["**/*.lock", "**/dist/**", "**/*.min.*", "**/*.snap", "docs/**"];
 var DEFAULT_MAX_FILES = 200;
+var AUDIT_MAX_INPUT_TOKENS = 2e5;
 function planAudit(input2) {
   const { files, include = DEFAULT_INCLUDE, exclude = DEFAULT_EXCLUDE, maxFiles = DEFAULT_MAX_FILES, maxInputTokens, isSensitivePath: isSensitivePath2 = isSensitivePath } = input2;
   const sortedFiles = [...files].sort((a, b) => compareText2(a.path, b.path));
@@ -163215,7 +163221,7 @@ function planAudit(input2) {
     }
   }
   skipped.sort((a, b) => compareText2(a.path, b.path));
-  const maxChunkTokens = Math.floor(maxInputTokens * 0.7);
+  const maxChunkTokens = Math.floor(Math.min(maxInputTokens, AUDIT_MAX_INPUT_TOKENS) * 0.7);
   const chunks = [];
   let currentChunk = [];
   let currentChunkTokens = 0;
@@ -163331,7 +163337,7 @@ async function runAudit(input2) {
     include: config2.audit?.include,
     exclude: config2.audit?.exclude,
     maxFiles: config2.audit?.maxFiles,
-    maxInputTokens: config2.budget?.maxInputTokens ?? 2e5
+    maxInputTokens: config2.budget?.maxInputTokens ?? DEFAULT_MAX_INPUT_TOKENS
   });
   const totalUsage = {
     inputTokens: 0,
@@ -168791,6 +168797,20 @@ async function executePauseCommand(client, params) {
   return { success: true, state: "active" };
 }
 
+var MAX_FALLBACK_DETAIL = 300;
+function fallbackReasonOf(disclosure, knownSecrets) {
+  if (!disclosure.fallbackFrom || !disclosure.fallbackCode)
+    return void 0;
+  const detail = disclosure.fallbackDetail ? shortenDetail(redactSecrets(disclosure.fallbackDetail, knownSecrets).text) : "";
+  const methodSwitch = disclosure.fallbackFromMethod && disclosure.modelUsedMethod ? { fromMethod: disclosure.fallbackFromMethod, usedMethod: disclosure.modelUsedMethod } : {};
+  return { from: disclosure.fallbackFrom, code: disclosure.fallbackCode, ...detail ? { detail } : {}, ...methodSwitch };
+}
+function shortenDetail(text) {
+  const clean = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
+  const chars = Array.from(clean);
+  return chars.length > MAX_FALLBACK_DETAIL ? `${chars.slice(0, MAX_FALLBACK_DETAIL - 1).join("")}\u2026` : clean;
+}
+
 function neutralize2(text) {
   return text.replaceAll("<!--", "&lt;!--").replace(/<\/div/gi, "&lt;/div").replace(/(^|[^\w`])@(?=[A-Za-z0-9-])/g, "$1@\u200B");
 }
@@ -168995,20 +169015,6 @@ ${content}
   return content;
 }
 
-var MAX_FALLBACK_DETAIL = 300;
-function fallbackReasonOf(disclosure, knownSecrets) {
-  if (!disclosure.fallbackFrom || !disclosure.fallbackCode)
-    return void 0;
-  const detail = disclosure.fallbackDetail ? shorten(redactSecrets(disclosure.fallbackDetail, knownSecrets).text) : "";
-  const methodSwitch = disclosure.fallbackFromMethod && disclosure.modelUsedMethod ? { fromMethod: disclosure.fallbackFromMethod, usedMethod: disclosure.modelUsedMethod } : {};
-  return { from: disclosure.fallbackFrom, code: disclosure.fallbackCode, ...detail ? { detail } : {}, ...methodSwitch };
-}
-function shorten(text) {
-  const clean = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
-  const chars = Array.from(clean);
-  return chars.length > MAX_FALLBACK_DETAIL ? `${chars.slice(0, MAX_FALLBACK_DETAIL - 1).join("")}\u2026` : clean;
-}
-
 function dedupeJudgeOf(judge) {
   return judge && hasJudgeUse(judge.uses, "dedupe") ? judge.judge : void 0;
 }
@@ -169188,7 +169194,8 @@ async function reviewPullRequest(ctx) {
     });
   } else if (reviewResult.status === "skipped-budget") {
     outcome = "skipped-budget";
-    detail = reviewResult.reason;
+    detail = redactSecrets(reviewResult.reason, knownSecrets).text;
+    log?.(`MergePilot skipped this review for its budget: ${detail}`);
     inlineFindings = [];
     summaryMarkdown = renderReviewSummary({
       language: config2.language,

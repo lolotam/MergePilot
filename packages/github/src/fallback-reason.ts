@@ -28,7 +28,7 @@ export function fallbackReasonOf(
   knownSecrets: Secret[],
 ): FallbackReason | undefined {
   if (!disclosure.fallbackFrom || !disclosure.fallbackCode) return undefined;
-  const detail = disclosure.fallbackDetail ? shorten(redactSecrets(disclosure.fallbackDetail, knownSecrets).text) : '';
+  const detail = disclosure.fallbackDetail ? shortenDetail(redactSecrets(disclosure.fallbackDetail, knownSecrets).text) : '';
   const methodSwitch =
     disclosure.fallbackFromMethod && disclosure.modelUsedMethod
       ? { fromMethod: disclosure.fallbackFromMethod, usedMethod: disclosure.modelUsedMethod }
@@ -37,7 +37,7 @@ export function fallbackReasonOf(
 }
 
 /** One line without control characters, cut by code points (never inside a surrogate pair). */
-function shorten(text: string): string {
+export function shortenDetail(text: string): string {
   // eslint-disable-next-line no-control-regex
   const clean = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim();
   const chars = Array.from(clean);

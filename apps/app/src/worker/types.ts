@@ -60,4 +60,6 @@ export interface ProcessReviewResult {
   status: ReviewRunStatus;
   costUsd?: number | null;
   detail?: string | null;
+  /** The engine skipped the review for its budget (token or per-review cost limit); `detail` says why. */
+  skippedForBudget?: true;
 }

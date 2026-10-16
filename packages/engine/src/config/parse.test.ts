@@ -32,7 +32,8 @@ describe('parseConfig', () => {
           callTimeoutMs: 300_000,
           totalTimeoutMs: 1_200_000,
         },
-        budget: { perReviewUsd: 0.5, maxInputTokens: 200000 },
+        // Raised from 200,000 so huge PRs go to capped batches instead of being skipped (ADR-0013).
+        budget: { perReviewUsd: 0.5, maxInputTokens: 1_000_000 },
         audit: {
           enabled: false,
           output: 'summary',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_MAX_INPUT_TOKENS } from '../config/schema.js';
 import type { TokenUsage } from '../llm/types.js';
 import { FINDINGS_MISSING_REASON, parseReviewAnswer, ReviewAnswerSchema } from '../review/answer.js';
 import { estimateTokens } from '../review/budget.js';
@@ -45,7 +46,7 @@ export async function runAudit(input: RunAuditInput): Promise<AuditResult> {
     include: config.audit?.include,
     exclude: config.audit?.exclude,
     maxFiles: config.audit?.maxFiles,
-    maxInputTokens: config.budget?.maxInputTokens ?? 200000,
+    maxInputTokens: config.budget?.maxInputTokens ?? DEFAULT_MAX_INPUT_TOKENS,
   });
 
   const totalUsage: TokenUsage = {
