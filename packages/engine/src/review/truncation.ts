@@ -22,7 +22,13 @@ import {
   type ReviewableFileWithPatch,
   type RulesFileInput,
 } from './split.js';
-import { describeCallError, requestedOutputTokens, type SpendTracker } from './spend.js';
+import {
+  describeCallError,
+  OUTPUT_LIMIT_RETRY_SKIPPED,
+  requestedOutputTokens,
+  retryAddsAnswerRoom,
+  type SpendTracker,
+} from './spend.js';
 
 export interface RecoverReviewTruncationInput {
   parseResult: ParseReviewAnswerResult;
@@ -80,7 +86,10 @@ export async function recoverReviewTruncation(
   const retryOutputTokens = reviewRetryOutputTokens(maxOutputTokens);
   const retryRequested = requestedOutputTokens(model, retryOutputTokens);
 
-  if (!spend.canAfford(promptTokens, retryRequested)) {
+  if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens)) {
+    // The output limit already clamped the first call: go straight to the batch split.
+    if (redactedReviewableFiles.length <= 1) incompleteReasons.push(OUTPUT_LIMIT_RETRY_SKIPPED);
+  } else if (!spend.canAfford(promptTokens, retryRequested)) {
     incompleteReasons.push('truncation retry skipped: budget limit reached');
   } else {
     try {

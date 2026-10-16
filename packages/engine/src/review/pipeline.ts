@@ -257,12 +257,6 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   // Each call may return up to maxFindings findings, so its answer budget grows with them (ADR-0033).
   const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
-  // The configured model's known output limit may leave less room; each call is clamped to fit.
-  const answerTokens = model.answerTokensFor(maxOutputTokens);
-  const outputLimit: OutputLimitDisclosure | undefined =
-    answerTokens < maxOutputTokens
-      ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens }
-      : undefined;
   // Price the output limit each call really requests: answer budget + effort's thinking headroom
   // (largest across the chain). Thinking is billed as output, so pricing less could overspend.
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
@@ -389,6 +383,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   };
 
   const contextDisclosure = context.disclosure();
+  // The answering model's known output limit may have clamped each call (a fallback's own limit
+  // after a fallback); the summary then says the answer may hold fewer findings (ADR-0033).
+  const answerTokens = model.answerTokensFor(maxOutputTokens);
+  const outputLimit: OutputLimitDisclosure | undefined =
+    answerTokens < maxOutputTokens
+      ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens }
+      : undefined;
   // Pricing belongs to the configured model; after a model fallback the cost is unknown (tokens still count).
   const disclosure = model.disclosure(knownSecrets);
   const methodOnlyFallback =

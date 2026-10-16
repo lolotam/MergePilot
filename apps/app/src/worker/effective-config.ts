@@ -82,7 +82,8 @@ export function effectiveConfigFor(
  * the hashes of reviews from before the setting existed stay the same.
  */
 function configHashOf(base: string, inheritedLimit: number | undefined): string {
-  const hash = createHash('sha256').update(base);
-  if (inheritedLimit !== undefined && inheritedLimit !== DEFAULT_MAX_FINDINGS) hash.update(`\nmaxFindings=${inheritedLimit}`);
-  return hash.digest('hex').slice(0, 12);
+  const inherited = inheritedLimit !== undefined && inheritedLimit !== DEFAULT_MAX_FINDINGS;
+  // A structured encoding, so no repository text can hash like an inherited limit.
+  const input = inherited ? JSON.stringify({ base, maxFindings: inheritedLimit }) : base;
+  return createHash('sha256').update(input).digest('hex').slice(0, 12);
 }

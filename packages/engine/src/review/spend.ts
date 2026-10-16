@@ -22,6 +22,23 @@ export function requestedOutputTokens(model: ReviewModel, maxOutputTokens: numbe
   return model.outputTokensFor ? model.outputTokensFor(maxOutputTokens) : maxOutputTokens;
 }
 
+/** The answer budget one call really gets for `maxOutputTokens`, within the model's output limit. */
+export function answerTokensOf(model: ReviewModel, maxOutputTokens: number): number {
+  return model.answerTokensFor ? model.answerTokensFor(maxOutputTokens) : maxOutputTokens;
+}
+
+/** A truncation retry skipped because the model's output limit leaves no larger answer budget. */
+export const OUTPUT_LIMIT_RETRY_SKIPPED = "truncation retry skipped: the model's output limit leaves no room for a larger answer";
+
+/**
+ * Whether a truncation retry at `retryOutputTokens` would get more answer room than the first
+ * call's `maxOutputTokens`. Not when the model's output limit already clamped the first call: the
+ * retry would pay for the whole prompt again for an answer cut at the same point (ADR-0033).
+ */
+export function retryAddsAnswerRoom(model: ReviewModel, maxOutputTokens: number, retryOutputTokens: number): boolean {
+  return answerTokensOf(model, retryOutputTokens) > answerTokensOf(model, maxOutputTokens);
+}
+
 /** True when the backend reported usage that can be priced (a real call never has zero input). */
 export function hasRealUsage(usage: TokenUsage | undefined): usage is TokenUsage {
   if (!usage) return false;

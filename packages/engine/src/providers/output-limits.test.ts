@@ -4,17 +4,18 @@ import type { GenerateOptions, StreamChunk } from '../llm/types.js';
 import { modelFromAdapter } from '../review/model.js';
 import { answerTokensWithin, knownMaxOutputTokens } from './output-limits.js';
 
-/** An adapter with a 2,048-token thinking headroom and the given output limit. */
+/** An adapter with a 2,048-token thinking headroom (none for a thinking-off call) and the given output limit. */
 class LimitedAdapter extends LlmAdapter {
   readonly provider = 'fake';
   sent: number | undefined;
+  lastAnswer: number | undefined;
 
   constructor(private readonly limit: number | undefined) {
     super();
   }
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
-    return options.maxOutputTokens + 2048;
+    return options.maxOutputTokens + (options.thinking === 'off' ? 0 : 2048);
   }
 
   override outputLimit(): number | undefined {
@@ -22,6 +23,7 @@ class LimitedAdapter extends LlmAdapter {
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.lastAnswer = options.maxOutputTokens;
     this.sent = this.requestedOutputTokens(options);
     yield { type: 'text-delta', text: '{}' };
     yield { type: 'finish', reason: 'stop' };
@@ -51,6 +53,17 @@ describe('model output limits (ADR-0033)', () => {
     expect(model.outputTokensFor?.(16_024)).toBe(8192);
     await model.generate({ system: 'S', user: 'U', maxOutputTokens: 16_024 });
     expect(adapter.sent).toBe(8192);
+  });
+
+  it('sizes a thinking-off call by its own headroom, and estimates by the configured effort', async () => {
+    const adapter = new LimitedAdapter(8192);
+    const model = modelFromAdapter(adapter, 'small');
+    await model.generate({ system: 'S', user: 'U', maxOutputTokens: 16_024, thinking: 'off' });
+    // No thinking headroom on this call: the whole limit goes to the answer.
+    expect(adapter.sent).toBe(8192);
+    expect(adapter.lastAnswer).toBe(8192);
+    // The preflight keeps the conservative estimate with headroom.
+    expect(model.answerTokensFor?.(16_024)).toBe(6144);
   });
 
   it('leaves the budget alone when the limit is unknown', async () => {

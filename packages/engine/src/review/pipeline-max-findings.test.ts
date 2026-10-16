@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MergePilotConfig } from '../config/schema.js';
+import { LlmFailure } from '../llm/failure.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { makeConfig, validFindingJson } from './pipeline.fixtures.js';
 import { runReview, type PrFile } from './pipeline.js';
@@ -66,6 +67,72 @@ describe('runReview — review.maxFindings', () => {
 
     const roomy = await review(configWith({ maxFindings: 10 }), limited, files);
     expect(roomy.status === 'completed' && roomy.outputLimit).toBeUndefined();
+  });
+
+  describe('a truncated whole-PR answer on a model clamped by its output limit', () => {
+    const files: PrFile[] = [0, 1].map((i) => ({ path: `src/f${i}.ts`, status: 'added', patch: patchOf(10), changes: 10 }));
+    const isWholePr = (req: ReviewModelRequest) => req.user.includes('PATCH:src/f0.ts') && req.user.includes('PATCH:src/f1.ts');
+
+    /** Truncates every whole-PR answer; each one-file batch answers in full. */
+    function truncatingModel(answerTokensFor?: (max: number) => number) {
+      const { model, calls } = findingsModel(1);
+      const truncating: ReviewModel = {
+        ...model,
+        ...(answerTokensFor ? { answerTokensFor } : {}),
+        generate: async (req) => {
+          if (!isWholePr(req)) return model.generate(req);
+          calls.push(req);
+          return { text: '{"summary": "Reviewed.", "findings": [', finishReason: 'length' };
+        },
+      };
+      return { model: truncating, calls };
+    }
+
+    it('skips the same-size retry and goes straight to the batch split', async () => {
+      // An 8,192-token model with 2,048 tokens of thinking headroom: every call gets 6,144.
+      const { model, calls } = truncatingModel((max) => Math.min(max, 6144));
+      const result = await review(configWith({ maxFindings: 50 }), model, files);
+
+      expect(calls.filter(isWholePr)).toHaveLength(1);
+      expect(calls.filter((c) => !isWholePr(c))).toHaveLength(2);
+      expect(result.status).toBe('completed');
+      if (result.status === 'completed') {
+        expect(result.result.findings).toHaveLength(2);
+        expect(result.outputLimit).toMatchObject({ answerTokens: 6144 });
+      }
+    });
+
+    it('still retries the whole PR once when the retry gets more room', async () => {
+      const { model, calls } = truncatingModel();
+      await review(configWith({ maxFindings: 50 }), model, files);
+      expect(calls.filter(isWholePr).map((c) => c.maxOutputTokens)).toEqual([16_024, 32_048]);
+    });
+  });
+
+  it('discloses the output limit of the model that answered, not of the failed primary', async () => {
+    const files: PrFile[] = [{ path: 'src/f0.ts', status: 'added', patch: patchOf(10), changes: 10 }];
+    const failing = (answerTokensFor?: (max: number) => number): ReviewModel => ({
+      label: 'fake:primary',
+      outputTokensFor: (max) => max,
+      ...(answerTokensFor ? { answerTokensFor } : {}),
+      generate: async () => {
+        throw new LlmFailure({ code: 'RATE_LIMIT', provider: 'fake', message: 'rate limited' });
+      },
+    });
+    const answering = (answerTokensFor?: (max: number) => number): ReviewModel => ({
+      ...findingsModel(1).model,
+      label: 'fake:fallback',
+      ...(answerTokensFor ? { answerTokensFor } : {}),
+    });
+    const run = (primary: ReviewModel, fallback: ReviewModel) =>
+      runReview({ config: configWith({ maxFindings: 50 }), pr: { title: 'PR', body: '' }, files, rulesFiles: [], model: primary, fallbackModels: [fallback], knownSecrets: [] });
+
+    const roomyFallback = await run(failing((max) => Math.min(max, 6000)), answering());
+    expect(roomyFallback.status === 'completed' && roomyFallback.modelUsed).toBe('fake:fallback');
+    expect(roomyFallback.status === 'completed' && roomyFallback.outputLimit).toBeUndefined();
+
+    const clampedFallback = await run(failing(), answering((max) => Math.min(max, 7000)));
+    expect(clampedFallback.status === 'completed' && clampedFallback.outputLimit).toMatchObject({ answerTokens: 7000 });
   });
 
   it('sizes the verification answer for the findings it checks', async () => {

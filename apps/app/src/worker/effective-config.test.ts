@@ -42,6 +42,16 @@ describe('effectiveConfigFor — config hash and the workspace findings limit', 
     expect(effective(fileWithLimit, 50).config.review.maxFindings).toBe(3);
   });
 
+  it('never hashes a file text like an inherited limit', () => {
+    const text = 'review:\n  minSeverity: high\n';
+    const inheriting = effective((limit) => repoFile(text, limit), 20);
+    // A file that names no limit and inherits none, whose text is the inheriting file's text plus
+    // a "\nmaxFindings=20" suffix: plain concatenation would hash both the same.
+    const lookalike = effective(() => ({ ...repoFile(text, undefined), configText: `${text}\nmaxFindings=20` }));
+    expect(lookalike.config.review.maxFindings).toBe(5);
+    expect(lookalike.configHash).not.toBe(inheriting.configHash);
+  });
+
   it('still uses the file pricing for the same model when only the limit was filled in', () => {
     const text = 'provider: openai\nmodel: gpt-x\nbudget:\n  pricing:\n    inputPerMTok: 1\n    outputPerMTok: 2\n';
     expect(effective((limit) => repoFile(text, limit), 20).repoPricing).toMatchObject({ inputPerMTok: 1, outputPerMTok: 2 });

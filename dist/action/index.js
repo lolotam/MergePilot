@@ -139540,9 +139540,9 @@ var FallbackChain = class {
   outputTokensFor(maxOutputTokens) {
     return Math.max(...this.#models.map((m2) => m2.outputTokensFor?.(maxOutputTokens) ?? maxOutputTokens));
   }
-  /** The configured model's answer budget: the one the findings limit is sized for. */
+  /** The answer budget of the model answering now: after a fallback, the fallback's own limit. */
   answerTokensFor(maxOutputTokens) {
-    return this.#models[0]?.answerTokensFor?.(maxOutputTokens) ?? maxOutputTokens;
+    return this.#current().answerTokensFor?.(maxOutputTokens) ?? maxOutputTokens;
   }
   get label() {
     return this.#current().label;
@@ -139665,12 +139665,12 @@ function secretsToRedact(known, model, fallbacks = model.fallbacks ?? []) {
   return [...known, ...model.secrets ?? [], ...fallbacks.flatMap((m2) => m2.secrets ?? [])];
 }
 function modelFromAdapter(adapter, model, effort) {
-  const requested = (maxOutputTokens) => adapter.requestedOutputTokens({ model, maxOutputTokens, ...effort ? { effort } : {} });
-  const answerTokensFor = (maxOutputTokens) => answerTokensWithin(adapter.outputLimit(model), maxOutputTokens, requested(maxOutputTokens));
+  const requested = (maxOutputTokens, thinking) => adapter.requestedOutputTokens({ model, maxOutputTokens, ...effort ? { effort } : {}, ...thinking ? { thinking } : {} });
+  const answerTokensFor = (maxOutputTokens, thinking) => answerTokensWithin(adapter.outputLimit(model), maxOutputTokens, requested(maxOutputTokens, thinking));
   return {
     label: `${adapter.provider}:${model}`,
     outputTokensFor: (maxOutputTokens) => requested(answerTokensFor(maxOutputTokens)),
-    answerTokensFor,
+    answerTokensFor: (maxOutputTokens) => answerTokensFor(maxOutputTokens),
     async generate(request2) {
       const result = await collectText(adapter.stream({
         model,
@@ -139678,7 +139678,7 @@ function modelFromAdapter(adapter, model, effort) {
           { role: "system", content: request2.system },
           { role: "user", content: request2.user }
         ],
-        maxOutputTokens: answerTokensFor(request2.maxOutputTokens),
+        maxOutputTokens: answerTokensFor(request2.maxOutputTokens, request2.thinking),
         ...effort ? { effort } : {},
         ...request2.responseSchema ? { responseSchema: request2.responseSchema } : {},
         ...request2.thinking ? { thinking: request2.thinking } : {},
@@ -139800,6 +139800,13 @@ function selectFindings(findings, opts = {}) {
 
 function requestedOutputTokens(model, maxOutputTokens) {
   return model.outputTokensFor ? model.outputTokensFor(maxOutputTokens) : maxOutputTokens;
+}
+function answerTokensOf(model, maxOutputTokens) {
+  return model.answerTokensFor ? model.answerTokensFor(maxOutputTokens) : maxOutputTokens;
+}
+var OUTPUT_LIMIT_RETRY_SKIPPED = "truncation retry skipped: the model's output limit leaves no room for a larger answer";
+function retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens) {
+  return answerTokensOf(model, retryOutputTokens) > answerTokensOf(model, maxOutputTokens);
 }
 function hasRealUsage(usage) {
   if (!usage)
@@ -140521,7 +140528,9 @@ async function reviewOneBatch(input2, prompt, promptTokens) {
     notes.push(empty.note);
   if (needsTruncationRetry(parsed, (empty.response ?? first).finishReason)) {
     const retryRequested = requestedOutputTokens(model, retryOutputTokens);
-    if (!spend.canAfford(promptTokens, retryRequested)) {
+    if (!retryAddsAnswerRoom(model, input2.maxOutputTokens, retryOutputTokens)) {
+      notes.push(OUTPUT_LIMIT_RETRY_SKIPPED);
+    } else if (!spend.canAfford(promptTokens, retryRequested)) {
       notes.push("truncation retry skipped: budget limit reached");
     } else {
       try {
@@ -140863,7 +140872,10 @@ async function recoverReviewTruncation(input2) {
   }
   const retryOutputTokens = reviewRetryOutputTokens(maxOutputTokens);
   const retryRequested = requestedOutputTokens(model, retryOutputTokens);
-  if (!spend.canAfford(promptTokens, retryRequested)) {
+  if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens)) {
+    if (redactedReviewableFiles.length <= 1)
+      incompleteReasons.push(OUTPUT_LIMIT_RETRY_SKIPPED);
+  } else if (!spend.canAfford(promptTokens, retryRequested)) {
     incompleteReasons.push("truncation retry skipped: budget limit reached");
   } else {
     try {
@@ -141520,8 +141532,6 @@ async function runReview(input2) {
     return estimateTokens(batchPrompt.system + batchPrompt.user);
   }) : [promptTokens];
   const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
-  const answerTokens = model.answerTokensFor(maxOutputTokens);
-  const outputLimit = answerTokens < maxOutputTokens ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens } : void 0;
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
   const verifyOutputTokens = model.outputTokensFor(verifyOutputTokensFor(reviewCfg.maxFindings * callPromptTokens.length));
   const initialPricing = currentPricing();
@@ -141620,6 +141630,8 @@ async function runReview(input2) {
     incompleteReasons
   };
   const contextDisclosure = context.disclosure();
+  const answerTokens = model.answerTokensFor(maxOutputTokens);
+  const outputLimit = answerTokens < maxOutputTokens ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens } : void 0;
   const disclosure = model.disclosure(knownSecrets);
   const methodOnlyFallback = disclosure.fallbackFromMethod !== void 0 && disclosure.modelUsed === disclosure.fallbackFrom;
   let reviewCostUsd;

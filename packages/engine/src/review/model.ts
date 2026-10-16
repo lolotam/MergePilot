@@ -89,15 +89,16 @@ export interface ReviewModelResponse {
 
 /** Adapts any API `LlmAdapter` to the orchestrator's `ReviewModel`; `effort` is the configured thinking effort. */
 export function modelFromAdapter(adapter: LlmAdapter, model: string, effort?: string): ReviewModel {
-  const requested = (maxOutputTokens: number): number =>
-    adapter.requestedOutputTokens({ model, maxOutputTokens, ...(effort ? { effort } : {}) });
+  const requested = (maxOutputTokens: number, thinking?: 'off'): number =>
+    adapter.requestedOutputTokens({ model, maxOutputTokens, ...(effort ? { effort } : {}), ...(thinking ? { thinking } : {}) });
   // Every call stays within the model's known output limit, its thinking headroom kept (ADR-0033).
-  const answerTokensFor = (maxOutputTokens: number): number =>
-    answerTokensWithin(adapter.outputLimit(model), maxOutputTokens, requested(maxOutputTokens));
+  // A call's own thinking override sizes its headroom; estimates use the configured effort.
+  const answerTokensFor = (maxOutputTokens: number, thinking?: 'off'): number =>
+    answerTokensWithin(adapter.outputLimit(model), maxOutputTokens, requested(maxOutputTokens, thinking));
   return {
     label: `${adapter.provider}:${model}`,
     outputTokensFor: (maxOutputTokens) => requested(answerTokensFor(maxOutputTokens)),
-    answerTokensFor,
+    answerTokensFor: (maxOutputTokens) => answerTokensFor(maxOutputTokens),
     async generate(request) {
       const result = await collectText(
         adapter.stream({
@@ -106,7 +107,7 @@ export function modelFromAdapter(adapter: LlmAdapter, model: string, effort?: st
             { role: 'system', content: request.system },
             { role: 'user', content: request.user },
           ],
-          maxOutputTokens: answerTokensFor(request.maxOutputTokens),
+          maxOutputTokens: answerTokensFor(request.maxOutputTokens, request.thinking),
           ...(effort ? { effort } : {}),
           ...(request.responseSchema ? { responseSchema: request.responseSchema } : {}),
           ...(request.thinking ? { thinking: request.thinking } : {}),
