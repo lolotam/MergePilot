@@ -15,7 +15,12 @@ MergePilot reviews pull requests through a shared TypeScript engine, a GitHub Ac
 - `packages/github` owns GitHub reads, publishing, and review rendering. `apps/action` and `apps/app` supply credentials and call the shared engine.
 - `apps/app/src/api/contract*.ts` defines dashboard REST schemas consumed by `apps/web`. Update producers and consumers together.
 - Use TypeScript ESM and `.js` extensions in relative imports. Keep user-visible text in the Arabic/English dictionaries under `apps/web/src/i18n/`.
-- Match the existing components and styling for dashboard changes. Keep code and identifiers in English; respect the user's requested conversation language.
+- Match the existing components and styling for dashboard changes. Keep code and identifiers in English.
+
+## Conversation language
+
+- Reply to the owner in simple Egyptian Arabic only, even when the owner writes in English. This covers every reply: status lines, progress updates, questions and final summaries. Switch to English only when the owner asks for an English reply in that message.
+- Code, identifiers, commit messages, PR titles and descriptions, and English documentation stay in English. Keep file paths, commands, model names and error messages verbatim inside the Arabic text.
 
 ## Review and credential invariants
 

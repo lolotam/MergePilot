@@ -15,4 +15,4 @@
 
 ## Language
 
-Replies to the owner are in simple Egyptian Arabic. The PRD and decisions log are Arabic. Code, identifiers and commit messages are English.
+Replies to the owner are in simple Egyptian Arabic only, even when the owner writes in English; switch to English only when the owner asks for an English reply in that message. See "Conversation language" in `AGENTS.md`. The PRD and decisions log are Arabic. Code, identifiers, commit messages and PRs are English.
