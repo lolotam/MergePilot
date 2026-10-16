@@ -1,5 +1,6 @@
 import { decodeSubscription, type CredentialInfo, type CredentialRef, type CredentialStore, type RequestPurpose, type Secret } from '@mergepilot/engine';
 import type { ApiProvider } from '../core/types.js';
+import { admittedSubscription } from './dual-method-review.js';
 import type { ProcessReviewCredentials } from './types.js';
 
 /** The engine's view of a workspace's stored keys during one review; every resolved key is known for redaction. */
@@ -7,11 +8,17 @@ export class WorkspaceCredentialStore implements CredentialStore {
   private readonly secrets = new Map<string, Secret>();
   private readonly extra: Secret[] = [];
 
+  /**
+   * `subscriptionOnly`: the bot was admitted free on its subscription (ADR-0033), so every resolve
+   * for the primary provider (including the refresh before each call) returns that subscription,
+   * never an API key the default may have switched to since.
+   */
   constructor(
     private readonly workspaceId: string,
     private readonly credentials: ProcessReviewCredentials,
-    primaryProvider: ApiProvider,
+    private readonly primaryProvider: ApiProvider,
     primarySecret: Secret,
+    private readonly options: { subscriptionOnly?: boolean } = {},
   ) {
     this.secrets.set(primaryProvider, primarySecret);
   }
@@ -31,6 +38,11 @@ export class WorkspaceCredentialStore implements CredentialStore {
 
   async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
     const provider = ref.provider as ApiProvider;
+    if (this.options.subscriptionOnly && provider === this.primaryProvider) {
+      const subscription = await admittedSubscription(this.credentials, this.workspaceId, provider);
+      this.secrets.set(ref.provider, subscription);
+      return subscription;
+    }
     if (ref.method === 'subscription') {
       // The other method of a dual provider (ADR-0027): the parent envelope, refreshed when it is
       // about to expire, whatever the effective default is. Kept apart from the default's key so
