@@ -115543,11 +115543,11 @@ function patchChunks(patch) {
       lines.push(line);
     }
   }
-  return hunks.map((hunk) => ({ text: hunk.lines.join("\n"), ranges: hunk.ranges, near: false }));
+  return hunks.map((hunk) => ({ text: hunk.lines.join("\n"), ranges: hunk.ranges, findingLines: [] }));
 }
 function contextChunk(file2) {
   return { text: `Reason: ${file2.reason}
-${numberLines(file2.content)}`, ranges: [], near: false };
+${numberLines(file2.content)}`, ranges: [], findingLines: [] };
 }
 function cutToTokens(text, tokens) {
   const kept = [];
@@ -115562,19 +115562,40 @@ function cutToTokens(text, tokens) {
   }
   return [...kept, CUT_MARKER].join("\n");
 }
+function lineNumberOf(line) {
+  const match2 = /^\s+(\d+) /.exec(line);
+  return match2 ? Number(match2[1]) : void 0;
+}
+function windowOf(chunk) {
+  const [header2 = "", ...body] = chunk.text.split("\n");
+  const kept = body.filter((line) => {
+    const number4 = lineNumberOf(line);
+    return number4 !== void 0 && chunk.findingLines.some((at) => Math.abs(at - number4) <= NEAR_LINES);
+  });
+  return kept.length === body.length ? chunk.text : [header2, ...kept, CUT_MARKER].join("\n");
+}
+function show(chunk, text, left) {
+  const before = chunk.shown === void 0 ? 0 : estimateTokens(chunk.shown);
+  const cost = estimateTokens(text) - before;
+  if (cost <= left) {
+    chunk.shown = text;
+    return Math.max(cost, 0);
+  }
+  if (chunk.shown === void 0 && left >= MIN_CUT_TOKENS) {
+    chunk.shown = cutToTokens(text, left);
+    return left;
+  }
+  return 0;
+}
 function fitChunks(chunks, maxTokens) {
   let left = maxTokens;
-  const ordered = [...chunks.filter((c) => c.near), ...chunks.filter((c) => !c.near)];
-  for (const chunk of ordered) {
-    const cost = estimateTokens(chunk.text);
-    if (cost <= left) {
-      chunk.shown = chunk.text;
-      left -= cost;
-    } else if (left >= MIN_CUT_TOKENS) {
-      chunk.shown = cutToTokens(chunk.text, left);
-      left = 0;
-    }
-  }
+  const near = chunks.filter((c) => c.findingLines.length > 0);
+  for (const chunk of near)
+    left -= show(chunk, windowOf(chunk), left);
+  for (const chunk of near)
+    left -= show(chunk, chunk.text, left);
+  for (const chunk of chunks.filter((c) => c.findingLines.length === 0))
+    left -= show(chunk, chunk.text, left);
 }
 function namesPath(text, path11) {
   const escaped = path11.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -115615,7 +115636,7 @@ function markNearChunks(findings, files) {
   for (const finding of findings) {
     for (const chunk of files.get(finding.path)?.chunks ?? []) {
       if (chunk.ranges.some(([from, to]) => finding.line >= from - NEAR_LINES && finding.line <= to + NEAR_LINES)) {
-        chunk.near = true;
+        chunk.findingLines.push(finding.line);
       }
     }
   }

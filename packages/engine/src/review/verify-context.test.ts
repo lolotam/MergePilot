@@ -95,6 +95,25 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).not.toContain('filler399');
   });
 
+  it("shows a window around every finding line before any finding's whole hunk", () => {
+    // Finding 1 sits at the end of a 400-line hunk; finding 2 is in a hunk after it. Filling hunks
+    // whole in order would spend the cap on hunk 1 (and cut it from the top) before reaching either line.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const patch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+bad1();\n@@ -900,1 +1300,2 @@\n const near = 1;\n+bad2();`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [
+        finding({ path: 'src/big.ts', line: 402, evidence: 'bad1();', body: 'b' }),
+        finding({ id: 'f2', path: 'src/big.ts', line: 1301, evidence: 'bad2();', body: 'b' }),
+      ],
+      files: [{ path: 'src/big.ts', patch }],
+      maxCodeTokens: 400,
+    });
+    expect(user).toContain('402 + bad1();');
+    expect(user).toContain('1301 + bad2();');
+    expect(user).not.toContain('filler0 ');
+  });
+
   it.each(['en', 'ar'])('in %s, no longer rejects a finding only for depending on code not shown', (language) => {
     const { system } = buildVerifyPrompt({ language, findings: [finding()], files: [] });
     expect(system).not.toContain('Reject when it depends on code not shown in the provided hunks');

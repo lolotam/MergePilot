@@ -51,7 +51,8 @@ interface Chunk {
   text: string;
   /** Line ranges (new and old side) the chunk covers; empty for a context file. */
   ranges: Array<[number, number]>;
-  near: boolean;
+  /** Lines of findings this chunk is near (in the finding's own file): their window is shown first. */
+  findingLines: number[];
   shown?: string | undefined;
 }
 
@@ -92,11 +93,11 @@ function patchChunks(patch: string): Chunk[] {
       lines.push(line);
     }
   }
-  return hunks.map((hunk) => ({ text: hunk.lines.join('\n'), ranges: hunk.ranges, near: false }));
+  return hunks.map((hunk) => ({ text: hunk.lines.join('\n'), ranges: hunk.ranges, findingLines: [] }));
 }
 
 function contextChunk(file: ContextFile): Chunk {
-  return { text: `Reason: ${file.reason}\n${numberLines(file.content)}`, ranges: [], near: false };
+  return { text: `Reason: ${file.reason}\n${numberLines(file.content)}`, ranges: [], findingLines: [] };
 }
 
 /** A chunk cut at a line break to about `tokens`, ending with the visible marker. */
@@ -112,20 +113,48 @@ function cutToTokens(text: string, tokens: number): string {
   return [...kept, CUT_MARKER].join('\n');
 }
 
-/** Fills the cap: chunks near a finding line first, then the rest in file order. */
+/** The number a rendered chunk line starts with, or undefined for a header or marker line. */
+function lineNumberOf(line: string): number | undefined {
+  const match = /^\s+(\d+) /.exec(line);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** The hunk header and the lines within NEAR_LINES of a finding line; the rest is marked as cut. */
+function windowOf(chunk: Chunk): string {
+  const [header = '', ...body] = chunk.text.split('\n');
+  const kept = body.filter((line) => {
+    const number = lineNumberOf(line);
+    return number !== undefined && chunk.findingLines.some((at) => Math.abs(at - number) <= NEAR_LINES);
+  });
+  return kept.length === body.length ? chunk.text : [header, ...kept, CUT_MARKER].join('\n');
+}
+
+/** Shows `text` in the chunk when it fits what is left, or cut to fit; returns the tokens it used. */
+function show(chunk: Chunk, text: string, left: number): number {
+  const before = chunk.shown === undefined ? 0 : estimateTokens(chunk.shown);
+  const cost = estimateTokens(text) - before;
+  if (cost <= left) {
+    chunk.shown = text;
+    return Math.max(cost, 0);
+  }
+  if (chunk.shown === undefined && left >= MIN_CUT_TOKENS) {
+    chunk.shown = cutToTokens(text, left);
+    return left;
+  }
+  return 0;
+}
+
+/**
+ * Fills the cap in three passes: first a window around every finding line, so one large hunk cannot
+ * use up the budget and leave another finding without its own evidence; then the whole hunks near a
+ * finding; then everything else in file order.
+ */
 function fitChunks(chunks: Chunk[], maxTokens: number): void {
   let left = maxTokens;
-  const ordered = [...chunks.filter((c) => c.near), ...chunks.filter((c) => !c.near)];
-  for (const chunk of ordered) {
-    const cost = estimateTokens(chunk.text);
-    if (cost <= left) {
-      chunk.shown = chunk.text;
-      left -= cost;
-    } else if (left >= MIN_CUT_TOKENS) {
-      chunk.shown = cutToTokens(chunk.text, left);
-      left = 0;
-    }
-  }
+  const near = chunks.filter((c) => c.findingLines.length > 0);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk), left);
+  for (const chunk of near) left -= show(chunk, chunk.text, left);
+  for (const chunk of chunks.filter((c) => c.findingLines.length === 0)) left -= show(chunk, chunk.text, left);
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +215,7 @@ function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string,
   for (const finding of findings) {
     for (const chunk of files.get(finding.path)?.chunks ?? []) {
       if (chunk.ranges.some(([from, to]) => finding.line >= from - NEAR_LINES && finding.line <= to + NEAR_LINES)) {
-        chunk.near = true;
+        chunk.findingLines.push(finding.line);
       }
     }
   }
