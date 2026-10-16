@@ -64,8 +64,13 @@ describe('parseConfig', () => {
     expect(errors.some((e) => e.startsWith('review: ') && e.includes('maxFinding'))).toBe(true);
   });
 
-  it('rejects maxFindings above 20 with the key path', () => {
-    const errors = expectErrors('provider: openai\nmodel: gpt\nreview:\n  maxFindings: 21\n');
+  it.each([1, 50])('accepts maxFindings %i, the ends of 1..50', (maxFindings) => {
+    const result = parseConfig(`provider: openai\nmodel: gpt\nreview:\n  maxFindings: ${maxFindings}\n`);
+    expect(result.ok && result.config.review.maxFindings).toBe(maxFindings);
+  });
+
+  it.each([0, 51, 2.5])('rejects maxFindings %s with the key path', (maxFindings) => {
+    const errors = expectErrors(`provider: openai\nmodel: gpt\nreview:\n  maxFindings: ${maxFindings}\n`);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/^review\.maxFindings: /);
   });
@@ -102,9 +107,28 @@ describe('parseConfig', () => {
   it('never lets defaults replace a provider the file names, nor hide other errors', () => {
     const named = parseConfig('provider: claude-code\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
     expect(named.ok && named.config.provider).toBe('claude-code');
-    const bad = parseConfig('review:\n  maxFindings: 21\n', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    const bad = parseConfig('review:\n  maxFindings: 51\n', { defaults: { provider: 'openai', model: 'gpt-x', maxFindings: 20 } });
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.errors[0]).toMatch(/^review\.maxFindings: /);
+  });
+
+  it('fills review.maxFindings from defaults only when the file leaves it out (ADR-0033)', () => {
+    const defaults = { provider: 'openai', model: 'gpt-x', maxFindings: 25 };
+    const none = parseConfig('language: en\n', { defaults });
+    expect(none.ok && none.config.review.maxFindings).toBe(25);
+    expect(none.ok && none.defaulted).toEqual(['provider', 'model']);
+    const otherKeys = parseConfig('review:\n  minSeverity: high\n', { defaults });
+    expect(otherKeys.ok && [otherKeys.config.review.maxFindings, otherKeys.config.review.minSeverity]).toEqual([25, 'high']);
+    const named = parseConfig('review:\n  maxFindings: 3\n', { defaults });
+    expect(named.ok && named.config.review.maxFindings).toBe(3);
+    const noDefault = parseConfig('', { defaults: { provider: 'openai', model: 'gpt-x' } });
+    expect(noDefault.ok && noDefault.config.review.maxFindings).toBe(5);
+  });
+
+  it('leaves a review value that is not a mapping for the schema to reject', () => {
+    const filled = parseConfig('review: [1]\n', { defaults: { provider: 'openai', model: 'gpt-x', maxFindings: 10 } });
+    expect(filled.ok).toBe(false);
+    if (!filled.ok) expect(filled.errors[0]).toMatch(/^review: /);
   });
 
   it('returns a syntax error with a line number instead of throwing', () => {

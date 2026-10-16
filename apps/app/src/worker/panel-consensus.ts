@@ -24,8 +24,8 @@ export interface ConsensusPublish {
 
 /**
  * Consensus mode (ADR-0017): merges the findings of every bot that completed, drops what is
- * below the minimum agreement (except critical and high, and listed in the summary), and
- * publishes one review as slot 1 under «Review panel». Publishes nothing when no bot completed.
+ * below the minimum agreement (except critical and high, and listed in the summary), keeps at
+ * most `review.maxFindings` of the rest (the others are listed too; ADR-0033), and publishes one review as slot 1 under «Review panel». Publishes nothing when no bot completed.
  * The judge's same-issue cost is added to the record of the bot whose run carries the review
  * (slot 1 when it completed, otherwise the lowest completed slot).
  */
@@ -67,6 +67,8 @@ export async function publishConsensus(
   const merge = await mergePanelFindings({
     bots: completed.map(({ br, rr }) => ({ slot: br.bot.slot, name: br.bot.name, inline: rr.inline, summaryOnly: rr.summaryOnly })),
     minAgreement: settings.panelMinAgreement ?? 1,
+    // One published review: the findings limit is for the merged total, not each bot (ADR-0033).
+    maxFindings: ctx.mainConfig.effectiveConfig.review.maxFindings,
     judge: consensusJudge,
     knownSecrets,
     maxUsd: consensusJudge ? budget() : undefined,

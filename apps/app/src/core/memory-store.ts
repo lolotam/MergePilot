@@ -1,4 +1,4 @@
-import { InstallationAlreadyLinkedError, WorkspaceDeletedError } from './types.js';
+import { DEFAULT_WORKSPACE_MAX_FINDINGS, InstallationAlreadyLinkedError, WorkspaceDeletedError } from './types.js';
 import { findActiveRun } from './memory-runs.js';
 import {
   memoryCreateReviewRun,
@@ -114,6 +114,7 @@ export class MemoryStore implements AppStore {
       heavyThresholdLines: s.heavyThresholdLines ?? 800,
       fallback: s.fallback ?? [],
       minSeverity: s.minSeverity ?? 'medium',
+      maxFindings: s.maxFindings ?? DEFAULT_WORKSPACE_MAX_FINDINGS,
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
       judge: s.judge ? { ...s.judge, uses: [...s.judge.uses], fallback: [...s.judge.fallback] } : null,
@@ -134,6 +135,7 @@ export class MemoryStore implements AppStore {
     }
     this.settings.set(settings.workspaceId, {
       ...settings,
+      maxFindings: settings.maxFindings ?? stored?.maxFindings,
       runRetentionDays:
         settings.runRetentionDays !== undefined
           ? settings.runRetentionDays

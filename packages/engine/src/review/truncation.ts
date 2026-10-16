@@ -12,6 +12,7 @@ import type { ReviewDeadline } from './call.js';
 import type { ManifestFile } from './manifest.js';
 import type { PromptPr } from './follow-up.js';
 import type { ReviewModel } from './model.js';
+import { reviewRetryOutputTokens } from './output-budget.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
 import {
   batchFilesBySize,
@@ -76,7 +77,7 @@ export async function recoverReviewTruncation(
   }
 
   // 1. Retry once with 2x allowance if budget permits
-  const retryOutputTokens = Math.min(maxOutputTokens * 2, 16384);
+  const retryOutputTokens = reviewRetryOutputTokens(maxOutputTokens);
   const retryRequested = requestedOutputTokens(model, retryOutputTokens);
 
   if (!spend.canAfford(promptTokens, retryRequested)) {

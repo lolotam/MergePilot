@@ -55,6 +55,22 @@ describe('renderPanelSummary (consensus, ADR-0017)', () => {
     expect(body).toContain('Inline comments: 1 · Outside diff: 0');
   });
 
+  it('lists the clusters over the findings limit in their own collapsible section (ADR-0033)', async () => {
+    const merge = await mergePanelFindings({
+      bots: [{ slot: 1, name: 'MergePilot', inline: [f({ title: 'Kept', severity: 'high' }), f({ title: 'Cut', path: 'b.ts' })], summaryOnly: [] }],
+      minAgreement: 1,
+      maxFindings: 1,
+    });
+    const body = renderPanelSummary({ language: 'en', baseUrl: BASE, bots, merge, minAgreement: 1, inlineCount: 1 });
+    expect(body).toContain('<summary>Over the findings limit (1)</summary>');
+    expect(body).toContain('**medium** · `b.ts:10` — Cut · _Found by: MergePilot (1/1)_');
+    expect(renderPanelSummary({ language: 'ar', baseUrl: BASE, bots, merge, minAgreement: 1, inlineCount: 1 })).toContain(
+      '<summary>فوق الحد الأقصى للملاحظات (1)</summary>',
+    );
+    const unlimited = renderPanelSummary({ language: 'en', baseUrl: BASE, bots, merge: await merged(), minAgreement: 2, inlineCount: 1 });
+    expect(unlimited).not.toContain('Over the findings limit');
+  });
+
   it('renders in Arabic inside an RTL block', async () => {
     const body = renderPanelSummary({ language: 'ar', baseUrl: BASE, bots, merge: await merged(), minAgreement: 1, inlineCount: 1 });
     expect(body.startsWith('<div dir="rtl">\n\n## لوحة المراجعين')).toBe(true);

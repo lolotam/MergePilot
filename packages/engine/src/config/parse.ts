@@ -15,7 +15,27 @@ export interface ParseConfigOptions {
    * choice (it picks the provider and model itself), so its repos need not name them; the GitHub
    * Action passes nothing and `provider` stays required. Each key is filled on its own.
    */
-  defaults?: { provider: string; model?: string | undefined } | undefined;
+  defaults?:
+    | {
+        provider: string;
+        model?: string | undefined;
+        /**
+         * `review.maxFindings` when the file leaves it out: the SaaS App passes the workspace's
+         * dashboard choice, and a file that names its own value keeps it (ADR-0033).
+         */
+        maxFindings?: number | undefined;
+      }
+    | undefined;
+}
+
+/** `data` with `review.maxFindings` filled when the file's `review` mapping leaves it out. */
+function withDefaultMaxFindings(data: object, maxFindings: number | undefined): object {
+  if (maxFindings === undefined) return data;
+  const review: unknown = (data as { review?: unknown }).review;
+  if (review === undefined) return { ...data, review: { maxFindings } };
+  // A review value that is not a mapping is left for the schema to reject.
+  if (typeof review !== 'object' || review === null || Array.isArray(review) || 'maxFindings' in review) return data;
+  return { ...data, review: { ...review, maxFindings } };
 }
 
 function valueAt(data: unknown, path: readonly PropertyKey[]): unknown {
@@ -56,7 +76,7 @@ export function parseConfig(yamlText: string, options: ParseConfigOptions = {}):
   const filled: Partial<Record<DefaultedKey, string>> = {};
   if (options.defaults && !('provider' in data)) filled.provider = options.defaults.provider;
   if (options.defaults?.model !== undefined && !('model' in data)) filled.model = options.defaults.model;
-  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...data });
+  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...withDefaultMaxFindings(data, options.defaults?.maxFindings) });
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((issue) => formatIssue(issue, data)) };
   }

@@ -25,7 +25,7 @@ export async function buildBotConfig(
   repoConfigResult: LoadRepoConfigResult,
   choice: Pick<ModelChoice, 'provider' | 'model' | 'effort'>,
   fallbackList: Array<{ provider: ApiProvider; model: string; effort?: string }>,
-  settings: Pick<WorkspaceSettings, 'language' | 'minSeverity' | 'priceOverrides'>,
+  settings: Pick<WorkspaceSettings, 'language' | 'minSeverity' | 'maxFindings' | 'priceOverrides'>,
   store: Pick<ModelPriceStore, 'getModelPrice'>,
 ): Promise<BotConfig> {
   const built = effectiveConfigFor(repoConfigResult, choice, fallbackList, settings);

@@ -14,6 +14,7 @@ import { estimateTokens } from './budget.js';
 import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { combineUsage, needsTruncationRetry, type ReviewableFileWithPatch } from './split.js';
+import { verifyOutputTokensFor, verifyRetryOutputTokens } from './output-budget.js';
 import { describeCallError, requestedOutputTokens, type SpendTracker } from './spend.js';
 import type { ContextFile } from './prompt.js';
 import type { Finding } from './types.js';
@@ -24,9 +25,6 @@ import {
   VerifyAnswerSchema,
   type VerifyRejectedFinding,
 } from './verify.js';
-
-export const VERIFY_MAX_OUTPUT_TOKENS = 2048;
-const VERIFY_RETRY_OUTPUT_TOKENS = Math.min(VERIFY_MAX_OUTPUT_TOKENS * 2, 8192);
 
 export interface VerifyPassInput {
   language: 'ar' | 'en';
@@ -71,7 +69,10 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     maxCodeTokens: input.maxCodeTokens,
   });
   const promptTokens = estimateTokens(verifyPrompt.system + verifyPrompt.user);
-  const firstRequested = requestedOutputTokens(model, VERIFY_MAX_OUTPUT_TOKENS);
+  // The answer has one verdict per finding, so its budget grows with them (ADR-0033).
+  const maxOutputTokens = verifyOutputTokensFor(input.findings.length);
+  const retryOutputTokens = verifyRetryOutputTokens(maxOutputTokens);
+  const firstRequested = requestedOutputTokens(model, maxOutputTokens);
   const responseSchema = z.toJSONSchema(VerifyAnswerSchema) as Record<string, unknown>;
 
   if (input.deadline?.expired) {
@@ -86,7 +87,7 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
   const request: ReviewModelRequest = {
     system: verifyPrompt.system,
     user: verifyPrompt.user,
-    maxOutputTokens: VERIFY_MAX_OUTPUT_TOKENS,
+    maxOutputTokens,
     responseSchema,
     ...(signal ? { signal } : {}),
   };
@@ -112,14 +113,14 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     if (empty.note) incompleteReasons.push(`verification ${empty.note}`);
 
     if (needsTruncationRetry(verifyParsed, (empty.response ?? res).finishReason)) {
-      const retryRequested = requestedOutputTokens(model, VERIFY_RETRY_OUTPUT_TOKENS);
+      const retryRequested = requestedOutputTokens(model, retryOutputTokens);
       if (!spend.canAfford(promptTokens, retryRequested)) {
         incompleteReasons.push('verification retry skipped: budget limit reached');
       } else {
         try {
           const retryRes = await model.generate({
             ...request,
-            maxOutputTokens: VERIFY_RETRY_OUTPUT_TOKENS,
+            maxOutputTokens: retryOutputTokens,
             ...(empty.thinkingOff ? { thinking: 'off' as const } : {}),
           });
           spend.record(promptTokens, retryRequested, retryRes.usage);

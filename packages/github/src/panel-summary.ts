@@ -53,6 +53,7 @@ interface Labels {
   incomplete: string;
   outside: string;
   below: (n: number) => string;
+  overLimit: (n: number) => string;
   summaries: string;
   counts: (inline: number, outside: number) => string;
   disclaimer: string;
@@ -68,6 +69,7 @@ const EN: Labels = {
   incomplete: '### ⚠️ Warning: Incomplete review',
   outside: '### Findings outside the diff',
   below: (n) => `Below agreement (${n})`,
+  overLimit: (n) => `Over the findings limit (${n})`,
   summaries: 'Bot summaries',
   counts: (inline, outside) => `Inline comments: ${inline} · Outside diff: ${outside}`,
   disclaimer: 'MergePilot only comments and never approves or blocks merging.',
@@ -83,6 +85,7 @@ const AR: Labels = {
   incomplete: '### ⚠️ تحذير: مراجعة غير مكتملة',
   outside: '### ملاحظات خارج التغييرات',
   below: (n) => `أقل من حد الاتفاق (${n})`,
+  overLimit: (n) => `فوق الحد الأقصى للملاحظات (${n})`,
   summaries: 'ملخصات المراجعين',
   counts: (inline, outside) => `تعليقات مضمنة: ${inline} · خارج التغييرات: ${outside}`,
   disclaimer: '`MergePilot` يكتفي بالتعليق فقط ولا يوافق على الدمج أو يمنعه.',
@@ -113,8 +116,8 @@ function details(summary: string, body: string): string {
 
 /**
  * The body of the one review a consensus panel publishes: the «Review panel» header, a table of
- * the bots, the merged findings outside the diff, and everything set aside below the agreement,
- * so nothing is dropped silently. The hidden marker is appended by `publishReview`.
+ * the bots, the merged findings outside the diff, and everything set aside below the agreement or
+ * over the findings limit, so nothing is dropped silently. The hidden marker is appended by `publishReview`.
  */
 export function renderPanelSummary(input: PanelSummaryInput): string {
   const isArabic = input.language === 'ar';
@@ -147,6 +150,10 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   if (merge.below.length > 0) {
     const items = merge.below.map((c) => `- ${clusterLine(c, merge.total, input.language)}`);
     sections.push(details(labels.below(merge.below.length), items.join('\n')));
+  }
+  if (merge.overLimit.length > 0) {
+    const items = merge.overLimit.map((c) => `- ${clusterLine(c, merge.total, input.language)}`);
+    sections.push(details(labels.overLimit(merge.overLimit.length), items.join('\n')));
   }
 
   const rejected = renderVerifyRejected(input.verifyRejected ?? [], isArabic);

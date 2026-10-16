@@ -7,6 +7,7 @@ import { useI18n } from '../i18n/context.js';
 import { EffortSelect, effortFor } from './EffortSelect.js';
 import { FallbackModelsCard } from './FallbackModelsCard.js';
 import { HeavyModelCard, type HeavyModelValue } from './HeavyModelCard.js';
+import { DEFAULT_MAX_FINDINGS, MaxFindingsSelect, type MaxFindings } from './MaxFindingsSelect.js';
 import { ModelSelect } from './ModelSelect.js';
 import { fieldClass, labelClass, ProviderSelect, useModelEfforts } from './providers.js';
 import { SeveritySelect } from './SeveritySelect.js';
@@ -49,6 +50,7 @@ export function ReviewSettingsCard({
   const [heavy, setHeavy] = useState<HeavyModelValue>(NO_HEAVY);
   const [fallback, setFallback] = useState<FallbackEntry[]>([]);
   const [minSeverity, setMinSeverity] = useState<Severity>('medium');
+  const [maxFindings, setMaxFindings] = useState<MaxFindings>(DEFAULT_MAX_FINDINGS);
   const [language, setLanguage] = useState<'ar' | 'en'>('ar');
   const [monthlyBudget, setMonthlyBudget] = useState('');
   // The main bot's identity (ADR-0017), saved with the settings.
@@ -68,7 +70,7 @@ export function ReviewSettingsCard({
     const key = JSON.stringify([
       settings.botName, settings.botLogo, settings.provider, settings.model, settings.effort, settings.heavyProvider,
       settings.heavyModel, settings.heavyEffort, settings.heavyThresholdLines, settings.fallback, settings.minSeverity,
-      settings.language, settings.monthlyBudgetUsd,
+      settings.maxFindings, settings.language, settings.monthlyBudgetUsd,
     ]);
     if (key === shownKey.current) return;
     shownKey.current = key;
@@ -89,6 +91,7 @@ export function ReviewSettingsCard({
     );
     setFallback(settings.fallback ?? []);
     setMinSeverity(settings.minSeverity ?? 'medium');
+    setMaxFindings(settings.maxFindings ?? DEFAULT_MAX_FINDINGS);
     setLanguage(settings.language);
     setMonthlyBudget(
       settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined ? String(settings.monthlyBudgetUsd) : '',
@@ -127,6 +130,7 @@ export function ReviewSettingsCard({
         heavyThresholdLines: heavyOn ? heavy.heavyThresholdLines : null,
         fallback: fallback.map((f) => ({ provider: f.provider, model: f.model.trim(), effort: f.effort ?? null })),
         minSeverity,
+        maxFindings,
         botName: botName.trim(),
         botLogo,
       });
@@ -192,6 +196,7 @@ export function ReviewSettingsCard({
 
             <EffortSelect id="settings-effort" efforts={efforts} value={effort} onChange={setEffort} disabled={isMember} />
             <SeveritySelect value={minSeverity} onChange={setMinSeverity} disabled={isMember} />
+            <MaxFindingsSelect value={maxFindings} onChange={setMaxFindings} disabled={isMember} />
 
             <div>
               <label htmlFor="settings-language" className={labelClass}>

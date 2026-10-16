@@ -18,13 +18,15 @@ export interface EffectiveConfig {
  * `provider: claude-code`); the repo still supplies its review rules and other settings. A
  * repo-provided baseUrl never reaches the effective config: a key must not be sent to a URL from
  * repository content (ADR-0008 amendment). The price is resolved later (ADR-0016), so
- * `budget.pricing` is left empty here.
+ * `budget.pricing` is left empty here. The workspace's findings limit applies when the repo file
+ * leaves `review.maxFindings` out: `loadRepoConfig` fills it then, and a file's own value wins
+ * (ADR-0033).
  */
 export function effectiveConfigFor(
   repoConfigResult: LoadRepoConfigResult,
   choice: Pick<ModelChoice, 'provider' | 'model' | 'effort'>,
   fallbackList: Array<{ provider: ApiProvider; model: string; effort?: string }>,
-  settings: Pick<WorkspaceSettings, 'language' | 'minSeverity'>,
+  settings: Pick<WorkspaceSettings, 'language' | 'minSeverity' | 'maxFindings'>,
 ): EffectiveConfig {
   const { provider, model, effort } = choice;
   if ('missing' in repoConfigResult) {
@@ -35,7 +37,10 @@ export function effectiveConfigFor(
         ...(effort ? { effort } : {}),
         fallback: fallbackList,
         language: settings.language,
-        review: { minSeverity: settings.minSeverity ?? 'medium' },
+        review: {
+          minSeverity: settings.minSeverity ?? 'medium',
+          ...(settings.maxFindings !== undefined ? { maxFindings: settings.maxFindings } : {}),
+        },
       }),
       rulesFiles: [],
       configHash: createHash('sha256')

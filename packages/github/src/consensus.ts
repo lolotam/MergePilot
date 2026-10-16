@@ -15,7 +15,9 @@ import { normalizeTitle } from './dedupe.js';
  * either the same normalized title or, when a judge is supplied, a "same issue?" answer of 0.8 or
  * more. Each cluster keeps its most severe version and the bots that found it. Clusters found by
  * fewer than `minAgreement` bots are set aside, except critical and high ones, and returned so the
- * summary can list them: nothing is dropped silently.
+ * summary can list them: nothing is dropped silently. The kept clusters are then capped at
+ * `maxFindings`, the published review's findings limit (ADR-0033); the clusters over it are
+ * returned for the summary too.
  */
 
 export const CONSENSUS_LINE_WINDOW = 3;
@@ -43,6 +45,8 @@ export interface MergePanelInput {
   /** The bots that completed their review. */
   bots: PanelBotFindings[];
   minAgreement: number;
+  /** Most clusters the published review keeps; undefined keeps every agreed cluster. */
+  maxFindings?: number | undefined;
   judge?: Judge | undefined;
   knownSecrets?: readonly Secret[] | undefined;
   maxUsd?: number | undefined;
@@ -52,6 +56,8 @@ export interface MergePanelResult {
   kept: ConsensusCluster[];
   /** Below the minimum agreement (never critical or high). */
   below: ConsensusCluster[];
+  /** Agreed clusters left out by `maxFindings`: the least severe, then those the fewest bots found. */
+  overLimit: ConsensusCluster[];
   /** How many bots completed: the N of "n/N". */
   total: number;
   /** Set when the judge was asked (or failed). */
@@ -131,14 +137,31 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
     groups.set(root, [...(groups.get(root) ?? []), entry]);
   });
 
-  const kept: ConsensusCluster[] = [];
+  const agreed: ConsensusCluster[] = [];
   const below: ConsensusCluster[] = [];
   for (const group of groups.values()) {
     const cluster = toCluster(group);
-    const agreed = cluster.foundBy.length >= input.minAgreement;
-    (agreed || ALWAYS_KEPT.has(cluster.finding.severity) ? kept : below).push(cluster);
+    const enough = cluster.foundBy.length >= input.minAgreement;
+    (enough || ALWAYS_KEPT.has(cluster.finding.severity) ? agreed : below).push(cluster);
   }
-  return { kept: kept.sort(byImportance), below: below.sort(byImportance), total: input.bots.length, ...(semantic ? { semantic } : {}) };
+  const { kept, overLimit } = capClusters(agreed.sort(byImportance), input.maxFindings);
+  return { kept, below: below.sort(byImportance), overLimit, total: input.bots.length, ...(semantic ? { semantic } : {}) };
+}
+
+/** The `max` clusters to publish, most severe first and then those most bots found; order kept. */
+function capClusters(
+  clusters: ConsensusCluster[],
+  max: number | undefined,
+): { kept: ConsensusCluster[]; overLimit: ConsensusCluster[] } {
+  if (max === undefined || clusters.length <= max) return { kept: clusters, overLimit: [] };
+  const ranked = [...clusters].sort(
+    (a, b) =>
+      SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity] ||
+      b.foundBy.length - a.foundBy.length ||
+      byImportance(a, b),
+  );
+  const chosen = new Set(ranked.slice(0, Math.max(0, max)));
+  return { kept: clusters.filter((c) => chosen.has(c)), overLimit: clusters.filter((c) => !chosen.has(c)) };
 }
 
 function nearby(a: Entry, b: Entry): boolean {

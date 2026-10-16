@@ -182,6 +182,12 @@ export function describeStoreContract(
         expect(reloaded?.minSeverity).toBe('medium');
         expect(reloaded?.judge).toBeNull();
 
+        // The findings limit (ADR-0033): 5 until saved, kept when left out.
+        expect(reloaded?.maxFindings).toBe(5);
+        await store.saveSettings({ ...updated, maxFindings: 35 });
+        await store.saveSettings({ ...updated, maxFindings: undefined, minSeverity: 'low' });
+        expect(await store.getSettings('ws-settings-test')).toMatchObject({ maxFindings: 35, minSeverity: 'low' });
+
         // The Jev judge (ADR-0015): saved with its fallbacks, kept when left out, cleared by null.
         const judge = {
           enabled: true,

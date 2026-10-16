@@ -150,6 +150,7 @@ export async function seedWorkspace(h: BackupHarness): Promise<void> {
     heavyThresholdLines: 1200,
     fallback: [{ provider: 'custom', model: 'my-model' }],
     minSeverity: 'high',
+    maxFindings: 25,
     runRetentionDays: 90,
     repoColors: { 'acme/api': 'sky' },
     judge: { enabled: true, provider: 'typesafe', model: 'jev-latest', mode: 'filter', threshold: 0.4, fallback: [] },
