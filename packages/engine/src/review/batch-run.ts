@@ -135,7 +135,7 @@ async function reviewOneBatch(
 
   if (needsTruncationRetry(parsed, (empty.response ?? first).finishReason)) {
     const retryRequested = requestedOutputTokens(model, retryOutputTokens);
-    if (!retryAddsAnswerRoom(model, input.maxOutputTokens, retryOutputTokens)) {
+    if (!retryAddsAnswerRoom(model, input.maxOutputTokens, retryOutputTokens, empty.thinkingOff ? 'off' : undefined)) {
       notes.push(OUTPUT_LIMIT_RETRY_SKIPPED);
     } else if (!spend.canAfford(promptTokens, retryRequested)) {
       notes.push('truncation retry skipped: budget limit reached');

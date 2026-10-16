@@ -64,6 +64,7 @@ describe('model output limits (ADR-0033)', () => {
     expect(adapter.lastAnswer).toBe(8192);
     // The preflight keeps the conservative estimate with headroom.
     expect(model.answerTokensFor?.(16_024)).toBe(6144);
+    expect(model.answerTokensFor?.(16_024, 'off')).toBe(8192);
   });
 
   it('leaves the budget alone when the limit is unknown', async () => {

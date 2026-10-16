@@ -139541,8 +139541,8 @@ var FallbackChain = class {
     return Math.max(...this.#models.map((m2) => m2.outputTokensFor?.(maxOutputTokens) ?? maxOutputTokens));
   }
   /** The answer budget of the model answering now: after a fallback, the fallback's own limit. */
-  answerTokensFor(maxOutputTokens) {
-    return this.#current().answerTokensFor?.(maxOutputTokens) ?? maxOutputTokens;
+  answerTokensFor(maxOutputTokens, thinking) {
+    return this.#current().answerTokensFor?.(maxOutputTokens, thinking) ?? maxOutputTokens;
   }
   get label() {
     return this.#current().label;
@@ -139670,7 +139670,7 @@ function modelFromAdapter(adapter, model, effort) {
   return {
     label: `${adapter.provider}:${model}`,
     outputTokensFor: (maxOutputTokens) => requested(answerTokensFor(maxOutputTokens)),
-    answerTokensFor: (maxOutputTokens) => answerTokensFor(maxOutputTokens),
+    answerTokensFor,
     async generate(request2) {
       const result = await collectText(adapter.stream({
         model,
@@ -139801,12 +139801,12 @@ function selectFindings(findings, opts = {}) {
 function requestedOutputTokens(model, maxOutputTokens) {
   return model.outputTokensFor ? model.outputTokensFor(maxOutputTokens) : maxOutputTokens;
 }
-function answerTokensOf(model, maxOutputTokens) {
-  return model.answerTokensFor ? model.answerTokensFor(maxOutputTokens) : maxOutputTokens;
+function answerTokensOf(model, maxOutputTokens, thinking) {
+  return model.answerTokensFor ? model.answerTokensFor(maxOutputTokens, thinking) : maxOutputTokens;
 }
 var OUTPUT_LIMIT_RETRY_SKIPPED = "truncation retry skipped: the model's output limit leaves no room for a larger answer";
-function retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens) {
-  return answerTokensOf(model, retryOutputTokens) > answerTokensOf(model, maxOutputTokens);
+function retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens, thinking) {
+  return answerTokensOf(model, retryOutputTokens, thinking) > answerTokensOf(model, maxOutputTokens, thinking);
 }
 function hasRealUsage(usage) {
   if (!usage)
@@ -140528,7 +140528,7 @@ async function reviewOneBatch(input2, prompt, promptTokens) {
     notes.push(empty.note);
   if (needsTruncationRetry(parsed, (empty.response ?? first).finishReason)) {
     const retryRequested = requestedOutputTokens(model, retryOutputTokens);
-    if (!retryAddsAnswerRoom(model, input2.maxOutputTokens, retryOutputTokens)) {
+    if (!retryAddsAnswerRoom(model, input2.maxOutputTokens, retryOutputTokens, empty.thinkingOff ? "off" : void 0)) {
       notes.push(OUTPUT_LIMIT_RETRY_SKIPPED);
     } else if (!spend.canAfford(promptTokens, retryRequested)) {
       notes.push("truncation retry skipped: budget limit reached");
@@ -140872,7 +140872,7 @@ async function recoverReviewTruncation(input2) {
   }
   const retryOutputTokens = reviewRetryOutputTokens(maxOutputTokens);
   const retryRequested = requestedOutputTokens(model, retryOutputTokens);
-  if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens)) {
+  if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens, input2.thinkingOff ? "off" : void 0)) {
     if (redactedReviewableFiles.length <= 1)
       incompleteReasons.push(OUTPUT_LIMIT_RETRY_SKIPPED);
   } else if (!spend.canAfford(promptTokens, retryRequested)) {

@@ -86,7 +86,7 @@ export async function recoverReviewTruncation(
   const retryOutputTokens = reviewRetryOutputTokens(maxOutputTokens);
   const retryRequested = requestedOutputTokens(model, retryOutputTokens);
 
-  if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens)) {
+  if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens, input.thinkingOff ? 'off' : undefined)) {
     // The output limit already clamped the first call: go straight to the batch split.
     if (redactedReviewableFiles.length <= 1) incompleteReasons.push(OUTPUT_LIMIT_RETRY_SKIPPED);
   } else if (!spend.canAfford(promptTokens, retryRequested)) {

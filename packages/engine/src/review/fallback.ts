@@ -96,8 +96,8 @@ export class FallbackChain implements ReviewModel {
   }
 
   /** The answer budget of the model answering now: after a fallback, the fallback's own limit. */
-  answerTokensFor(maxOutputTokens: number): number {
-    return this.#current().answerTokensFor?.(maxOutputTokens) ?? maxOutputTokens;
+  answerTokensFor(maxOutputTokens: number, thinking?: 'off'): number {
+    return this.#current().answerTokensFor?.(maxOutputTokens, thinking) ?? maxOutputTokens;
   }
 
   get label(): string {

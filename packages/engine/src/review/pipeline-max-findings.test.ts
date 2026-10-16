@@ -102,6 +102,70 @@ describe('runReview — review.maxFindings', () => {
       }
     });
 
+    describe('after the thinking-off retry', () => {
+      // An 8,192-token limit beside 2,048 tokens of thinking headroom; a thinking-off call gets it all.
+      const answerTokensFor = (max: number, thinking?: 'off') => Math.min(max, thinking === 'off' ? 8192 : 6144);
+      const truncated: ReviewModelResponse = { text: '{"summary": "Reviewed.", "findings": [', finishReason: 'length' };
+
+      /** Answers empty with thinking on, truncated on the first thinking-off call, in full after. */
+      function thinkingOffModel(isTarget: (req: ReviewModelRequest) => boolean, others?: (req: ReviewModelRequest) => ReviewModelResponse) {
+        const { model, calls } = findingsModel(1);
+        const seen = new Set<string>();
+        const tracked: ReviewModel = {
+          ...model,
+          answerTokensFor,
+          generate: async (req) => {
+            if (!isTarget(req)) {
+              if (others) {
+                calls.push(req);
+                return others(req);
+              }
+              return model.generate(req);
+            }
+            if (req.thinking !== 'off') {
+              calls.push(req);
+              return { text: '', finishReason: 'stop' };
+            }
+            if (!seen.has(req.user)) {
+              seen.add(req.user);
+              calls.push(req);
+              return truncated;
+            }
+            return model.generate(req);
+          },
+        };
+        return { model: tracked, calls };
+      }
+
+      it('retries the whole PR with thinking off when that leaves more answer room', async () => {
+        // N = 20: 7,024 answer tokens; the thinking-off first answer got them all, its retry gets 8,192.
+        const { model, calls } = thinkingOffModel(isWholePr);
+        const result = await review(configWith({ maxFindings: 20 }), model, files);
+
+        expect(calls.filter(isWholePr).map((c) => [c.maxOutputTokens, c.thinking])).toEqual([
+          [7024, undefined],
+          [7024, 'off'],
+          [14_048, 'off'],
+        ]);
+        expect(calls.filter((c) => !isWholePr(c))).toHaveLength(0);
+        expect(result.status).toBe('completed');
+      });
+
+      it('retries a truncated batch with thinking off when that leaves more answer room', async () => {
+        // The whole-PR answer is truncated with thinking on: its retry would get no more room.
+        const { model, calls } = thinkingOffModel((req) => !isWholePr(req), () => truncated);
+        const result = await review(configWith({ maxFindings: 20 }), model, files);
+
+        expect(calls.filter(isWholePr)).toHaveLength(1);
+        const batchCalls = calls.filter((c) => !isWholePr(c));
+        // Per batch: the empty answer, the truncated thinking-off answer, then its thinking-off retry.
+        const perBatch = [[7024, undefined], [7024, 'off'], [14_048, 'off']];
+        expect(batchCalls.map((c) => [c.maxOutputTokens, c.thinking])).toEqual([...perBatch, ...perBatch]);
+        expect(result.status).toBe('completed');
+        if (result.status === 'completed') expect(result.result.findings).toHaveLength(2);
+      });
+    });
+
     it('still retries the whole PR once when the retry gets more room', async () => {
       const { model, calls } = truncatingModel();
       await review(configWith({ maxFindings: 50 }), model, files);

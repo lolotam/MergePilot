@@ -46,9 +46,10 @@ export interface ReviewModel {
   outputTokensFor?(maxOutputTokens: number): number;
   /**
    * The answer budget a call really gets for `maxOutputTokens`: lower when the model's known output
-   * limit leaves less room beside its thinking headroom (ADR-0033). Absent means `maxOutputTokens`.
+   * limit leaves less room beside its thinking headroom (ADR-0033). `thinking: 'off'` sizes it for a
+   * call sent with thinking off; without it, for the configured effort. Absent means `maxOutputTokens`.
    */
-  answerTokensFor?(maxOutputTokens: number): number;
+  answerTokensFor?(maxOutputTokens: number, thinking?: 'off'): number;
 }
 
 /** The caller's known secrets plus every key the model and its fallbacks send, for redaction. */
@@ -98,7 +99,7 @@ export function modelFromAdapter(adapter: LlmAdapter, model: string, effort?: st
   return {
     label: `${adapter.provider}:${model}`,
     outputTokensFor: (maxOutputTokens) => requested(answerTokensFor(maxOutputTokens)),
-    answerTokensFor: (maxOutputTokens) => answerTokensFor(maxOutputTokens),
+    answerTokensFor,
     async generate(request) {
       const result = await collectText(
         adapter.stream({
