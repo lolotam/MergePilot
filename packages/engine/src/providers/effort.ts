@@ -147,6 +147,33 @@ export function anthropicThinking(model: string, effort: string | undefined): An
   return { thinking: { type: 'enabled', budget_tokens: thinkingHeadroom(value) } };
 }
 
+/**
+ * Output tokens reserved for adaptive Claude thinking, by Anthropic effort. Adaptive thinking
+ * takes no budget: Claude decides how long to think and its thinking shares `max_tokens` with
+ * the answer, so at high effort a large review batch outgrows the budget table above and the
+ * JSON answer is cut (ADR-0011 amendment, 2026-10-16). Every Claude 5.x model allows 128k output.
+ */
+const ADAPTIVE_THINKING_HEADROOM: Readonly<Record<string, number>> = Object.freeze({
+  low: 4096,
+  medium: 16384,
+  high: 32768,
+  xhigh: 32768,
+  max: 32768,
+});
+
+/** Headroom for adaptive Claude thinking at this effort; an absent or unknown effort runs at `high`. */
+export function adaptiveThinkingHeadroom(effort: string | undefined): number {
+  const value = normalize(effort);
+  return ADAPTIVE_THINKING_HEADROOM[value === 'minimal' ? 'low' : value] ?? ADAPTIVE_THINKING_HEADROOM.high ?? 0;
+}
+
+/** Anthropic API: output tokens added on top of the answer for this model's thinking; 0 without thinking. */
+export function anthropicThinkingHeadroom(model: string, effort: string | undefined): number {
+  const thinking = anthropicThinking(model, effort);
+  if (!thinking) return 0;
+  return thinking.thinking.type === 'adaptive' ? adaptiveThinkingHeadroom(effort) : thinkingHeadroom(effort);
+}
+
 export type GeminiThinkingConfig = { thinkingBudget: number } | { thinkingLevel: string };
 
 const GEMINI_BUDGET_MODEL = /^gemini-(?:1|2)\./;

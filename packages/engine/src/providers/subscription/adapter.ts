@@ -1,14 +1,15 @@
 import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai/models';
-import type { CredentialStore, Message } from '@earendil-works/pi-ai';
+import type { CredentialStore, Message, ThinkingLevel } from '@earendil-works/pi-ai';
 import { decodeSubscription, type SubscriptionProvider } from '../../credentials/subscription.js';
 import type { Secret } from '../../credentials/secret.js';
-import { LlmAdapter } from '../../llm/adapter.js';
+import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY } from '../../llm/retry.js';
 import type { GenerateOptions, StreamChunk } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
 import { subscriptionProvider } from './auth.js';
 import { failureFromResponse } from '../http.js';
+import { subscriptionOutputTokens } from './output-tokens.js';
 
 export function subscriptionModels(provider: SubscriptionProvider) {
   return subscriptionProvider(provider).getModels().map((model) => ({
@@ -19,11 +20,30 @@ export function subscriptionModels(provider: SubscriptionProvider) {
   }));
 }
 
+type ModelLevel = ReturnType<typeof getSupportedThinkingLevels>[number];
+
+/** The model's level for this effort (`none` is `off`), or undefined when it has no such level. */
+function supportedLevel(levels: readonly ModelLevel[], effort: string | undefined): ModelLevel | undefined {
+  return levels.find((level) => level === effort || (effort === 'none' && level === 'off'));
+}
+
+/** pi-ai reads thinking from `reasoning`; `off` is sent as no level at all. */
+function reasoningFor(level: ModelLevel | undefined): ThinkingLevel | undefined {
+  return level === 'off' ? undefined : level;
+}
+
 /** Streams only model text; no agent tools or subprocesses are enabled. */
 export class SubscriptionAdapter extends LlmAdapter {
   override readonly retryPolicy = DEFAULT_RETRY_POLICY;
   constructor(override readonly provider: SubscriptionProvider, private secret: Secret,
     private readonly resolveSecret?: () => Promise<Secret>) { super(); }
+
+  override requestedOutputTokens(options: OutputTokenRequest): number {
+    const model = subscriptionProvider(this.provider).getModels().find((entry) => entry.id === options.model);
+    if (!model) return options.maxOutputTokens;
+    const reasoning = reasoningFor(supportedLevel(getSupportedThinkingLevels(model), options.effort));
+    return subscriptionOutputTokens(model, reasoning, options.maxOutputTokens).requested;
+  }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     let envelope;
@@ -54,11 +74,11 @@ export class SubscriptionAdapter extends LlmAdapter {
     const model = models.getModel(provider.id, options.model);
     if (!model) throw new LlmFailure({ provider: this.provider, code: 'BAD_REQUEST', message: `Unknown subscription model: ${options.model}` });
     const efforts = getSupportedThinkingLevels(model);
-    const requestedEffort = options.thinking === 'off' && efforts.includes('off') ? 'off' : options.effort;
-    const effort = efforts.find((level) => level === requestedEffort || (requestedEffort === 'none' && level === 'off'));
-    if (options.effort !== undefined && !effort) {
+    const level = supportedLevel(efforts, options.thinking === 'off' && efforts.includes('off') ? 'off' : options.effort);
+    if (options.effort !== undefined && !level) {
       throw new LlmFailure({ provider: this.provider, code: 'BAD_REQUEST', message: `Unsupported subscription effort: ${options.effort}` });
     }
+    const reasoning = reasoningFor(level);
     const messages: Message[] = options.messages.map((message) => message.role === 'assistant'
       ? { role: 'assistant', content: [{ type: 'text', text: message.content }], api: model.api, provider: model.provider, model: model.id,
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: 'stop', timestamp: Date.now() }
@@ -70,9 +90,9 @@ export class SubscriptionAdapter extends LlmAdapter {
     try {
       for await (const event of models.streamSimple(model, { messages }, {
         ...(options.signal ? { signal: options.signal } : {}),
-        ...(effort ? { thinking: effort } : {}),
+        ...(reasoning ? { reasoning } : {}),
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-        maxTokens: options.maxOutputTokens,
+        maxTokens: subscriptionOutputTokens(model, reasoning, options.maxOutputTokens).send,
         maxRetries: 0,
         transport: 'sse',
         fetch: async (input, init) => {

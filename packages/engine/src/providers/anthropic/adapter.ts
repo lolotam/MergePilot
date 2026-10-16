@@ -5,7 +5,7 @@ import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import type { FinishReason, GenerateOptions, StreamChunk, TokenUsage } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
-import { anthropicThinking, thinkingHeadroom } from '../effort.js';
+import { anthropicThinking, anthropicThinkingHeadroom } from '../effort.js';
 import type {
   AnthropicAdapterOptions,
   AnthropicLike,
@@ -53,8 +53,7 @@ export class AnthropicAdapter extends LlmAdapter {
   }
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
-    const thinks = anthropicThinking(options.model, options.effort) !== undefined;
-    return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
+    return options.maxOutputTokens + anthropicThinkingHeadroom(options.model, options.effort);
   }
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {

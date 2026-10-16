@@ -175,6 +175,20 @@ describe('AnthropicAdapter', () => {
     expect(chunks.find((c) => c.type === 'finish')).toEqual({ type: 'finish', reason: 'max-tokens' });
   });
 
+  it.each([
+    ['claude-opus-5-5', 4096 + 32768],
+    ['claude-sonnet-4-5', 4096 + 16384],
+  ])('sends %s at effort high the output limit the budget preflight prices', async (model, limit) => {
+    const fakeClient = new FakeAnthropicClient();
+    fakeClient.eventsToEmit = [{ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } }];
+    const adapter = new AnthropicAdapter({ apiKey: new Secret('sk-test-000'), client: fakeClient });
+
+    await drain(adapter.stream({ model, effort: 'high', messages: [{ role: 'user', content: 'Review' }], maxOutputTokens: 4096 }));
+
+    expect(fakeClient.lastStreamParams?.max_tokens).toBe(limit);
+    expect(adapter.requestedOutputTokens({ model, effort: 'high', maxOutputTokens: 4096 })).toBe(limit);
+  });
+
   it('maps stop_sequence and other reasons to stop', async () => {
     const fakeClient = new FakeAnthropicClient();
     fakeClient.eventsToEmit = [
