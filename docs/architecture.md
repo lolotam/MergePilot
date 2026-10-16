@@ -24,6 +24,7 @@ packages/
       llm/             عقد LlmAdapter + LlmFailure + retry policy (مشتق من Harness، ADR-0003)
       providers/       anthropic/ openai/ gemini/ compatible/ — adapters لمزوّدي الـ API
                        subscription/ — تسجيل دخول وبروتوكولات اشتراكات Codex وClaude وGrok عن طريق pi-ai
+                       subscription/antigravity/ — دخول اشتراك Google Antigravity وبروتوكول Cloud Code Assist، كود بتاعنا (ADR-0032)
                        claude-code/ — تشغيل Claude Code الأصلي للـ Action
       credentials/     CredentialStore + CredentialInfo (ADR-0002)
                        subscription.ts — envelope مشفّر لبيانات الاشتراك، منفصل عن مفتاح الـ API

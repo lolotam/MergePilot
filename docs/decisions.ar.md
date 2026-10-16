@@ -631,7 +631,7 @@
 
 **ملاحظة المنفّذ:** دخول اشتراك Google بأرقام تعريف Antigravity أو Gemini CLI ممكن يخالف شروط Google، والحساب ممكن يتوقف. ده قرار صاحب المشروع.
 
-### س46: دخول اشتراك Google Antigravity (ADR-0032، مقترح)
+### س46: دخول اشتراك Google Antigravity (ADR-0032)
 
 **الطلب (2026-10-16):** نضيف دخول اشتراك Google (Antigravity / `agy`) من لوحة التحكم بنفس طريقة اشتراك Codex، بعد قرار س45.
 
@@ -692,3 +692,18 @@
 2. لأ، نستنى لحد ما pi-ai تضيف دخول Google.
 
 الإجابة: —
+
+**إجابة صاحب المشروع (بنصّها، 2026-10-16):**
+
+> go with reccomendations expet : 
+>
+> (د) يبقى فيه اشتراك ومفاتيح API مع بعض زي ADR-0027؟
+>
+> you said that its new provider called antigravity (this will be auth only )
+> Google Gemini will still  api method  as it is now
+
+**التفسير:**
+- كل المقترحات اتقبلت زي ما هي مكتوبة: أ وب وج وهـ وو وز وح.
+- في (د): المزوّد الجديد اشتراك (دخول) بس، ومالوش مفاتيح API خالص، ومش «طريقتين» زي ADR-0027. ومزوّد `gemini` الحالي بيفضل بمفاتيح API بس زي ما هو، من غير أي تغيير.
+- اسم المزوّد `google-antigravity` زي (ج)، واسمه في الواجهة «Google Antigravity».
+- مفيش fallback بفلوس (ADR-0008) بيتعمل لوحده كإعداد افتراضي. أي workspace يقدر يظبط واحد بنفسه زي أي fallback لموديل تاني.

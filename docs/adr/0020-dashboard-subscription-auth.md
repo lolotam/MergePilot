@@ -1,6 +1,6 @@
 # ADR-0020: Dashboard API-Key and Consumer-Subscription Authentication
 
-- **Status:** Accepted (owner request, 2026-10-13).
+- **Status:** Accepted (owner request, 2026-10-13). Amended by ADR-0032: a subscription-only Google Antigravity provider whose protocol is MergePilot's own code, not pi-ai's.
 - **Related:** ADR-0002, ADR-0003, ADR-0004, ADR-0006, ADR-0007, ADR-0016, ADR-0018.
 - **Supersedes:** the API-only/no-pi-ai restrictions in ADR-0002/0003/0004 and the dashboard subscription restrictions in ADR-0006/0007. The official Claude Code Action mode remains available.
 

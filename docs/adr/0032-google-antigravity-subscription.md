@@ -1,8 +1,8 @@
 # ADR-0032: Google Antigravity consumer-subscription login
 
-**Date:** 2026-10-16 · **Status:** Proposed (design only; implementation waits for the owner's answers in decisions log س46) · **Owner decision:** س45 (third-party client IDs allowed), س46 (open questions)
+**Date:** 2026-10-16 · **Status:** Accepted (owner, 2026-10-16, decisions log س46) · **Owner decisions:** س45 (third-party client IDs allowed), س46 (scope and design)
 
-**Related:** ADR-0004, ADR-0006, ADR-0008, ADR-0020, ADR-0024, ADR-0026, ADR-0027, `docs/subscription-auth.md`.
+**Related:** ADR-0004, ADR-0006, ADR-0008, ADR-0020, ADR-0022, ADR-0024, ADR-0026, ADR-0027, `docs/subscription-auth.md`.
 
 ## Context
 
@@ -11,7 +11,7 @@ The owner asked for a Google subscription login that works the way the Codex, Cl
 Research findings, 2026-10-16 (sources at the end):
 
 1. **The Gemini CLI consumer path is gone.** Google stopped serving Gemini CLI and the Gemini Code Assist IDE extensions for Google AI Pro/Ultra subscribers and free "Code Assist for individuals" users on 2026-06-18. Code Assist Standard/Enterprise licences (bound to a Google Cloud project) and API-key users kept access. The successor for consumers is the Antigravity CLI (`agy`).
-2. **Google's terms forbid exactly this use.** The Antigravity FAQ states that using third-party software, tools or services to access Antigravity violates the Terms of Service and may lead to suspension or termination; it recommends a Gemini Enterprise or AI Studio API key for third-party agents, and says wrapping headless `agy -p` or automating account switching is unsupported on consumer plans. Community reports describe 403 "ToS violation" suspensions of Antigravity/Gemini CLI access, appeals, and reinstatements. This is a stronger statement than the risk note recorded in س45, so the owner is asked again in س46 before any code is written.
+2. **Google's terms forbid exactly this use.** The Antigravity FAQ states that using third-party software, tools or services to access Antigravity violates the Terms of Service and may lead to suspension or termination. It recommends a Gemini Enterprise or AI Studio API key for third-party agents, and says wrapping headless `agy -p` or automating account switching is unsupported on consumer plans. Community reports describe 403 "ToS violation" suspensions of Antigravity/Gemini CLI access, appeals, and reinstatements. This is a stronger statement than the risk note recorded in س45, so the owner was asked again in س46 (answer: go ahead, with the acknowledgement below).
 3. **`agy` is closed source.** `github.com/google-antigravity/antigravity-cli` holds docs, examples and the changelog, not the source. Official docs say `agy` signs in with a Google account (Free, Pro, Ultra, or business through Gemini Enterprise), keeps tokens in the OS keyring, and on SSH prints an authorization URL whose browser page shows a code the user pastes back.
 4. **The protocol is public through Gemini CLI (Apache-2.0) and third-party MIT plugins:**
    - **OAuth:** Google's standard authorization endpoint, Authorization Code + PKCE S256 + `state`, token exchange and refresh at `https://oauth2.googleapis.com/token`. Scopes: `cloud-platform`, `userinfo.email`, `userinfo.profile` (the third-party Antigravity plugins also ask for `cclog` and `experimentsandconfigs`). Both clients are Google "installed application" clients whose client ID and non-confidential client secret ship inside the official tool. Gemini CLI's client publishes them in its source; the Antigravity values are those that ship inside the Antigravity application, as used by the third-party plugins.
@@ -23,86 +23,151 @@ Research findings, 2026-10-16 (sources at the end):
    - **Errors:** Google RPC error objects `{ error: { code, message, status, details } }`. Quota and rate limit: HTTP 429 `RESOURCE_EXHAUSTED` with a `google.rpc.RetryInfo` `retryDelay` and a "quota will reset after …" message. Account verification: 403 with `VALIDATION_REQUIRED` and a validation URL. Suspension: 403 naming a Terms of Service violation. Onboarding: ineligible-tier and project-required errors from `loadCodeAssist`/`onboardUser`.
 5. **No library to delegate to.** `@earendil-works/pi-ai` 1.1.0 (installed) and 1.3.0 have no Google OAuth provider; pi v0.71.0 removed its built-in "Google Gemini CLI" and "Google Antigravity" providers without a stated reason. The MIT packages that restore them (`pi-antigravity`, `@yofriadi/pi-provider-antigravity`, `@raquezha/antigravity`, the archived `opencode-antigravity-auth`) are plugins for the pi or OpenCode agents, built around a local callback server, multi-account rotation and their own stores. None is a maintained library that fits MergePilot's vault, lock and headless web login, and their multi-account rotation is banned here.
 
-## Decision (proposed)
+## Decision
 
-1. **A separate provider id, subscription only.** Add `google-antigravity` to `SUBSCRIPTION_PROVIDERS`, to the dashboard `SubscriptionProviderSchema` and to the provider registry, with the display name "Google Antigravity". `gemini` stays an API-key provider with its ADR-0026 key list. Antigravity model ids (`claude-*`, `gpt-oss-*`, Antigravity-specific Gemini ids) do not match Gemini API ids, so ADR-0027's "same provider and model on the other method" cannot hold. `google-antigravity` is **not** in `DUAL_METHOD_PROVIDER_IDS` in this ADR. A workspace that wants a paid backup configures an explicit, disclosed ADR-0008 fallback to `gemini:<model>`. One Google account per workspace; no account rotation (ADR-0004 §4, and the FAQ's ban on automated account switching).
+The owner accepted every recommendation in س46 and confirmed (د): the new provider is sign-in only.
 
-2. **Code location.** Everything protocol-specific lives in `packages/engine/src/providers/subscription/antigravity/`:
-   - `oauth.ts`: the PKCE URL, the code exchange, refresh, and onboarding (`loadCodeAssist`, then `onboardUser` with polling).
-   - `client.ts`: the Code Assist SSE client.
-   - `models.ts`: `fetchAvailableModels` and a static fallback list.
-   - `errors.ts`: Google RPC error to `LlmFailure` mapping.
-   The engine does not import from `apps/` (ADR-0001). `subscription/auth.ts` dispatches `loginSubscription` and `refreshSubscription` to this module for `google-antigravity`; the other providers keep going through pi-ai. The `select`-prompt branch and `subscriptionProvider()` stop falling through to xAI for unknown ids. Code is written from the protocol description above. Nothing is copied from Gemini CLI (Apache-2.0, outside the MIT copying rule) or from the plugins; if an MIT file is ever copied verbatim, its notice is kept and `THIRD_PARTY_NOTICES.md` gets a row.
+1. **A separate provider, subscription only.**
+   - `google-antigravity` ("Google Antigravity") is in `API_PROVIDER_IDS`, `SUBSCRIPTION_PROVIDERS` and the new `SUBSCRIPTION_ONLY_PROVIDERS` (`packages/engine/src/credentials/subscription.ts`), and in the dashboard's `SubscriptionProviderSchema`.
+   - It has **no API-key method**. `PUT /keys/google-antigravity` answers `400 subscription_only`, `CredentialService.sealKey` refuses a plain key (a backup restore of its sealed envelope still works), and a connection test with a typed key answers `auth`.
+   - It is not in `DUAL_METHOD_PROVIDER_IDS` or `MULTI_KEY_PROVIDER_IDS`.
+   - `gemini` is unchanged: API keys only, with its ADR-0026 list.
+   - No paid fallback is set up by default. A workspace may still configure one, for example to `gemini:<model>`, like any ADR-0008 fallback; it is disclosed as one.
+   - One Google account per workspace. There is no account rotation (ADR-0004 §4, and the FAQ's ban on automated account switching).
 
-3. **Client credentials.** The OAuth client ID and its non-confidential installed-app secret are read from server configuration (`GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_ID`, `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_SECRET`), not committed to the repository (pending س46-ب). When they are absent, the provider is hidden from the subscription method list and the login route answers `400 invalid_provider`. These values are never logged or returned to the dashboard.
+2. **Code location.** The protocol lives in `packages/engine/src/providers/subscription/antigravity/`:
+   - `config.ts`: client configuration, fixed hosts, identity headers.
+   - `oauth.ts`: PKCE URL, pasted-address parsing, code exchange, refresh, `loadCodeAssist`/`onboardUser`, and `SubscriptionLoginError`.
+   - `transport.ts`: the host-list rule.
+   - `protocol.ts`: request body, thinking config, SSE parsing, usage.
+   - `adapter.ts`: `AntigravityAdapter`.
+   - `models.ts`: `fetchAvailableModels`, the cache and the static list.
+   - `errors.ts`: Google RPC error → `LlmFailure`.
 
-4. **Login on a web server.** MergePilot never binds a callback port. The server builds the PKCE authorization URL (S256 verifier kept in the attempt, random `state`) and the existing `SubscriptionLogins` state machine carries it unchanged: `notify({ type: 'auth_url' })`, then one `prompt` for the pasted value. Two variants, chosen by س46-ب:
-   - **(a) Google-hosted code page** (redirect `https://codeassist.google.com/authcode` or the equivalent Antigravity page, if the chosen client accepts it): the user pastes the short code. Same UX as Claude copy-code.
-   - **(b) Loopback redirect** (`http://localhost:51121/oauth-callback`): after sign-in the browser shows a "can't connect" page; the user copies the full address-bar URL into the dashboard. The server parses it, rejects a missing or mismatched `state`, and exchanges the `code`. The dashboard text warns that a program listening on that port on the user's machine would receive the code.
-   After the exchange the server calls `loadCodeAssist`, and `onboardUser` when needed, to get `projectId` and the tier. Ineligible-tier, verification-required and project-required answers fail the attempt with a fixed message; the Google body is never shown. Attempts keep today's rules: admin only, bound to user and workspace, 15-minute expiry, cancellable, sticky routing for multiple web replicas, saved only by the authenticated `finish` request.
+   `subscription/auth.ts` dispatches `loginSubscription`/`refreshSubscription` for `google-antigravity` to this module; the other subscriptions keep pi-ai. `createSubscriptionAdapter` and `isSubscriptionAdapter` (`subscription/adapter.ts`) pick the adapter and mark it as subscription-billed. The engine does not import from `apps/` (ADR-0001).
 
-5. **Persistence.** The existing `mergepilot:oauth:v1:` envelope inside the vault column: `{ provider: 'google-antigravity', credential: { type: 'oauth', access, refresh, expires, projectId, tier } }` (the schema's catchall already allows extra fields). The account email is not stored. `credentialSecretValues` already redacts `access` and `refresh` individually; `projectId` is not a secret. Backups, restore and master-key rotation need no change beyond the provider enum.
+   This is a written exception to AGENTS.md's "delegate OAuth protocol details to pi-ai" (س46-ح); if pi-ai adds a maintained Google provider, this module moves to it. The code is written from the protocol description above. Nothing is copied from Gemini CLI (Apache-2.0, outside the MIT copying rule) or from the plugins.
 
-6. **Refresh.** The existing `CredentialService.resolve` path: lock-free read while `expires` is more than 60 seconds away, otherwise `coordinateRefresh` under the workspace/provider advisory lock, then `refreshSubscription` → `POST https://oauth2.googleapis.com/token` (`grant_type=refresh_token`). `expires = now + expires_in`. Google normally keeps the same refresh token; when the response carries a new one it replaces the old one. `invalid_grant` or any refresh failure keeps the stored credential and raises "sign in again"; the upstream body is dropped. The adapter keeps `resolveSecret`, so a long review refreshes between calls.
+3. **Client credentials.** The OAuth client ID and its non-confidential installed-app secret come from server configuration, `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_ID` and `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_SECRET`, never from the repository (س46-ب). Without both:
+   - `GET /api/workspaces/:ws/subscriptions` leaves the provider out, so the add-credential dialog does not offer it;
+   - `POST …/subscriptions/google-antigravity` answers `400 invalid_provider`;
+   - a refresh fails with "sign in again".
 
-7. **Request protocol.** `GoogleAntigravityAdapter extends LlmAdapter` streams `POST {host}/v1internal:streamGenerateContent?alt=sse` with the envelope above.
-   - System messages go to `systemInstruction.parts` and the other messages to `contents` (`assistant` → `model`).
-   - `maxOutputTokens` and the effort map to `thinkingConfig` with the existing Gemini helpers, keeping `maxOutputTokens` above `thinkingBudget`. Parts with `thought: true` are not yielded as review text.
-   - `usageMetadata` maps to `TokenUsage` (thought tokens count as output).
-   - Headers: `Authorization: Bearer`, `Content-Type`, `Accept: text/event-stream`, and the `User-Agent`, `X-Goog-Api-Client` and `Client-Metadata` values of the chosen client. Sending another tool's identity headers is allowed by س45; it is also the part Google can change or detect at any time.
-   - Hosts: a fixed list in code, `daily-cloudcode-pa.sandbox.googleapis.com` then `cloudcode-pa.googleapis.com`, not configurable from `.mergepilot.yml` or the dashboard. The next host is tried only on a network error, 404 or 5xx **before any response byte was streamed**, and the switch is logged with the host name. 401, 403 and 429 never move to another host.
-   - No tools, function declarations or Google Search grounding are sent: review calls are text only, and no reviewed code is executed.
+   The values are sent only to Google's token endpoint and are never logged or returned.
 
-8. **Failure classification.** `errors.ts` reads `error.status`, `error.details[]` and the HTTP status. It never puts the body in the message without `redactSecrets`.
-   - 429 `RESOURCE_EXHAUSTED` → `RATE_LIMIT` when `retryDelay` is at most 60 s (retried by the existing policy, honouring the delay up to its cap), otherwise `QUOTA`. Test the existing `code429` wording regex against these bodies rather than assume it matches.
-   - 401, or `invalid_grant` on refresh → `INVALID_CREDENTIAL`, "sign in again".
-   - 403 `VALIDATION_REQUIRED` → `INVALID_CREDENTIAL`, "Google asks you to verify this account in the browser, then sign in again". The validation URL from the body is not forwarded.
-   - 403 naming a Terms of Service violation or a disabled service → `INVALID_CREDENTIAL`, "Google disabled Antigravity access for this account". Kind `auth`, so ADR-0027's quota-only triggers never pay around it, and the failure is never silent.
-   - 404 unknown model → `BAD_REQUEST` naming the model. 400 `INVALID_ARGUMENT` → `BAD_REQUEST`, or `CONTEXT_WINDOW_EXCEEDED` on token-limit wording.
-   - 500/502/503 `UNAVAILABLE`/overloaded → `SERVER`. 408/504 → `TIMEOUT`. Fetch errors → `NETWORK`. Abort → `ABORTED`.
-   - A stream that ends without a final candidate → `UNKNOWN`. Finish reason `SAFETY`/`RECITATION`/`PROHIBITED_CONTENT` → finish `error`, as in `GeminiAdapter`.
+4. **Login on a web server.** MergePilot never binds a callback port, so it uses the paste-the-address variant with the loopback redirect `http://localhost:51121/oauth-callback`. This is the variant the Antigravity client is known to accept; a Google-hosted code page for this client is not verified.
+   1. The server builds the authorization URL: PKCE S256, a random `state`, `access_type=offline`, `prompt=consent`.
+   2. The existing `SubscriptionLogins` state machine shows the link (`auth_url`) and one text prompt.
+   3. The user signs in. The browser then fails to open the localhost page, and the user pastes that address.
+   4. `codeFromPastedUrl` rejects an address with no `code` or with a missing or wrong `state`, then the code is exchanged with the verifier.
+   5. `loadCodeAssist` gives the project and tier. A new account is onboarded on its default tier with `onboardUser`, polled every 5 s for up to 2 minutes.
 
-9. **Models.** `listModels` calls `fetchAvailableModels` with the resolved token and caches the result per workspace for 4 hours. The existing models-cache invalidation runs on connect and disconnect. When the call fails, a static list in `models.ts` is returned and the UI notes it may be stale. Thinking variants of one model are shown once, with the efforts the model reports. The effort list reuses `effort.ts`.
+   Failures carry a fixed `SubscriptionLoginError.reason`: `denied`, `state-mismatch`, `invalid-paste`, `token-exchange`, `validation-required`, `ineligible` or `project-required`. A tier that needs the user's own Google Cloud project (a business account) fails with `project-required`; only personal accounts are in scope (س46-هـ). The login snapshot exposes only `errorCode`, never Google's body.
 
-10. **Pricing and accounting.** ADR-0024 unchanged in spirit: `includedInSubscription: true`, `authMethod: 'subscription'`, price source `subscription`, $0 incremental cost, token usage kept. For the API-equivalent figure a new map, `SUBSCRIPTION_API_PROVIDER` (`claude-*` → `anthropic`, `gemini-*` → `gemini`, `gpt-oss-*` → none), finds the catalog row of the same model under its API provider, after the workspace's manual price. When no row matches, the figure is absent, never $0. Monthly-budget admission treats the bot as a free subscription bot (ADR-0022), since no paid method exists on this provider.
+   The terms acknowledgement is required twice: the dashboard enables **Sign in** only after the checkbox is ticked, and the start route refuses a request without `acknowledgedTerms: true` (`400 terms_not_acknowledged`). Everything else is today's rule: admin only, bound to user and workspace, 15-minute expiry, cancellable, sticky routing for several web replicas, saved only by the authenticated `finish` request.
+
+5. **Persistence.** The existing `mergepilot:oauth:v1:` envelope in the vault column: `{ provider: 'google-antigravity', credential: { type: 'oauth', access, refresh, expires, projectId, tier } }`. The account email is not stored. `credentialSecretValues` redacts `access` and `refresh` individually. The single-credential paths (backup export/restore, master-key rotation in `vault/rotate.ts`, delete) need no provider-specific code.
+
+6. **Refresh.** `CredentialService.resolve` unchanged: a lock-free read while `expires` is more than 60 s away, otherwise `coordinateRefresh` under the workspace/provider advisory lock, then `POST https://oauth2.googleapis.com/token` with `grant_type=refresh_token`. `expires` is `now + expires_in`. A refresh token Google sends replaces the stored one; otherwise the old one is kept, with the project. Any failure keeps the stored credential and raises "Subscription token refresh failed; sign in again". The adapter resolves the secret again before each call.
+
+7. **Request protocol.** `AntigravityAdapter` streams `POST {host}/v1internal:streamGenerateContent?alt=sse`:
+   - The body is `{ project, model, userAgent: 'antigravity', requestId, request: { contents, systemInstruction?, generationConfig } }`. System messages go to `systemInstruction.parts`, and `assistant` becomes `model`.
+   - Thinking:
+     - Gemini models take `geminiThinkingConfig`.
+     - Claude models take `thinkingBudget = thinkingHeadroom(effort)` (none for `off`), always with `includeThoughts: false`.
+     - `maxOutputTokens` is the answer budget plus that headroom, and `requestedOutputTokens` returns the same number, so the budget preflight prices it.
+   - Parts with `thought: true` are not yielded. `usageMetadata` maps like `GeminiAdapter`: cached tokens are not counted as input, and thought tokens count as output.
+   - Headers: `Authorization`, `Content-Type`, `Accept: text/event-stream`, and the Antigravity `User-Agent`, `X-Goog-Api-Client` and `Client-Metadata` values in `config.ts` (allowed by س45). Their exact values are not verified against a current Antigravity build, and Google may change or check them.
+   - Hosts: a fixed list in code, `daily-cloudcode-pa.sandbox.googleapis.com` then `cloudcode-pa.googleapis.com`, for chat, onboarding and the model list. It is not configurable from `.mergepilot.yml` or the dashboard.
+     - The next host is tried only on a network error, 404 or 5xx, before any of the body was read.
+     - 401, 403 and 429 never move to another host, nor does an aborted call.
+     - The engine does not log the switch; it has no logger.
+   - No tools, function declarations or search grounding are sent, and no reviewed code is executed.
+
+8. **Failure classification** (`errors.ts`). Bodies are read only for classification. Messages are fixed, except a bad request, which keeps a short provider message after `redactSecrets` over the envelope's tokens.
+
+   | Answer | `LlmFailure` code | Message or note |
+   |---|---|---|
+   | 429 or `RESOURCE_EXHAUSTED`, `retryDelay` ≤ 60 s | `RATE_LIMIT` | `retryAfterMs` set from the delay |
+   | 429, `retryDelay` > 60 s, "reset after …" in the message, or `ErrorInfo` reason `QUOTA_EXHAUSTED` | `QUOTA` | |
+   | 429 with no timing | `RATE_LIMIT` | Google's generic text mentions "quota" even for short limits |
+   | 401 | `INVALID_CREDENTIAL` | "sign in again" |
+   | 403 `VALIDATION_REQUIRED` | `INVALID_CREDENTIAL` | "verify this account in the browser"; the link is not forwarded |
+   | 403 suspension or Terms of Service wording | `INVALID_CREDENTIAL` | "Google disabled Antigravity access for this account" |
+   | other 403 | `INVALID_CREDENTIAL` | |
+   | 404 | `BAD_REQUEST` | names the model |
+   | 400 | `BAD_REQUEST`, or `CONTEXT_WINDOW_EXCEEDED` on token-limit wording | |
+   | 408, 504 | `TIMEOUT` | |
+   | other 5xx | `SERVER` | |
+   | fetch error | `NETWORK` | |
+   | abort | `ABORTED` | |
+   | an error event inside the stream | as its status | |
+   | a stream with no candidate | `UNKNOWN` | |
+   | finish `SAFETY`/`RECITATION`/`PROHIBITED_CONTENT` | finish `error` | |
+
+   Every 403 has kind `auth`, so nothing pays its way around a suspension.
+
+9. **Models.**
+   - `listModels('google-antigravity', envelope)` calls `fetchAvailableModels` and keeps chat models (`gemini-*`, `claude-*`, `gpt-oss-*`, no image/embedding/TTS ids).
+   - The result is cached per project for 4 hours. A failed refresh returns the last list that worked, and with none, the static list in `models.ts`. A real access problem then shows on the connection test or the review.
+   - Efforts: Gemini models get the Gemini levels, Claude models `off/low/medium/high`, and `gpt-oss-*` none.
+   - The registry default model is `gemini-3.8-flash`.
+
+10. **Pricing and accounting (ADR-0024).**
+    - Calls are subscription-billed: `includedInSubscription`, `authMethod: 'subscription'`, run price source `subscription`, and $0 incremental cost, with token usage kept. Budget admission treats the bot as free (ADR-0022).
+    - The display-only API-equivalent uses the same model at its own vendor (س46-ز). `antigravityApiModel` in `apps/app/src/worker/api-equivalent.ts` maps `claude-*` to `anthropic` and `gemini-*` to `gemini`, and prices `-thinking` variants as their base model. `gpt-oss-*` has no API vendor, so no equivalent is shown, never $0.
 
 11. **Dashboard.**
-    - Settings → Provider credentials → Add credential lists "Google Antigravity" with the Subscription method only.
-    - Before **Start sign-in**, a notice states that Google's terms forbid third-party access to Antigravity and that Google may suspend the account's Antigravity access. The user must tick an acknowledgement checkbox (pending س46-أ); the tick is required by the client and checked by the start route.
-    - The sign-in step reuses `SubscriptionSignIn`: open the Google page, paste the code (or the redirect URL in variant b), Continue. The provider label, notice, paste help and the ToS-suspension and verification errors are new keys in `apps/web/src/i18n/en.ts` and `ar.ts`.
-    - The model list comes from point 9.
-    - `apps/app/src/api/contract-subscriptions.ts` and the web client change together.
+    - **Add credential.** The dialog offers "Google Antigravity" only when `GET …/subscriptions` lists it. It then shows sign-in only, with no API-key field.
+    - **Before sign-in.** An amber notice states the Terms-of-Service risk, and an "I understand the risk to this Google account" checkbox enables **Sign in with Google (Antigravity)**.
+    - **Sign-in step.** The step asks for the address from the browser and explains the localhost page and the port-51121 caveat. Each failure reason has its own translated text.
+    - **Code.** All text lives in `apps/web/src/i18n/antigravity-{en,ar}.ts`. `apps/app/src/api/contract-subscriptions.ts` (`SubscriptionStartSchema`, `SubscriptionAvailabilitySchema`, `errorCode`, `SUBSCRIPTION_ONLY_PROVIDER_IDS`) and the web client changed together. The web keeps a copy of the subscription-only list, checked against the contract by type.
 
-12. **Docs.** On acceptance: update `docs/subscription-auth.md` (provider, steps, the ToS warning), `docs/architecture.md` (the `subscription/antigravity/` folder), and `AGENTS.md` (subscription provider list). Amend ADR-0006's "Gemini has no subscription mode" lines (Context and Decision §5) to point here.
+12. **Action.** The registry entry names `GOOGLE_ANTIGRAVITY_SUBSCRIPTION` as the provider's environment variable. `AntigravityAdapter` does not refresh tokens itself (refresh lives in the dashboard's credential service), so the Action can use such an envelope only while its access token is still valid. The supported path is the dashboard.
 
-## Tests to write (phase 2)
+## Tests
 
-- **Engine, OAuth:**
-  - the PKCE URL has S256, `state`, scopes and the configured client;
-  - the exchange sends the verifier;
-  - the pasted redirect URL is parsed, and a mismatched or missing `state` is rejected (variant b);
-  - `onboardUser` polls until done, and the ineligible, validation and project-required answers fail with fixed messages;
-  - refresh success, `invalid_grant`, and a rotated refresh token.
-- **Engine, request protocol:** envelope shape, `project`, roles, `systemInstruction`, `thinkingConfig` bounds, headers, SSE parsing across chunk boundaries, usage mapping, thought parts dropped, and the host order rule (no host switch after the first byte or on 401/403/429).
-- **Engine, failure classification:** a fixture per row of point 8, including the `retryDelay` threshold and the suspension 403. No token or body secret appears in `LlmFailure.message`.
-- **App (AGENTS.md list):**
-  - admin-only start, input, finish and cancel;
-  - user and workspace isolation of attempts;
-  - cancellation and expiry;
-  - encrypted persistence of the envelope with `projectId`;
-  - concurrent refresh sharing one promise under the lock, across a web and a worker store;
-  - redaction of `access` and `refresh` in prompts, output, errors and logs;
-  - the provider hidden when the client configuration is absent;
-  - the acknowledgement required by the start route.
-- **Web:** the sign-in step with the notice and checkbox, paste and continue, the new error texts in en and ar, and the model list after connect.
-- **Pricing:** an API-equivalent from the `anthropic` row for a `claude-*` model, and absent for `gpt-oss-*`.
+- **Engine, OAuth** (`antigravity/oauth.test.ts`):
+  - the URL parameters (S256, state, scopes, offline, no secret);
+  - pasted-address parsing (match, mismatch, missing state, missing code, bare code, refusal);
+  - the exchange with the verifier and client;
+  - existing-tier and onboarding-with-polling paths;
+  - validation-required, ineligible and project-required;
+  - a 403 from `loadCodeAssist` without its body, and a 503 there reported as a generic failure;
+  - no token request on a mismatched paste;
+  - refused or refresh-less exchanges;
+  - refresh keeping, rotating and failing.
+- **Engine, request protocol** (`antigravity/adapter.test.ts`):
+  - envelope, roles, system instruction, thinking config and output-token bounds, headers;
+  - SSE across read boundaries, thought parts dropped, usage, finish mapping;
+  - the host rule (503, 404 and network move on; 401, 403 and 429 do not; all failing gives `NETWORK`);
+  - an in-stream quota error, a stream with no candidate, a missing project or failed refresh;
+  - the per-call resolved credential.
+- **Engine, failure classification** (`antigravity/errors.test.ts`): rate limit vs quota by `retryDelay`, reset wording and reason; a bare 429; 401; verification and suspension 403s without the body; 404, 400 context, 503 and 504; token redaction.
+- **Engine, models and configuration** (`antigravity/models.test.ts`, `subscription/auth.test.ts`): map and array parsing, the 4-hour cache, last-good and static fallback; availability without the client values, and no request when unconfigured.
+- **App** (`api/subscription-routes-antigravity.test.ts`, `credentials/subscription-antigravity.test.ts`):
+  - admin-only availability and start;
+  - hidden or refused when unconfigured;
+  - the required acknowledgement;
+  - encrypted persistence with the project and no tokens in responses;
+  - the fixed `errorCode` on failure;
+  - API keys refused, also on restore;
+  - one refresh for two service instances that keeps the refresh token and project;
+  - a failed refresh preserving the row;
+  - disconnect serialized after a pending refresh;
+  - master-key rotation;
+  - redaction of both tokens.
+
+  Workspace isolation of login attempts is covered by the shared `subscription-routes.test.ts`.
+- **Web** (`settings/AntigravitySignIn.test.tsx`): the checkbox gating and the acknowledgement sent; the paste field and its submission; the translated failure reason; the provider offered only when available, with no API-key field.
 
 ## Consequences
 
-- Workspaces gain a Google consumer-subscription bot, with Claude and Gemini models billed to the user's Google AI plan.
-- Google's terms forbid this use. Access can be suspended for the Google account's Antigravity service, Google can change the client, headers or endpoints at any time, and the feature can break without notice. Every such failure surfaces as `LlmFailure`; nothing falls back silently.
-- MergePilot owns this protocol code instead of delegating it to pi-ai, which conflicts with AGENTS.md's "delegate OAuth protocol details to pi-ai" until the owner accepts this exception (س46). A future pi-ai Google provider would replace it.
-- The Code Assist Standard/Enterprise path (business accounts with their own Google Cloud project) uses the same protocol and could be added later with a user-supplied project id field (س46-هـ).
+- Workspaces gain a Google consumer-subscription bot that serves Claude and Gemini models on the user's Google AI plan.
+- Google's terms forbid this use, and the dashboard says so before every sign-in. Google can suspend the account's Antigravity access, and it can change the client, headers or hosts at any time, so the feature can break without notice. Every such failure surfaces as `LlmFailure`; nothing falls back silently.
+- MergePilot owns this protocol code instead of pi-ai (AGENTS.md exception, س46-ح).
+- Business accounts (Code Assist Standard/Enterprise with their own Google Cloud project) use the same protocol. They can be added later with a user-supplied project id (س46-هـ).
+- ADR-0006's "Gemini has no subscription mode" lines are amended to point here.
 
 ## Sources (read 2026-10-16)
 
