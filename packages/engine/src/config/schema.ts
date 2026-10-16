@@ -67,11 +67,20 @@ export const REVIEW_LIMIT_DEFAULTS: Readonly<ReviewLimits> = Object.freeze({
   totalTimeoutMs: 1_200_000,
 });
 
+/** Default `review.maxRulesTokens` (ADR-0028). */
+export const DEFAULT_MAX_RULES_TOKENS = 12_000;
+
 const ReviewSettingsSchema = z.strictObject({
   maxFindings: z.number().int().min(1).max(20).default(5),
   minSeverity: SeveritySchema.default('medium'),
   exclude: z.array(z.string()).default(['**/*.lock', '**/dist/**', '**/*.min.*', '**/*.snap']),
   rulesFiles: z.array(z.string()).default(['CLAUDE.md', 'AGENTS.md']),
+  /**
+   * Total estimated tokens of owner rules sent with a review. The configured `rulesFiles` always go;
+   * the nested AGENTS.md / CLAUDE.md of changed directories fill what is left, shallowest and
+   * smallest first, and the ones left out are disclosed in the summary (ADR-0028).
+   */
+  maxRulesTokens: z.number().int().positive().default(DEFAULT_MAX_RULES_TOKENS),
   pathInstructions: z.array(PathInstructionSchema).default([]),
   /** Second model pass that re-checks every finding against the code before publishing. */
   verify: z.boolean().default(true),

@@ -2,6 +2,7 @@ import type { Finding } from '@mergepilot/engine';
 import type { FallbackReason } from './fallback-reason.js';
 import { renderBotIdentity, type BotIdentity } from './bot-identity.js';
 import type { JudgeSummaryInput } from './judge-summary.js';
+import { renderRulesLeftOut, renderVerifyRejected, type VerifyRejectedItem } from './review-notes.js';
 import { neutralize } from './text-safety.js';
 
 export type ReviewScope =
@@ -36,6 +37,10 @@ export interface ReviewSummaryInput {
   judge?: JudgeSummaryInput | undefined;
   /** The reviewer-panel bot (ADR-0017); when set, the summary starts with its identity line. */
   identity?: BotIdentity | undefined;
+  /** Findings the verification pass rejected (ADR-0028), listed folded. */
+  verifyRejected?: readonly VerifyRejectedItem[] | undefined;
+  /** Nested rules files left out of the review (ADR-0028). */
+  rulesLeftOut?: readonly string[] | undefined;
 }
 
 function renderHeader(outcome: ReviewSummaryInput['outcome'], isArabic: boolean): string {
@@ -261,6 +266,11 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
 
   const judge = input.judge ? renderJudge(input.judge, isArabic) : undefined;
   if (judge) sections.push(judge);
+
+  const rejected = renderVerifyRejected(input.verifyRejected ?? [], isArabic);
+  if (rejected) sections.push(rejected);
+  const rulesLeftOut = renderRulesLeftOut(input.rulesLeftOut ?? [], isArabic);
+  if (rulesLeftOut) sections.push(rulesLeftOut);
 
   if (input.summaryOnly && input.summaryOnly.length > 0) {
     sections.push(renderFindingsOutsideDiff(input.summaryOnly, isArabic));

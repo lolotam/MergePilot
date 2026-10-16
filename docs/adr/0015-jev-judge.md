@@ -1,6 +1,6 @@
 # ADR-0015: Jev Judge — A "System One" Decision Layer With an Explicit Fallback Chain
 
-- **Status:** Accepted (2026-10-13)
+- **Status:** Accepted (2026-10-13); the filter's default threshold and never-filtered categories amended by ADR-0028
 - **Related to:** ADR-0002, ADR-0008, ADR-0010, ADR-0011, ADR-0013, docs/decisions.ar.md (batch 9, Q26–Q27; batch 12, Q32)
 
 ## Context

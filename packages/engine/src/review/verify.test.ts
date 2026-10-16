@@ -51,7 +51,7 @@ describe('verify - buildVerifyPrompt', () => {
     expect(prompt.system).toContain('verifying another reviewer');
     expect(prompt.system).toContain('confirmed');
     expect(prompt.system).toContain('rejected');
-    expect(prompt.system).toContain('evidence is not in the code');
+    expect(prompt.system).toContain('evidence is not in the code shown');
     expect(prompt.system).toContain('UNTRUSTED');
 
     // Check user prompt contains finding info
@@ -62,10 +62,9 @@ describe('verify - buildVerifyPrompt', () => {
     expect(prompt.user).toContain('The variable x may be null before invocation.');
     expect(prompt.user).toContain('x.doSomething();');
 
-    // Check numbered hunks: hunk at line 95 is within 20 lines of line 97
+    // Every hunk of the finding's file is shown (ADR-0028), not only the ±20 lines around it.
     expect(prompt.user).toContain('97 + x.doSomething();');
-    // Hunk at line 1 is >20 lines away and should NOT be included for line 97
-    expect(prompt.user).not.toContain('const a = 1;');
+    expect(prompt.user).toContain('1   const a = 1;');
   });
 
   it('neutralises delimiters in untrusted content', () => {

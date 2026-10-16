@@ -15,12 +15,14 @@ import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { combineUsage, needsTruncationRetry, type ReviewableFileWithPatch } from './split.js';
 import { describeCallError, requestedOutputTokens, type SpendTracker } from './spend.js';
+import type { ContextFile } from './prompt.js';
 import type { Finding } from './types.js';
 import {
   applyVerdicts,
   buildVerifyPrompt,
   parseVerifyAnswer,
   VerifyAnswerSchema,
+  type VerifyRejectedFinding,
 } from './verify.js';
 
 export const VERIFY_MAX_OUTPUT_TOKENS = 2048;
@@ -30,6 +32,9 @@ export interface VerifyPassInput {
   language: 'ar' | 'en';
   findings: Finding[];
   files: ReviewableFileWithPatch[];
+  contextFiles?: readonly ContextFile[] | undefined;
+  /** Estimated tokens of code the verifier is shown in total (ADR-0028: `review.batchTokens`). */
+  maxCodeTokens?: number | undefined;
   model: ReviewModel;
   spend: SpendTracker;
   knownSecrets: readonly Secret[];
@@ -42,6 +47,8 @@ export interface VerifyPassResult {
   findings: Finding[];
   totalUsage: TokenUsage | undefined;
   verification?: { checked: number; rejected: number } | undefined;
+  /** Every rejected finding, so the summary discloses what verification dropped. */
+  rejected: VerifyRejectedFinding[];
   incompleteReasons: string[];
 }
 
@@ -52,6 +59,7 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
   const unchanged = (reason: string): VerifyPassResult => ({
     findings: input.findings,
     totalUsage,
+    rejected: [],
     incompleteReasons: [...incompleteReasons, `verification skipped: ${reason}`],
   });
 
@@ -59,6 +67,8 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     language: input.language,
     findings: input.findings,
     files: input.files,
+    contextFiles: input.contextFiles,
+    maxCodeTokens: input.maxCodeTokens,
   });
   const promptTokens = estimateTokens(verifyPrompt.system + verifyPrompt.user);
   const firstRequested = requestedOutputTokens(model, VERIFY_MAX_OUTPUT_TOKENS);
@@ -137,6 +147,7 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     findings: kept,
     totalUsage,
     verification: { checked: input.findings.length, rejected: rejected.length },
+    rejected: rejected.map(({ finding }) => ({ title: finding.title, path: finding.path, line: finding.line })),
     incompleteReasons,
   };
 }

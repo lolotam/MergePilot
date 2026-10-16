@@ -12,7 +12,7 @@ export const arJudge = {
   judgeUseAnnotate: 'إضافة الثقة',
   judgeUseAnnotateHint: 'سطر «ثقة Jev: 0.82» على كل ملاحظة منشورة.',
   judgeUseFilter: 'فلترة',
-  judgeUseFilterHint: 'يستبعد الملاحظات الأقل من الحد (لا يستبعد الحرجة أو العالية أبدًا).',
+  judgeUseFilterHint: 'يستبعد الملاحظات الأقل من الحد (لا يستبعد أبدًا الحرجة أو العالية أو ملاحظات الأمان أو فقد البيانات).',
   judgeUseDedupe: 'فحص التكرار',
   judgeUseDedupeHint: 'لا ينشر ملاحظة تكرر بالمعنى تعليقًا سابقًا من نفس البوت قريبًا منها.',
   judgeUseConsensus: 'الإجماع',

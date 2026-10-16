@@ -89,6 +89,9 @@ describe('executeReview — incremental review and deduplication', () => {
       async getPullRequest() {
         return { head: { sha: headSha } };
       },
+      async getFileContent() {
+        return null;
+      },
       async listReviewsPage() {
         return opts.reviews ?? [];
       },

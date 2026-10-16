@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { isJudgeUse, legacyJudgeMode, normalizeJudgeUses } from '@mergepilot/engine';
+import { DEFAULT_JUDGE_THRESHOLD, isJudgeUse, legacyJudgeMode, normalizeJudgeUses } from '@mergepilot/engine';
 import { BotNameTakenError, sameBotName } from '../core/types.js';
 import type { ApiProvider, BotLogo, JudgeSettings, PanelMode, PriceOverride, WorkspaceSettings } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
@@ -55,7 +55,7 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
     judgeModel: judge?.model ?? null,
     judgeUses: judge ? normalizeJudgeUses(judge.uses) : [],
     judgeMode: judge ? legacyJudgeMode(judge.uses) : 'off',
-    judgeThreshold: String(judge?.threshold ?? 0.35),
+    judgeThreshold: String(judge?.threshold ?? DEFAULT_JUDGE_THRESHOLD),
     judgeFallback: judge?.fallback ?? [],
   };
 }

@@ -106,6 +106,8 @@ export async function publishConsensus(
     scope: reviewScopeOf(files.selection),
     incompleteReasons,
     judgeUnavailable: merge.semantic?.unavailable,
+    verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
+    rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
   });
 
   const capture = capturingReviewUrl(ctx.client);
