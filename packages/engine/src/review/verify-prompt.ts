@@ -199,6 +199,11 @@ function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFi
       const context = contexts.get(path);
       if (patch?.trim()) {
         files.set(path, { path, kind: 'HUNKS', chunks: patchChunks(patch), missing: false });
+        // The full version of a changed file, sent to the review as context, holds the unchanged
+        // lines a finding may cite: the verifier sees it too, after the hunks.
+        if (context) {
+          files.set(`${path}#context`, { path, kind: 'REPOSITORY_CONTEXT', chunks: [contextChunk(context)], missing: false });
+        }
       } else if (context && !patches.has(path)) {
         files.set(path, { path, kind: 'REPOSITORY_CONTEXT', chunks: [contextChunk(context)], missing: false });
       } else {

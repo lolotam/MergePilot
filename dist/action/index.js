@@ -115413,6 +115413,8 @@ var ContextPlan = class {
     for (const file2 of this.files) {
       if (file2.tokens > left || !file2.forPaths.some((p) => wanted.has(p)))
         continue;
+      if (file2.kind !== "changed-file" && wanted.has(file2.path))
+        continue;
       chosen.push({ path: file2.path, content: file2.content, reason: file2.reason, truncated: file2.truncated });
       left -= file2.tokens;
     }
@@ -115812,6 +115814,9 @@ function collectFiles(input2) {
       const context = contexts.get(path11);
       if (patch?.trim()) {
         files.set(path11, { path: path11, kind: "HUNKS", chunks: patchChunks(patch), missing: false });
+        if (context) {
+          files.set(`${path11}#context`, { path: path11, kind: "REPOSITORY_CONTEXT", chunks: [contextChunk(context)], missing: false });
+        }
       } else if (context && !patches.has(path11)) {
         files.set(path11, { path: path11, kind: "REPOSITORY_CONTEXT", chunks: [contextChunk(context)], missing: false });
       } else {
@@ -169685,9 +169690,10 @@ async function gatherRepositoryContext(client, params) {
   if (params.contextTokens <= 0)
     return { files: [], leftOut: [] };
   const reviewed = params.files.filter((f3) => classifyFile(f3, { exclude: params.exclude, isSensitivePath }) === "review");
-  const added = reviewed.filter((f3) => f3.status === "added").map((f3) => [f3.path, null]);
+  const added = reviewed.filter((f3) => f3.status === "added").map((f3) => [f3.path, patchNewSide(f3.patch ?? "")]);
   const reader = new ContextReader(client, params, new Map(added));
-  await inChunks(reviewed.filter((f3) => f3.status !== "added"), (file2) => reader.readChangedFile(file2));
+  const readable = reviewed.filter((f3) => f3.status !== "added" && isContextPathAllowed(f3.path, { exclude: params.exclude, isSensitivePath }));
+  await inChunks(readable, (file2) => reader.readChangedFile(file2));
   const pairs = reviewed.flatMap((file2) => {
     const pair = pairCandidates(file2.path);
     return pair ? [{ ...pair, kind: "test-pair", forPath: file2.path, disclose: false }] : [];

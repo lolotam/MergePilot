@@ -133,6 +133,8 @@ export class ContextPlan {
     let left = maxTokens;
     for (const file of this.files) {
       if (file.tokens > left || !file.forPaths.some((p) => wanted.has(p))) continue;
+      // An added file imported by another file of this call: its patch here already shows all of it.
+      if (file.kind !== 'changed-file' && wanted.has(file.path)) continue;
       chosen.push({ path: file.path, content: file.content, reason: file.reason, truncated: file.truncated });
       left -= file.tokens;
     }

@@ -299,10 +299,16 @@ export async function gatherRepositoryContext(client: GitHubClient, params: Gath
   const reviewed = params.files.filter(
     (f) => classifyFile(f, { exclude: params.exclude, isSensitivePath }) === 'review',
   );
-  // a: the full version of each changed file (an added file's patch already shows all of it).
-  const added = reviewed.filter((f) => f.status === 'added').map((f): [string, null] => [f.path, null]);
-  const reader = new ContextReader(client, params, new Map(added));
-  await inChunks(reviewed.filter((f) => f.status !== 'added'), (file) => reader.readChangedFile(file));
+  // An added file is never read: its patch is the whole file. That content still serves as the
+  // import context of a reviewed file in another batch (the engine skips it within its own batch).
+  const added = reviewed.filter((f) => f.status === 'added').map((f): [string, string] => [f.path, patchNewSide(f.patch ?? '')]);
+  const reader = new ContextReader(client, params, new Map<string, string | null>(added));
+  // a: the full version of each changed file that context may hold (not vendor, out/, lockfiles…),
+  // so such files do not use up the read limit before the engine would drop them anyway.
+  const readable = reviewed.filter(
+    (f) => f.status !== 'added' && isContextPathAllowed(f.path, { exclude: params.exclude, isSensitivePath }),
+  );
+  await inChunks(readable, (file) => reader.readChangedFile(file));
 
   // c, then b: sibling tests/implementations, then local imports (from the head content or patch).
   const pairs = reviewed.flatMap((file): Lookup[] => {

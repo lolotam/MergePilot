@@ -74,6 +74,13 @@ describe('ContextPlan', () => {
     expect(plan.disclosure()).toEqual({ sent: ['src/for-b.ts'], leftOut: ['src/for-a.ts'] });
   });
 
+  it("skips an added file's import context in its own batch and sends it to the batch importing it", () => {
+    // src/b.ts is an added file imported by src/a.ts: its patch is in its own batch already.
+    const plan = new ContextPlan([file('src/b.ts', 'import', 'export const b = 1;', ['src/a.ts'])], options());
+    expect(plan.forBatch([{ path: 'src/a.ts' }, { path: 'src/b.ts' }])).toEqual([]);
+    expect(plan.forBatch([{ path: 'src/a.ts' }]).map((f) => f.path)).toEqual(['src/b.ts']);
+  });
+
   it('sends nothing and discloses nothing when review.contextTokens is 0', () => {
     const plan = new ContextPlan([file('src/dep.ts', 'import')], options({ contextTokens: 0 }));
     expect(plan.whole()).toEqual([]);

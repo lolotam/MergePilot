@@ -147,6 +147,27 @@ describe('gatherRepositoryContext', () => {
     expect(readPaths.filter((p) => /\.env|legacy|dist\/|gone|\.pem|lock\.yaml|^src\/new\.ts$/.test(p))).toEqual([]);
   });
 
+  it('does not read a changed file that context may not hold (vendor, out/, node_modules)', async () => {
+    const { client, reads } = fakeClient({ 'vendor/lib.ts': 'x', 'out/generated.ts': 'y', 'src/api.ts': 'z' });
+    await gatherRepositoryContext(client, params([modified('vendor/lib.ts'), modified('out/generated.ts'), modified('src/api.ts')]));
+    const readPaths = reads.map((r) => r.path);
+    expect(readPaths).toContain('src/api.ts');
+    expect(readPaths.filter((p) => p.startsWith('vendor/') || p.startsWith('out/'))).toEqual([]);
+  });
+
+  it("offers an added file's patch as the import context of the file importing it, without a read", async () => {
+    const { client, reads } = fakeClient({ 'src/api.ts': "import { fresh } from './new.js';" });
+    const result = await gatherRepositoryContext(
+      client,
+      params([
+        modified('src/api.ts'),
+        { path: 'src/new.ts', status: 'added', patch: '@@ -0,0 +1 @@\n+export const fresh = 1;', changes: 1 },
+      ]),
+    );
+    expect(result.files.find((f) => f.path === 'src/new.ts')).toMatchObject({ kind: 'import', content: 'export const fresh = 1;' });
+    expect(reads.map((r) => r.path)).not.toContain('src/new.ts');
+  });
+
   it('counts imports past the read limit and failed reads as left out', async () => {
     const imports = Array.from({ length: MAX_CONTEXT_READS }, (_, i) => `import './m${i}.ts';`).join('\n');
     const { client } = fakeClient({ 'src/api.ts': imports }, ['src/m0.ts']);
