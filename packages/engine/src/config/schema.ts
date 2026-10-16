@@ -76,8 +76,12 @@ export const DEFAULT_CONTEXT_TOKENS = 30_000;
 /** Default `review.prContextTokens` (ADR-0030): half of the default `review.contextTokens`. */
 export const DEFAULT_PR_CONTEXT_TOKENS = 15_000;
 
+/** Default and upper bound of `review.maxFindings`: findings one bot's review publishes (ADR-0033). */
+export const DEFAULT_MAX_FINDINGS = 5;
+export const MAX_FINDINGS_LIMIT = 50;
+
 const ReviewSettingsSchema = z.strictObject({
-  maxFindings: z.number().int().min(1).max(20).default(5),
+  maxFindings: z.number().int().min(1).max(MAX_FINDINGS_LIMIT).default(DEFAULT_MAX_FINDINGS),
   minSeverity: SeveritySchema.default('medium'),
   exclude: z.array(z.string()).default(['**/*.lock', '**/dist/**', '**/*.min.*', '**/*.snap']),
   rulesFiles: z.array(z.string()).default(['CLAUDE.md', 'AGENTS.md']),

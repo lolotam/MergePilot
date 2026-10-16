@@ -64,6 +64,7 @@ export async function generateWithTimeout(
  */
 export function withCallTimeout(model: ReviewModel, timeoutMs: number): ReviewModel {
   const outputTokensFor = model.outputTokensFor?.bind(model);
+  const answerTokensFor = model.answerTokensFor?.bind(model);
   return {
     get label() {
       return model.label;
@@ -75,6 +76,7 @@ export function withCallTimeout(model: ReviewModel, timeoutMs: number): ReviewMo
     ...(model.secrets ? { secrets: model.secrets } : {}),
     ...(model.skippedFallbacks ? { skippedFallbacks: model.skippedFallbacks } : {}),
     ...(outputTokensFor ? { outputTokensFor } : {}),
+    ...(answerTokensFor ? { answerTokensFor } : {}),
     generate: (request) => generateWithTimeout(model, request, timeoutMs),
   };
 }

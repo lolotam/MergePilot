@@ -126,6 +126,7 @@ export {
 } from './review-pull-request.js';
 export {
   CONSENSUS_LINE_WINDOW,
+  capConsensusClusters,
   foundByLabel,
   mergePanelFindings,
   withFoundBy,

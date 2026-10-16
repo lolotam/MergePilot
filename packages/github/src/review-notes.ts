@@ -1,4 +1,4 @@
-import type { ContextDisclosure, ContextPaths } from '@mergepilot/engine';
+import type { ContextDisclosure, ContextPaths, OutputLimitDisclosure } from '@mergepilot/engine';
 import { neutralize } from './text-safety.js';
 
 /** A finding the verification pass rejected; `bot` names the panel bot that reported it. */
@@ -21,6 +21,23 @@ export function renderVerifyRejected(items: readonly VerifyRejectedItem[], isAra
     return `- ${neutralize(item.title.trim())} · \`${neutralize(item.path)}:${item.line}\`${bot}`;
   });
   return `<details>\n<summary>${label}</summary>\n\n${lines.join('\n')}\n</details>`;
+}
+
+/**
+ * The model's output limit left less answer room than the findings limit is sized for (ADR-0033):
+ * the review still ran, clamped to fit, so the answer may hold fewer findings. `bot` names the
+ * panel bot it is about.
+ */
+export function renderOutputLimitNote(
+  limit: OutputLimitDisclosure | undefined,
+  isArabic: boolean,
+  bot?: string,
+): string | undefined {
+  if (!limit) return undefined;
+  const who = bot ? ` — **${neutralize(bot)}**` : '';
+  return isArabic
+    ? `> ⚠️ حد مخرجات النموذج سمح بـ ${limit.answerTokens} توكن للرد بدل ${limit.neededTokens} محسوبة لـ ${limit.maxFindings} ملاحظة (\`review.maxFindings\`)، فالرد قد يحمل ملاحظات أقل.${who}`
+    : `> ⚠️ The model's output limit allowed ${limit.answerTokens} answer tokens instead of the ${limit.neededTokens} sized for ${limit.maxFindings} findings (\`review.maxFindings\`), so the answer may hold fewer findings.${who}`;
 }
 
 /**

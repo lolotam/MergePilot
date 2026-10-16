@@ -125,6 +125,28 @@ describe('mergePanelFindings (consensus, ADR-0017)', () => {
     expect(result.below.map((c) => c.finding.title)).toEqual(['Lonely medium']);
   });
 
+  it('caps the kept clusters at maxFindings: most severe, then most bots; the rest is over the limit (ADR-0033)', async () => {
+    const result = await mergePanelFindings({
+      bots: [
+        bot(1, 'Main', [f({ title: 'Agreed', line: 10 }), f({ title: 'Solo A', line: 20 }), f({ title: 'Solo B', line: 30 })]),
+        bot(2, 'Owl', [f({ title: 'Agreed', line: 10 }), f({ title: 'Severe', line: 40, severity: 'high' })], [f({ title: 'Outside', path: 'z.ts' })]),
+      ],
+      minAgreement: 1,
+      maxFindings: 3,
+    });
+    // Severe (high) first, then Agreed (2 bots), then the first medium by path and line.
+    expect(result.kept.map((c) => c.finding.title)).toEqual(['Severe', 'Agreed', 'Solo A']);
+    expect(result.overLimit.map((c) => c.finding.title)).toEqual(['Solo B', 'Outside']);
+    expect(result.below).toEqual([]);
+  });
+
+  it('keeps every agreed cluster without maxFindings or when they fit it', async () => {
+    const bots = [bot(1, 'Main', [f({ title: 'A' }), f({ title: 'B', line: 30 })])];
+    expect((await mergePanelFindings({ bots, minAgreement: 1 })).overLimit).toEqual([]);
+    const fits = await mergePanelFindings({ bots, minAgreement: 1, maxFindings: 2 });
+    expect([fits.kept.length, fits.overLimit.length]).toEqual([2, 0]);
+  });
+
   it('clusters outside-the-diff findings separately from inline ones', async () => {
     const result = await mergePanelFindings({
       bots: [bot(1, 'Main', [f()]), bot(2, 'Owl', [], [f()])],

@@ -83,7 +83,7 @@ describe('processReviewJob — a repo .mergepilot.yml without provider', () => {
   });
 
   it('still fails a repo file that is invalid for another reason', async () => {
-    const h = createHarness({ settings: {}, repoFiles: { '.mergepilot.yml': 'review:\n  maxFindings: 50\n' } });
+    const h = createHarness({ settings: {}, repoFiles: { '.mergepilot.yml': 'review:\n  maxFindings: 51\n' } });
     const result = await processReviewJob(h.job, h.deps);
     expect(result.status).toBe('failed');
     expect(result.detail).toMatch(/review\.maxFindings/);
