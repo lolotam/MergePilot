@@ -29,7 +29,7 @@ A consensus panel (ADR-0017) merged the reviews of up to five bots without cappi
    - Truncation retry: twice the first budget, at most 32,768 (it was at most 16,384).
    - Verification call: `max(2048, 128 × findings checked)`, at most 16,384. Its retry is twice that, at most 16,384.
 
-   Adapters still add their thinking headroom on top. At the default 5 every budget is what it was. The budget preflight prices these larger limits. For verification it assumes the worst case: every call returned N findings.
+   Adapters still add their thinking headroom on top. At the default 5, a single-call review requests exactly what it did before. A batched review's verification budget now grows with the findings its batches returned (25 findings from five batches ask for 3,200 tokens), where the fixed 2048 could cut the answer. The budget preflight prices these larger limits. For verification it assumes the worst case: every call returned N findings.
 6. **Safety caps that stay.** The run record keeps at most 200 findings (`prepare-run-result.ts`). The audit keeps its `min(N × chunks, 50)`. The judge's same-issue pairs stay capped at 50 per request (`MAX_CONSENSUS_PAIRS`, `MAX_SEMANTIC_PAIRS`). Pairs past that cap are compared by title only. The GitHub publish path has no cap of its own.
 
 ## Consequences
