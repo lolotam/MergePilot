@@ -25,7 +25,7 @@ function setup(maxRulesTokens: number) {
     compareCommits: async () => null,
     getFileContent: async ({ path, ref }) => {
       reads.push({ path, ref });
-      if (ref !== baseSha) return 'HEAD';
+      if (ref !== baseSha) return path.endsWith('.md') ? 'HEAD' : null;
       if (path === 'apps/AGENTS.md') return 'Apps rule: validate input.';
       if (path === 'apps/api/CLAUDE.md') return 'API rule: '.padEnd(400, 'x');
       return null;
@@ -67,7 +67,8 @@ describe('reviewPullRequest — nested rules and verification disclosure (ADR-00
     const env = setup(12_000);
     const result = await env.run();
     expect(result.outcome).toBe('completed');
-    expect(env.reads.every((r) => r.ref === baseSha)).toBe(true);
+    // Owner rules come from the base; only repository context (ADR-0029) is read at the head.
+    expect(env.reads.filter((r) => r.path.endsWith('.md')).every((r) => r.ref === baseSha)).toBe(true);
     const prompt = env.requests[0]?.user ?? '';
     expect(prompt).toContain('<<<REVIEW_CRITERIA:RULES_FILE:apps/AGENTS.md>>>');
     expect(prompt).toContain('<<<REVIEW_CRITERIA:RULES_FILE:apps/api/CLAUDE.md>>>');

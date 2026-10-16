@@ -3,6 +3,7 @@ import {
   dedupeJudgeOf,
   deduplicateFindings,
   judgeBudgetLeft,
+  mergeContextDisclosures,
   mergePanelFindings,
   publishReview,
   renderPanelSummary,
@@ -108,6 +109,7 @@ export async function publishConsensus(
     judgeUnavailable: merge.semantic?.unavailable,
     verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
+    context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),
   });
 
   const capture = capturingReviewUrl(ctx.client);

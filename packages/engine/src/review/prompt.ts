@@ -37,8 +37,8 @@ export interface PromptInput {
   /** Third-party reference text: untrusted, informs the review but never instructs it. */
   libraryDocs?: LibraryDoc[];
   /**
-   * Read-only repository files (base commit) shown after the patches, so a finding can rest on
-   * code outside the diff (ADR-0028). Untrusted like the patches; `reason` says why it is shown.
+   * Read-only repository files (PR head commit) shown after the patches, so a finding can rest on
+   * code outside the diff (ADR-0028, ADR-0029). Untrusted like the patches; `reason` says why.
    */
   contextFiles?: ContextFile[];
 }
@@ -47,6 +47,17 @@ export interface ContextFile {
   path: string;
   content: string;
   reason: string;
+  /** The content was cut at a line break to fit; the visible marker follows the numbered lines. */
+  truncated?: boolean | undefined;
+}
+
+/** Ends a context file that was cut to fit its token cap (ADR-0029). */
+export const CONTEXT_TRUNCATED_MARKER = '[context truncated: the rest of this file was not sent]';
+
+/** A context file as the model sees it: the reason, the numbered lines, then any cut marker. */
+export function renderContextFile(file: ContextFile): string {
+  const body = `Reason: ${file.reason}\n${numberLines(file.content)}`;
+  return file.truncated ? `${body}\n${CONTEXT_TRUNCATED_MARKER}` : body;
 }
 
 export interface LibraryDoc {
@@ -178,7 +189,7 @@ WHAT YOU SEE: the pull request's title and description, the owner's rules, somet
 the diff of every changed file of this pull request (or of this batch of it): the changed lines with \
 a few lines of context, each printed with its line number (new-file numbers for added and context \
 lines, old-file numbers for removed lines), and sometimes REPOSITORY_CONTEXT blocks: read-only \
-files of the repository at the base commit, numbered the same way. You never see the program running.`;
+files of the repository at the head commit, numbered the same way. You never see the program running.`;
 
 const METHOD = `\
 METHOD: first work out what the change is trying to do. Then, for every hunk, look for:
@@ -308,8 +319,7 @@ function buildUserPrompt(input: PromptInput): string {
   }
 
   for (const context of input.contextFiles ?? []) {
-    const shown = `Reason: ${context.reason}\n${numberLines(context.content)}`;
-    parts.push(wrapUntrusted(`REPOSITORY_CONTEXT:${context.path}`, shown));
+    parts.push(wrapUntrusted(`REPOSITORY_CONTEXT:${context.path}`, renderContextFile(context)));
   }
 
   return parts.join('\n\n');

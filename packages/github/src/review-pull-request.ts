@@ -23,7 +23,8 @@ import { dedupeJudgeOf, judgeSummaryInput, withJudgeUsage, type ReviewJudge } fr
 import { isPrPaused, postPauseNoticeOnce } from './pause.js';
 import { listPullRequestFiles } from './pr-files.js';
 import { publishReview, type PublishReviewResult } from './publish.js';
-import { withNestedRulesFiles } from './rules-files.js';
+import { contextDisclosureOf } from './review-context.js';
+import { gatherReviewInputs } from './review-inputs.js';
 import { renderReviewSummary } from './summary.js';
 
 export type LoadRepoConfigResult =
@@ -195,16 +196,8 @@ export async function reviewPullRequest(
     return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL, publish: { status: 'skipped-no-changes' } };
   }
 
-  // ADR-0028: every AGENTS.md / CLAUDE.md in the directories of each reviewed file, from the base commit.
-  const rules = await withNestedRulesFiles(client, {
-    owner,
-    repo,
-    baseSha,
-    rulesFiles,
-    changedPaths: filesToReview.map((f) => f.path),
-    maxRulesTokens: config.review.maxRulesTokens,
-  });
-  if (rules.leftOut.length > 0) log?.(`Rules files not sent with the review: ${rules.leftOut.join(', ')}`);
+  // Nested owner rules at the base commit (ADR-0028), repository context at the head (ADR-0029).
+  const inputs = await gatherReviewInputs(client, { owner, repo, baseSha, headSha, config, rulesFiles, files: filesToReview, log });
 
   log?.('Running review...');
   const reviewResult = await runReview({
@@ -215,7 +208,8 @@ export async function reviewPullRequest(
     },
     files: filesToReview,
     anchorFiles: prFiles,
-    rulesFiles: rules.rulesFiles,
+    rulesFiles: inputs.rulesFiles,
+    contextFiles: inputs.contextFiles,
     model,
     knownSecrets,
     judge,
@@ -273,7 +267,8 @@ export async function reviewPullRequest(
       outcome: 'completed',
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       verifyRejected: reviewResult.verifyRejected,
-      rulesLeftOut: rules.leftOut,
+      rulesLeftOut: inputs.rulesLeftOut,
+      context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut),
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),

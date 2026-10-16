@@ -2,7 +2,8 @@ import { escapeInline, renderBotLogo } from './bot-identity.js';
 import { foundByLabel, type ConsensusCluster, type MergePanelResult } from './consensus.js';
 import type { FallbackReason } from './fallback-reason.js';
 import { renderFallbackNotice, renderScopeLine, type ReviewScope } from './summary.js';
-import { renderRulesLeftOut, renderVerifyRejected, type VerifyRejectedItem } from './review-notes.js';
+import type { ContextDisclosure } from '@mergepilot/engine';
+import { renderContextNote, renderRulesLeftOut, renderVerifyRejected, type VerifyRejectedItem } from './review-notes.js';
 import { neutralize } from './text-safety.js';
 
 /** One bot's row in the consensus summary table (ADR-0017). */
@@ -39,6 +40,8 @@ export interface PanelSummaryInput {
   verifyRejected?: readonly VerifyRejectedItem[] | undefined;
   /** Nested rules files left out of the review (ADR-0028). */
   rulesLeftOut?: readonly string[] | undefined;
+  /** Repository context of the bots, merged (ADR-0029). */
+  context?: ContextDisclosure | undefined;
 }
 
 interface Labels {
@@ -150,6 +153,8 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   if (rejected) sections.push(rejected);
   const rulesLeftOut = renderRulesLeftOut(input.rulesLeftOut ?? [], isArabic);
   if (rulesLeftOut) sections.push(rulesLeftOut);
+  const contextNote = renderContextNote(input.context, isArabic);
+  if (contextNote) sections.push(contextNote);
 
   const summaries = input.bots.filter((b) => b.status === 'completed' && b.summary?.trim());
   if (summaries.length > 0) {

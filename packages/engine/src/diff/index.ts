@@ -6,6 +6,7 @@ export {
 
 export {
   classifyFile,
+  isContextPathAllowed,
   type FileClassification,
   type FileToClassify,
   type ClassifyFileOptions,

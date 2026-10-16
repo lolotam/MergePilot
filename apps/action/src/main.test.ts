@@ -231,8 +231,10 @@ review:
 
     await run(deps);
 
-    expect(requestedFileContentRefs.length).toBeGreaterThan(0);
-    for (const refCall of requestedFileContentRefs) {
+    // Config and owner rules come from the base; only repository context (ADR-0029) is read at the head.
+    const configAndRules = requestedFileContentRefs.filter((r) => r.path === '.mergepilot.yml' || r.path.endsWith('.md'));
+    expect(configAndRules.length).toBeGreaterThan(0);
+    for (const refCall of configAndRules) {
       expect(refCall.ref).toBe(baseSha);
       expect(refCall.ref).not.toBe(headSha);
     }

@@ -81,6 +81,18 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).toContain('  1   export function release() {}');
   });
 
+  it("shows a changed file's full version next to its hunks, so a cited unchanged line is there", () => {
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ evidence: 'src/api.ts:40: const timeoutMs = 0;', body: 'b' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+      contextFiles: [{ path: 'src/api.ts', content: `${'// filler\n'.repeat(39)}const timeoutMs = 0;`, reason: 'changed file, full version' }],
+    });
+    expect(user).toContain('<<<UNTRUSTED:HUNKS:src/api.ts>>>');
+    expect(user).toContain('<<<UNTRUSTED:REPOSITORY_CONTEXT:src/api.ts>>>');
+    expect(user).toContain('40   const timeoutMs = 0;');
+  });
+
   it('keeps the hunk near the finding line and marks what the token cap left out', () => {
     const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
     const patch = `@@ -1,1 +1,401 @@\n const first = 0;\n${filler}\n@@ -900,1 +1300,2 @@\n const near = 1;\n+broken();`;

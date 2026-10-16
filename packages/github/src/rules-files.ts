@@ -1,6 +1,7 @@
 import { DEFAULT_MAX_RULES_TOKENS, estimateTokens } from '@mergepilot/engine';
 import type { GitHubClient } from './client.js';
 import { capFileContent, type FileContent } from './contents.js';
+import { readAtRef } from './read-cache.js';
 
 /** The rules files looked up in the directories of the changed files (ADR-0028). */
 export const NESTED_RULES_NAMES: readonly string[] = ['AGENTS.md', 'CLAUDE.md'];
@@ -29,29 +30,6 @@ export interface NestedRulesResult {
   rulesFiles: FileContent[];
   /** Nested rules the review could not include, for the summary: never dropped silently. */
   leftOut: string[];
-}
-
-/**
- * Content at a commit never changes, so reads are shared per client: the bots of one reviewer
- * panel use the same client and look the same files up once. The cache lives as long as the client:
- * the Action makes one per run and the App one per job (`guardWritesForWorkspace` wraps each job's
- * client in a new object), so it never outlives a review.
- */
-const readCache = new WeakMap<GitHubClient, Map<string, Promise<string | null>>>();
-
-function readAtRef(client: GitHubClient, owner: string, repo: string, ref: string, path: string): Promise<string | null> {
-  let cache = readCache.get(client);
-  if (!cache) {
-    cache = new Map();
-    readCache.set(client, cache);
-  }
-  const key = `${owner}/${repo}@${ref}:${path}`;
-  let read = cache.get(key);
-  if (!read) {
-    read = client.getFileContent({ owner, repo, path, ref });
-    cache.set(key, read);
-  }
-  return read;
 }
 
 /** The directories above a path, deepest first, without the repository root. */

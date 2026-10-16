@@ -107,3 +107,25 @@ export function describeCallError(err: unknown, knownSecrets: readonly Secret[] 
   const message = err instanceof Error ? err.message : String(err);
   return redactSecrets(message, [...knownSecrets]).text.slice(0, 200);
 }
+
+export interface ReviewCostEstimateInput {
+  /** Estimated prompt tokens of each review call: the whole-PR call, or every batch. */
+  callPromptTokens: readonly number[];
+  reviewOutputTokens: number;
+  /** The verification call's worst case (the whole-PR prompt); omitted when verify is off. */
+  verifyPromptTokens?: number | undefined;
+  verifyOutputTokens: number;
+}
+
+/**
+ * The up-front USD estimate of a review (ADR-0013 point 7): every review call at its requested
+ * output, plus the verification call's worst case. Prompts include their repository context (ADR-0029).
+ */
+export function estimateReviewCostUsd(input: ReviewCostEstimateInput, pricing: ModelPricing): number {
+  const review = input.callPromptTokens.reduce(
+    (sum, tokens) => sum + estimateCostUsd({ inputTokens: tokens, maxOutputTokens: input.reviewOutputTokens }, pricing),
+    0,
+  );
+  if (input.verifyPromptTokens === undefined) return review;
+  return review + estimateCostUsd({ inputTokens: input.verifyPromptTokens, maxOutputTokens: input.verifyOutputTokens }, pricing);
+}

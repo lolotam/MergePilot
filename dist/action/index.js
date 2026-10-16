@@ -113879,6 +113879,7 @@ var REVIEW_LIMIT_DEFAULTS = Object.freeze({
   totalTimeoutMs: 12e5
 });
 var DEFAULT_MAX_RULES_TOKENS = 12e3;
+var DEFAULT_CONTEXT_TOKENS = 3e4;
 var ReviewSettingsSchema = external_exports.strictObject({
   maxFindings: external_exports.number().int().min(1).max(20).default(5),
   minSeverity: SeveritySchema.default("medium"),
@@ -113890,6 +113891,12 @@ var ReviewSettingsSchema = external_exports.strictObject({
    * smallest first, and the ones left out are disclosed in the summary (ADR-0028).
    */
   maxRulesTokens: external_exports.number().int().positive().default(DEFAULT_MAX_RULES_TOKENS),
+  /**
+   * Estimated tokens of repository context (files outside the diff, read at the PR head) per review
+   * call: the whole-PR call gets up to this much; each batch up to `min(contextTokens, batchTokens)`
+   * from its own files. 0 turns it off. What is left out is counted in the summary (ADR-0029).
+   */
+  contextTokens: external_exports.number().int().min(0).default(DEFAULT_CONTEXT_TOKENS),
   pathInstructions: external_exports.array(PathInstructionSchema).default([]),
   /** Second model pass that re-checks every finding against the code before publishing. */
   verify: external_exports.boolean().default(true),
@@ -114179,6 +114186,72 @@ function isGeneratedPath(filePath) {
     return true;
   }
   return false;
+}
+var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "ico",
+  "bmp",
+  "tif",
+  "tiff",
+  "avif",
+  "psd",
+  "pdf",
+  "zip",
+  "gz",
+  "tgz",
+  "bz2",
+  "xz",
+  "7z",
+  "rar",
+  "jar",
+  "war",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
+  "mp3",
+  "mp4",
+  "mov",
+  "avi",
+  "webm",
+  "wav",
+  "ogg",
+  "flac",
+  "exe",
+  "dll",
+  "so",
+  "dylib",
+  "bin",
+  "class",
+  "o",
+  "a",
+  "wasm",
+  "pyc",
+  "sqlite",
+  "db"
+]);
+function isLockfile(base) {
+  return LOCKFILES.has(base) || base.endsWith(".lock") || base === "go.sum";
+}
+function isContextPathAllowed(path11, opts) {
+  const normalized = path11.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  const base = (segments[segments.length - 1] ?? "").toLowerCase();
+  const extension2 = base.includes(".") ? base.split(".").pop() ?? "" : "";
+  if (opts.isSensitivePath(normalized))
+    return false;
+  if (opts.exclude.some((pattern) => matchesGlobPattern(normalized, pattern)))
+    return false;
+  if (isGeneratedPath(normalized) || isLockfile(base))
+    return false;
+  if (BINARY_EXTENSIONS.has(extension2) || base.endsWith(".snap"))
+    return false;
+  return !segments.slice(0, -1).some((s2) => s2 === "node_modules" || s2 === "vendor" || s2 === "out");
 }
 function classifyFile(file2, opts) {
   if (file2.status === "removed") {
@@ -114758,6 +114831,12 @@ function describeCallError(err, knownSecrets = []) {
   const message = err instanceof Error ? err.message : String(err);
   return redactSecrets(message, [...knownSecrets]).text.slice(0, 200);
 }
+function estimateReviewCostUsd(input2, pricing) {
+  const review = input2.callPromptTokens.reduce((sum, tokens) => sum + estimateCostUsd({ inputTokens: tokens, maxOutputTokens: input2.reviewOutputTokens }, pricing), 0);
+  if (input2.verifyPromptTokens === void 0)
+    return review;
+  return review + estimateCostUsd({ inputTokens: input2.verifyPromptTokens, maxOutputTokens: input2.verifyOutputTokens }, pricing);
+}
 
 function timeoutFailure(label, timeoutMs) {
   return new LlmFailure({
@@ -114879,6 +114958,13 @@ async function retryForJsonOnly(input2) {
 }
 
 var PR_BODY_MAX_CHARS = 4e3;
+var CONTEXT_TRUNCATED_MARKER = "[context truncated: the rest of this file was not sent]";
+function renderContextFile(file2) {
+  const body = `Reason: ${file2.reason}
+${numberLines(file2.content)}`;
+  return file2.truncated ? `${body}
+${CONTEXT_TRUNCATED_MARKER}` : body;
+}
 function wrapUntrusted(label, content) {
   const safeLabel = escapeLabel(label);
   return `<<<UNTRUSTED:${safeLabel}>>>
@@ -114951,7 +115037,7 @@ var OUTPUT_CONTRACT = `Respond with exactly one JSON object matching this schema
   ]
 }
 Keys and the severity, category and side values are spelled exactly as above, whatever language the text fields use.`;
-var WHAT_YOU_SEE = `WHAT YOU SEE: the pull request's title and description, the owner's rules, sometimes library docs, the diff of every changed file of this pull request (or of this batch of it): the changed lines with a few lines of context, each printed with its line number (new-file numbers for added and context lines, old-file numbers for removed lines), and sometimes REPOSITORY_CONTEXT blocks: read-only files of the repository at the base commit, numbered the same way. You never see the program running.`;
+var WHAT_YOU_SEE = `WHAT YOU SEE: the pull request's title and description, the owner's rules, sometimes library docs, the diff of every changed file of this pull request (or of this batch of it): the changed lines with a few lines of context, each printed with its line number (new-file numbers for added and context lines, old-file numbers for removed lines), and sometimes REPOSITORY_CONTEXT blocks: read-only files of the repository at the head commit, numbered the same way. You never see the program running.`;
 var METHOD = `METHOD: first work out what the change is trying to do. Then, for every hunk, look for:
 - correctness: wrong logic or boundaries, null/undefined and empty cases, error paths that swallow or mishandle failures, async ordering and races, resources left open, invariants broken between the changed pieces;
 - security: injection, missing or wrong authorization, secrets in code or logs, unsafe deserialization, path traversal, SSRF, weakened validation;
@@ -115028,9 +115114,7 @@ ${prBody}`;
 ${wrapUntrusted(`PATCH:${file2.path}`, annotated)}`);
   }
   for (const context of input2.contextFiles ?? []) {
-    const shown = `Reason: ${context.reason}
-${numberLines(context.content)}`;
-    parts.push(wrapUntrusted(`REPOSITORY_CONTEXT:${context.path}`, shown));
+    parts.push(wrapUntrusted(`REPOSITORY_CONTEXT:${context.path}`, renderContextFile(context)));
   }
   return parts.join("\n\n");
 }
@@ -115151,6 +115235,7 @@ function parseReviewResponse(response) {
   });
 }
 function buildBatchPrompt(input2, files) {
+  const contextFiles = input2.contextFor?.(files) ?? [];
   return buildReviewPrompt({
     language: input2.config.language,
     maxFindings: input2.config.review.maxFindings,
@@ -115158,7 +115243,8 @@ function buildBatchPrompt(input2, files) {
     rulesFiles: input2.rulesFiles,
     pathInstructions: input2.config.review.pathInstructions,
     files,
-    ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {}
+    ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {},
+    ...contextFiles.length > 0 ? { contextFiles } : {}
   });
 }
 async function reviewOneBatch(input2, prompt, promptTokens) {
@@ -115260,6 +115346,116 @@ async function executeBatchedReview(input2) {
   };
   return { merged, totalUsage, incompleteReasons };
 }
+
+var KIND_ORDER = { "changed-file": 0, "test-pair": 1, import: 2 };
+var CONTEXT_FILE_MAX_TOKENS = 8e3;
+var BLOCK_OVERHEAD_TOKENS = 30;
+function cutAtLineBreak(file2, maxTokens) {
+  if (estimateTokens(renderContextFile(file2)) <= maxTokens)
+    return file2;
+  const kept = [];
+  let used = estimateTokens(renderContextFile({ ...file2, content: "", truncated: true }));
+  for (const line of file2.content.split(/\r?\n/)) {
+    const cost = estimateTokens(`  ${kept.length + 1}   ${line}
+`);
+    if (used + cost > maxTokens)
+      break;
+    kept.push(line);
+    used += cost;
+  }
+  return { ...file2, content: kept.join("\n"), truncated: true };
+}
+function dedupeByPath(files) {
+  const byPath = /* @__PURE__ */ new Map();
+  for (const file2 of files) {
+    const known = byPath.get(file2.path);
+    if (!known) {
+      byPath.set(file2.path, { ...file2, forPaths: [...file2.forPaths] });
+      continue;
+    }
+    const forPaths = [.../* @__PURE__ */ new Set([...known.forPaths, ...file2.forPaths])];
+    const better = KIND_ORDER[file2.kind] < KIND_ORDER[known.kind] ? file2 : known;
+    byPath.set(file2.path, { ...better, forPaths });
+  }
+  return [...byPath.values()];
+}
+function prepare(files, opts) {
+  const reviewed = new Set(opts.reviewedPaths);
+  const maxFileTokens = Math.min(CONTEXT_FILE_MAX_TOKENS, opts.contextTokens) - BLOCK_OVERHEAD_TOKENS;
+  const prepared = [];
+  for (const file2 of dedupeByPath(files)) {
+    const forPaths = file2.forPaths.filter((p) => reviewed.has(p));
+    if (forPaths.length === 0 || file2.content.includes("\0"))
+      continue;
+    if (!isContextPathAllowed(file2.path, { exclude: opts.exclude, isSensitivePath }))
+      continue;
+    const redacted = redactSecrets(file2.content, opts.knownSecrets).text;
+    const shown = cutAtLineBreak({ path: file2.path, content: redacted, reason: file2.reason }, maxFileTokens);
+    const tokens = estimateTokens(renderContextFile(shown)) + BLOCK_OVERHEAD_TOKENS;
+    prepared.push({ ...shown, kind: file2.kind, forPaths, tokens });
+  }
+  const depth = (path11) => path11.split("/").length;
+  return prepared.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || depth(a.path) - depth(b.path) || a.tokens - b.tokens || (a.path < b.path ? -1 : 1));
+}
+var ContextPlan = class {
+  opts;
+  files;
+  sent = /* @__PURE__ */ new Map();
+  /** Context skipped because the file's own patch was in the call: shown, so never left out. */
+  shownAsPatch = /* @__PURE__ */ new Set();
+  constructor(offered, opts) {
+    this.opts = opts;
+    this.files = opts.contextTokens > 0 ? prepare(offered, opts) : [];
+  }
+  /** The files for a call reviewing `paths`, in send order, within `maxTokens`; not recorded. */
+  select(paths, maxTokens) {
+    const wanted = new Set(paths);
+    const chosen = [];
+    let left = maxTokens;
+    for (const file2 of this.files) {
+      if (file2.tokens > left || !file2.forPaths.some((p) => wanted.has(p)))
+        continue;
+      if (file2.truncated && file2.content === "")
+        continue;
+      if (file2.kind !== "changed-file" && wanted.has(file2.path)) {
+        this.shownAsPatch.add(file2.path);
+        continue;
+      }
+      chosen.push({ path: file2.path, content: file2.content, reason: file2.reason, truncated: file2.truncated });
+      left -= file2.tokens;
+    }
+    return chosen;
+  }
+  /** The context of the whole-PR call (not yet recorded: the call may be replaced by batches). */
+  whole() {
+    return this.select(this.opts.reviewedPaths, this.opts.contextTokens);
+  }
+  /** Records files as sent to the model. */
+  markSent(files) {
+    for (const file2 of files)
+      this.sent.set(file2.path, file2);
+  }
+  /** The context of one batch, from its own files' context, recorded as sent. */
+  forBatch = (batch) => {
+    const cap = Math.min(this.opts.contextTokens, this.opts.batchTokens);
+    const files = this.select(batch.map((f3) => f3.path), cap);
+    this.markSent(files);
+    return files;
+  };
+  /** Every file sent in at least one call: what the verify pass may show. */
+  sentFiles() {
+    return [...this.sent.values()];
+  }
+  /** Sent and left-out paths; undefined when no context was offered. */
+  disclosure() {
+    if (this.files.length === 0)
+      return void 0;
+    return {
+      sent: [...this.sent.keys()],
+      leftOut: this.files.filter((f3) => !this.sent.has(f3.path) && !this.shownAsPatch.has(f3.path)).map((f3) => f3.path)
+    };
+  }
+};
 
 function makeRedactionFinding(path11, line, kind, idIndex) {
   return {
@@ -115366,6 +115562,7 @@ async function recoverReviewTruncation(input2) {
       spend,
       knownSecrets: input2.knownSecrets,
       libraryDocs,
+      contextFor: input2.contextFor,
       signal,
       initialUsage: totalUsage,
       deadline: input2.deadline
@@ -115444,6 +115641,7 @@ async function runSinglePass(ctx) {
     redactedRulesFiles: ctx.redactedRulesFiles,
     redactedReviewableFiles: ctx.redactedReviewableFiles,
     libraryDocs: ctx.libraryDocs,
+    contextFor: ctx.contextFor,
     signal,
     totalUsage: combineUsage(response.usage, empty.usage),
     thinkingOff: empty.thinkingOff,
@@ -115477,6 +115675,7 @@ async function runBatchedPass(ctx, batches) {
     spend: ctx.spend,
     knownSecrets: ctx.knownSecrets,
     libraryDocs: ctx.libraryDocs,
+    contextFor: ctx.contextFor,
     signal: ctx.signal,
     deadline: ctx.deadline
   });
@@ -115546,8 +115745,7 @@ function patchChunks(patch) {
   return hunks.map((hunk) => ({ text: hunk.lines.join("\n"), ranges: hunk.ranges, findingLines: [] }));
 }
 function contextChunk(file2) {
-  return { text: `Reason: ${file2.reason}
-${numberLines(file2.content)}`, ranges: [], findingLines: [] };
+  return { text: renderContextFile(file2), ranges: [], findingLines: [] };
 }
 function cutToTokens(text, tokens) {
   const kept = [];
@@ -115622,6 +115820,9 @@ function collectFiles(input2) {
       const context = contexts.get(path11);
       if (patch?.trim()) {
         files.set(path11, { path: path11, kind: "HUNKS", chunks: patchChunks(patch), missing: false });
+        if (context) {
+          files.set(`${path11}#context`, { path: path11, kind: "REPOSITORY_CONTEXT", chunks: [contextChunk(context)], missing: false });
+        }
       } else if (context && !patches.has(path11)) {
         files.set(path11, { path: path11, kind: "REPOSITORY_CONTEXT", chunks: [contextChunk(context)], missing: false });
       } else {
@@ -115916,6 +116117,14 @@ async function runReview(input2) {
     content: redactSecrets(rf.content, knownSecrets).text
   }));
   const { files: redactedReviewableFiles, securityFindings } = redactPatches(reviewableFiles, knownSecrets);
+  const context = new ContextPlan(input2.contextFiles ?? [], {
+    exclude: reviewCfg.exclude,
+    knownSecrets,
+    reviewedPaths: redactedReviewableFiles.map((f3) => f3.path),
+    contextTokens: reviewCfg.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
+    batchTokens: limits.batchTokens
+  });
+  const wholeContext = context.whole();
   const prompt = buildReviewPrompt({
     language: config2.language,
     maxFindings: reviewCfg.maxFindings,
@@ -115923,7 +116132,8 @@ async function runReview(input2) {
     rulesFiles: redactedRulesFiles,
     pathInstructions: reviewCfg.pathInstructions,
     files: redactedReviewableFiles,
-    ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {}
+    ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {},
+    ...wholeContext.length > 0 ? { contextFiles: wholeContext } : {}
   });
   const promptTokens = estimateTokens(prompt.system + prompt.user);
   const budgetResult = checkBudget({
@@ -115939,12 +116149,15 @@ async function runReview(input2) {
     for (const path11 of plan.truncatedPaths) {
       incompleteReasons.push(`${path11}: patch truncated to fit review.batchTokens`);
     }
+  } else {
+    context.markSent(wholeContext);
   }
   const promptArgs = {
     config: config2,
     pr: { title: redactedPrTitle, body: redactedPrBody },
     rulesFiles: redactedRulesFiles,
-    libraryDocs: input2.libraryDocs
+    libraryDocs: input2.libraryDocs,
+    contextFor: context.forBatch
   };
   const callPromptTokens = plan ? plan.batches.map((batch) => {
     const batchPrompt = buildBatchPrompt(promptArgs, batch);
@@ -115953,14 +116166,14 @@ async function runReview(input2) {
   const maxOutputTokens = 4096;
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
   const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
-  let estimatedCostUsd;
   const initialPricing = currentPricing();
   if (initialPricing) {
-    const pricing = initialPricing;
-    estimatedCostUsd = callPromptTokens.reduce((sum, tokens) => sum + estimateCostUsd({ inputTokens: tokens, maxOutputTokens: reviewOutputTokens }, pricing), 0);
-    if (reviewCfg.verify) {
-      estimatedCostUsd += estimateCostUsd({ inputTokens: promptTokens, maxOutputTokens: verifyOutputTokens }, pricing);
-    }
+    const estimatedCostUsd = estimateReviewCostUsd({
+      callPromptTokens,
+      reviewOutputTokens,
+      verifyPromptTokens: reviewCfg.verify ? promptTokens : void 0,
+      verifyOutputTokens
+    }, initialPricing);
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
       return { status: "skipped-budget", reason: costOverBudgetReason(estimatedCostUsd, budgetCfg.perReviewUsd) };
     }
@@ -115981,7 +116194,8 @@ async function runReview(input2) {
     redactedPrBody,
     redactedRulesFiles,
     redactedReviewableFiles,
-    libraryDocs: input2.libraryDocs
+    libraryDocs: input2.libraryDocs,
+    contextFor: context.forBatch
   };
   const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
   if (!pass.ok) {
@@ -116003,6 +116217,7 @@ async function runReview(input2) {
       language: config2.language,
       findings: modelFindings,
       files: redactedReviewableFiles,
+      contextFiles: context.sentFiles(),
       maxCodeTokens: limits.batchTokens,
       model,
       spend,
@@ -116053,6 +116268,7 @@ async function runReview(input2) {
     complete,
     incompleteReasons
   };
+  const contextDisclosure = context.disclosure();
   const disclosure = model.disclosure(knownSecrets);
   const methodOnlyFallback = disclosure.fallbackFromMethod !== void 0 && disclosure.modelUsed === disclosure.fallbackFrom;
   let reviewCostUsd;
@@ -116074,6 +116290,7 @@ async function runReview(input2) {
     ...verification !== void 0 ? { verification } : {},
     ...verifyRejected.length > 0 ? { verifyRejected } : {},
     ...judge ? { judge } : {},
+    ...contextDisclosure ? { context: contextDisclosure } : {},
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls
   };
@@ -163247,7 +163464,7 @@ async function createReviewModel(config2, store, opts) {
   return { ...primary.model, ...attachments(apiKey, chain) };
 }
 
-var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
+var BINARY_EXTENSIONS2 = /* @__PURE__ */ new Set([
   ".png",
   ".jpg",
   ".jpeg",
@@ -163295,7 +163512,7 @@ function isBinaryPath(path11) {
   if (dotIndex === -1)
     return false;
   const ext = path11.slice(dotIndex).toLowerCase();
-  return BINARY_EXTENSIONS.has(ext);
+  return BINARY_EXTENSIONS2.has(ext);
 }
 function compareText2(a, b) {
   if (a === b)
@@ -168954,6 +169171,20 @@ function renderRulesLeftOut(paths, isArabic) {
   const list = paths.map((p) => `\`${neutralize2(p)}\``).join(isArabic ? "\u060C " : ", ");
   return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0641\u0627\u062A \u0642\u0648\u0627\u0639\u062F \u0644\u0645 \u062A\u064F\u0631\u0633\u0644 \u0645\u0639 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 (\u062A\u062C\u0627\u0648\u0632\u062A \`review.maxRulesTokens\` \u0623\u0648 \u062D\u062F \u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u062C\u0644\u062F\u0627\u062A): ${list}` : `> \u2139\uFE0F Rules files not sent with the review (over \`review.maxRulesTokens\` or the directory lookup limit): ${list}`;
 }
+function renderContextNote(context, isArabic) {
+  if (!context)
+    return void 0;
+  const sent = new Set(context.sent).size;
+  const leftOut = new Set(context.leftOut).size;
+  if (sent === 0 && leftOut === 0)
+    return void 0;
+  if (isArabic) {
+    const left2 = leftOut > 0 ? `\u060C \u0648\u063A\u064A\u0631 \u0627\u0644\u0645\u064F\u0631\u0633\u0644\u0629 ${leftOut} (\u062A\u062C\u0627\u0648\u0632\u062A \`review.contextTokens\` \u0623\u0648 \u062D\u062F \u0627\u0644\u0642\u0631\u0627\u0621\u0629)` : "";
+    return `> \u2139\uFE0F \u0633\u064A\u0627\u0642 \u0627\u0644\u0645\u0633\u062A\u0648\u062F\u0639: \u0627\u0644\u0645\u0644\u0641\u0627\u062A \u0627\u0644\u0645\u064F\u0631\u0633\u0644\u0629 ${sent}${left2}.`;
+  }
+  const left = leftOut > 0 ? `, ${leftOut} left out (over \`review.contextTokens\` or the read limit)` : "";
+  return `> \u2139\uFE0F Repository context: ${sent} ${sent === 1 ? "file" : "files"} sent${left}.`;
+}
 
 function renderHeader(outcome, isArabic) {
   if (outcome === "completed") {
@@ -169143,6 +169374,9 @@ function renderReviewSummary(input2) {
   const rulesLeftOut = renderRulesLeftOut(input2.rulesLeftOut ?? [], isArabic);
   if (rulesLeftOut)
     sections.push(rulesLeftOut);
+  const contextNote = renderContextNote(input2.context, isArabic);
+  if (contextNote)
+    sections.push(contextNote);
   if (input2.summaryOnly && input2.summaryOnly.length > 0) {
     sections.push(renderFindingsOutsideDiff(input2.summaryOnly, isArabic));
   }
@@ -169191,9 +169425,6 @@ function withJudgeUsage(costUsd2, usage, report) {
   };
 }
 
-var NESTED_RULES_NAMES = ["AGENTS.md", "CLAUDE.md"];
-var MAX_RULES_DIRECTORIES = 40;
-var READ_CONCURRENCY = 8;
 var readCache = /* @__PURE__ */ new WeakMap();
 function readAtRef(client, owner, repo, ref, path11) {
   let cache = readCache.get(client);
@@ -169204,11 +169435,20 @@ function readAtRef(client, owner, repo, ref, path11) {
   const key = `${owner}/${repo}@${ref}:${path11}`;
   let read = cache.get(key);
   if (!read) {
-    read = client.getFileContent({ owner, repo, path: path11, ref });
+    const pending = client.getFileContent({ owner, repo, path: path11, ref });
+    pending.catch(() => {
+      if (cache?.get(key) === pending)
+        cache.delete(key);
+    });
+    read = pending;
     cache.set(key, read);
   }
   return read;
 }
+
+var NESTED_RULES_NAMES = ["AGENTS.md", "CLAUDE.md"];
+var MAX_RULES_DIRECTORIES = 40;
+var READ_CONCURRENCY = 8;
 function ancestorDirectories(path11) {
   const parts = path11.split("/").slice(0, -1);
   return parts.map((_, index) => parts.slice(0, parts.length - index).join("/"));
@@ -169266,6 +169506,253 @@ async function withNestedRulesFiles(client, params) {
   const found = await readCandidates(client, params, candidates, leftOut);
   const nested = fitUnderCap(params.rulesFiles, applicableRules(params.changedPaths, found), params.maxRulesTokens ?? DEFAULT_MAX_RULES_TOKENS, leftOut);
   return { rulesFiles: [...params.rulesFiles, ...nested], leftOut };
+}
+
+var MAX_CONTEXT_READS = 120;
+var READ_CONCURRENCY2 = 8;
+var JS_EXTENSIONS = /* @__PURE__ */ new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
+var SOURCE_FOR_EMITTED = {
+  js: ["ts", "tsx", "js"],
+  jsx: ["tsx", "jsx"],
+  mjs: ["mts", "mjs"],
+  cjs: ["cts", "cjs"]
+};
+var EXTENSIONLESS_SUFFIXES = [".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx", "/index.js"];
+var NON_CODE_EXTENSIONS = /* @__PURE__ */ new Set(["css", "scss", "sass", "less", "json", "svg", "png", "jpg", "jpeg", "gif", "md", "html", "txt", "yml", "yaml", "wasm"]);
+var JS_SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"])(\.{1,2}\/[^'"\n]*)\1/g;
+var PY_RELATIVE_IMPORT_RE = /^\s*from\s+(\.+)([\w.]*)\s+import\s+([^\n#]+)/gm;
+var dirOf = (path11) => path11.split("/").slice(0, -1).join("/");
+var extOf = (path11) => {
+  const base = path11.split("/").pop() ?? "";
+  return base.includes(".") ? (base.split(".").pop() ?? "").toLowerCase() : "";
+};
+function joinRelative(dir, relative3) {
+  const parts = dir ? dir.split("/") : [];
+  for (const segment of relative3.split("/")) {
+    if (segment === "" || segment === ".")
+      continue;
+    if (segment === "..") {
+      if (parts.length === 0)
+        return null;
+      parts.pop();
+    } else {
+      parts.push(segment);
+    }
+  }
+  return parts.join("/");
+}
+function localImportSpecifiers(content) {
+  return [...new Set([...content.matchAll(JS_SPECIFIER_RE)].map((m2) => m2[2]))];
+}
+function resolveImportCandidates(fromPath, specifier) {
+  const target = joinRelative(dirOf(fromPath), specifier);
+  if (!target)
+    return [];
+  const ext = extOf(target);
+  const emitted = Object.hasOwn(SOURCE_FOR_EMITTED, ext) ? SOURCE_FOR_EMITTED[ext] : void 0;
+  if (emitted)
+    return emitted.map((e2) => `${target.slice(0, -ext.length)}${e2}`);
+  if (JS_EXTENSIONS.has(ext))
+    return [target];
+  if (NON_CODE_EXTENSIONS.has(ext))
+    return [];
+  return EXTENSIONLESS_SUFFIXES.map((suffix) => `${target}${suffix}`);
+}
+function pythonImportCandidates(fromPath, content) {
+  const groups = [];
+  for (const match2 of content.matchAll(PY_RELATIVE_IMPORT_RE)) {
+    const up = "../".repeat(match2[1].length - 1);
+    const base = joinRelative(dirOf(fromPath), up || ".");
+    if (base === null)
+      continue;
+    const modules = match2[2] ? [match2[2].replace(/\./g, "/")] : match2[3].replace(/[()]/g, "").split(",").map((n) => n.trim().split(/\s+/)[0] ?? "").filter(Boolean);
+    for (const module of modules) {
+      const target = base ? `${base}/${module}` : module;
+      groups.push([`${target}.py`, `${target}/__init__.py`]);
+    }
+  }
+  return groups;
+}
+var inDir = (dir, name) => dir ? `${dir}/${name}` : name;
+var testsOf = (path11, candidates) => ({ candidates, reason: `test of ${path11}` });
+var implementationOf = (path11, candidates) => ({
+  candidates: [...new Set(candidates)],
+  reason: `implementation of the test ${path11}`
+});
+var outOfTestDir = (dir, testDir) => dir.split("/").pop() === testDir ? dirOf(dir) : dir;
+function jsPair(path11, dir, stem, ext) {
+  const test = stem.match(/^(.*)\.(test|spec)$/);
+  if (test)
+    return implementationOf(path11, [inDir(outOfTestDir(dir, "__tests__"), `${test[1]}.${ext}`)]);
+  return testsOf(path11, [inDir(dir, `${stem}.test.${ext}`), inDir(dir, `${stem}.spec.${ext}`), inDir(dir, `__tests__/${stem}.test.${ext}`)]);
+}
+function pyPair(path11, dir, stem) {
+  const tested = stem.startsWith("test_") ? stem.slice("test_".length) : stem.endsWith("_test") ? stem.slice(0, -"_test".length) : void 0;
+  if (tested) {
+    const name = `${tested}.py`;
+    return implementationOf(path11, [inDir(dir, name), inDir(outOfTestDir(dir, "tests"), name)]);
+  }
+  return testsOf(path11, [inDir(dir, `test_${stem}.py`), inDir(dir, `${stem}_test.py`), inDir(dir, `tests/test_${stem}.py`)]);
+}
+function goPair(path11, dir, stem) {
+  return stem.endsWith("_test") ? implementationOf(path11, [inDir(dir, `${stem.slice(0, -"_test".length)}.go`)]) : testsOf(path11, [inDir(dir, `${stem}_test.go`)]);
+}
+function pairCandidates(path11) {
+  const dir = dirOf(path11);
+  const ext = extOf(path11);
+  const stem = path11.slice(dir ? dir.length + 1 : 0, -(ext.length + 1));
+  if (JS_EXTENSIONS.has(ext))
+    return jsPair(path11, dir, stem, ext);
+  if (ext === "py")
+    return pyPair(path11, dir, stem);
+  if (ext === "go")
+    return goPair(path11, dir, stem);
+  return void 0;
+}
+function patchNewSide(patch) {
+  return patch.split("\n").filter((line) => line.startsWith("+") || line.startsWith(" ")).map((line) => line.slice(1)).join("\n");
+}
+function importLookups(path11, content) {
+  const ext = extOf(path11);
+  const groups = JS_EXTENSIONS.has(ext) ? localImportSpecifiers(content).map((s2) => resolveImportCandidates(path11, s2)) : ext === "py" ? pythonImportCandidates(path11, content) : [];
+  return groups.filter((candidates) => candidates.length > 0).map((candidates) => ({ candidates, kind: "import", reason: `imported by ${path11}`, forPath: path11, disclose: true }));
+}
+async function inChunks(items, fn) {
+  for (let i2 = 0; i2 < items.length; i2 += READ_CONCURRENCY2) {
+    await Promise.all(items.slice(i2, i2 + READ_CONCURRENCY2).map(fn));
+  }
+}
+var ContextReader = class {
+  client;
+  params;
+  known;
+  reads = 0;
+  attempted = /* @__PURE__ */ new Map();
+  found = [];
+  leftOut = [];
+  constructor(client, params, known) {
+    this.client = client;
+    this.params = params;
+    this.known = known;
+  }
+  /** A path several reviewed files import is read, and counted against the limit, once. */
+  read(path11) {
+    let outcome = this.attempted.get(path11);
+    if (!outcome) {
+      outcome = this.readOnce(path11);
+      this.attempted.set(path11, outcome);
+    }
+    return outcome;
+  }
+  async readOnce(path11) {
+    if (this.reads >= MAX_CONTEXT_READS)
+      return "limit";
+    this.reads++;
+    try {
+      return { content: await readAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, path11) };
+    } catch {
+      this.leftOut.push(`${path11} (could not be read)`);
+      return "failed";
+    }
+  }
+  async run(lookups) {
+    await inChunks(lookups, (lookup) => this.lookUp(lookup));
+  }
+  /** a: the full version of a changed file, recorded in `known` for the later lookups. */
+  async readChangedFile(file2) {
+    const outcome = await this.read(file2.path);
+    if (outcome === "limit")
+      this.leftOut.push(`${file2.path} (not looked up)`);
+    const content = typeof outcome === "object" ? outcome.content : null;
+    if (content)
+      this.add({ kind: "changed-file", reason: "changed file, full version", forPath: file2.path }, file2.path, content);
+    this.known.set(file2.path, content);
+  }
+  async lookUp(lookup) {
+    for (const path11 of lookup.candidates) {
+      if (path11 === lookup.forPath)
+        return;
+      if (this.known.has(path11)) {
+        const content = this.known.get(path11);
+        if (content)
+          this.add(lookup, path11, content);
+        return;
+      }
+      if (isSensitivePath(path11) || isSensitivePath(lookup.candidates[0] ?? path11))
+        return;
+      if (!isContextPathAllowed(path11, { exclude: this.params.exclude, isSensitivePath }))
+        continue;
+      const outcome = await this.read(path11);
+      if (outcome === "limit") {
+        if (lookup.disclose)
+          this.leftOut.push(`${lookup.candidates[0]} (not looked up)`);
+        return;
+      }
+      if (outcome === "failed")
+        return;
+      if (outcome.content !== null) {
+        this.add(lookup, path11, outcome.content);
+        return;
+      }
+    }
+  }
+  add(lookup, path11, content) {
+    this.found.push({ path: path11, content, reason: lookup.reason, kind: lookup.kind, forPaths: [lookup.forPath] });
+  }
+};
+async function gatherRepositoryContext(client, params) {
+  if (params.contextTokens <= 0)
+    return { files: [], leftOut: [] };
+  const reviewed = params.files.filter((f3) => classifyFile(f3, { exclude: params.exclude, isSensitivePath }) === "review");
+  const added = reviewed.filter((f3) => f3.status === "added").map((f3) => [f3.path, patchNewSide(f3.patch ?? "")]);
+  const reader = new ContextReader(client, params, new Map(added));
+  const readable = reviewed.filter((f3) => f3.status !== "added" && isContextPathAllowed(f3.path, { exclude: params.exclude, isSensitivePath }));
+  await inChunks(readable, (file2) => reader.readChangedFile(file2));
+  const pairs = reviewed.flatMap((file2) => {
+    const pair = pairCandidates(file2.path);
+    return pair ? [{ ...pair, kind: "test-pair", forPath: file2.path, disclose: false }] : [];
+  });
+  const imports = reviewed.flatMap((file2) => importLookups(file2.path, reader.known.get(file2.path) ?? patchNewSide(file2.patch ?? "")));
+  await reader.run([...pairs, ...imports]);
+  return { files: reader.found, leftOut: reader.leftOut };
+}
+function contextDisclosureOf(engine, gathererLeftOut) {
+  if (!engine && gathererLeftOut.length === 0)
+    return void 0;
+  return { sent: engine?.sent ?? [], leftOut: [...engine?.leftOut ?? [], ...gathererLeftOut] };
+}
+
+async function gatherReviewInputs(client, params) {
+  const { owner, repo, config: config2, log } = params;
+  const [rules, context] = await Promise.all([
+    withNestedRulesFiles(client, {
+      owner,
+      repo,
+      baseSha: params.baseSha,
+      rulesFiles: params.rulesFiles,
+      changedPaths: params.files.map((f3) => f3.path),
+      maxRulesTokens: config2.review.maxRulesTokens
+    }),
+    gatherRepositoryContext(client, {
+      owner,
+      repo,
+      headSha: params.headSha,
+      files: params.files,
+      exclude: config2.review.exclude,
+      contextTokens: config2.review.contextTokens ?? DEFAULT_CONTEXT_TOKENS
+    })
+  ]);
+  if (rules.leftOut.length > 0)
+    log?.(`Rules files not sent with the review: ${rules.leftOut.join(", ")}`);
+  if (context.files.length > 0 || context.leftOut.length > 0) {
+    log?.(`Repository context: ${context.files.length} files read, ${context.leftOut.length} not read`);
+  }
+  return {
+    rulesFiles: rules.rulesFiles,
+    rulesLeftOut: rules.leftOut,
+    contextFiles: context.files,
+    contextLeftOut: context.leftOut
+  };
 }
 
 async function loadRepoConfig(client, params) {
@@ -169352,16 +169839,7 @@ async function reviewPullRequest(ctx) {
     log?.(`MergePilot skipped: ${NOTHING_NEW_DETAIL}`);
     return { outcome: "skipped", detail: NOTHING_NEW_DETAIL, publish: { status: "skipped-no-changes" } };
   }
-  const rules = await withNestedRulesFiles(client, {
-    owner,
-    repo,
-    baseSha,
-    rulesFiles,
-    changedPaths: filesToReview.map((f3) => f3.path),
-    maxRulesTokens: config2.review.maxRulesTokens
-  });
-  if (rules.leftOut.length > 0)
-    log?.(`Rules files not sent with the review: ${rules.leftOut.join(", ")}`);
+  const inputs = await gatherReviewInputs(client, { owner, repo, baseSha, headSha, config: config2, rulesFiles, files: filesToReview, log });
   log?.("Running review...");
   const reviewResult = await runReview({
     config: config2,
@@ -169371,7 +169849,8 @@ async function reviewPullRequest(ctx) {
     },
     files: filesToReview,
     anchorFiles: prFiles,
-    rulesFiles: rules.rulesFiles,
+    rulesFiles: inputs.rulesFiles,
+    contextFiles: inputs.contextFiles,
     model,
     knownSecrets,
     judge
@@ -169422,7 +169901,8 @@ async function reviewPullRequest(ctx) {
       outcome: "completed",
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       verifyRejected: reviewResult.verifyRejected,
-      rulesLeftOut: rules.leftOut,
+      rulesLeftOut: inputs.rulesLeftOut,
+      context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut),
       ...totals.costUsd !== void 0 ? { costUsd: totals.costUsd } : {},
       ...totals.inputTokens !== void 0 ? { inputTokens: totals.inputTokens } : {},
       ...totals.outputTokens !== void 0 ? { outputTokens: totals.outputTokens } : {}

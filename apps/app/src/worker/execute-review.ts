@@ -170,6 +170,7 @@ export async function executeReview(
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       verifyRejected: reviewResult.verifyRejected,
       rulesLeftOut: run.rulesLeftOut,
+      context: run.context,
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),

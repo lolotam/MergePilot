@@ -50,3 +50,7 @@ The five changes the comparison recommended are: (1) repository context outside 
 - **GitHub reads.** A review now reads up to 80 extra files at the base commit (usually far fewer). A failed read is named in the summary instead of failing the review.
 - **Jev filter scope.** Jev still judges each finding against its own hunk only, so a cross-file finding can score low; it is still never dropped silently, and security/data-loss ones are never dropped at all.
 - **Not in this ADR.** Filling `contextFiles` with repository code outside the diff (change 1), PR-aware incremental runs (change 3) and batch manifests (change 4) follow in later ADRs. Whether reviews actually improve has to be measured again against the same comparison set.
+
+## Amendment (2026-10-16): context is read at the head
+
+ADR-0029 fills `contextFiles` (change 1). The `REPOSITORY_CONTEXT` blocks hold files read at the pull request's **head** commit, not the base, and `WHAT_YOU_SEE` says so. Owner rules (point 5) still come only from the base commit.
