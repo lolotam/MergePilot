@@ -13,7 +13,6 @@ import {
   type RepositoryContextFile,
 } from '@mergepilot/engine';
 import type { GitHubClient } from './client.js';
-import { capFileContent } from './contents.js';
 import { readAtRef } from './read-cache.js';
 
 /** At most this many file reads per review; what is not looked up is disclosed. */
@@ -261,10 +260,11 @@ class ContextReader {
   async readChangedFile(file: ReviewedFile): Promise<void> {
     const outcome = await this.read(file.path);
     if (outcome === 'limit') this.leftOut.push(`${file.path} (not looked up)`);
+    // Passed uncut: the engine redacts secrets first and cuts after (ADR-0029), so a cut can never
+    // leave part of a secret that exact matching would then miss.
     const content = typeof outcome === 'object' ? outcome.content : null;
-    const full = content !== null ? capFileContent(content) : null;
-    if (full) this.add({ kind: 'changed-file', reason: 'changed file, full version', forPath: file.path }, file.path, full);
-    this.known.set(file.path, full);
+    if (content) this.add({ kind: 'changed-file', reason: 'changed file, full version', forPath: file.path }, file.path, content);
+    this.known.set(file.path, content);
   }
 
   private async lookUp(lookup: Lookup): Promise<void> {
@@ -287,7 +287,7 @@ class ContextReader {
       }
       if (outcome === 'failed') return;
       if (outcome.content !== null) {
-        this.add(lookup, path, capFileContent(outcome.content));
+        this.add(lookup, path, outcome.content);
         return;
       }
     }

@@ -183,6 +183,13 @@ describe('gatherRepositoryContext', () => {
     expect(result.files.map((f) => f.path)).toContain('app/views.py');
   });
 
+  it('hands the engine the whole file, so redaction runs before any cut', async () => {
+    const big = `${'// filler line\n'.repeat(80_000)}const key = 'tail';`;
+    const { client } = fakeClient({ 'src/big.ts': big });
+    const result = await gatherRepositoryContext(client, params([modified('src/big.ts')]));
+    expect(result.files.find((f) => f.path === 'src/big.ts')?.content).toBe(big);
+  });
+
   it('never takes a failed read or the read limit for file content', async () => {
     const imports = Array.from({ length: MAX_CONTEXT_READS }, (_, i) => `import './m${i}.ts';`).join('\n');
     const { client } = fakeClient({ 'src/api.ts': imports }, ['src/broken.ts']);

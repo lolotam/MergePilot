@@ -169435,7 +169435,12 @@ function readAtRef(client, owner, repo, ref, path11) {
   const key = `${owner}/${repo}@${ref}:${path11}`;
   let read = cache.get(key);
   if (!read) {
-    read = client.getFileContent({ owner, repo, path: path11, ref });
+    const pending = client.getFileContent({ owner, repo, path: path11, ref });
+    pending.catch(() => {
+      if (cache?.get(key) === pending)
+        cache.delete(key);
+    });
+    read = pending;
     cache.set(key, read);
   }
   return read;
@@ -169659,10 +169664,9 @@ var ContextReader = class {
     if (outcome === "limit")
       this.leftOut.push(`${file2.path} (not looked up)`);
     const content = typeof outcome === "object" ? outcome.content : null;
-    const full = content !== null ? capFileContent(content) : null;
-    if (full)
-      this.add({ kind: "changed-file", reason: "changed file, full version", forPath: file2.path }, file2.path, full);
-    this.known.set(file2.path, full);
+    if (content)
+      this.add({ kind: "changed-file", reason: "changed file, full version", forPath: file2.path }, file2.path, content);
+    this.known.set(file2.path, content);
   }
   async lookUp(lookup) {
     for (const path11 of lookup.candidates) {
@@ -169687,7 +169691,7 @@ var ContextReader = class {
       if (outcome === "failed")
         return;
       if (outcome.content !== null) {
-        this.add(lookup, path11, capFileContent(outcome.content));
+        this.add(lookup, path11, outcome.content);
         return;
       }
     }

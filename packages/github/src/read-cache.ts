@@ -9,7 +9,10 @@ import type { GitHubClient } from './client.js';
  */
 const readCache = new WeakMap<GitHubClient, Map<string, Promise<string | null>>>();
 
-/** `client.getFileContent` at `ref`, shared per client; a failed read rejects for every caller. */
+/**
+ * `client.getFileContent` at `ref`, shared per client. A failed read is dropped from the cache, so a
+ * transient error (5xx, secondary rate limit) does not stay a failure for the rest of the job.
+ */
 export function readAtRef(client: GitHubClient, owner: string, repo: string, ref: string, path: string): Promise<string | null> {
   let cache = readCache.get(client);
   if (!cache) {
@@ -19,7 +22,11 @@ export function readAtRef(client: GitHubClient, owner: string, repo: string, ref
   const key = `${owner}/${repo}@${ref}:${path}`;
   let read = cache.get(key);
   if (!read) {
-    read = client.getFileContent({ owner, repo, path, ref });
+    const pending = client.getFileContent({ owner, repo, path, ref });
+    pending.catch(() => {
+      if (cache?.get(key) === pending) cache.delete(key);
+    });
+    read = pending;
     cache.set(key, read);
   }
   return read;
