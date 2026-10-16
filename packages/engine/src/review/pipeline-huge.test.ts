@@ -52,7 +52,7 @@ function scripted(
 }
 
 function answerFor(req: ReviewModelRequest): ReviewModelResponse {
-  const path = /src\/f\d\.ts/.exec(req.user)?.[0] ?? 'src/f0.ts';
+  const path = /PATCH:(src\/f\d\.ts)/.exec(req.user)?.[1] ?? 'src/f0.ts';
   return {
     text: JSON.stringify({ summary: `Reviewed ${path}.`, findings: [validFindingJson({ path, line: 2, title: `Bug in ${path}` })] }),
     finishReason: 'stop',
@@ -82,7 +82,7 @@ describe('runReview — huge PRs (ADR-0013)', () => {
 
     // 5 files of ~100 tokens, cap 250 → [f0,f1] [f2,f3] [f4]; no call carries every file.
     expect(calls).toHaveLength(3);
-    const filesPerCall = calls.map((c) => fiveFiles.filter((f) => c.user.includes(f.path)).map((f) => f.path));
+    const filesPerCall = calls.map((c) => fiveFiles.filter((f) => c.user.includes(`PATCH:${f.path}`)).map((f) => f.path));
     expect(filesPerCall).toEqual([['src/f0.ts', 'src/f1.ts'], ['src/f2.ts', 'src/f3.ts'], ['src/f4.ts']]);
     expect(result.status).toBe('completed');
     if (result.status === 'completed') {
@@ -171,11 +171,11 @@ describe('runReview — huge PRs (ADR-0013)', () => {
 
   it('reports a batch that stays empty after the retry and still merges the other batches', async () => {
     const { model, calls } = scripted((req) =>
-      req.user.includes('src/f0.ts') ? { text: '', finishReason: 'stop' } : answerFor(req),
+      req.user.includes('PATCH:src/f0.ts') ? { text: '', finishReason: 'stop' } : answerFor(req),
     );
     const result = await run(hugeConfig(), model);
 
-    expect(calls.filter((c) => c.user.includes('src/f0.ts')).map((c) => c.thinking)).toEqual([undefined, 'off']);
+    expect(calls.filter((c) => c.user.includes('PATCH:src/f0.ts')).map((c) => c.thinking)).toEqual([undefined, 'off']);
     expect(result.status).toBe('completed');
     if (result.status === 'completed') {
       expect(result.complete).toBe(false);
@@ -212,7 +212,7 @@ describe('runReview — huge PRs (ADR-0013)', () => {
   it('a timed-out batch is disclosed and the others still count', async () => {
     vi.useFakeTimers();
     const { model } = scripted((req) =>
-      req.user.includes('src/f2.ts') ? new Promise<ReviewModelResponse>(() => undefined) : answerFor(req),
+      req.user.includes('PATCH:src/f2.ts') ? new Promise<ReviewModelResponse>(() => undefined) : answerFor(req),
     );
     const pending = run(hugeConfig({ callTimeoutMs: 1_000 }), model);
     await vi.advanceTimersByTimeAsync(1_000);
@@ -261,7 +261,7 @@ describe('runReview — huge PRs (ADR-0013)', () => {
   it('sums usage and spend across the empty-reply retry and the batches', async () => {
     const pricing = { inputPerMTok: 0, outputPerMTok: 10, cacheReadPerMTok: 0, cacheWritePerMTok: 0 };
     const { model, calls } = scripted((req, i) =>
-      req.user.includes('src/f0.ts') && i === 0 ? { text: '', finishReason: 'stop', usage: usage(4096) } : answerFor(req),
+      req.user.includes('PATCH:src/f0.ts') && i === 0 ? { text: '', finishReason: 'stop', usage: usage(4096) } : answerFor(req),
     );
     const result = await run(hugeConfig({}, { perReviewUsd: 1, maxInputTokens: 200_000, pricing }), model);
 
