@@ -20,12 +20,15 @@ import type {
   GitHubPullRequestFile,
   GitHubReview,
   GitHubReviewComment,
+  GitHubReviewThread,
   ListFilesPageParams,
   ListIssueCommentsParams,
   ListReviewCommentsParams,
   ListReviewsPageParams,
+  ListReviewThreadsParams,
   RemoveLabelParams,
 } from './client-types.js';
+import { fetchReviewThreads } from './review-threads.js';
 
 export * from './client-types.js';
 
@@ -239,6 +242,14 @@ export function createOctokitClient(token: string): GitHubClient {
             ...(params.per_page !== undefined ? { per_page: params.per_page } : {}),
           });
           return response.data as GitHubReviewComment[];
+        } catch (error) {
+          sanitizeError(error, token);
+        }
+      },
+
+      async listReviewThreads(params: ListReviewThreadsParams): Promise<GitHubReviewThread[]> {
+        try {
+          return await fetchReviewThreads((query, variables) => octokit.graphql(query, variables), params);
         } catch (error) {
           sanitizeError(error, token);
         }

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { judgeSameIssue, type Finding, type Judge, type SameIssuePair, type Secret } from '@mergepilot/engine';
 import type { GitHubClient, GitHubReviewComment } from './client.js';
 import { commentBotSlot, MAIN_BOT_SLOT } from './marker.js';
+import { listAllReviewComments } from './review-comments.js';
 
 export interface DeduplicateFindingsParams {
   owner: string;
@@ -44,7 +45,6 @@ export const SEMANTIC_LINE_WINDOW = 10;
 const MAX_CANDIDATES_PER_FINDING = 3;
 const MAX_SEMANTIC_PAIRS = 50;
 
-const COMMENTS_PAGE_SIZE = 100;
 const FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
 const TITLE_REGEX = /^###\s+(.+)$/m;
 
@@ -161,36 +161,17 @@ export async function deduplicateFindings(
     return { kept: [...findings], dropped: [] };
   }
 
-  // Paged fetch of all MergePilot review comments on the PR
-  let page = 1;
-  const existingComments: GitHubReviewComment[] = [];
-
-  while (true) {
-    let comments: GitHubReviewComment[];
-    try {
-      comments = await client.listReviewCommentsPage({
-        owner,
-        repo,
-        pull_number,
-        page,
-        per_page: COMMENTS_PAGE_SIZE,
-      });
-    } catch {
-      // Dedupe is best-effort: losing it must never lose a review the model already paid for.
-      return { kept: [...findings], dropped: [], skipped: true };
-    }
-
-    for (const comment of comments) {
-      if (isMergePilotComment(comment, publisherLogin) && commentBotSlot(comment.body) === botSlot) {
-        existingComments.push(comment);
-      }
-    }
-
-    if (comments.length < COMMENTS_PAGE_SIZE) {
-      break;
-    }
-    page++;
+  // Every MergePilot review comment of this bot on the PR.
+  let comments: GitHubReviewComment[];
+  try {
+    comments = await listAllReviewComments(client, { owner, repo, pull_number });
+  } catch {
+    // Dedupe is best-effort: losing it must never lose a review the model already paid for.
+    return { kept: [...findings], dropped: [], skipped: true };
   }
+  const existingComments = comments.filter(
+    (comment) => isMergePilotComment(comment, publisherLogin) && commentBotSlot(comment.body) === botSlot,
+  );
 
   if (existingComments.length === 0) {
     return { kept: [...findings], dropped: [] };

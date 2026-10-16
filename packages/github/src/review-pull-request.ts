@@ -196,8 +196,13 @@ export async function reviewPullRequest(
     return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL, publish: { status: 'skipped-no-changes' } };
   }
 
-  // Nested owner rules at the base commit (ADR-0028), repository context at the head (ADR-0029).
-  const inputs = await gatherReviewInputs(client, { owner, repo, baseSha, headSha, config, rulesFiles, files: filesToReview, log });
+  // Nested owner rules at the base commit (ADR-0028), repository context at the head (ADR-0029);
+  // an incremental run also sees the rest of the PR and its open findings (ADR-0030).
+  const followUp =
+    selection.mode === 'incremental'
+      ? { sinceSha: selection.sinceSha, prFiles, pullNumber, publisherLogin }
+      : undefined;
+  const inputs = await gatherReviewInputs(client, { owner, repo, baseSha, headSha, config, rulesFiles, files: filesToReview, followUp, log });
 
   log?.('Running review...');
   const reviewResult = await runReview({
@@ -210,6 +215,7 @@ export async function reviewPullRequest(
     anchorFiles: prFiles,
     rulesFiles: inputs.rulesFiles,
     contextFiles: inputs.contextFiles,
+    followUp: inputs.followUp,
     model,
     knownSecrets,
     judge,
@@ -268,7 +274,7 @@ export async function reviewPullRequest(
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       verifyRejected: reviewResult.verifyRejected,
       rulesLeftOut: inputs.rulesLeftOut,
-      context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut),
+      context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut, inputs.openFindings),
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),

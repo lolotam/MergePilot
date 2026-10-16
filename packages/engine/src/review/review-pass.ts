@@ -13,6 +13,7 @@ import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ManifestFile } from './manifest.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
+import type { PromptPr } from './follow-up.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
 import { combineUsage, reviewJsonSchema, type ReviewableFileWithPatch, type RulesFileInput } from './split.js';
 import type { SpendTracker } from './spend.js';
@@ -32,8 +33,8 @@ export interface ReviewPassContext {
   maxOutputTokens: number;
   /** Output tokens one review call really requests (thinking headroom included). */
   reviewOutputTokens: number;
-  redactedPrTitle: string;
-  redactedPrBody: string;
+  /** The pull request as every prompt shows it, follow-up included (ADR-0030). */
+  promptPr: PromptPr;
   redactedRulesFiles: RulesFileInput[];
   redactedReviewableFiles: ReviewableFileWithPatch[];
   libraryDocs?: LibraryDoc[] | undefined;
@@ -126,8 +127,7 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     config: ctx.config,
     spend,
     knownSecrets: ctx.knownSecrets,
-    redactedPrTitle: ctx.redactedPrTitle,
-    redactedPrBody: ctx.redactedPrBody,
+    promptPr: ctx.promptPr,
     redactedRulesFiles: ctx.redactedRulesFiles,
     redactedReviewableFiles: ctx.redactedReviewableFiles,
     libraryDocs: ctx.libraryDocs,
@@ -168,7 +168,7 @@ export async function runBatchedPass(
   const result = await executeBatchedReview({
     batches,
     config: ctx.config,
-    pr: { title: ctx.redactedPrTitle, body: ctx.redactedPrBody },
+    pr: ctx.promptPr,
     rulesFiles: ctx.redactedRulesFiles,
     model: ctx.model,
     maxOutputTokens: ctx.maxOutputTokens,

@@ -16,6 +16,8 @@ export {
   type CompareCommitsStatus,
   type GitHubReviewComment,
   type ListReviewCommentsParams,
+  type GitHubReviewThread,
+  type ListReviewThreadsParams,
   type GitHubIssueComment,
   type ListIssueCommentsParams,
   type CreateIssueCommentParams,
@@ -111,6 +113,9 @@ export * from './review-notes.js';
 export * from './rules-files.js';
 export * from './review-context.js';
 export * from './review-inputs.js';
+export * from './review-threads.js';
+export * from './open-findings.js';
+export * from './pr-context.js';
 export {
   loadRepoConfig,
   type LoadRepoConfigResult,

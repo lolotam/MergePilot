@@ -21,7 +21,10 @@ export interface VerifyPromptInput {
   language: string;
   findings: Finding[];
   files: VerifyReviewableFile[];
-  /** Read-only repository files; one is shown when a finding names its path (ADR-0028). */
+  /**
+   * Read-only repository files and, on a follow-up review, the PR's other diffs (ADR-0030); one is
+   * shown when a finding names its path (ADR-0028).
+   */
   contextFiles?: readonly ContextFile[] | undefined;
   /** Estimated tokens of code shown in total; defaults to the `review.batchTokens` default. */
   maxCodeTokens?: number | undefined;
@@ -163,7 +166,7 @@ function fitChunks(chunks: Chunk[], maxTokens: number): void {
 
 interface ShownFile {
   path: string;
-  kind: 'HUNKS' | 'REPOSITORY_CONTEXT';
+  kind: 'HUNKS' | 'REPOSITORY_CONTEXT' | 'PR_CONTEXT';
   chunks: Chunk[];
   missing: boolean;
 }
@@ -186,7 +189,11 @@ function pathsFor(finding: Finding, known: readonly string[]): string[] {
 
 function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFinding: Map<string, string[]> } {
   const patches = new Map(input.files.map((f) => [f.path, f.patch]));
-  const contexts = new Map((input.contextFiles ?? []).map((c) => [c.path, c]));
+  // A path sent both as a PR diff and as its head file (ADR-0030) shows the head file: a superset.
+  const contexts = new Map<string, ContextFile>();
+  for (const c of input.contextFiles ?? []) {
+    if (!contexts.has(c.path) || c.source !== 'pull-request') contexts.set(c.path, c);
+  }
   const known = [...patches.keys(), ...[...contexts.keys()].filter((p) => !patches.has(p))];
   const files = new Map<string, ShownFile>();
   const pathsByFinding = new Map<string, string[]>();
@@ -205,7 +212,8 @@ function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFi
           files.set(`${path}#context`, { path, kind: 'REPOSITORY_CONTEXT', chunks: [contextChunk(context)], missing: false });
         }
       } else if (context && !patches.has(path)) {
-        files.set(path, { path, kind: 'REPOSITORY_CONTEXT', chunks: [contextChunk(context)], missing: false });
+        const kind = context.source === 'pull-request' ? 'PR_CONTEXT' : 'REPOSITORY_CONTEXT';
+        files.set(path, { path, kind, chunks: [contextChunk(context)], missing: false });
       } else {
         files.set(path, { path, kind: 'HUNKS', chunks: [], missing: true });
       }

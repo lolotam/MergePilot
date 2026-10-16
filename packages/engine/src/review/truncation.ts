@@ -10,6 +10,7 @@ import type { ParseReviewAnswerResult } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import type { ReviewDeadline } from './call.js';
 import type { ManifestFile } from './manifest.js';
+import type { PromptPr } from './follow-up.js';
 import type { ReviewModel } from './model.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
 import {
@@ -34,8 +35,8 @@ export interface RecoverReviewTruncationInput {
   /** Shared per-review spend; the first review call must already be recorded in it. */
   spend: SpendTracker;
   knownSecrets?: readonly Secret[] | undefined;
-  redactedPrTitle: string;
-  redactedPrBody: string;
+  /** The pull request as every prompt shows it, follow-up included (ADR-0030). */
+  promptPr: PromptPr;
   redactedRulesFiles: RulesFileInput[];
   redactedReviewableFiles: ReviewableFileWithPatch[];
   libraryDocs?: LibraryDoc[] | undefined;
@@ -107,7 +108,7 @@ export async function recoverReviewTruncation(
     const batchResult = await executeBatchedReview({
       batches: batchFilesBySize(redactedReviewableFiles),
       config,
-      pr: { title: input.redactedPrTitle, body: input.redactedPrBody },
+      pr: input.promptPr,
       rulesFiles: input.redactedRulesFiles,
       model,
       maxOutputTokens,

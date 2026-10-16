@@ -1,5 +1,5 @@
 import type { Secret } from '../credentials/secret.js';
-import { parsePatch } from '../diff/parse-patch.js';
+import { parsePatch, type ParsedPatch } from '../diff/parse-patch.js';
 import { redactSecrets } from '../security/redact.js';
 import type { Finding } from './types.js';
 
@@ -83,4 +83,28 @@ export function redactPatches(
     }
   }
   return { files: redacted, securityFindings };
+}
+
+/**
+ * The patches inline findings may anchor to. An incremental review passes the full PR diff as
+ * `anchorFiles`: a comment must land on a line of the PR's own patch, RIGHT side only (the reviewed
+ * patch's LEFT lines belong to the previous head, not the PR base), and only in a file this run
+ * reviewed: the rest of the PR is context for a follow-up review, never a place for a finding
+ * (ADR-0012, ADR-0030). A finding elsewhere is kept in the summary only.
+ */
+export function anchorIndexOf(
+  reviewed: ReadonlyArray<{ path: string; patch: string }>,
+  anchorFiles?: ReadonlyArray<{ path: string; patch?: string | undefined }>,
+): Map<string, ParsedPatch> {
+  const index = new Map<string, ParsedPatch>();
+  if (!anchorFiles) {
+    for (const f of reviewed) index.set(f.path, parsePatch(f.patch));
+    return index;
+  }
+  const reviewedPaths = new Set(reviewed.map((f) => f.path));
+  for (const f of anchorFiles) {
+    if (!f.patch || !reviewedPaths.has(f.path)) continue;
+    index.set(f.path, { ...parsePatch(f.patch), leftLines: new Set<number>() });
+  }
+  return index;
 }

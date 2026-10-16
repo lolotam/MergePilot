@@ -73,6 +73,9 @@ export const DEFAULT_MAX_RULES_TOKENS = 12_000;
 /** Default `review.contextTokens` (ADR-0029). */
 export const DEFAULT_CONTEXT_TOKENS = 30_000;
 
+/** Default `review.prContextTokens` (ADR-0030): half of the default `review.contextTokens`. */
+export const DEFAULT_PR_CONTEXT_TOKENS = 15_000;
+
 const ReviewSettingsSchema = z.strictObject({
   maxFindings: z.number().int().min(1).max(20).default(5),
   minSeverity: SeveritySchema.default('medium'),
@@ -90,6 +93,12 @@ const ReviewSettingsSchema = z.strictObject({
    * from its own files. 0 turns it off. What is left out is counted in the summary (ADR-0029).
    */
   contextTokens: z.number().int().min(0).default(DEFAULT_CONTEXT_TOKENS),
+  /**
+   * On a follow-up (incremental) review, the share of each call's `contextTokens` that goes to the
+   * pull request's other changed files (their PR diff, as PR_CONTEXT); repository context fills the
+   * rest. Taken out of `contextTokens`, never added to it. 0 turns PR context off (ADR-0030).
+   */
+  prContextTokens: z.number().int().min(0).default(DEFAULT_PR_CONTEXT_TOKENS),
   pathInstructions: z.array(PathInstructionSchema).default([]),
   /** Second model pass that re-checks every finding against the code before publishing. */
   verify: z.boolean().default(true),

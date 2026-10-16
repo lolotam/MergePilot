@@ -17,14 +17,19 @@ import type {
   GitHubPullRequestFile,
   GitHubReview,
   GitHubReviewComment,
+  GitHubReviewThread,
   ListFilesPageParams,
   ListIssueCommentsParams,
   ListReviewCommentsParams,
   ListReviewsPageParams,
+  ListReviewThreadsParams,
   RemoveLabelParams,
 } from '@mergepilot/github';
+import { fetchReviewThreads } from '@mergepilot/github';
 
 export interface OctokitLike {
+  /** GraphQL, for review thread state (ADR-0030); absent on test fakes. */
+  graphql?(query: string, variables: Record<string, unknown>): Promise<unknown>;
   rest: {
     pulls: {
       listFiles(params: {
@@ -263,6 +268,11 @@ export function wrapOctokit(octokit: OctokitLike): GitHubClient {
         ...(params.per_page !== undefined ? { per_page: params.per_page } : {}),
       });
       return response.data as GitHubReviewComment[];
+    },
+
+    async listReviewThreads(params: ListReviewThreadsParams): Promise<GitHubReviewThread[]> {
+      if (!octokit.graphql) throw new Error('graphql is not supported by this Octokit instance');
+      return fetchReviewThreads((query, variables) => octokit.graphql!(query, variables), params);
     },
 
     async listIssueCommentsPage(params: ListIssueCommentsParams): Promise<GitHubIssueComment[]> {

@@ -8,10 +8,15 @@
  * Everything arrives through `RunReviewInput` (ADR-0001).
  */
 
-import { DEFAULT_CONTEXT_TOKENS, REVIEW_LIMIT_DEFAULTS, type MergePilotConfig, type ReviewLimits } from '../config/schema.js';
+import {
+  DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_PR_CONTEXT_TOKENS,
+  REVIEW_LIMIT_DEFAULTS,
+  type MergePilotConfig,
+  type ReviewLimits,
+} from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import { classifyFile } from '../diff/classify-file.js';
-import { parsePatch, type ParsedPatch } from '../diff/parse-patch.js';
 import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
 import { isSensitivePath } from '../security/sensitive-path.js';
@@ -25,11 +30,12 @@ import { runFalsePositiveFilter, type FalsePositiveOutcome } from '../judge/fals
 import { hasJudgeUse, type JudgeUses } from '../judge/uses.js';
 import type { Judge } from '../judge/judge.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
+import { prepareFollowUp, promptPrOf, type FollowUp } from './follow-up.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
 import { manifestFileOf, type ManifestFile } from './manifest.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
-import { redactPatches } from './patch-helpers.js';
+import { anchorIndexOf, redactPatches } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, type CappedBatches } from './split.js';
 import { estimateReviewCostUsd, paidSwitchFits, SpendTracker } from './spend.js';
@@ -57,8 +63,17 @@ export interface RunReviewInput {
   config: MergePilotConfig;
   pr: { title: string; body: string };
   files: PrFile[];
-  /** Optional full PR files to anchor inline findings to PR patch lines (used during incremental review). */
+  /**
+   * The full PR files on an incremental review: inline findings anchor to their PR patch lines, in
+   * the files of `files` only (ADR-0012, ADR-0030).
+   */
   anchorFiles?: PrFile[] | undefined;
+  /**
+   * Set on an incremental review (ADR-0030): the prompts say it is a follow-up of `sinceSha`, show
+   * the PR's other changed files offered as `pr-change` context, and list the bot's open findings.
+   * Without it a review is a whole-PR review, as before, and `pr-change` context is ignored.
+   */
+  followUp?: FollowUp | undefined;
   rulesFiles: RulesFile[];
   model: ReviewModel;
   /** Explicit fallback models (ADR-0008); defaults to `model.fallbacks`, else none. */
@@ -136,6 +151,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const currentPricing = () => model.includedInSubscription ? subscriptionPricing : budgetCfg.pricing;
   // Every key a model in the chain may send is redacted before ANY model call, fallbacks included.
   const knownSecrets = secretsToRedact(input.knownSecrets, input.model, fallbackModels);
+  const followUp = prepareFollowUp(input.followUp, knownSecrets);
 
   // ── Step a: classify files ─────────────────────────────────────────────
   const incompleteReasons: string[] = [];
@@ -163,6 +179,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // Redact PR text
   const redactedPrTitle = redactSecrets(pr.title, knownSecrets).text;
   const redactedPrBody = redactSecrets(pr.body, knownSecrets).text;
+  // Every prompt of the review, batches included, carries the follow-up (ADR-0030).
+  const promptPr = promptPrOf(redactedPrTitle, redactedPrBody, followUp);
 
   // Redact rules files
   const redactedRulesFiles = rulesFiles.map((rf) => ({
@@ -180,6 +198,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     reviewedPaths: redactedReviewableFiles.map((f) => f.path),
     contextTokens: reviewCfg.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
     batchTokens: limits.batchTokens,
+    // The rest of the PR is context on a follow-up review only (ADR-0030).
+    prContextTokens: followUp ? (reviewCfg.prContextTokens ?? DEFAULT_PR_CONTEXT_TOKENS) : 0,
   });
   const wholeContext = context.whole();
 
@@ -187,7 +207,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const prompt = buildReviewPrompt({
     language: config.language,
     maxFindings: reviewCfg.maxFindings,
-    pr: { title: redactedPrTitle, body: redactedPrBody },
+    pr: promptPr,
     rulesFiles: redactedRulesFiles,
     pathInstructions: reviewCfg.pathInstructions,
     files: redactedReviewableFiles,
@@ -218,7 +238,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
   const promptArgs = {
     config,
-    pr: { title: redactedPrTitle, body: redactedPrBody },
+    pr: promptPr,
     rulesFiles: redactedRulesFiles,
     libraryDocs: input.libraryDocs,
     contextFor: context.forBatch,
@@ -270,8 +290,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     promptTokens,
     maxOutputTokens,
     reviewOutputTokens,
-    redactedPrTitle,
-    redactedPrBody,
+    promptPr,
     redactedRulesFiles,
     redactedReviewableFiles,
     libraryDocs: input.libraryDocs,
@@ -344,17 +363,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     minSeverity: reviewCfg.minSeverity as Severity,
   });
 
-  // Build patch index for anchoring. An incremental review passes the full PR diff as
-  // `anchorFiles`: inline comments must land on lines of the PR's own patch, and only on its
-  // RIGHT side (the reviewed patch's LEFT lines belong to the previous head, not the PR base).
-  const anchorSource = input.anchorFiles ?? redactedReviewableFiles;
-  const patchIndex = new Map<string, ParsedPatch>();
-  for (const f of anchorSource) {
-    if (!f.patch) continue;
-    const parsed = parsePatch(f.patch);
-    patchIndex.set(f.path, input.anchorFiles ? { ...parsed, leftLines: new Set<number>() } : parsed);
-  }
-
+  // Inline comments land only on lines of the reviewed files (PR patch lines when incremental).
+  const patchIndex = anchorIndexOf(redactedReviewableFiles, input.anchorFiles);
   const { inline, summaryOnly } = anchorFindings(selected, patchIndex);
 
   // ── Step g: assemble result ────────────────────────────────────────────
