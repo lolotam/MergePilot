@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import type { SkillsResponse } from '../../api/skills.js';
 import { useCreateSkillMutation } from '../../api/skills.js';
@@ -24,11 +24,20 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
   // A new key clears the file input after an upload.
   const [fileKey, setFileKey] = useState(0);
 
+  // Only the latest pick counts: a slow earlier read must not replace it, and no upload is sent
+  // while it is still being read.
+  const [reading, setReading] = useState(false);
+  const latestPick = useRef(0);
+
   const handleFile = async (file: File | undefined) => {
+    const pick = ++latestPick.current;
     setError(null);
     setContent(null);
-    if (!file) return;
+    if (!file) return setReading(false);
+    setReading(true);
     const read = await readSkillFile(file, limits.maxTokens, t);
+    if (pick !== latestPick.current) return;
+    setReading(false);
     if (!read.ok) return setError(read.error);
     setContent(read.content);
     if (!name.trim()) setName(nameFromFile(file.name, limits.maxNameLength));
@@ -36,6 +45,7 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (reading) return;
     const problem = skillNameError(name, limits.maxNameLength, t) ?? (content === null ? t('skillsFileRequired') : null);
     if (problem || content === null) return setError(problem);
     setError(null);
@@ -95,7 +105,7 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
       <div className="flex justify-end">
         <button
           type="submit"
-          disabled={disabled || create.isPending}
+          disabled={disabled || create.isPending || reading}
           className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-full text-xs font-semibold transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
         >
           <Upload className="w-3.5 h-3.5" />

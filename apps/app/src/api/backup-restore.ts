@@ -298,7 +298,7 @@ async function planSettings(
   missingSkills: Set<string>,
 ): Promise<WorkspaceSettings> {
   // The file names the main bot's skill by name (ADR-0034); an older file without it keeps the skill.
-  const ref = takeSkillRef(raw);
+  const ref = takeSkillRef(raw, 'settings');
   const parsed = SettingsUpdateSchema.safeParse(ref.rest);
   if (!parsed.success) throw zodProblem('settings', parsed.error);
   const update = ref.present ? { ...parsed.data, skillId: resolveSkillName(skills, ref.name, missingSkills) } : parsed.data;
@@ -327,7 +327,7 @@ async function planBots(
     if (typeof slot !== 'number' || !isExtraBotSlot(slot) || bots.some((b) => b.slot === slot)) {
       throw new RestoreProblem(400, 'invalid_slot', `${field}.slot: each extra bot needs its own slot 2-5`, `${field}.slot`);
     }
-    const ref = takeSkillRef(entry);
+    const ref = takeSkillRef(entry, field);
     const parsed = ReviewerBotInputSchema.safeParse(ref.rest);
     if (!parsed.success) throw zodProblem(field, parsed.error);
     const input = parsed.data;

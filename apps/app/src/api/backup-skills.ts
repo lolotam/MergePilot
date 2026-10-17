@@ -22,12 +22,25 @@ export function withSkillName<T extends { skillId?: string | null | undefined; s
 
 /**
  * The skill a file entry names, and the entry without its skill fields (they are not part of the
- * PUT schemas). `present: false` (an older file) keeps the stored skill of the settings.
+ * PUT schemas). `present: false` (an older file) keeps the stored skill of the settings. A
+ * `skillName` that is not null or a valid skill name, or that looks like a credential, refuses the
+ * restore without echoing the value. `field` names the entry (e.g. `bots[0]`).
  */
-export function takeSkillRef(entry: Record<string, unknown>): { rest: Record<string, unknown>; present: boolean; name: string | null } {
+export function takeSkillRef(
+  entry: Record<string, unknown>,
+  field: string,
+): { rest: Record<string, unknown>; present: boolean; name: string | null } {
   const { skillName, skillId: _id, skillRemovedName: _removed, ...rest } = entry;
   const present = Object.hasOwn(entry, 'skillName');
-  return { rest, present, name: typeof skillName === 'string' && skillName.trim() !== '' ? skillName : null };
+  if (!present || skillName === null) return { rest, present, name: null };
+  const name = SkillNameSchema.safeParse(skillName);
+  if (!name.success) {
+    throw new RestoreProblem(400, 'validation_error', `${field}.skillName: must be a skill name or null`, `${field}.skillName`);
+  }
+  if (skillNameHasCredential(name.data)) {
+    throw new RestoreProblem(400, 'skill_has_credential', `${field}.skillName: ${NAME_CREDENTIAL}`, `${field}.skillName`);
+  }
+  return { rest, present, name: name.data };
 }
 
 export interface SkillRestorePlan {

@@ -86,10 +86,12 @@ async function replacePgBots(tx: AppTx, workspaceId: string, bots: NonNullable<W
 async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable<WorkspaceRestore['skills']>): Promise<void> {
   await lockSkills(tx, workspaceId);
   for (const skill of skills) {
+    // Locked, so a delete of this skill waits for the restore instead of landing in between.
     const [existing] = await tx
       .select({ id: reviewSkills.id })
       .from(reviewSkills)
-      .where(and(eq(reviewSkills.workspaceId, workspaceId), eq(reviewSkills.id, skill.id)));
+      .where(and(eq(reviewSkills.workspaceId, workspaceId), eq(reviewSkills.id, skill.id)))
+      .for('update');
     if (existing) {
       await updateSkill(tx, workspaceId, skill.id, {
         name: skill.name,

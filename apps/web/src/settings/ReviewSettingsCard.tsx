@@ -73,13 +73,12 @@ export function ReviewSettingsCard({
     const key = JSON.stringify([
       settings.botName, settings.botLogo, settings.provider, settings.model, settings.effort, settings.heavyProvider,
       settings.heavyModel, settings.heavyEffort, settings.heavyThresholdLines, settings.fallback, settings.minSeverity,
-      settings.maxFindings, settings.language, settings.monthlyBudgetUsd, settings.skillId, settings.skillRemovedName,
+      settings.maxFindings, settings.language, settings.monthlyBudgetUsd,
     ]);
     if (key === shownKey.current) return;
     shownKey.current = key;
     setBotName(settings.botName ?? MAIN_BOT_DEFAULT_NAME);
     setBotLogo(settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO);
-    setSkillId(settings.skillId ?? null);
     setProvider(settings.provider);
     setModel(settings.model);
     setEffort(settings.effort ?? null);
@@ -101,6 +100,13 @@ export function ReviewSettingsCard({
       settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined ? String(settings.monthlyBudgetUsd) : '',
     );
   }, [settings]);
+
+  // The skill follows the server on its own (ADR-0034): deleting a skill sets this bot to Default,
+  // and that refetch must not discard unsaved edits to the model or the other fields.
+  const savedSkillId = settings?.skillId ?? null;
+  useEffect(() => {
+    setSkillId(savedSkillId);
+  }, [savedSkillId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

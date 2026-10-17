@@ -119,7 +119,7 @@ export function renderPanel(options: {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(['workspaces', 'ws-1', 'settings'], { settings });
   const onSave = options.onSave ?? vi.fn(async () => undefined);
-  const utils = render(
+  const tree = (settings: Settings) => (
     <QueryClientProvider client={client}>
       <I18nProvider initialLanguage="en">
         <ToastProvider>
@@ -134,7 +134,10 @@ export function renderPanel(options: {
           />
         </ToastProvider>
       </I18nProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { ...utils, onSave, client };
+  const utils = render(tree(settings));
+  /** Re-renders with the settings a refetch would bring. */
+  const rerenderSettings = (next: Settings) => utils.rerender(tree(next));
+  return { ...utils, onSave, client, rerenderSettings };
 }

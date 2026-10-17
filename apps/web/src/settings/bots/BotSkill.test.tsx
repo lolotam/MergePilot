@@ -53,4 +53,18 @@ describe('Per-bot skill dropdown (ADR-0034)', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ skillId: SECURITY_ID }));
   });
+
+  it('a deleted skill moves the main bot to Default without discarding its unsaved edits', async () => {
+    const settings = { ...MAIN_SETTINGS, skillId: SECURITY_ID };
+    fakeBotsServer({ settings, skills: SKILLS });
+    const { rerenderSettings } = renderPanel({ settings });
+    await screen.findByRole('option', { name: 'Security' });
+    await user.type(screen.getByLabelText('Monthly budget in USD ($)'), '42');
+
+    // The refetch after the delete: no skill, and the deleted-skill note.
+    rerenderSettings({ ...MAIN_SETTINGS, skillId: null, skillRemovedName: 'Security' });
+
+    await waitFor(() => expect((screen.getByLabelText('Skill') as HTMLSelectElement).value).toBe(''));
+    expect((screen.getByLabelText('Monthly budget in USD ($)') as HTMLInputElement).value).toContain('42');
+  });
 });

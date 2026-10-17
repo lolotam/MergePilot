@@ -116,6 +116,25 @@ describe('SkillsCard (ADR-0034)', () => {
     });
   });
 
+  it('uploads the latest picked file even when an earlier read finishes last', async () => {
+    const user = userEvent.setup();
+    const server = fakeSkillsServer([]);
+    let finishFirst!: (text: string) => void;
+    vi.mocked(readFileText).mockReturnValueOnce(new Promise((resolve) => { finishFirst = resolve; }));
+    renderCard();
+    await screen.findByText('This workspace has no skills yet.');
+    const fileInput = screen.getByLabelText('Markdown file (.md or .markdown)');
+
+    await user.upload(fileInput, new File(['# Old'], 'old.md', { type: 'text/markdown' }));
+    await user.upload(fileInput, new File(['# New'], 'new.md', { type: 'text/markdown' }));
+    await waitFor(() => expect((screen.getByLabelText('Skill name') as HTMLInputElement).value).toBe('new'));
+    finishFirst('# Old');
+    await user.click(screen.getByRole('button', { name: 'Upload skill' }));
+
+    await waitFor(() => expect(server.writes()).toHaveLength(1));
+    expect(server.writes()[0]?.body).toEqual({ name: 'new', content: '# New' });
+  });
+
   it('adds a template as a new skill with a free name', async () => {
     const user = userEvent.setup();
     const server = fakeSkillsServer([skill({ name: 'security' })]);

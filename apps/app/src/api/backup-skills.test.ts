@@ -74,6 +74,22 @@ describe('settings backup — review skills (ADR-0034)', { timeout: 60000 }, () 
     expect(bots.bots.every((b: Record<string, unknown>) => !('skillId' in b))).toBe(true);
   });
 
+  it.each([
+    ['a skill name that is not a string', { settings: { skillName: 42 } }, 'validation_error', 'settings.skillName'],
+    ['a credential as a bot skill name', { bot: { skillName: ['AKIA', 'Q'.repeat(16)].join('') } }, 'skill_has_credential', 'bots[0].skillName'],
+  ])('refuses %s without echoing it, writing nothing', async (_case, edit, code, field) => {
+    const file = await exported();
+    const hand = {
+      ...file,
+      settings: { ...file.settings, ...('settings' in edit ? edit.settings : {}) },
+      bots: file.bots.map((b: Record<string, unknown>, i: number) => (i === 0 && 'bot' in edit ? { ...b, ...edit.bot } : b)),
+    };
+    const res = await restore(hand);
+    expect([res.statusCode, res.json().error.code, res.json().error.field]).toEqual([400, code, field]);
+    expect(res.body).not.toContain('Q'.repeat(16));
+    expect((await call('GET', 'bots', 'ws-2')).json().bots).toEqual([]);
+  });
+
   it('refuses a hand-edited skill that breaks the upload rules, writing nothing', async () => {
     const file = { ...(await exported()), skills: [{ name: 'Leaky', content: ' ' }] };
     const res = await restore(file);
