@@ -176,6 +176,19 @@ export function defineReviewSkillContract(
     }
   });
 
+  it('refuses a restore whose planned skill was renamed since the plan, writing nothing', async () => {
+    const store = await createStore();
+    try {
+      const renamed = await store.createReviewSkill(WS, newSkill({ name: 'Frontend' }));
+      // The plan matched "Security" to this id before an admin renamed it to "Frontend".
+      const attempt = store.restoreWorkspace(WS, { skills: [{ ...newSkill({ name: 'Security' }), id: renamed.id }] });
+      await expect(attempt).rejects.toBeInstanceOf(SkillNameTakenError);
+      expect((await store.getReviewSkill(WS, renamed.id))?.name).toBe('Frontend');
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   it('restores skills by id: a same-id skill is replaced, a new one inserted, and bots may use them', async () => {
     const store = await createStore();
     try {

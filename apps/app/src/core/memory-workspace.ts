@@ -13,7 +13,7 @@ import { deleteMemoryWorkspaceAuthPreferences } from './memory-auth-preferences.
 import {
   assertMemorySkill, deleteMemoryWorkspaceSkills, getMemorySkill, insertMemorySkill, updateMemorySkill, type MemorySkills,
 } from './memory-skills.js';
-import { MAX_WORKSPACE_SKILLS, SkillLimitError, type ReviewSkillRecord } from './skill-types.js';
+import { MAX_WORKSPACE_SKILLS, SkillLimitError, SkillNameTakenError, type ReviewSkillRecord } from './skill-types.js';
 import { listMemoryProviderKeys } from './memory-provider-keys.js';
 import type { MemoryStore } from './memory-store.js';
 import type { MemoryKeyTables } from './memory-provider-keys.js';
@@ -148,7 +148,10 @@ export async function restoreMemoryWorkspace(
   const snapshot = snapshotWorkspace(store, workspaceId);
   try {
   for (const skill of restore.skills ?? []) {
-    if (getMemorySkill(store.skills, workspaceId, skill.id)) {
+    const existing = getMemorySkill(store.skills, workspaceId, skill.id);
+    // Like the Postgres restore: a skill renamed since the plan matched it by name is another skill.
+    if (existing && existing.name.trim().toLowerCase() !== skill.name.trim().toLowerCase()) throw new SkillNameTakenError(skill.name);
+    if (existing) {
       updateMemorySkill(store.skills, workspaceId, skill.id, {
         name: skill.name,
         content: { text: skill.content, hash: skill.contentHash, sizeTokens: skill.sizeTokens },

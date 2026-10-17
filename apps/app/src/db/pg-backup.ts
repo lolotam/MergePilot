@@ -86,12 +86,14 @@ async function replacePgBots(tx: AppTx, workspaceId: string, bots: NonNullable<W
 async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable<WorkspaceRestore['skills']>): Promise<void> {
   await lockSkills(tx, workspaceId);
   for (const skill of skills) {
-    // Locked, so a delete of this skill waits for the restore instead of landing in between.
+    // Locked, so a delete or rename of this skill waits for the restore instead of landing in
+    // between. The plan matched the id by name: a skill renamed since then is another skill now.
     const [existing] = await tx
-      .select({ id: reviewSkills.id })
+      .select({ id: reviewSkills.id, name: reviewSkills.name })
       .from(reviewSkills)
       .where(and(eq(reviewSkills.workspaceId, workspaceId), eq(reviewSkills.id, skill.id)))
       .for('update');
+    if (existing && !sameSkillName(existing.name, skill.name)) throw new SkillNameTakenError(skill.name);
     if (existing) {
       await updateSkill(tx, workspaceId, skill.id, {
         name: skill.name,
@@ -104,6 +106,8 @@ async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable
   }
   if ((await countSkills(tx, workspaceId)) > MAX_WORKSPACE_SKILLS) throw new SkillLimitError();
 }
+
+const sameSkillName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** A restore racing a skill write: the plan's names or ids no longer match the workspace. */
 function skillRaceError(error: unknown, restore: WorkspaceRestore): Error | undefined {
