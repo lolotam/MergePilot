@@ -137627,7 +137627,8 @@ var KIND_BY_CODE = {
   QUOTA: "quota",
   QUOTA_EXHAUSTED_ALL_KEYS: "quota",
   INVALID_CREDENTIAL: "auth",
-  PROVIDER_NOT_CONFIGURED: "auth",
+  // The operator's server lacks the sign-in client: nothing the user's credential can fix.
+  PROVIDER_NOT_CONFIGURED: "server",
   RATE_LIMIT: "rate-limit",
   SERVER: "server",
   TIMEOUT: "network",

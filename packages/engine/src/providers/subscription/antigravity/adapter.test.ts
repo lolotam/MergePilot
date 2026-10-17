@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Secret } from '../../../credentials/secret.js';
 import { encodeSubscription } from '../../../credentials/subscription.js';
-import { classifyFailure, type LlmFailure } from '../../../llm/failure.js';
+import { classifyFailure, failureKind, type LlmFailure } from '../../../llm/failure.js';
+import { FALLBACK_TRIGGERS } from '../../../review/fallback.js';
 import type { GenerateOptions, StreamChunk } from '../../../llm/types.js';
 import { SubscriptionRefreshError } from '../refresh-error.js';
 import { AntigravityAdapter } from './adapter.js';
@@ -223,6 +224,9 @@ describe('AntigravityAdapter failures', () => {
     await expect(collect(adapter.stream(options))).rejects.toMatchObject({
       code: 'PROVIDER_NOT_CONFIGURED', message: 'Google Antigravity sign-in is not configured on this server',
     });
+    // A server-side category, not `auth`: nothing the user's credential can fix. A configured fallback still applies.
+    expect(failureKind('PROVIDER_NOT_CONFIGURED')).toBe('server');
+    expect(FALLBACK_TRIGGERS).toContain('server');
   });
 
   it('uses the credential resolved before each call', async () => {
