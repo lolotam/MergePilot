@@ -3,6 +3,7 @@ import type { AuthEvent, AuthPrompt } from '@earendil-works/pi-ai';
 import { SubscriptionRefreshError } from '../refresh-error.js';
 import {
   ANTIGRAVITY_REDIRECT_URI,
+  abortableSleep,
   authorizationUrl,
   codeFromPastedUrl,
   createPkce,
@@ -201,5 +202,63 @@ describe('refreshAntigravity', () => {
     const failure = await refreshAntigravity(stored, d, new AbortController().signal).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(SubscriptionRefreshError);
     expect(failure).toMatchObject({ transient });
+  });
+});
+
+/** A body whose cancel is observable, as an unread HTTP body would be. */
+function trackedBody(text: string, cancel: () => void): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(text)); }, cancel });
+}
+
+describe('failed and unreadable Google answers', () => {
+  const stored = { type: 'oauth' as const, access: OLD_ACCESS, refresh, expires: 1, projectId: 'project-123', tier: 'free-tier' };
+  const echoed = `not json ${ROTATED_REFRESH}`;
+
+  it('cancels the body of a refused token request, and the status still decides', async () => {
+    const cancel = vi.fn();
+    const { deps: d } = deps({ '/token': () => new Response(trackedBody('{"error":"invalid_grant"}', cancel), { status: 400 }) });
+    await expect(refreshAntigravity(stored, d, new AbortController().signal)).rejects.toMatchObject({ reason: 'sign-in' });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns a token answer that is not JSON into fixed errors without its body', async () => {
+    const notJson = () => new Response(echoed, { status: 200 });
+    const login = await loginAntigravity(interaction((authUrl) => redirectFor(authUrl)).value, deps({ '/token': notJson }).deps).catch((error: unknown) => error);
+    expect(login).toMatchObject({ reason: 'token-exchange' });
+    const refreshFailure = await refreshAntigravity(stored, deps({ '/token': notJson }).deps, new AbortController().signal).catch((error: unknown) => error);
+    expect(refreshFailure).toMatchObject({ reason: 'unreachable' });
+    for (const error of [login, refreshFailure] as Error[]) {
+      expect(error.message).not.toContain(ROTATED_REFRESH);
+      expect(error.cause).toBeUndefined();
+    }
+  });
+
+  it('turns a Code Assist answer that is not JSON into a fixed error without its body', async () => {
+    const { deps: d } = deps({ '/token': tokenOk, ':loadCodeAssist': () => new Response(echoed, { status: 200 }) });
+    const failure = await loginAntigravity(interaction((authUrl) => redirectFor(authUrl)).value, d).catch((error: unknown) => error as Error);
+    expect(failure.message).toBe('Cloud Code Assist loadCodeAssist answered with a body that is not JSON');
+    expect(failure.cause).toBeUndefined();
+  });
+});
+
+describe('abortableSleep', () => {
+  it('rejects at once when the sign-in is already cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(abortableSleep(60_000, controller.signal)).rejects.toThrow('Login cancelled');
+  });
+
+  it('removes its abort listener when the wait ends', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const remove = vi.spyOn(controller.signal, 'removeEventListener');
+      const waiting = abortableSleep(5_000, controller.signal);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waiting;
+      expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

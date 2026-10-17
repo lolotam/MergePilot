@@ -110,11 +110,29 @@ describe('AntigravityAdapter request protocol', () => {
     expect(off.maxOutputTokens).toBe(1000);
   });
 
-  it('maps MAX_TOKENS and safety finishes', async () => {
+  it('reports MAX_TOKENS as a cut-off answer', async () => {
     const maxTokens = await collect(adapterWith(vi.fn(async () => sse([candidate([{ text: 'cut' }], 'MAX_TOKENS')]))).stream(options));
     expect(maxTokens.at(-1)).toEqual({ type: 'finish', reason: 'max-tokens' });
-    const blocked = await collect(adapterWith(vi.fn(async () => sse([candidate([], 'SAFETY')]))).stream(options));
-    expect(blocked.at(-1)).toEqual({ type: 'finish', reason: 'error' });
+  });
+
+  it.each([
+    ['SAFETY', 'BAD_REQUEST', /declined to answer \(SAFETY\)/],
+    ['RECITATION', 'BAD_REQUEST', /declined to answer \(RECITATION\)/],
+    ['OTHER', 'UNKNOWN', /abnormally \(OTHER\)/],
+    ['MALFORMED_FUNCTION_CALL', 'UNKNOWN', /abnormally \(MALFORMED_FUNCTION_CALL\)/],
+    ['FINISH_REASON_UNSPECIFIED', 'UNKNOWN', /abnormally/],
+  ])('fails a %s finish instead of reporting a clean end', async (reason, code, message) => {
+    const failure = await collect(adapterWith(vi.fn(async () => sse([candidate([{ text: 'partial' }], reason)]))).stream(options))
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code, message: expect.stringMatching(message) });
+    expect(classifyFailure((failure as LlmFailure).code)).toBe('fatal');
+  });
+
+  it('reports a blocked prompt as a refusal that is not retried', async () => {
+    const fetchMock = vi.fn(async () => sse([{ response: { promptFeedback: { blockReason: 'PROHIBITED_CONTENT' } } }]));
+    const failure = await collect(adapterWith(fetchMock).stream(options)).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'BAD_REQUEST', message: 'Google Antigravity declined to answer (PROHIBITED_CONTENT)' });
+    expect(classifyFailure((failure as LlmFailure).code)).toBe('fatal');
   });
 });
 
@@ -185,19 +203,26 @@ describe('AntigravityAdapter failures', () => {
   it('asks for a new sign-in when the credential has no project or Google refused the refresh', async () => {
     const fetchMock = vi.fn();
     await expect(collect(adapterWith(fetchMock, secret('')).stream(options))).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
-    const refused = new AntigravityAdapter(secret(), async () => { throw new SubscriptionRefreshError(false); }, fetchMock as never);
+    const refused = new AntigravityAdapter(secret(), async () => { throw new SubscriptionRefreshError('sign-in'); }, fetchMock as never);
     await expect(collect(refused.stream(options))).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([
-    ['an unreachable token endpoint', new SubscriptionRefreshError(true), 'NETWORK'],
+    ['an unreachable token endpoint', new SubscriptionRefreshError('unreachable'), 'NETWORK'],
     ['a lock or database error while loading the credential', new Error('connection terminated'), 'SERVER'],
   ])('reports %s as a transient failure, not as an invalid sign-in', async (_name, cause, code) => {
     const adapter = new AntigravityAdapter(secret(), async () => { throw cause; }, vi.fn() as never);
     const failure = await collect(adapter.stream(options)).catch((error: unknown) => error);
     expect(failure).toMatchObject({ code });
     expect(classifyFailure((failure as LlmFailure).code)).toBe('transient');
+  });
+
+  it('reports a server without the OAuth client as an operator problem, not as a sign-in to redo', async () => {
+    const adapter = new AntigravityAdapter(secret(), async () => { throw new SubscriptionRefreshError('not-configured'); }, vi.fn() as never);
+    await expect(collect(adapter.stream(options))).rejects.toMatchObject({
+      code: 'PROVIDER_NOT_CONFIGURED', message: 'Google Antigravity sign-in is not configured on this server',
+    });
   });
 
   it('uses the credential resolved before each call', async () => {

@@ -7,7 +7,7 @@
 import { sortUnique, type CatalogModel } from '../../catalog-types.js';
 import { FALLBACK_EFFORTS } from '../../effort.js';
 import { antigravityHeaders } from './config.js';
-import { fetchWithHosts, type FetchFn } from './transport.js';
+import { discardBody, fetchWithHosts, readJson, type FetchFn } from './transport.js';
 
 export const ANTIGRAVITY_MODELS_TTL_MS = 4 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 500;
@@ -94,20 +94,29 @@ export async function listAntigravityModels(
   const now = (options.now ?? Date.now)();
   const cached = cache.get(projectId);
   if (projectId && cached && cached.expiresAt > now) return cached.models;
+  let models: CatalogModel[] | undefined;
   try {
-    const response = await fetchWithHosts(options.fetch ?? fetch, 'fetchAvailableModels', {
-      method: 'POST',
-      headers: antigravityHeaders(credential.access),
-      body: JSON.stringify(projectId ? { project: projectId } : {}),
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const models = parseAvailableModels(await response.json());
-    if (models.length === 0) throw new Error('No chat models listed');
-    if (projectId) remember(projectId, models, now);
-    return models;
+    models = await fetchModels(credential.access, projectId, options);
   } catch (error) {
     if (options.signal?.aborted) throw error;
-    return lastGood.get(projectId) ?? staticAntigravityModels();
+    // No answer or an unreadable one: the fallback below, like a refusal.
   }
+  if (!models || models.length === 0) return lastGood.get(projectId) ?? staticAntigravityModels();
+  if (projectId) remember(projectId, models, now);
+  return models;
+}
+
+/** The account's chat models, or undefined when Google refused the request. */
+async function fetchModels(access: string, projectId: string, options: ListAntigravityOptions): Promise<CatalogModel[] | undefined> {
+  const response = await fetchWithHosts(options.fetch ?? fetch, 'fetchAvailableModels', {
+    method: 'POST',
+    headers: antigravityHeaders(access),
+    body: JSON.stringify(projectId ? { project: projectId } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (!response.ok) {
+    await discardBody(response);
+    return undefined;
+  }
+  return parseAvailableModels(await readJson(response, 'Cloud Code Assist fetchAvailableModels'));
 }

@@ -9,7 +9,9 @@ export type LlmFailureCode =
   | 'BAD_REQUEST'
   | 'ABORTED'
   | 'UNKNOWN'
-  | 'QUOTA_EXHAUSTED_ALL_KEYS';
+  | 'QUOTA_EXHAUSTED_ALL_KEYS'
+  /** The server lacks what a provider needs (Google Antigravity's OAuth client, ADR-0032): an operator fix, not the user's. */
+  | 'PROVIDER_NOT_CONFIGURED';
 
 export interface LlmFailureInit {
   code: LlmFailureCode;
@@ -121,6 +123,7 @@ const KIND_BY_CODE: Readonly<Record<LlmFailureCode, FailureKind>> = {
   QUOTA: 'quota',
   QUOTA_EXHAUSTED_ALL_KEYS: 'quota',
   INVALID_CREDENTIAL: 'auth',
+  PROVIDER_NOT_CONFIGURED: 'auth',
   RATE_LIMIT: 'rate-limit',
   SERVER: 'server',
   TIMEOUT: 'network',

@@ -29,6 +29,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<LlmFailureCode>([
   'ABORTED',
   'UNKNOWN',
   'QUOTA_EXHAUSTED_ALL_KEYS',
+  'PROVIDER_NOT_CONFIGURED',
 ]);
 
 /** The failure category of anything a model threw, or undefined when it is not an LlmFailure. */

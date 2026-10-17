@@ -68,9 +68,10 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
 
 5. **Persistence.** The existing `mergepilot:oauth:v1:` envelope in the vault column: `{ provider: 'google-antigravity', credential: { type: 'oauth', access, refresh, expires, projectId, tier } }`. The account email is not stored. `credentialSecretValues` redacts `access` and `refresh` individually. The single-credential paths (backup export/restore, master-key rotation in `vault/rotate.ts`, delete) need no provider-specific code.
 
-6. **Refresh.** `CredentialService.resolve` unchanged: a lock-free read while `expires` is more than 60 s away, otherwise `coordinateRefresh` under the workspace/provider advisory lock, then `POST https://oauth2.googleapis.com/token` with `grant_type=refresh_token`. `expires` is `now + expires_in`. A refresh token Google sends replaces the stored one; otherwise the old one is kept, with the project. Any failure keeps the stored credential and raises `SubscriptionRefreshError`:
+6. **Refresh.** `CredentialService.resolve` unchanged: a lock-free read while `expires` is more than 60 s away, otherwise `coordinateRefresh` under the workspace/provider advisory lock, then a refresh grant to Google's token endpoint (`oauth2.googleapis.com`). The new expiry is now plus the lifetime Google returns. When Google sends a new refresh value it replaces the stored one; otherwise the old one is kept, with the project. Any failure keeps the stored credential and raises `SubscriptionRefreshError`:
    - **permanent** for 400/401 (`invalid_grant`) or a 200 without an access token: "Subscription token refresh failed; sign in again";
-   - **transient** for no answer, 408, 429 or 5xx: "could not reach the provider; try again".
+   - **transient** for no answer, an unreadable (non-JSON) answer, 408, 429 or 5xx: "could not reach the provider; try again";
+   - **not configured** when the server lacks the OAuth client: "Google Antigravity sign-in is not configured on this server". This is an operator problem, so the adapter reports it as `PROVIDER_NOT_CONFIGURED` rather than asking the user to sign in again. A sign-in started then fails with the `not-configured` reason.
 
    The adapter resolves the secret again before each call. A permanent refresh failure becomes `INVALID_CREDENTIAL`. A transient one becomes `NETWORK`, and any other error while loading the credential (lock, database) becomes `SERVER`, so both are retried. pi-ai refresh errors carry no classification and stay permanent.
 
@@ -108,7 +109,12 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
    | an error event inside the stream | as its status | |
    | a stream that ends without a candidate `finishReason` (no answer, or cut off mid-answer) | `NETWORK` | retried |
    | a malformed SSE event | `UNKNOWN` | never skipped |
-   | finish `SAFETY`/`RECITATION`/`PROHIBITED_CONTENT` | finish `error` | |
+   | finish `STOP` / `MAX_TOKENS` | finish `stop` / `max-tokens` | the only clean ends |
+   | finish `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII`, `IMAGE_SAFETY`, `LANGUAGE`, or `promptFeedback.blockReason` | `BAD_REQUEST` | "declined to answer (REASON)", not retried |
+   | any other finish (`OTHER`, `MALFORMED_FUNCTION_CALL`, `FINISH_REASON_UNSPECIFIED`, …) | `UNKNOWN` | "ended the answer abnormally (REASON)" |
+   | a 2xx body that is not JSON (token, Code Assist, model list) | fixed error | no parse message or cause kept |
+
+   A failed or unread response body is cancelled before the error is thrown; the status stays the deciding signal.
 
    Every 403 has kind `auth`, so nothing pays its way around a suspension.
 

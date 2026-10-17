@@ -63,6 +63,8 @@ export function generateRequestBody(options: GenerateOptions, projectId: string,
 export interface AntigravityChunk {
   text: string;
   finishReason?: string;
+  /** `promptFeedback.blockReason`: Google refused the prompt, so no candidate follows. */
+  blockReason?: string;
   usage?: Record<string, unknown>;
   error?: { status: number; body: string };
 }
@@ -80,8 +82,10 @@ export function parseChunk(data: unknown): AntigravityChunk {
   const parts = Array.isArray(content?.parts) ? (content.parts as Array<Record<string, unknown>>) : [];
   // Thought parts are the model's reasoning, never review text.
   const text = parts.filter((part) => part.thought !== true && typeof part.text === 'string').map((part) => part.text as string).join('');
+  const feedback = response.promptFeedback && typeof response.promptFeedback === 'object' ? (response.promptFeedback as { blockReason?: unknown }) : undefined;
   return {
     text,
+    ...(typeof feedback?.blockReason === 'string' && feedback.blockReason ? { blockReason: feedback.blockReason } : {}),
     ...(typeof candidate?.finishReason === 'string' ? { finishReason: candidate.finishReason } : {}),
     ...(response.usageMetadata && typeof response.usageMetadata === 'object' ? { usage: response.usageMetadata as Record<string, unknown> } : {}),
   };

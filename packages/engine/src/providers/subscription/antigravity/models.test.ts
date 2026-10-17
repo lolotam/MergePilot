@@ -46,6 +46,14 @@ describe('listAntigravityModels', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('cancels the body of a refused model-list request and serves the static list', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('denied')); }, cancel });
+    const fetchMock = vi.fn(async () => new Response(body, { status: 403 }));
+    expect(await listAntigravityModels(credential, { fetch: fetchMock })).toEqual(staticAntigravityModels());
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the last good list when a refresh fails, and falls back to the static list without one', async () => {
     let now = 0;
     const fetchMock = vi.fn()

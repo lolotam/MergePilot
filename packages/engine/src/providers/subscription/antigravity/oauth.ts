@@ -9,7 +9,7 @@ import type { AuthInteraction } from '@earendil-works/pi-ai';
 import type { SubscriptionCredential } from '../../../credentials/subscription.js';
 import { antigravityHeaders, ANTIGRAVITY_CLIENT_METADATA, type AntigravityClient } from './config.js';
 import { SubscriptionRefreshError } from '../refresh-error.js';
-import { fetchWithHosts } from './transport.js';
+import { discardBody, fetchWithHosts, MalformedResponseError, readJson } from './transport.js';
 
 export const ANTIGRAVITY_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 export const ANTIGRAVITY_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -31,6 +31,7 @@ export const SUBSCRIPTION_LOGIN_FAILURES = [
   'validation-required',
   'ineligible',
   'project-required',
+  'not-configured',
 ] as const;
 export type SubscriptionLoginFailure = (typeof SUBSCRIPTION_LOGIN_FAILURES)[number];
 
@@ -108,8 +109,11 @@ async function postToken(deps: AntigravityDeps, form: Record<string, string>, si
     signal,
   });
   // The body of a failed token call can echo the request; it is dropped, not parsed into a message.
-  if (!response.ok) throw new TokenEndpointError(response.status);
-  return (await response.json()) as TokenResponse;
+  if (!response.ok) {
+    await discardBody(response);
+    throw new TokenEndpointError(response.status);
+  }
+  return (await readJson(response, 'Google token endpoint')) as TokenResponse;
 }
 
 /** A non-2xx answer from Google's token endpoint; only the status is kept. */
@@ -161,13 +165,16 @@ async function postCodeAssist(deps: AntigravityDeps, access: string, method: str
     // Any other answer (5xx, 401, 429) is not about the account: the generic sign-in failure.
     throw new Error(`Cloud Code Assist ${method} answered HTTP ${response.status}`);
   }
-  return response.json();
+  return readJson(response, `Cloud Code Assist ${method}`);
 }
 
-function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
+/** Waits between onboarding polls; an aborted sign-in stops at once, and no listener outlives the wait. */
+export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('Login cancelled')); }, { once: true });
+    if (signal.aborted) { reject(new Error('Login cancelled')); return; }
+    const onAbort = () => { clearTimeout(timer); reject(new Error('Login cancelled')); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -192,7 +199,7 @@ export async function setupCodeAssist(deps: AntigravityDeps, access: string, sig
 
 /** `onboardUser` is a long-running operation: asked again every 5 s until done, for up to 2 minutes. */
 async function onboard(deps: AntigravityDeps, access: string, tierId: string, signal: AbortSignal): Promise<string> {
-  const sleep = deps.sleep ?? defaultSleep;
+  const sleep = deps.sleep ?? abortableSleep;
   for (let poll = 0; poll < ONBOARD_MAX_POLLS; poll++) {
     const operation = (await postCodeAssist(deps, access, 'onboardUser', { tierId, metadata: { ...ANTIGRAVITY_CLIENT_METADATA } }, signal)) as {
       done?: unknown; response?: { cloudaicompanionProject?: unknown };
@@ -211,7 +218,7 @@ async function exchangeCode(deps: AntigravityDeps, code: string, verifier: strin
   const tokens = await postToken(deps, {
     grant_type: 'authorization_code', code, redirect_uri: ANTIGRAVITY_REDIRECT_URI, code_verifier: verifier,
   }, signal).catch((error: unknown) => {
-    throw error instanceof TokenEndpointError ? new SubscriptionLoginError('token-exchange') : error;
+    throw error instanceof TokenEndpointError || error instanceof MalformedResponseError ? new SubscriptionLoginError('token-exchange') : error;
   });
   if (typeof tokens.access_token !== 'string' || !tokens.access_token || typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) {
     throw new SubscriptionLoginError('token-exchange');
@@ -242,10 +249,10 @@ async function postRefresh(deps: AntigravityDeps, refresh: string, signal: Abort
   try {
     return await postToken(deps, { grant_type: 'refresh_token', refresh_token: refresh }, signal);
   } catch (error) {
-    if (error instanceof TokenEndpointError) throw new SubscriptionRefreshError(transientStatus(error.status));
+    if (error instanceof TokenEndpointError) throw new SubscriptionRefreshError(transientStatus(error.status) ? 'unreachable' : 'sign-in');
     if (signal.aborted) throw error;
     // No answer at all (DNS, connection, timeout, unreadable body): the sign-in may still be valid.
-    throw new SubscriptionRefreshError(true);
+    throw new SubscriptionRefreshError('unreachable');
   }
 }
 
@@ -255,7 +262,7 @@ async function postRefresh(deps: AntigravityDeps, refresh: string, signal: Abort
  */
 export async function refreshAntigravity(credential: SubscriptionCredential, deps: AntigravityDeps, signal: AbortSignal): Promise<SubscriptionCredential> {
   const tokens = await postRefresh(deps, credential.refresh, signal);
-  if (typeof tokens.access_token !== 'string' || !tokens.access_token) throw new SubscriptionRefreshError(false);
+  if (typeof tokens.access_token !== 'string' || !tokens.access_token) throw new SubscriptionRefreshError('sign-in');
   return {
     ...credential,
     access: tokens.access_token,

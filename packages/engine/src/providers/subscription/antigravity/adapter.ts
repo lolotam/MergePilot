@@ -11,10 +11,26 @@ import { antigravityFailure, ANTIGRAVITY_PROVIDER } from './errors.js';
 import { antigravityOutputTokens, generateRequestBody, parseChunk, sseJson, usageOf } from './protocol.js';
 import { fetchWithHosts, type FetchFn } from './transport.js';
 
-function finishOf(reason: string | undefined): FinishReason {
+const BLOCKED_FINISH = new Set(['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY', 'LANGUAGE']);
+/** Google's reasons are enum names; anything else is not put in a message. */
+const ENUM_NAME = /^[A-Z_]{2,40}$/;
+
+function reasonText(reason: string): string {
+  return ENUM_NAME.test(reason) ? ` (${reason})` : '';
+}
+
+/** Google declined the prompt or the answer: retrying the same review gets the same refusal. */
+function refusal(reason: string): LlmFailure {
+  return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'BAD_REQUEST', message: `Google Antigravity declined to answer${reasonText(reason)}` });
+}
+
+/** Only STOP is a clean end and MAX_TOKENS a cut one; every other reason fails the call. */
+function finishOf(reason: string): FinishReason {
+  if (reason === 'STOP') return 'stop';
   if (reason === 'MAX_TOKENS') return 'max-tokens';
-  if (reason === 'SAFETY' || reason === 'RECITATION' || reason === 'BLOCKLIST' || reason === 'PROHIBITED_CONTENT') return 'error';
-  return 'stop';
+  if (BLOCKED_FINISH.has(reason)) throw refusal(reason);
+  // OTHER, MALFORMED_FUNCTION_CALL, FINISH_REASON_UNSPECIFIED, or a reason added later.
+  throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'UNKNOWN', message: `Google Antigravity ended the answer abnormally${reasonText(reason)}` });
 }
 
 /**
@@ -25,9 +41,13 @@ function finishOf(reason: string | undefined): FinishReason {
 function resolveFailure(error: unknown, signal: AbortSignal | undefined): LlmFailure {
   if (signal?.aborted) return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'ABORTED', message: 'request aborted' });
   if (error instanceof SubscriptionRefreshError) {
-    return error.transient
-      ? new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'NETWORK', message: 'Could not refresh the Google Antigravity sign-in; try again' })
-      : new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'INVALID_CREDENTIAL', message: 'Google Antigravity sign-in expired or was revoked; sign in again' });
+    if (error.reason === 'unreachable') {
+      return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'NETWORK', message: 'Could not refresh the Google Antigravity sign-in; try again' });
+    }
+    if (error.reason === 'not-configured') {
+      return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'PROVIDER_NOT_CONFIGURED', message: 'Google Antigravity sign-in is not configured on this server' });
+    }
+    return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'INVALID_CREDENTIAL', message: 'Google Antigravity sign-in expired or was revoked; sign in again' });
   }
   return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'SERVER', message: 'Could not load the Google Antigravity credential; try again' });
 }
@@ -100,6 +120,8 @@ export class AntigravityAdapter extends LlmAdapter {
       for await (const event of sseJson(response.body)) {
         const chunk = parseChunk(event);
         if (chunk.error) throw antigravityFailure(chunk.error.status, chunk.error.body, options.model);
+        // A blocked prompt has no candidates at all; it is a refusal, not a cut-off stream.
+        if (chunk.blockReason) throw refusal(chunk.blockReason);
         if (chunk.text) yield { type: 'text-delta', text: chunk.text };
         if (chunk.finishReason) finishReason = chunk.finishReason;
         if (chunk.usage) usage = chunk.usage;
@@ -111,7 +133,8 @@ export class AntigravityAdapter extends LlmAdapter {
     if (!finishReason) {
       throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'NETWORK', message: 'Google Antigravity stream ended before the answer was complete' });
     }
+    const finish = finishOf(finishReason);
     yield { type: 'usage', usage: usageOf(usage) };
-    yield { type: 'finish', reason: finishOf(finishReason) };
+    yield { type: 'finish', reason: finish };
   }
 }

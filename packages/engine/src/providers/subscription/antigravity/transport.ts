@@ -2,6 +2,31 @@ import { antigravityUrl, ANTIGRAVITY_HOSTS } from './config.js';
 
 export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
+/** Releases a body that will not be read. The status already decided the outcome, so a failing cancel changes nothing. */
+export async function discardBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // The connection is already gone.
+  }
+}
+
+/** A 2xx answer whose body is not JSON. Fixed message, no cause: a parse error can quote the body. */
+export class MalformedResponseError extends Error {
+  constructor(what: string) {
+    super(`${what} answered with a body that is not JSON`);
+    this.name = 'MalformedResponseError';
+  }
+}
+
+export async function readJson(response: Response, what: string): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new MalformedResponseError(what);
+  }
+}
+
 /**
  * One Cloud Code Assist call over the fixed host list (ADR-0032 §7). The next host is tried only
  * when this one could not be reached, or answered 404 or 5xx; the caller has not read any of the
@@ -20,7 +45,7 @@ export async function fetchWithHosts(doFetch: FetchFn, method: string, init: Req
       continue;
     }
     if (!last && (response.status === 404 || response.status >= 500)) {
-      await response.body?.cancel().catch(() => undefined);
+      await discardBody(response);
       continue;
     }
     return response;

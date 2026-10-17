@@ -19,4 +19,5 @@ export const enAntigravity: Record<keyof typeof arAntigravity, string> = {
   subscriptionErrorValidationRequired: 'Google asks you to verify this account first. Verify it in the browser, then sign in again.',
   subscriptionErrorIneligible: 'This Google account is not eligible for Antigravity.',
   subscriptionErrorProjectRequired: 'This account needs a Google Cloud project; business accounts are not supported yet.',
+  subscriptionErrorNotConfigured: 'Google Antigravity sign-in is not configured on this server. Ask the server operator.',
 };

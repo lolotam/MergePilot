@@ -17,4 +17,5 @@ export const arAntigravity = {
   subscriptionErrorValidationRequired: 'Google عايزة تتأكد من الحساب الأول. أكّده في المتصفح، وبعدها سجّل الدخول تاني.',
   subscriptionErrorIneligible: 'حساب Google ده مش مسموح له يستخدم Antigravity.',
   subscriptionErrorProjectRequired: 'الحساب ده محتاج Google Cloud project، وحسابات الشركات لسه مش مدعومة.',
+  subscriptionErrorNotConfigured: 'تسجيل دخول Google Antigravity مش متظبط على السيرفر ده. كلّم مسؤول السيرفر.',
 };

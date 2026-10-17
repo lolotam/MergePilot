@@ -16,6 +16,7 @@ const LOGIN_ERROR_KEYS: Record<SubscriptionLoginErrorCode, I18nKey> = {
   'validation-required': 'subscriptionErrorValidationRequired',
   ineligible: 'subscriptionErrorIneligible',
   'project-required': 'subscriptionErrorProjectRequired',
+  'not-configured': 'subscriptionErrorNotConfigured',
 };
 
 const SIGN_IN_LABELS: Record<SubscriptionProvider, I18nKey> = {

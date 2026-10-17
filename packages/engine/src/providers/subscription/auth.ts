@@ -3,10 +3,17 @@ import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai';
 import type { PiSubscriptionProvider, SubscriptionCredential, SubscriptionProvider } from '../../credentials/subscription.js';
-import { antigravityClientFromEnv, isAntigravityConfigured, loginAntigravity, refreshAntigravity, type AntigravityDeps } from './antigravity/index.js';
+import {
+  antigravityClientFromEnv,
+  isAntigravityConfigured,
+  loginAntigravity,
+  refreshAntigravity,
+  SubscriptionLoginError,
+  type AntigravityDeps,
+} from './antigravity/index.js';
 import { SubscriptionRefreshError } from './refresh-error.js';
 
-export { SubscriptionRefreshError } from './refresh-error.js';
+export { SubscriptionRefreshError, type SubscriptionRefreshFailure } from './refresh-error.js';
 
 export type { AuthEvent as SubscriptionAuthEvent, AuthPrompt as SubscriptionAuthPrompt } from '@earendil-works/pi-ai';
 export type SubscriptionInteraction = AuthInteraction;
@@ -33,14 +40,17 @@ export function isSubscriptionAvailable(provider: SubscriptionProvider, env: Rea
   return provider === 'google-antigravity' ? isAntigravityConfigured(env) : true;
 }
 
-function antigravityDeps(): AntigravityDeps {
+/** The OAuth client, or `missing()` thrown: a server without it is an operator problem, not the user's. */
+function antigravityDeps(missing: () => Error): AntigravityDeps {
   const client = antigravityClientFromEnv();
-  if (!client) throw new Error('Google Antigravity sign-in is not configured on this server');
+  if (!client) throw missing();
   return { client };
 }
 
 export async function loginSubscription(provider: SubscriptionProvider, interaction: SubscriptionInteraction): Promise<SubscriptionCredential> {
-  if (provider === 'google-antigravity') return loginAntigravity(interaction, antigravityDeps());
+  if (provider === 'google-antigravity') {
+    return loginAntigravity(interaction, antigravityDeps(() => new SubscriptionLoginError('not-configured')));
+  }
   const oauth = subscriptionProvider(provider).auth.oauth!;
   return oauth.login({
     ...interaction,
@@ -62,11 +72,13 @@ export async function loginSubscription(provider: SubscriptionProvider, interact
  */
 export async function refreshSubscription(provider: SubscriptionProvider, credential: SubscriptionCredential, signal: AbortSignal): Promise<SubscriptionCredential> {
   try {
-    if (provider === 'google-antigravity') return await refreshAntigravity(credential, antigravityDeps(), signal);
+    if (provider === 'google-antigravity') {
+      return await refreshAntigravity(credential, antigravityDeps(() => new SubscriptionRefreshError('not-configured')), signal);
+    }
     return await subscriptionProvider(provider).auth.oauth!.refresh(credential, signal);
   } catch (error) {
     if (error instanceof SubscriptionRefreshError) throw error;
     // Upstream errors may contain token-response bodies; never return them to the dashboard or logs.
-    throw new SubscriptionRefreshError(false);
+    throw new SubscriptionRefreshError('sign-in');
   }
 }

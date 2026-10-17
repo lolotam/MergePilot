@@ -58,14 +58,15 @@ describe('Google Antigravity availability', () => {
     expect(isSubscriptionAvailable('openai', {})).toBe(true);
   });
 
-  it('refuses to sign in or refresh without the client configuration, before any request', async () => {
+  it('reports a missing client configuration as a server problem, not a sign-in to redo, before any request', async () => {
     vi.stubEnv(ANTIGRAVITY_CLIENT_ID_ENV, '');
     vi.stubEnv(ANTIGRAVITY_CLIENT_SECRET_ENV, '');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    await expect(loginSubscription('google-antigravity', { notify: () => undefined, prompt: async () => '' })).rejects.toThrow(/not configured/);
+    await expect(loginSubscription('google-antigravity', { notify: () => undefined, prompt: async () => '' }))
+      .rejects.toMatchObject({ name: 'SubscriptionLoginError', reason: 'not-configured' });
     await expect(refreshSubscription('google-antigravity', { type: 'oauth', access: 'a', refresh: 'r', expires: 0 }, new AbortController().signal))
-      .rejects.toThrow('Subscription token refresh failed; sign in again');
+      .rejects.toMatchObject({ reason: 'not-configured', message: 'Google Antigravity sign-in is not configured on this server' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
