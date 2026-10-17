@@ -63,7 +63,9 @@ export function memoryCreateReviewRun(store: MemoryRunTables, run: NewReviewRun)
     throw new ActiveRunExistsError(run.repoFullName, run.pullNumber, starting.botSlot);
   }
   if (reusable) {
-    const updated: ReviewRun = { ...reusable, ...run, ...starting };
+    // A retry on Default must not keep the skill the earlier attempt ran with (ADR-0034).
+    const { skillName: _earlierSkill, ...earlier } = reusable;
+    const updated: ReviewRun = { ...earlier, ...run, ...starting };
     store.runs.set(reusable.id, updated);
     return { ...updated };
   }

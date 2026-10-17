@@ -5,6 +5,7 @@ import {
   SkillNameTakenError,
   UnknownSkillError,
   type AppStore,
+  type NewReviewRun,
   type NewReviewSkill,
   type ReviewerBot,
   type WorkspaceSettings,
@@ -135,6 +136,25 @@ export function defineReviewSkillContract(
       expect((await store.getSettings(WS))?.skillRemovedName).toBe('Security');
       await store.saveSettings(settings({ skillId: null }));
       expect(await store.getSettings(WS)).not.toHaveProperty('skillRemovedName');
+    } finally {
+      await cleanup?.();
+    }
+  });
+
+  it("records the run's skill by name, and a retry of the same job on Default drops it", async () => {
+    const store = await createStore();
+    try {
+      const run = (overrides: Partial<NewReviewRun>): NewReviewRun => ({
+        workspaceId: WS, jobId: 'job-skill', installationId: 9, repoFullName: 'org/skills', pullNumber: 3,
+        headSha: 'sha-skill', status: 'running', costUsd: null, detail: null, ...overrides,
+      });
+      const first = await store.createReviewRun(run({ skillName: 'Security' }));
+      expect((await store.getReviewRun(WS, first.id))?.skillName).toBe('Security');
+      await store.finishReviewRun(WS, first.id, { status: 'failed', costUsd: null, detail: 'boom' });
+
+      const retry = await store.createReviewRun(run({}));
+      expect(retry.id).toBe(first.id);
+      expect(await store.getReviewRun(WS, first.id)).not.toHaveProperty('skillName');
     } finally {
       await cleanup?.();
     }
