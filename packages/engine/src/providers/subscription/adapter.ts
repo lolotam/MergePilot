@@ -5,6 +5,7 @@ import type { Secret } from '../../credentials/secret.js';
 import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY } from '../../llm/retry.js';
+import { responseSchemaInstruction } from '../../llm/schema-instruction.js';
 import type { GenerateOptions, StreamChunk } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
 import { subscriptionProvider } from './auth.js';
@@ -35,6 +36,19 @@ function levelFor(levels: readonly ModelLevel[], options: OutputTokenRequest): M
 /** pi-ai reads thinking from `reasoning`; `off` is sent as no level at all. */
 function reasoningFor(level: ModelLevel | undefined): ThinkingLevel | undefined {
   return level === 'off' ? undefined : level;
+}
+
+/**
+ * The call's messages with its `responseSchema` appended to the leading system message, as the
+ * API adapters send it. pi-ai has no structured-output option, so the prompt is the only way the
+ * schema (and its required `findings` key) reaches a subscription model.
+ */
+function withResponseSchema(options: GenerateOptions): GenerateOptions['messages'] {
+  if (!options.responseSchema) return options.messages;
+  const instruction = responseSchemaInstruction(options.responseSchema);
+  const [first, ...rest] = options.messages;
+  if (first?.role === 'system') return [{ ...first, content: `${first.content}\n\n${instruction}` }, ...rest];
+  return [{ role: 'system', content: instruction }, ...options.messages];
 }
 
 /** Streams only model text; no agent tools or subprocesses are enabled. */
@@ -88,7 +102,7 @@ export class SubscriptionAdapter extends LlmAdapter {
       throw new LlmFailure({ provider: this.provider, code: 'BAD_REQUEST', message: `Unsupported subscription effort: ${options.effort}` });
     }
     const reasoning = reasoningFor(level);
-    const messages: Message[] = options.messages.map((message) => message.role === 'assistant'
+    const messages: Message[] = withResponseSchema(options).map((message) => message.role === 'assistant'
       ? { role: 'assistant', content: [{ type: 'text', text: message.content }], api: model.api, provider: model.provider, model: model.id,
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: 'stop', timestamp: Date.now() }
       : { role: message.role, content: message.content, timestamp: Date.now() });

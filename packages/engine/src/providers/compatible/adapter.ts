@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
+import { responseSchemaInstruction } from '../../llm/schema-instruction.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
 import { DEFAULT_THINKING_HEADROOM, compatibleEffortFields, deepseekEffort, defaultThinkingHeadroom, isCompatibleReasoningModel, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
 import { bearerHeaders, failureFromResponse, failureFromThrown, redactKey, type FetchLike, type KeyInput } from '../http.js';
@@ -148,7 +149,7 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
 
     if (options.responseSchema) {
       // Compatible servers differ on `response_format`; the schema in the prompt works everywhere.
-      const instruction = `Respond with a single JSON object matching this JSON schema:\n${JSON.stringify(options.responseSchema)}`;
+      const instruction = responseSchemaInstruction(options.responseSchema);
       const system = messages.find((m) => m.role === 'system');
       if (system) system.content = `${system.content}\n\n${instruction}`;
       else messages.unshift({ role: 'system', content: instruction });

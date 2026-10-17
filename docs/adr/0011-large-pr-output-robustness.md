@@ -132,3 +132,27 @@ they request. API calls are priced on the limit they actually request. An adapti
 is now preflighted at 36,864 output tokens instead of 20,480, so a tight `budget.perReviewUsd` can
 skip a review that passed before. An answer cut at `max_tokens` is still reported as
 `finishReason: max-tokens` and disclosed as `truncated`; nothing is dropped silently.
+
+## Amendment (2026-10-17): the subscription path sends the response schema
+
+Seen live on lolotam/MergePilot#150 (reviews after cf2351a and 1d94378) and #152 (review
+5555184233 after bbad1c0): the panel bot running `anthropic:claude-opus-5-5` on the Claude
+subscription was disclosed with "the model answered without a findings list" on every review where
+it found nothing. Its summaries said so ("I found no defects"), the runs completed, and no review
+with a finding carried the warning. The same symptom was already recorded on #143 and #144
+above, before the adaptive headroom shipped, so the headroom and the `reasoning` effort are not the
+cause.
+
+**Cause.** The parser flags an answer only when an object has a `summary` and no `findings` key at
+all; `"findings": []` parses as a clean review. Every review call carries `responseSchema`, the JSON
+schema of the answer in which `findings` is required. The Anthropic, OpenAI-compatible and Claude
+Code adapters append it to the system prompt, and the OpenAI and Gemini adapters send it natively.
+`SubscriptionAdapter` dropped it, so a subscription model saw only the prose contract of the review
+prompt, and Claude left the key out when the list would have been empty.
+
+**Decision.** `SubscriptionAdapter` appends the same schema line as the API adapters
+(`llm/schema-instruction.ts`) to the leading system message, or sends it as the system message when
+the call has none. pi-ai places that message after the Claude Code identity block it requires for
+OAuth, and passes it as instructions to Codex and Grok. The output limit is unchanged. The parser and
+its disclosure are unchanged: an answer that still has no findings list is disclosed as before.
+The Google Antigravity adapter (ADR-0032) has its own protocol and does not send the schema yet.

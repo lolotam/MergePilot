@@ -7,6 +7,7 @@ import { collectText } from '../../llm/collect.js';
 import { createAdapter } from '../factory.js';
 import { listModels } from '../catalog.js';
 import { parseReviewAnswer } from '../../review/answer.js';
+import { reviewJsonSchema } from '../../review/split.js';
 import { SubscriptionAdapter, subscriptionModels } from './adapter.js';
 
 const access = `header.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'account-test' } })).toString('base64url')}.signature`;
@@ -215,6 +216,17 @@ describe('subscription output limit', () => {
     expect(adapter.requestedOutputTokens(call)).toBe(limit);
   });
 
+  it('keeps the same output limit when the call carries a response schema', async () => {
+    const reply = stubClaude('{"summary":"ok","findings":[]}', 'end_turn', 20);
+    const call = { ...review('claude-opus-5-5', 'high'), responseSchema: reviewJsonSchema() };
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'));
+
+    await collectText(adapter.stream(call));
+
+    expect(reply.body().max_tokens).toBe(4096 + 32768);
+    expect(adapter.requestedOutputTokens(call)).toBe(4096 + 32768);
+  });
+
   it('reports an answer cut at max_tokens as a truncated review, never as a finished one', async () => {
     stubClaude('{"summary":"cut', 'max_tokens', 4096 + 32768);
 
@@ -223,5 +235,62 @@ describe('subscription output limit', () => {
 
     expect(result.finishReason).toBe('max-tokens');
     expect(parsed).toMatchObject({ ok: false, code: 'truncated', error: 'truncated (finishReason: max-tokens, outputTokens: 36864)' });
+  });
+});
+
+/** The text of every system block pi-ai sent to Claude. */
+function sentSystem(body: Record<string, unknown>): string[] {
+  return (body.system as { text: string }[]).map((block) => block.text);
+}
+
+// Regression: lolotam/MergePilot#150 and #152 (2026-10-17), claude-opus-5-5 on the subscription
+// answered `{"summary": …}` without a findings key whenever it found nothing, so every clean
+// review was disclosed as incomplete. Every other adapter sends the review JSON schema, where
+// `findings` is required; this one dropped it.
+describe('subscription response schema', () => {
+  const SCHEMA_INSTRUCTION = 'Respond with a single JSON object matching this JSON schema:';
+
+  it('sends Claude the review JSON schema, findings required, after the review system prompt', async () => {
+    const reply = stubClaude('{"summary":"ok","findings":[]}', 'end_turn', 20);
+    const schema = reviewJsonSchema();
+
+    await collectText(new SubscriptionAdapter('anthropic', secretFor('anthropic'))
+      .stream({ ...request('claude-opus-5-5'), responseSchema: schema }));
+
+    const reviewSystem = sentSystem(reply.body()).find((text) => text.startsWith('Review only'));
+    expect(reviewSystem).toBe(`Review only\n\n${SCHEMA_INSTRUCTION}\n${JSON.stringify(schema)}`);
+    expect(schema).toMatchObject({ required: ['summary', 'findings'] });
+    expect(JSON.stringify(reply.body().messages)).toContain('"text":"Say OK"');
+    expect(JSON.stringify(reply.body().messages)).not.toContain(SCHEMA_INSTRUCTION);
+  });
+
+  it('sends the schema as the system prompt when the call has none', async () => {
+    const reply = stubClaude('{"summary":"ok","findings":[]}', 'end_turn', 20);
+    const schema = reviewJsonSchema();
+
+    await collectText(new SubscriptionAdapter('anthropic', secretFor('anthropic')).stream({
+      model: 'claude-opus-5-5', maxOutputTokens: 1024, responseSchema: schema,
+      messages: [{ role: 'user', content: 'Say OK' }],
+    }));
+
+    expect(sentSystem(reply.body())).toContain(`${SCHEMA_INSTRUCTION}\n${JSON.stringify(schema)}`);
+  });
+
+  it('leaves the system prompt unchanged when the call asks for no schema', async () => {
+    const reply = stubClaude('OK', 'end_turn', 2);
+
+    await collectText(new SubscriptionAdapter('anthropic', secretFor('anthropic')).stream(request('claude-opus-5-5')));
+
+    expect(sentSystem(reply.body())).toContain('Review only');
+    expect(sentSystem(reply.body()).join('\n')).not.toContain(SCHEMA_INSTRUCTION);
+  });
+
+  it('sends Codex and Grok the schema in their instructions too', async () => {
+    const reply = stubResponses();
+    const schema = reviewJsonSchema();
+
+    await collectText(new SubscriptionAdapter('xai', secretFor('xai')).stream({ ...request('grok-4.6'), responseSchema: schema }));
+
+    expect(JSON.stringify(reply.body())).toContain(JSON.stringify(`${SCHEMA_INSTRUCTION}\n${JSON.stringify(schema)}`).slice(1, -1));
   });
 });

@@ -137696,6 +137696,11 @@ async function withRetry(fn, policy = DEFAULT_RETRY_POLICY, deps = defaultDeps) 
   }
 }
 
+function responseSchemaInstruction(schema) {
+  return `Respond with a single JSON object matching this JSON schema:
+${JSON.stringify(schema)}`;
+}
+
 function computeLineOffsets(text) {
   const offsets = [0];
   for (let i2 = 0; i2 < text.length; i2++) {
@@ -138388,6 +138393,17 @@ function levelFor(levels, options) {
 function reasoningFor(level) {
   return level === "off" ? void 0 : level;
 }
+function withResponseSchema(options) {
+  if (!options.responseSchema)
+    return options.messages;
+  const instruction = responseSchemaInstruction(options.responseSchema);
+  const [first, ...rest] = options.messages;
+  if (first?.role === "system")
+    return [{ ...first, content: `${first.content}
+
+${instruction}` }, ...rest];
+  return [{ role: "system", content: instruction }, ...options.messages];
+}
 var SubscriptionAdapter = class extends LlmAdapter {
   provider;
   secret;
@@ -138450,7 +138466,7 @@ var SubscriptionAdapter = class extends LlmAdapter {
       throw new LlmFailure({ provider: this.provider, code: "BAD_REQUEST", message: `Unsupported subscription effort: ${options.effort}` });
     }
     const reasoning = reasoningFor(level);
-    const messages = options.messages.map((message) => message.role === "assistant" ? {
+    const messages = withResponseSchema(options).map((message) => message.role === "assistant" ? {
       role: "assistant",
       content: [{ type: "text", text: message.content }],
       api: model.api,
@@ -165008,9 +165024,7 @@ var AnthropicAdapter = class extends LlmAdapter {
       systemParts.push(systemMessages.map((m2) => m2.content).join("\n\n"));
     }
     if (options.responseSchema) {
-      const schemaStr = JSON.stringify(options.responseSchema);
-      systemParts.push(`Respond with a single JSON object matching this JSON schema:
-${schemaStr}`);
+      systemParts.push(responseSchemaInstruction(options.responseSchema));
     }
     let system;
     if (systemParts.length > 0) {
@@ -188747,8 +188761,7 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
     const messages = options.messages.map((m2) => ({ role: m2.role, content: m2.content }));
     const sendsJsonObject = !options.omitResponseFormat && options.responseSchema !== void 0 && JSON_OBJECT_SUPPORTED_PRESETS.has(this.provider);
     if (options.responseSchema) {
-      const instruction = `Respond with a single JSON object matching this JSON schema:
-${JSON.stringify(options.responseSchema)}`;
+      const instruction = responseSchemaInstruction(options.responseSchema);
       const system = messages.find((m2) => m2.role === "system");
       if (system)
         system.content = `${system.content}

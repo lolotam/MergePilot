@@ -3,6 +3,7 @@ import type { Secret } from '../../credentials/secret.js';
 import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
+import { responseSchemaInstruction } from '../../llm/schema-instruction.js';
 import type { FinishReason, GenerateOptions, StreamChunk, TokenUsage } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
 import { anthropicThinking, anthropicThinkingHeadroom } from '../effort.js';
@@ -71,8 +72,7 @@ export class AnthropicAdapter extends LlmAdapter {
       systemParts.push(systemMessages.map((m) => m.content).join('\n\n'));
     }
     if (options.responseSchema) {
-      const schemaStr = JSON.stringify(options.responseSchema);
-      systemParts.push(`Respond with a single JSON object matching this JSON schema:\n${schemaStr}`);
+      systemParts.push(responseSchemaInstruction(options.responseSchema));
     }
 
     let system: AnthropicSystemBlock[] | undefined;
