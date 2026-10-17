@@ -68,7 +68,11 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
 
 5. **Persistence.** The existing `mergepilot:oauth:v1:` envelope in the vault column: `{ provider: 'google-antigravity', credential: { type: 'oauth', access, refresh, expires, projectId, tier } }`. The account email is not stored. `credentialSecretValues` redacts `access` and `refresh` individually. The single-credential paths (backup export/restore, master-key rotation in `vault/rotate.ts`, delete) need no provider-specific code.
 
-6. **Refresh.** `CredentialService.resolve` unchanged: a lock-free read while `expires` is more than 60 s away, otherwise `coordinateRefresh` under the workspace/provider advisory lock, then `POST https://oauth2.googleapis.com/token` with `grant_type=refresh_token`. `expires` is `now + expires_in`. A refresh token Google sends replaces the stored one; otherwise the old one is kept, with the project. Any failure keeps the stored credential and raises "Subscription token refresh failed; sign in again". The adapter resolves the secret again before each call.
+6. **Refresh.** `CredentialService.resolve` unchanged: a lock-free read while `expires` is more than 60 s away, otherwise `coordinateRefresh` under the workspace/provider advisory lock, then `POST https://oauth2.googleapis.com/token` with `grant_type=refresh_token`. `expires` is `now + expires_in`. A refresh token Google sends replaces the stored one; otherwise the old one is kept, with the project. Any failure keeps the stored credential and raises `SubscriptionRefreshError`:
+   - **permanent** for 400/401 (`invalid_grant`) or a 200 without an access token: "Subscription token refresh failed; sign in again";
+   - **transient** for no answer, 408, 429 or 5xx: "could not reach the provider; try again".
+
+   The adapter resolves the secret again before each call. A permanent refresh failure becomes `INVALID_CREDENTIAL`. A transient one becomes `NETWORK`, and any other error while loading the credential (lock, database) becomes `SERVER`, so both are retried. pi-ai refresh errors carry no classification and stay permanent.
 
 7. **Request protocol.** `AntigravityAdapter` streams `POST {host}/v1internal:streamGenerateContent?alt=sse`:
    - The body is `{ project, model, userAgent: 'antigravity', requestId, request: { contents, systemInstruction?, generationConfig } }`. System messages go to `systemInstruction.parts`, and `assistant` becomes `model`.
@@ -84,7 +88,7 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
      - The engine does not log the switch; it has no logger.
    - No tools, function declarations or search grounding are sent, and no reviewed code is executed.
 
-8. **Failure classification** (`errors.ts`). Bodies are read only for classification. Messages are fixed, except a bad request, which keeps a short provider message after `redactSecrets` over the envelope's tokens.
+8. **Failure classification** (`errors.ts`). Bodies are read only for classification. Every message is a fixed text. It carries at most the HTTP status, the RPC `status` enum name (only when it matches `^[A-Z_]+$`) and the model id. No body text is forwarded on any path, so an echoed token cannot survive a truncation.
 
    | Answer | `LlmFailure` code | Message or note |
    |---|---|---|
@@ -102,7 +106,8 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
    | fetch error | `NETWORK` | |
    | abort | `ABORTED` | |
    | an error event inside the stream | as its status | |
-   | a stream with no candidate | `UNKNOWN` | |
+   | a stream that ends without a candidate `finishReason` (no answer, or cut off mid-answer) | `NETWORK` | retried |
+   | a malformed SSE event | `UNKNOWN` | never skipped |
    | finish `SAFETY`/`RECITATION`/`PROHIBITED_CONTENT` | finish `error` | |
 
    Every 403 has kind `auth`, so nothing pays its way around a suspension.
@@ -119,6 +124,8 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
 
 11. **Dashboard.**
     - **Add credential.** The dialog offers "Google Antigravity" only when `GET …/subscriptions` lists it. It then shows sign-in only, with no API-key field.
+    - **Every provider select** (main bot, heavy model, fallbacks, extra bots, add-credential) filters subscription-only providers by the same `GET …/subscriptions` answer (`ProviderSelect` with `workspaceId`). A saved `google-antigravity` choice stays visible, with a note that this server does not offer it.
+    - **The server enforces the same rule.** `PUT /settings` and `PUT /bots/:slot` refuse a newly chosen subscription-only provider the server does not offer (`400 provider_unavailable`). A choice already saved is kept, so other changes can still be saved.
     - **Before sign-in.** An amber notice states the Terms-of-Service risk, and an "I understand the risk to this Google account" checkbox enables **Sign in with Google (Antigravity)**.
     - **Sign-in step.** The step asks for the address from the browser and explains the localhost page and the port-51121 caveat. Each failure reason has its own translated text.
     - **Code.** All text lives in `apps/web/src/i18n/antigravity-{en,ar}.ts`. `apps/app/src/api/contract-subscriptions.ts` (`SubscriptionStartSchema`, `SubscriptionAvailabilitySchema`, `errorCode`, `SUBSCRIPTION_ONLY_PROVIDER_IDS`) and the web client changed together. The web keeps a copy of the subscription-only list, checked against the contract by type.
@@ -141,9 +148,14 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
   - envelope, roles, system instruction, thinking config and output-token bounds, headers;
   - SSE across read boundaries, thought parts dropped, usage, finish mapping;
   - the host rule (503, 404 and network move on; 401, 403 and 429 do not; all failing gives `NETWORK`);
-  - an in-stream quota error, a stream with no candidate, a missing project or failed refresh;
+  - an in-stream quota error;
+  - a stream without a `finishReason` (none at all, or after text);
+  - a malformed event;
+  - the body cancelled on early stop and on an error event;
+  - a missing project;
+  - permanent vs transient refresh failures and a credential-load error;
   - the per-call resolved credential.
-- **Engine, failure classification** (`antigravity/errors.test.ts`): rate limit vs quota by `retryDelay`, reset wording and reason; a bare 429; 401; verification and suspension 403s without the body; 404, 400 context, 503 and 504; token redaction.
+- **Engine, failure classification** (`antigravity/errors.test.ts`): rate limit vs quota by `retryDelay`, reset wording and reason; a bare 429; 401; verification and suspension 403s without the body; 404, 400 context, 503 and 504; no body text forwarded for any status, including a token echoed across the old 300-character cut.
 - **Engine, models and configuration** (`antigravity/models.test.ts`, `subscription/auth.test.ts`): map and array parsing, the 4-hour cache, last-good and static fallback; availability without the client values, and no request when unconfigured.
 - **App** (`api/subscription-routes-antigravity.test.ts`, `credentials/subscription-antigravity.test.ts`):
   - admin-only availability and start;

@@ -5,6 +5,7 @@ import { LlmAdapter, type OutputTokenRequest } from '../../../llm/adapter.js';
 import { LlmFailure } from '../../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY } from '../../../llm/retry.js';
 import type { FinishReason, GenerateOptions, StreamChunk } from '../../../llm/types.js';
+import { SubscriptionRefreshError } from '../refresh-error.js';
 import { antigravityHeaders } from './config.js';
 import { antigravityFailure, ANTIGRAVITY_PROVIDER } from './errors.js';
 import { antigravityOutputTokens, generateRequestBody, parseChunk, sseJson, usageOf } from './protocol.js';
@@ -14,6 +15,21 @@ function finishOf(reason: string | undefined): FinishReason {
   if (reason === 'MAX_TOKENS') return 'max-tokens';
   if (reason === 'SAFETY' || reason === 'RECITATION' || reason === 'BLOCKLIST' || reason === 'PROHIBITED_CONTENT') return 'error';
   return 'stop';
+}
+
+/**
+ * Why the credential could not be resolved before a call. Only a refresh Google refused means
+ * "sign in again"; an unreachable token endpoint, or a lock or database error while loading the
+ * credential, is transient so the call is retried.
+ */
+function resolveFailure(error: unknown, signal: AbortSignal | undefined): LlmFailure {
+  if (signal?.aborted) return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'ABORTED', message: 'request aborted' });
+  if (error instanceof SubscriptionRefreshError) {
+    return error.transient
+      ? new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'NETWORK', message: 'Could not refresh the Google Antigravity sign-in; try again' })
+      : new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'INVALID_CREDENTIAL', message: 'Google Antigravity sign-in expired or was revoked; sign in again' });
+  }
+  return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'SERVER', message: 'Could not load the Google Antigravity credential; try again' });
 }
 
 function thrownFailure(error: unknown, signal: AbortSignal | undefined): LlmFailure {
@@ -43,14 +59,21 @@ export class AntigravityAdapter extends LlmAdapter {
   }
 
   private async credential(signal: AbortSignal | undefined) {
-    try {
-      if (this.resolveSecret) this.secret = await this.resolveSecret();
-      const envelope = decodeSubscription(this.secret.reveal(), ANTIGRAVITY_PROVIDER);
-      const projectId = envelope?.credential.projectId;
-      if (envelope && typeof projectId === 'string' && projectId) return { access: envelope.credential.access, projectId };
-    } catch {
-      if (signal?.aborted) throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'ABORTED', message: 'request aborted' });
+    if (this.resolveSecret) {
+      try {
+        this.secret = await this.resolveSecret();
+      } catch (error) {
+        throw resolveFailure(error, signal);
+      }
     }
+    let envelope;
+    try {
+      envelope = decodeSubscription(this.secret.reveal(), ANTIGRAVITY_PROVIDER);
+    } catch {
+      // A malformed or foreign envelope: only a new sign-in repairs it.
+    }
+    const projectId = envelope?.credential.projectId;
+    if (envelope && typeof projectId === 'string' && projectId) return { access: envelope.credential.access, projectId };
     throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'INVALID_CREDENTIAL', message: 'Google Antigravity sign-in is required; sign in again' });
   }
 
@@ -69,24 +92,24 @@ export class AntigravityAdapter extends LlmAdapter {
     }
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => '');
-      throw antigravityFailure(response.status, text, options.model, [this.secret]);
+      throw antigravityFailure(response.status, text, options.model);
     }
     let finishReason: string | undefined;
     let usage: Record<string, unknown> | undefined;
-    let sawCandidate = false;
     try {
       for await (const event of sseJson(response.body)) {
         const chunk = parseChunk(event);
-        if (chunk.error) throw antigravityFailure(chunk.error.status, chunk.error.body, options.model, [this.secret]);
-        if (chunk.text) { sawCandidate = true; yield { type: 'text-delta', text: chunk.text }; }
-        if (chunk.finishReason) { sawCandidate = true; finishReason = chunk.finishReason; }
+        if (chunk.error) throw antigravityFailure(chunk.error.status, chunk.error.body, options.model);
+        if (chunk.text) yield { type: 'text-delta', text: chunk.text };
+        if (chunk.finishReason) finishReason = chunk.finishReason;
         if (chunk.usage) usage = chunk.usage;
       }
     } catch (error) {
       throw thrownFailure(error, options.signal);
     }
-    if (!sawCandidate) {
-      throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'UNKNOWN', message: 'Google Antigravity stream ended without a result' });
+    // Only a candidate's finishReason ends an answer; a stream that just stops was cut off.
+    if (!finishReason) {
+      throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'NETWORK', message: 'Google Antigravity stream ended before the answer was complete' });
     }
     yield { type: 'usage', usage: usageOf(usage) };
     yield { type: 'finish', reason: finishOf(finishReason) };

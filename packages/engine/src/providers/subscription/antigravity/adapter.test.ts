@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Secret } from '../../../credentials/secret.js';
 import { encodeSubscription } from '../../../credentials/subscription.js';
+import { classifyFailure, type LlmFailure } from '../../../llm/failure.js';
 import type { GenerateOptions, StreamChunk } from '../../../llm/types.js';
+import { SubscriptionRefreshError } from '../refresh-error.js';
 import { AntigravityAdapter } from './adapter.js';
 
 const access = ['fake', 'antigravity', 'access'].join('-');
@@ -10,6 +12,7 @@ const secret = (projectId: string | undefined = 'project-1') => new Secret(encod
   ...(projectId ? { projectId } : {}),
 }));
 
+const REFRESHED_ACCESS = 'fake-refreshed-access-token';
 const DAILY = 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:streamGenerateContent?alt=sse';
 const PROD = 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse';
 
@@ -149,24 +152,60 @@ describe('AntigravityAdapter failures', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('fails when the stream ends without a candidate', async () => {
-    await expect(collect(adapterWith(vi.fn(async () => sse([{ traceId: 'only' }]))).stream(options))).rejects.toMatchObject({ code: 'UNKNOWN' });
+  it.each([
+    ['no candidate at all', [{ traceId: 'only' }]],
+    ['text but no finishReason', [candidate([{ text: 'half an ans' }])]],
+  ])('treats a stream that ends with %s as cut off, not as a finished answer', async (_name, events) => {
+    await expect(collect(adapterWith(vi.fn(async () => sse(events))).stream(options))).rejects.toMatchObject({ code: 'NETWORK' });
   });
 
-  it('asks for a new sign-in when the credential has no project or the refresh failed', async () => {
+  it('fails on a malformed stream event instead of skipping it', async () => {
+    const body = new Response('data: {"response":{"candidates":[{"content":{"parts":[{"text":"a"}]}}]}}\n\ndata: {broken\n\n', { status: 200 });
+    await expect(collect(adapterWith(vi.fn(async () => body)).stream(options))).rejects.toMatchObject({ code: 'UNKNOWN', message: expect.stringMatching(/malformed/) });
+  });
+
+  it('cancels the response body when the caller stops early or an error event ends the stream', async () => {
+    const cancelled = vi.fn();
+    const open = (events: unknown[]) => {
+      const text = new TextEncoder().encode(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''));
+      // Never closed: only a cancel ends it, as with a live connection.
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(text); }, cancel: cancelled }), { status: 200 });
+    };
+    for await (const chunk of adapterWith(vi.fn(async () => open([candidate([{ text: 'first' }])]))).stream(options)) {
+      expect(chunk).toEqual({ type: 'text-delta', text: 'first' });
+      break;
+    }
+    expect(cancelled).toHaveBeenCalledTimes(1);
+
+    const quota = { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Your quota will reset after 5h.' } };
+    await expect(collect(adapterWith(vi.fn(async () => open([quota]))).stream(options))).rejects.toMatchObject({ code: 'QUOTA' });
+    expect(cancelled).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks for a new sign-in when the credential has no project or Google refused the refresh', async () => {
     const fetchMock = vi.fn();
     await expect(collect(adapterWith(fetchMock, secret('')).stream(options))).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
-    const failingRefresh = new AntigravityAdapter(secret(), async () => { throw new Error('Subscription token refresh failed; sign in again'); }, fetchMock as never);
-    await expect(collect(failingRefresh.stream(options))).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
+    const refused = new AntigravityAdapter(secret(), async () => { throw new SubscriptionRefreshError(false); }, fetchMock as never);
+    await expect(collect(refused.stream(options))).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an unreachable token endpoint', new SubscriptionRefreshError(true), 'NETWORK'],
+    ['a lock or database error while loading the credential', new Error('connection terminated'), 'SERVER'],
+  ])('reports %s as a transient failure, not as an invalid sign-in', async (_name, cause, code) => {
+    const adapter = new AntigravityAdapter(secret(), async () => { throw cause; }, vi.fn() as never);
+    const failure = await collect(adapter.stream(options)).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code });
+    expect(classifyFailure((failure as LlmFailure).code)).toBe('transient');
   });
 
   it('uses the credential resolved before each call', async () => {
     const fetchMock = vi.fn(async () => sse([candidate([{ text: 'ok' }], 'STOP')]));
     const refreshed = new Secret(encodeSubscription('google-antigravity', {
-      type: 'oauth', access: 'refreshed-access', refresh: 'r', expires: Date.now() + 3_600_000, projectId: 'project-1',
+      type: 'oauth', access: REFRESHED_ACCESS, refresh: 'fake-refresh-token', expires: Date.now() + 3_600_000, projectId: 'project-1',
     }));
     await collect(new AntigravityAdapter(secret(), async () => refreshed, fetchMock as never).stream(options));
-    expect(new Headers((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).get('authorization')).toBe('Bearer refreshed-access');
+    expect(new Headers((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).get('authorization')).toBe(`Bearer ${REFRESHED_ACCESS}`);
   });
 });

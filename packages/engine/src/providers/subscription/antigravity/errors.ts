@@ -1,11 +1,9 @@
 /**
- * Google RPC errors from Cloud Code Assist mapped to `LlmFailure` (ADR-0032 §8). Messages are
- * fixed texts, except a short redacted provider message for a bad request; account-state bodies
- * (verification links, suspension notices) are never forwarded.
+ * Google RPC errors from Cloud Code Assist mapped to `LlmFailure` (ADR-0032 §8). The body is read
+ * only to classify; every message is a fixed text (with at most the HTTP status, the RPC status
+ * enum name and the model id), so no echoed token, link or notice can reach a log or the dashboard.
  */
-import type { Secret } from '../../../credentials/secret.js';
-import { LlmFailure, providerMessage, type LlmFailureCode } from '../../../llm/failure.js';
-import { redactSecrets } from '../../../security/redact.js';
+import { LlmFailure, type LlmFailureCode } from '../../../llm/failure.js';
 
 export const ANTIGRAVITY_PROVIDER = 'google-antigravity';
 
@@ -13,6 +11,8 @@ export const ANTIGRAVITY_PROVIDER = 'google-antigravity';
 const RATE_LIMIT_MAX_DELAY_MS = 60_000;
 const CONTEXT_WORDING = /context (length|window)|too many tokens|prompt is too long|maximum context|exceeds the maximum number of tokens/i;
 const SUSPENSION_WORDING = /terms of service|has been disabled|suspended|violation/i;
+/** google.rpc.Code names such as INVALID_ARGUMENT; anything else in `status` is not trusted into a message. */
+const RPC_STATUS = /^[A-Z_]{3,40}$/;
 
 interface GoogleRpcError {
   status?: string;
@@ -67,8 +67,8 @@ function forbidden(bodyText: string): string {
   return 'Google refused access for this account; sign in again';
 }
 
-/** Maps one failed Cloud Code Assist response. `secrets` are redacted from any text that is kept. */
-export function antigravityFailure(status: number, bodyText: string, model: string, secrets: readonly Secret[]): LlmFailure {
+/** Maps one failed Cloud Code Assist response to a failure with a fixed message. */
+export function antigravityFailure(status: number, bodyText: string, model: string): LlmFailure {
   const error = rpcError(bodyText);
   const base = { provider: ANTIGRAVITY_PROVIDER, status };
   if (status === 429 || error.status === 'RESOURCE_EXHAUSTED') {
@@ -85,7 +85,8 @@ export function antigravityFailure(status: number, bodyText: string, model: stri
   }
   if (status === 408 || status === 504) return new LlmFailure({ ...base, code: 'TIMEOUT', message: 'Google Antigravity timed out' });
   if (status >= 500) return new LlmFailure({ ...base, code: 'SERVER', message: `Google Antigravity returned HTTP ${status}` });
-  const detail = redactSecrets(providerMessage(bodyText), [...secrets]).text;
   const code: LlmFailureCode = CONTEXT_WORDING.test(bodyText) ? 'CONTEXT_WINDOW_EXCEEDED' : 'BAD_REQUEST';
-  return new LlmFailure({ ...base, code, message: `Google Antigravity returned HTTP ${status} (${code})${detail ? `: ${detail}` : ''}` });
+  // No body text is forwarded on any path: only Google's RPC status, when it is a plain enum name.
+  const rpcStatus = typeof error.status === 'string' && RPC_STATUS.test(error.status) ? ` ${error.status}` : '';
+  return new LlmFailure({ ...base, code, message: `Google Antigravity rejected the request: HTTP ${status}${rpcStatus} (${code})` });
 }

@@ -2,8 +2,10 @@
  * The Cloud Code Assist request and SSE response (ADR-0032 §7). Review calls are text only: no
  * tools, function declarations or search grounding are ever sent.
  */
+import { LlmFailure } from '../../../llm/failure.js';
 import type { GenerateOptions } from '../../../llm/types.js';
 import { DEFAULT_THINKING_HEADROOM, geminiThinkingConfig, geminiThinksByDefault, thinkingHeadroom } from '../../effort.js';
+import { ANTIGRAVITY_PROVIDER } from './errors.js';
 
 type Effortful = Pick<GenerateOptions, 'model' | 'effort' | 'thinking' | 'maxOutputTokens'>;
 
@@ -85,17 +87,31 @@ export function parseChunk(data: unknown): AntigravityChunk {
   };
 }
 
-/** Yields each `data:` event of an SSE body as parsed JSON; a malformed event is skipped. */
+function parseEvent(payload: string): unknown {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    // A broken event may have carried part of the answer, so the answer cannot be trusted whole.
+    throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: 'UNKNOWN', message: 'Google Antigravity sent a malformed stream event' });
+  }
+}
+
+/**
+ * Yields each `data:` event of an SSE body as parsed JSON; a malformed event fails the stream.
+ * When the consumer stops early or an error ends the read, the body is cancelled, not just
+ * unlocked, so the connection is not left open.
+ */
 export async function* sseJson(body: ReadableStream<Uint8Array>): AsyncGenerator<unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let data: string[] = [];
+  let finished = false;
   const flush = function* (): Generator<unknown> {
     if (data.length === 0) return;
     const payload = data.join('\n');
     data = [];
-    try { yield JSON.parse(payload); } catch { /* A broken event carries nothing we can use. */ }
+    yield parseEvent(payload);
   };
   try {
     for (;;) {
@@ -113,7 +129,10 @@ export async function* sseJson(body: ReadableStream<Uint8Array>): AsyncGenerator
     }
     if (buffer.startsWith('data:')) data.push(buffer.slice(5).trimStart());
     yield* flush();
+    finished = true;
   } finally {
+    // Cancelling can itself fail on a broken connection; the error that ended the read stays the one thrown.
+    if (!finished) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }

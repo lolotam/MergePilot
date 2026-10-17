@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthEvent, AuthPrompt } from '@earendil-works/pi-ai';
+import { SubscriptionRefreshError } from '../refresh-error.js';
 import {
   ANTIGRAVITY_REDIRECT_URI,
   authorizationUrl,
@@ -167,25 +168,38 @@ describe('loginAntigravity', () => {
   });
 });
 
+const OLD_ACCESS = 'fake-old-access-token';
+const NEW_ACCESS = 'fake-new-access-token';
+const ROTATED_REFRESH = 'fake-rotated-refresh-token';
+
 describe('refreshAntigravity', () => {
-  const stored = { type: 'oauth' as const, access: 'old-access', refresh, expires: 1, projectId: 'project-123', tier: 'free-tier' };
+  const stored = { type: 'oauth' as const, access: OLD_ACCESS, refresh, expires: 1, projectId: 'project-123', tier: 'free-tier' };
 
   it('keeps the refresh token and project when Google sends only a new access token', async () => {
-    const { deps: d, calls } = deps({ '/token': () => Response.json({ access_token: 'new-access', expires_in: 3600 }) });
+    const { deps: d, calls } = deps({ '/token': () => Response.json({ access_token: NEW_ACCESS, expires_in: 3600 }) });
     const next = await refreshAntigravity(stored, d, new AbortController().signal);
-    expect(next).toEqual({ ...stored, access: 'new-access', expires: 1_000_000 + 3_600_000 });
+    expect(next).toEqual({ ...stored, access: NEW_ACCESS, expires: 1_000_000 + 3_600_000 });
     const form = new URLSearchParams(String(calls[0]!.init.body));
     expect(form.get('grant_type')).toBe('refresh_token');
     expect(form.get('refresh_token')).toBe(refresh);
   });
 
   it('stores a rotated refresh token', async () => {
-    const { deps: d } = deps({ '/token': () => Response.json({ access_token: 'new-access', refresh_token: 'rotated-refresh', expires_in: 3600 }) });
-    expect((await refreshAntigravity(stored, d, new AbortController().signal)).refresh).toBe('rotated-refresh');
+    const { deps: d } = deps({ '/token': () => Response.json({ access_token: NEW_ACCESS, refresh_token: ROTATED_REFRESH, expires_in: 3600 }) });
+    expect((await refreshAntigravity(stored, d, new AbortController().signal)).refresh).toBe(ROTATED_REFRESH);
   });
 
-  it('fails on invalid_grant', async () => {
-    const { deps: d } = deps({ '/token': () => Response.json({ error: 'invalid_grant' }, { status: 400 }) });
-    await expect(refreshAntigravity(stored, d, new AbortController().signal)).rejects.toBeInstanceOf(SubscriptionLoginError);
+  it.each([
+    ['invalid_grant (400)', () => Response.json({ error: 'invalid_grant' }, { status: 400 }), false],
+    ['401', () => new Response('', { status: 401 }), false],
+    ['a 200 without an access token', () => Response.json({ expires_in: 3600 }), false],
+    ['503', () => new Response('unavailable', { status: 503 }), true],
+    ['429', () => new Response('slow down', { status: 429 }), true],
+    ['no connection', () => { throw new TypeError('fetch failed'); }, true],
+  ])('classifies a refresh that fails with %s', async (_name, answer, transient) => {
+    const { deps: d } = deps({ '/token': answer });
+    const failure = await refreshAntigravity(stored, d, new AbortController().signal).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    expect(failure).toMatchObject({ transient });
   });
 });

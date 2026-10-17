@@ -4,6 +4,9 @@ import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-code
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai';
 import type { PiSubscriptionProvider, SubscriptionCredential, SubscriptionProvider } from '../../credentials/subscription.js';
 import { antigravityClientFromEnv, isAntigravityConfigured, loginAntigravity, refreshAntigravity, type AntigravityDeps } from './antigravity/index.js';
+import { SubscriptionRefreshError } from './refresh-error.js';
+
+export { SubscriptionRefreshError } from './refresh-error.js';
 
 export type { AuthEvent as SubscriptionAuthEvent, AuthPrompt as SubscriptionAuthPrompt } from '@earendil-works/pi-ai';
 export type SubscriptionInteraction = AuthInteraction;
@@ -53,12 +56,17 @@ export async function loginSubscription(provider: SubscriptionProvider, interact
   }, { agentName: 'MergePilot' });
 }
 
+/**
+ * Fails with `SubscriptionRefreshError` only. Google Antigravity says whether the failure is
+ * transient; pi-ai's errors carry no such classification, so they stay "sign in again".
+ */
 export async function refreshSubscription(provider: SubscriptionProvider, credential: SubscriptionCredential, signal: AbortSignal): Promise<SubscriptionCredential> {
   try {
     if (provider === 'google-antigravity') return await refreshAntigravity(credential, antigravityDeps(), signal);
     return await subscriptionProvider(provider).auth.oauth!.refresh(credential, signal);
-  } catch {
+  } catch (error) {
+    if (error instanceof SubscriptionRefreshError) throw error;
     // Upstream errors may contain token-response bodies; never return them to the dashboard or logs.
-    throw new Error('Subscription token refresh failed; sign in again');
+    throw new SubscriptionRefreshError(false);
   }
 }

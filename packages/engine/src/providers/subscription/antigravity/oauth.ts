@@ -8,6 +8,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { AuthInteraction } from '@earendil-works/pi-ai';
 import type { SubscriptionCredential } from '../../../credentials/subscription.js';
 import { antigravityHeaders, ANTIGRAVITY_CLIENT_METADATA, type AntigravityClient } from './config.js';
+import { SubscriptionRefreshError } from '../refresh-error.js';
 import { fetchWithHosts } from './transport.js';
 
 export const ANTIGRAVITY_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -107,8 +108,21 @@ async function postToken(deps: AntigravityDeps, form: Record<string, string>, si
     signal,
   });
   // The body of a failed token call can echo the request; it is dropped, not parsed into a message.
-  if (!response.ok) throw new SubscriptionLoginError('token-exchange');
+  if (!response.ok) throw new TokenEndpointError(response.status);
   return (await response.json()) as TokenResponse;
+}
+
+/** A non-2xx answer from Google's token endpoint; only the status is kept. */
+class TokenEndpointError extends Error {
+  constructor(readonly status: number) {
+    super(`Google token endpoint answered HTTP ${status}`);
+    this.name = 'TokenEndpointError';
+  }
+}
+
+/** Server-side or rate-limit answers may clear on their own; 400/401 (`invalid_grant`) will not. */
+function transientStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
 }
 
 function expiresAt(deps: AntigravityDeps, expiresIn: unknown): number {
@@ -196,7 +210,9 @@ async function onboard(deps: AntigravityDeps, access: string, tierId: string, si
 async function exchangeCode(deps: AntigravityDeps, code: string, verifier: string, signal: AbortSignal): Promise<{ access: string; refresh: string; expires: number }> {
   const tokens = await postToken(deps, {
     grant_type: 'authorization_code', code, redirect_uri: ANTIGRAVITY_REDIRECT_URI, code_verifier: verifier,
-  }, signal);
+  }, signal).catch((error: unknown) => {
+    throw error instanceof TokenEndpointError ? new SubscriptionLoginError('token-exchange') : error;
+  });
   if (typeof tokens.access_token !== 'string' || !tokens.access_token || typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) {
     throw new SubscriptionLoginError('token-exchange');
   }
@@ -222,10 +238,24 @@ export async function loginAntigravity(interaction: AuthInteraction, deps: Antig
   return { type: 'oauth', ...tokens, projectId: project.projectId, tier: project.tier };
 }
 
-/** A new access token; Google keeps the refresh token unless it sends a new one. */
+async function postRefresh(deps: AntigravityDeps, refresh: string, signal: AbortSignal): Promise<TokenResponse> {
+  try {
+    return await postToken(deps, { grant_type: 'refresh_token', refresh_token: refresh }, signal);
+  } catch (error) {
+    if (error instanceof TokenEndpointError) throw new SubscriptionRefreshError(transientStatus(error.status));
+    if (signal.aborted) throw error;
+    // No answer at all (DNS, connection, timeout, unreadable body): the sign-in may still be valid.
+    throw new SubscriptionRefreshError(true);
+  }
+}
+
+/**
+ * A new access token; Google keeps the refresh token unless it sends a new one. Fails with
+ * `SubscriptionRefreshError`: transient for no answer, 408, 429 and 5xx; permanent otherwise.
+ */
 export async function refreshAntigravity(credential: SubscriptionCredential, deps: AntigravityDeps, signal: AbortSignal): Promise<SubscriptionCredential> {
-  const tokens = await postToken(deps, { grant_type: 'refresh_token', refresh_token: credential.refresh }, signal);
-  if (typeof tokens.access_token !== 'string' || !tokens.access_token) throw new SubscriptionLoginError('token-exchange');
+  const tokens = await postRefresh(deps, credential.refresh, signal);
+  if (typeof tokens.access_token !== 'string' || !tokens.access_token) throw new SubscriptionRefreshError(false);
   return {
     ...credential,
     access: tokens.access_token,
