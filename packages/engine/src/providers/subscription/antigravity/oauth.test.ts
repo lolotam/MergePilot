@@ -167,6 +167,11 @@ describe('loginAntigravity', () => {
     const noRefresh = deps({ '/token': () => Response.json({ access_token: access, expires_in: 3600 }) });
     await expect(loginAntigravity(interaction((authUrl) => redirectFor(authUrl)).value, noRefresh.deps)).rejects.toMatchObject({ reason: 'token-exchange' });
   });
+
+  it('reports a client Google rejects at the code exchange as a server setup problem', async () => {
+    const rejected = deps({ '/token': () => Response.json({ error: 'invalid_client' }, { status: 401 }) });
+    await expect(loginAntigravity(interaction((authUrl) => redirectFor(authUrl)).value, rejected.deps)).rejects.toMatchObject({ reason: 'not-configured' });
+  });
 });
 
 const OLD_ACCESS = 'fake-old-access-token';
@@ -192,6 +197,7 @@ describe('refreshAntigravity', () => {
 
   it.each([
     ['invalid_grant (400)', () => Response.json({ error: 'invalid_grant' }, { status: 400 }), false],
+    ['invalid_client (401)', () => Response.json({ error: 'invalid_client' }, { status: 401 }), false],
     ['401', () => new Response('', { status: 401 }), false],
     ['a 200 without an access token', () => Response.json({ expires_in: 3600 }), false],
     ['503', () => new Response('unavailable', { status: 503 }), true],
@@ -203,22 +209,36 @@ describe('refreshAntigravity', () => {
     expect(failure).toBeInstanceOf(SubscriptionRefreshError);
     expect(failure).toMatchObject({ transient });
   });
-});
 
-/** A body whose cancel is observable, as an unread HTTP body would be. */
-function trackedBody(text: string, cancel: () => void): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(text)); }, cancel });
-}
+  it.each([
+    ['invalid_grant', 'sign-in'],
+    ['invalid_client', 'not-configured'],
+    ['unauthorized_client', 'not-configured'],
+    ['invalid_request', 'not-configured'],
+    ['some_future_code', 'sign-in'],
+  ])('reads the OAuth error %s from a refused refresh as %s', async (code, reason) => {
+    const { deps: d } = deps({ '/token': () => Response.json({ error: code, error_description: `echo ${refresh}` }, { status: 400 }) });
+    const failure = await refreshAntigravity(stored, d, new AbortController().signal).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ reason });
+    expect(String((failure as Error).message)).not.toContain(refresh);
+  });
+});
 
 describe('failed and unreadable Google answers', () => {
   const stored = { type: 'oauth' as const, access: OLD_ACCESS, refresh, expires: 1, projectId: 'project-123', tier: 'free-tier' };
   const echoed = `not json ${ROTATED_REFRESH}`;
 
-  it('cancels the body of a refused token request, and the status still decides', async () => {
-    const cancel = vi.fn();
-    const { deps: d } = deps({ '/token': () => new Response(trackedBody('{"error":"invalid_grant"}', cancel), { status: 400 }) });
-    await expect(refreshAntigravity(stored, d, new AbortController().signal)).rejects.toMatchObject({ reason: 'sign-in' });
-    expect(cancel).toHaveBeenCalledTimes(1);
+  it('reads a refused token body to its end, keeping only a known error code', async () => {
+    const answers: Response[] = [];
+    const { deps: d } = deps({ '/token': () => {
+      const answer = new Response(`<html>${ROTATED_REFRESH}</html>`, { status: 400 });
+      answers.push(answer);
+      return answer;
+    } });
+    const failure = await refreshAntigravity(stored, d, new AbortController().signal).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ reason: 'sign-in' });
+    expect(String((failure as Error).message)).not.toContain(ROTATED_REFRESH);
+    expect(answers[0]!.bodyUsed).toBe(true);
   });
 
   it('turns a token answer that is not JSON into fixed errors without its body', async () => {

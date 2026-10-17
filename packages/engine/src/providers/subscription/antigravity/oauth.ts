@@ -9,7 +9,7 @@ import type { AuthInteraction } from '@earendil-works/pi-ai';
 import type { SubscriptionCredential } from '../../../credentials/subscription.js';
 import { antigravityHeaders, ANTIGRAVITY_CLIENT_METADATA, type AntigravityClient } from './config.js';
 import { SubscriptionRefreshError } from '../refresh-error.js';
-import { discardBody, fetchWithHosts, MalformedResponseError, readJson } from './transport.js';
+import { fetchWithHosts, MalformedResponseError, readJson } from './transport.js';
 
 export const ANTIGRAVITY_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 export const ANTIGRAVITY_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -108,19 +108,36 @@ async function postToken(deps: AntigravityDeps, form: Record<string, string>, si
     body: new URLSearchParams({ ...form, client_id: deps.client.clientId, client_secret: deps.client.clientSecret }).toString(),
     signal,
   });
-  // The body of a failed token call can echo the request; it is dropped, not parsed into a message.
-  if (!response.ok) {
-    await discardBody(response);
-    throw new TokenEndpointError(response.status);
-  }
+  // The body of a failed token call can echo the request: only a known OAuth error code is kept from it.
+  if (!response.ok) throw new TokenEndpointError(response.status, await oauthErrorOf(response));
   return (await readJson(response, 'Google token endpoint')) as TokenResponse;
 }
 
-/** A non-2xx answer from Google's token endpoint; only the status is kept. */
+/** The RFC 6749 error codes kept from a failed token answer; anything else is dropped. */
+const OAUTH_ERRORS = new Set(['invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client', 'unsupported_grant_type', 'invalid_scope']);
+
+/** Codes that mean this server's OAuth client is wrong or missing: the operator's problem, not the user's. */
+const CLIENT_ERRORS = new Set(['invalid_request', 'invalid_client', 'unauthorized_client']);
+
+async function oauthErrorOf(response: Response): Promise<string | undefined> {
+  // Reading the body to its end also releases the connection; a parse failure keeps nothing of it.
+  try {
+    const error = ((await response.json()) as { error?: unknown }).error;
+    return typeof error === 'string' && OAUTH_ERRORS.has(error) ? error : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A non-2xx answer from Google's token endpoint; only the status and a known OAuth error code are kept. */
 class TokenEndpointError extends Error {
-  constructor(readonly status: number) {
+  constructor(readonly status: number, readonly oauthError: string | undefined) {
     super(`Google token endpoint answered HTTP ${status}`);
     this.name = 'TokenEndpointError';
+  }
+
+  get clientRejected(): boolean {
+    return this.oauthError !== undefined && CLIENT_ERRORS.has(this.oauthError);
   }
 }
 
@@ -218,6 +235,7 @@ async function exchangeCode(deps: AntigravityDeps, code: string, verifier: strin
   const tokens = await postToken(deps, {
     grant_type: 'authorization_code', code, redirect_uri: ANTIGRAVITY_REDIRECT_URI, code_verifier: verifier,
   }, signal).catch((error: unknown) => {
+    if (error instanceof TokenEndpointError && error.clientRejected) throw new SubscriptionLoginError('not-configured');
     throw error instanceof TokenEndpointError || error instanceof MalformedResponseError ? new SubscriptionLoginError('token-exchange') : error;
   });
   if (typeof tokens.access_token !== 'string' || !tokens.access_token || typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) {
@@ -249,7 +267,11 @@ async function postRefresh(deps: AntigravityDeps, refresh: string, signal: Abort
   try {
     return await postToken(deps, { grant_type: 'refresh_token', refresh_token: refresh }, signal);
   } catch (error) {
-    if (error instanceof TokenEndpointError) throw new SubscriptionRefreshError(transientStatus(error.status) ? 'unreachable' : 'sign-in');
+    if (error instanceof TokenEndpointError) {
+      if (transientStatus(error.status)) throw new SubscriptionRefreshError('unreachable');
+      // invalid_grant (or any other refusal) means the sign-in itself is gone; a rejected client is the server's setup.
+      throw new SubscriptionRefreshError(error.clientRejected ? 'not-configured' : 'sign-in');
+    }
     if (signal.aborted) throw error;
     // No answer at all (DNS, connection, timeout, unreadable body): the sign-in may still be valid.
     throw new SubscriptionRefreshError('unreachable');

@@ -2,7 +2,7 @@
  * Why a subscription token refresh failed:
  * - `sign-in`: the sign-in itself is no longer valid (for example `invalid_grant`);
  * - `unreachable`: no answer or a server error, so trying again later may work;
- * - `not-configured`: this server lacks the provider's OAuth client, an operator problem.
+ * - `not-configured`: this server lacks the provider's OAuth client or Google rejects it, an operator problem.
  */
 export type SubscriptionRefreshFailure = 'sign-in' | 'unreachable' | 'not-configured';
 
