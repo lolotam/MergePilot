@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { LlmFailure, type LlmFailureCode, type PriceEntry, type ReviewModel } from '@mergepilot/engine';
+import { encodeSubscription, LlmFailure, Secret, type LlmFailureCode, type PriceEntry, type ReviewModel } from '@mergepilot/engine';
 import { BudgetAdmission } from './budget-admission.js';
 import type { DualAuthState } from '../credentials/dual-auth.js';
-import { createHarness, WORKSPACE_ID } from './model-settings.fixtures.js';
+import type { WorkspaceSettings } from '../core/types.js';
+import { createHarness, keyFor, WORKSPACE_ID } from './model-settings.fixtures.js';
 import { processReviewJob } from './process-review.js';
 
 // ADR-0027 Phase B, end to end through the worker: anthropic has a subscription (the default)
@@ -29,25 +30,61 @@ function chain(primary: ReturnType<typeof vi.fn>, keys: ReturnType<typeof vi.fn>
 
 const bothMethods: DualAuthState = { hasSubscription: true, hasApiKeys: true, preference: 'subscription', effective: 'subscription' };
 const subscriptionOnly: DualAuthState = { ...bothMethods, hasApiKeys: false };
+const keysOnly: DualAuthState = { hasSubscription: false, hasApiKeys: true, preference: null, effective: 'api-key' };
 
-async function dualReview(model: ReviewModel, options: { repoFiles?: Record<string, string>; state?: DualAuthState; monthlyBudgetUsd?: number } = {}) {
+const subscription = (provider: 'anthropic' | 'openai') =>
+  new Secret(encodeSubscription(provider, { type: 'oauth', access: `${provider}-access-01`, refresh: `${provider}-refresh-01`, expires: Date.now() + 3_600_000 }));
+const apiKey = new Secret(keyFor('anthropic-slot'));
+
+/** The workspace's credentials as the worker reads them; a test may change them after admission. */
+interface CredentialState {
+  dual: DualAuthState;
+  /** What `resolve` returns: the parent row (the envelope while a subscription is connected). */
+  parent: Secret;
+}
+
+async function dualReview(
+  model: ReviewModel,
+  options: {
+    repoFiles?: Record<string, string>;
+    state?: DualAuthState;
+    monthlyBudgetUsd?: number;
+    settings?: Partial<WorkspaceSettings>;
+    /** Per provider; providers not listed use `state`. */
+    states?: Partial<Record<string, CredentialState>>;
+    /** What an admin changed between budget admission and the model build. */
+    afterAdmission?: CredentialState;
+  } = {},
+) {
   const h = createHarness({
-    settings: { monthlyBudgetUsd: options.monthlyBudgetUsd ?? null },
+    settings: { monthlyBudgetUsd: options.monthlyBudgetUsd ?? null, ...options.settings },
     fakeModel: model,
     ...(options.repoFiles ? { repoFiles: options.repoFiles } : {}),
   });
   await h.store.replaceModelPrices('models.dev', [catalog], new Date('2026-10-13T02:30:00.000Z'));
-  const state = options.state ?? bothMethods;
+  let current: CredentialState = { dual: options.state ?? bothMethods, parent: subscription('anthropic') };
+  const now = (provider: string): CredentialState => options.states?.[provider] ?? current;
   const credentials = {
     ...h.credentials,
-    getEffectiveAuthMethod: vi.fn(async () => state.effective),
-    getDualAuthState: vi.fn(async () => state),
+    resolve: vi.fn(async (_ws: string, provider: string) => now(provider).parent),
+    resolveKeyRoster: vi.fn(async () => ({ secrets: [apiKey], keyIds: ['k1'], startIndex: 0 })),
+    getEffectiveAuthMethod: vi.fn(async (_ws: string, provider: string) => now(provider).dual.effective),
+    getDualAuthState: vi.fn(async (_ws: string, provider: string) => now(provider).dual),
   };
   const admission = new BudgetAdmission();
-  const admit = vi.spyOn(admission, 'admit');
+  const admitOnce = admission.admit.bind(admission);
+  const admit = vi.spyOn(admission, 'admit').mockImplementation(async (...args) => {
+    const release = await admitOnce(...args);
+    if (options.afterAdmission) current = options.afterAdmission;
+    return release;
+  });
   const result = await processReviewJob(h.job, { ...h.deps, credentials, budgetAdmission: admission });
   return { ...h, result, admit, run: await h.latestRun(), config: h.getCapturedConfig() };
 }
+
+/** The credential the worker built the primary model with (the test seam's second argument). */
+const builtWith = (deps: { createModelForProvider?: unknown }) =>
+  (deps.createModelForProvider as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as Secret | undefined;
 
 describe('processReviewJob — method fallback from a subscription to API keys (ADR-0027)', () => {
   it('records the switch, prices the paid calls at the trusted API price and counts them in the month', async () => {
@@ -141,5 +178,51 @@ describe('processReviewJob — budget admission of a subscription bot (ADR-0027)
   it('reserves nothing for a subscription with no API keys', async () => {
     const { admit } = await dualReview(chain(answer(), answer()), { monthlyBudgetUsd: 10, state: subscriptionOnly });
     expect(admit.mock.calls[0]?.[1]).toBe(0);
+  });
+});
+
+describe('processReviewJob — a run keeps its budget admission (ADR-0033)', () => {
+  it('stays on the subscription when the default switches to API keys after a free admission', async () => {
+    const flipped: CredentialState = {
+      dual: { hasSubscription: true, hasApiKeys: true, preference: 'api-key', effective: 'api-key' },
+      parent: subscription('anthropic'),
+    };
+    const { admit, run, deps } = await dualReview(chain(answer(), answer()), {
+      monthlyBudgetUsd: 10,
+      state: subscriptionOnly,
+      afterAdmission: flipped,
+    });
+
+    expect(admit.mock.calls[0]?.[1]).toBe(0);
+    expect(builtWith(deps)?.reveal()).toBe(flipped.parent.reveal());
+    expect(run).toMatchObject({ status: 'completed', costUsd: 0 });
+  });
+
+  it('fails clearly instead of paying when the subscription was replaced by an API key after a free admission', async () => {
+    const { run, deps } = await dualReview(chain(answer(), answer()), {
+      monthlyBudgetUsd: 10,
+      state: subscriptionOnly,
+      afterAdmission: { dual: keysOnly, parent: apiKey },
+    });
+
+    expect(deps.createModelForProvider).not.toHaveBeenCalled();
+    expect(run).toMatchObject({ status: 'failed', costUsd: null });
+    expect(run?.detail).toMatch(/subscription .*no longer connected/i);
+    expect(run?.detail).not.toContain(apiKey.reveal());
+  });
+
+  it('admits the main bot on the heavy-duty provider it will actually run on', async () => {
+    const { admit, run, deps } = await dualReview(chain(answer(), answer()), {
+      monthlyBudgetUsd: 10,
+      settings: { heavyModel: 'gpt-heavy', heavyProvider: 'openai', heavyThresholdLines: 1 },
+      states: {
+        anthropic: { dual: subscriptionOnly, parent: subscription('anthropic') },
+        openai: { dual: keysOnly, parent: apiKey },
+      },
+    });
+
+    expect(admit.mock.calls[0]?.[1]).toBe(0.5);
+    expect(builtWith(deps)?.reveal()).toBe(apiKey.reveal());
+    expect(run?.status).toBe('completed');
   });
 });

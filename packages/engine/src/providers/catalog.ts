@@ -9,8 +9,9 @@ import { FALLBACK_EFFORTS } from './effort.js';
 import { failureFromResponse, failureFromThrown, keyValue, type FetchLike, type KeyInput } from './http.js';
 import type { ApiProviderId } from './ids.js';
 import { providerEntry, resolveBaseUrl } from './registry.js';
-import { decodeSubscription } from '../credentials/subscription.js';
+import { decodeSubscription, isSubscriptionOnlyProvider } from '../credentials/subscription.js';
 import { subscriptionModels } from './subscription/adapter.js';
+import { listAntigravityModels } from './subscription/antigravity/models.js';
 
 export type { CatalogModel } from './catalog-types.js';
 
@@ -154,7 +155,14 @@ export async function listModels(
   options: ListModelsOptions = {},
 ): Promise<CatalogModel[]> {
   const subscription = decodeSubscription(keyValue(apiKey) ?? '', provider);
+  if (subscription?.provider === 'google-antigravity') {
+    return listAntigravityModels(subscription.credential, {
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+  }
   if (subscription) return sortUnique(subscriptionModels(subscription.provider));
+  if (isSubscriptionOnlyProvider(provider)) throw new Error(`Provider ${provider} needs a subscription sign-in`);
   let models: CatalogModel[];
   if (provider === 'anthropic') models = await listAnthropic(apiKey, options);
   else if (provider === 'openai') models = await listOpenAI(apiKey, options);

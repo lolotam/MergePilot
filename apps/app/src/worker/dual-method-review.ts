@@ -2,7 +2,14 @@
  * The worker's side of the ADR-0027 method fallback: which providers have both a subscription and
  * API keys, how such a bot is admitted against the monthly budget, and how it is priced.
  */
-import { SUBSCRIPTION_PREFIX, type ApiProviderId, type DualMethodConfig } from '@mergepilot/engine';
+import {
+  decodeSubscription,
+  LlmFailure,
+  SUBSCRIPTION_PREFIX,
+  type ApiProviderId,
+  type DualMethodConfig,
+  type Secret,
+} from '@mergepilot/engine';
 import type { Logger } from 'pino';
 import { resolvePricing } from '../core/model-pricing.js';
 import type { ModelPriceStore } from '../core/price-types.js';
@@ -53,12 +60,42 @@ export async function dualMethodsForProviders(
 }
 
 /**
- * A bot admitted as free (ADR-0022) holds no budget, so keys connected after its admission must
- * not become a paid fallback behind its subscription in this run.
+ * A bot admitted as free (ADR-0022) holds no budget, so no key path may stand behind it in this
+ * run (ADR-0033): its own provider loses both methods' entries, whatever the default is now, and
+ * keys connected after its admission do not become a paid fallback behind any subscription.
  */
-export function withinAdmission(dualMethods: DualMethods, admittedFree: boolean | undefined): DualMethods {
+export function withinAdmission(dualMethods: DualMethods, admittedFree: boolean | undefined, primaryProvider: string): DualMethods {
   if (!admittedFree) return dualMethods;
-  return Object.fromEntries(Object.entries(dualMethods).filter(([, dual]) => dual?.defaultMethod !== 'subscription'));
+  return Object.fromEntries(
+    Object.entries(dualMethods).filter(([provider, dual]) => provider !== primaryProvider && dual?.defaultMethod !== 'subscription'),
+  );
+}
+
+/**
+ * The subscription a bot was admitted free with (ADR-0033), read again for this run whatever the
+ * default method is now. A parent row that is no longer an envelope (the subscription was replaced
+ * by an API key) fails the bot instead of paying with a budget it never reserved.
+ */
+export async function admittedSubscription(
+  credentials: Pick<ProcessReviewCredentials, 'resolve'>,
+  workspaceId: string,
+  provider: string,
+): Promise<Secret> {
+  const secret = await credentials.resolve(workspaceId, provider as KeyProvider);
+  let envelope: ReturnType<typeof decodeSubscription>;
+  try {
+    envelope = decodeSubscription(secret.reveal(), provider);
+  } catch {
+    envelope = undefined;
+  }
+  if (!envelope) {
+    throw new LlmFailure({
+      code: 'INVALID_CREDENTIAL',
+      provider,
+      message: `the ${provider} subscription this review was admitted with is no longer connected; it was not run on API keys outside the monthly budget`,
+    });
+  }
+  return secret;
 }
 
 /**

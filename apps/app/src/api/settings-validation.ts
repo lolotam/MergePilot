@@ -1,4 +1,4 @@
-import { isJevModel, jevModelIds } from '@mergepilot/engine';
+import { isJevModel, isSubscriptionOnlyProvider, jevModelIds, providerEntry, type SubscriptionProvider } from '@mergepilot/engine';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import {
   sameBotName,
@@ -31,6 +31,8 @@ export function mergeSettings(
     heavyThresholdLines: keep(update.heavyThresholdLines, current?.heavyThresholdLines),
     fallback: keep(update.fallback, current?.fallback) ?? [],
     minSeverity: keep(update.minSeverity, current?.minSeverity) ?? 'medium',
+    // Undefined keeps the stored value; the stores fill the default (5).
+    maxFindings: update.maxFindings ?? current?.maxFindings,
     // Undefined keeps the stored value; a workspace without settings starts at the 30-day default.
     runRetentionDays:
       update.runRetentionDays !== undefined
@@ -122,6 +124,38 @@ export async function validateFallback(
     seen.add(id);
     const problem = await keyProblem(entry.provider, 'fallback_key_missing', 'fallback');
     if (problem) return problem;
+  }
+  return null;
+}
+
+interface ProviderChoices {
+  provider: string;
+  heavyProvider?: string | null | undefined;
+  fallback?: ReadonlyArray<{ provider: string }> | null | undefined;
+}
+
+function providersOf(config: ProviderChoices | null | undefined): Set<string> {
+  if (!config) return new Set();
+  return new Set([config.provider, config.heavyProvider ?? '', ...(config.fallback ?? []).map((entry) => entry.provider)].filter(Boolean));
+}
+
+/**
+ * A subscription-only provider whose sign-in this server does not offer (ADR-0032: Google
+ * Antigravity without its OAuth client) cannot be newly chosen. A choice already saved is kept, so
+ * an admin can still save other changes and switch away from it.
+ */
+export function unavailableProviderProblem(
+  next: ProviderChoices,
+  previous: ProviderChoices | null | undefined,
+  available: (provider: SubscriptionProvider) => boolean,
+): SettingsProblem | null {
+  const kept = providersOf(previous);
+  for (const provider of providersOf(next)) {
+    if (kept.has(provider) || !isSubscriptionOnlyProvider(provider) || available(provider)) continue;
+    return {
+      code: 'provider_unavailable',
+      message: `${providerEntry(provider).label} sign-in is not configured on this server; choose another provider`,
+    };
   }
   return null;
 }

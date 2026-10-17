@@ -60,6 +60,15 @@ const ENTRIES: Record<ApiProviderId, EntryInit> = {
     defaultModel: 'gemini-3.8-flash',
     envName: 'GEMINI_API_KEY',
   },
+  // Subscription only (ADR-0032): no API key; requests use the Cloud Code Assist protocol.
+  'google-antigravity': {
+    label: 'Google Antigravity',
+    kind: 'native',
+    baseUrl: 'https://cloudcode-pa.googleapis.com',
+    thinkingStyle: 'gemini',
+    defaultModel: 'gemini-3.8-flash',
+    envName: 'GOOGLE_ANTIGRAVITY_SUBSCRIPTION',
+  },
   xai: {
     label: 'xAI (Grok)',
     kind: 'openai-compatible',

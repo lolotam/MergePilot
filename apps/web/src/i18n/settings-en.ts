@@ -60,6 +60,11 @@ export const enSettings = {
   severityHigh: 'High',
   severityCritical: 'Critical',
 
+  // Findings limit (ADR-0033)
+  maxFindingsLabel: 'Maximum review comments per PR review',
+  maxFindingsHint:
+    'The most findings one review writes on a pull request. A repository whose .mergepilot.yml sets review.maxFindings uses its own value.',
+
   // Key testing & Base URL
   testKeyAction: 'Test connection',
   testingKey: 'Testing...',

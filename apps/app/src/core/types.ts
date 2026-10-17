@@ -6,10 +6,12 @@ import type { BackupRestoreStore } from './backup-types.js';
 import type { ModelPriceStore, PriceOverride, RunPricing } from './price-types.js';
 import type { BotLogo, PanelMode, ReviewerBotStore } from './bot-types.js';
 import type { RepoColorKey, RunMaintenanceStore } from './run-types.js';
+import type { MaxFindingsChoice } from './findings-limit.js';
 
 export * from './backup-types.js';
 export * from './bot-types.js';
 export * from './run-types.js';
+export * from './findings-limit.js';
 export * from './price-types.js';
 
 /** Workspace roles (ADR-0007). Order matters: each role includes everything below it. */
@@ -86,6 +88,11 @@ export interface WorkspaceSettings {
   heavyThresholdLines?: number | null | undefined;
   fallback?: FallbackSetting[] | undefined;
   minSeverity?: Severity | undefined;
+  /**
+   * Findings one review publishes, unless the repository file names its own `review.maxFindings`
+   * (ADR-0033). Stores always read back a value (5 by default); undefined on save keeps it.
+   */
+  maxFindings?: MaxFindingsChoice | undefined;
   /**
    * Days to keep review runs (ADR-0014); null keeps them forever. Stores always read back a value
    * (30 by default); undefined on save keeps the stored value.

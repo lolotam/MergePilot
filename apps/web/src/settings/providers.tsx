@@ -2,12 +2,14 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type ApiProvider, type CatalogModel, type KeyProvider } from '../api/client.js';
 import type { I18nKey } from '../i18n/ar.js';
 import { useI18n } from '../i18n/context.js';
+import { isSubscriptionOnlyProvider } from './subscription-only.js';
 
 /** Every provider the SaaS accepts, in display order (`claude-code` stays Action-only). */
 export const SAAS_PROVIDERS: readonly ApiProvider[] = [
   'anthropic',
   'openai',
   'gemini',
+  'google-antigravity',
   'xai',
   'deepseek',
   'nvidia',
@@ -40,6 +42,7 @@ const LABEL_KEYS: Record<KeyProvider, I18nKey> = {
   anthropic: 'providerAnthropic',
   openai: 'providerOpenai',
   gemini: 'providerGemini',
+  'google-antigravity': 'providerGoogleAntigravity',
   xai: 'providerXai',
   deepseek: 'providerDeepseek',
   nvidia: 'providerNvidia',
@@ -99,20 +102,42 @@ export const fieldClass =
 
 export const labelClass = 'block text-xs font-semibold mb-1.5 text-ink-700 dark:text-ink-300';
 
+export const subscriptionsQueryKey = (workspaceId: string | undefined) =>
+  ['workspaces', workspaceId, 'subscriptions', 'available'] as const;
+
+/** The subscriptions this server offers (ADR-0032); admin only, so a member gets none. */
+export function useSubscriptionAvailability(workspaceId: string | undefined) {
+  return useQuery({
+    queryKey: subscriptionsQueryKey(workspaceId),
+    queryFn: () => api.getSubscriptionAvailability(workspaceId!),
+    enabled: Boolean(workspaceId),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+}
+
 export interface ProviderSelectProps<P extends KeyProvider = ApiProvider> {
   id: string;
   label: string;
   value: P;
   /** Providers to offer (default: the review providers); the current value is always kept in the list. */
   options?: readonly P[] | undefined;
+  /** Subscription-only providers are offered only when this workspace's server lists them. */
+  workspaceId?: string | undefined;
   onChange: (provider: P) => void;
   disabled?: boolean | undefined;
 }
 
-export function ProviderSelect<P extends KeyProvider = ApiProvider>({ id, label, value, options, onChange, disabled }: ProviderSelectProps<P>) {
+export function ProviderSelect<P extends KeyProvider = ApiProvider>({ id, label, value, options, workspaceId, onChange, disabled }: ProviderSelectProps<P>) {
+  const { t } = useI18n();
   const providerLabel = useProviderLabel();
-  const offered = options ?? (SAAS_PROVIDERS as readonly KeyProvider[] as readonly P[]);
+  const { data: availability } = useSubscriptionAvailability(workspaceId);
+  const offeredByServer = (provider: KeyProvider) =>
+    !isSubscriptionOnlyProvider(provider) || availability?.providers.includes(provider) === true;
+  const offered = (options ?? (SAAS_PROVIDERS as readonly KeyProvider[] as readonly P[])).filter(offeredByServer);
+  // A saved choice stays visible, so it is never silently replaced; the note says why it cannot be used.
   const list = offered.includes(value) ? offered : [value, ...offered];
+  const savedButUnavailable = availability !== undefined && !offeredByServer(value);
   return (
     <div>
       <label htmlFor={id} className={labelClass}>
@@ -131,6 +156,11 @@ export function ProviderSelect<P extends KeyProvider = ApiProvider>({ id, label,
           </option>
         ))}
       </select>
+      {savedButUnavailable && (
+        <p role="note" className="text-[11px] text-amber-700 dark:text-amber-300 mt-1 ms-2">
+          {t('providerUnavailableNote', { provider: providerLabel(value) })}
+        </p>
+      )}
     </div>
   );
 }

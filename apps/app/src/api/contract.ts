@@ -10,6 +10,7 @@ import { z } from 'zod';
  */
 
 import { SeveritySchema } from '@mergepilot/engine';
+import { MAX_FINDINGS_CHOICES } from '../core/findings-limit.js';
 import { BotLogoSchema, BotNameSchema, PanelMinAgreementSchema, PanelModeSchema } from './contract-bots.js';
 import { JudgeRunSchema, JudgeSettingsSchema, KeyProviderSchema } from './contract-judge.js';
 import {
@@ -32,6 +33,12 @@ export * from './contract-prices.js';
 export * from './contract-subscriptions.js';
 
 export type Severity = z.infer<typeof SeveritySchema>;
+
+export { MAX_FINDINGS_CHOICES };
+/** Settings field: findings per published review, one of the dashboard's choices (ADR-0033). */
+export const MaxFindingsSchema = z.literal([...MAX_FINDINGS_CHOICES], {
+  message: `maxFindings must be one of: ${MAX_FINDINGS_CHOICES.join(', ')}`,
+});
 
 export const ErrorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
@@ -67,6 +74,11 @@ export const SettingsSchema = z.object({
   heavyThresholdLines: z.number().int().positive().max(1_000_000).nullable().optional(),
   fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).optional().default([]),
   minSeverity: SeveritySchema.optional().default('medium'),
+  /**
+   * Findings one review publishes (consensus: the merged review); a repository's
+   * `.mergepilot.yml` `review.maxFindings` overrides it (ADR-0033). Left out on PUT keeps it (5 by default).
+   */
+  maxFindings: MaxFindingsSchema.optional(),
   /** Days to keep review runs; null = forever. Left out on PUT keeps the stored value (30 by default). */
   runRetentionDays: RunRetentionDaysSchema.optional(),
   /** `owner/repo` -> palette key for the runs table; left out on PUT keeps the stored map. */

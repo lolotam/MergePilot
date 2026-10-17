@@ -29,6 +29,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<LlmFailureCode>([
   'ABORTED',
   'UNKNOWN',
   'QUOTA_EXHAUSTED_ALL_KEYS',
+  'PROVIDER_NOT_CONFIGURED',
 ]);
 
 /** The failure category of anything a model threw, or undefined when it is not an LlmFailure. */
@@ -93,6 +94,11 @@ export class FallbackChain implements ReviewModel {
    */
   outputTokensFor(maxOutputTokens: number): number {
     return Math.max(...this.#models.map((m) => m.outputTokensFor?.(maxOutputTokens) ?? maxOutputTokens));
+  }
+
+  /** The answer budget of the model answering now: after a fallback, the fallback's own limit. */
+  answerTokensFor(maxOutputTokens: number, thinking?: 'off'): number {
+    return this.#current().answerTokensFor?.(maxOutputTokens, thinking) ?? maxOutputTokens;
   }
 
   get label(): string {

@@ -15,7 +15,12 @@ MergePilot reviews pull requests through a shared TypeScript engine, a GitHub Ac
 - `packages/github` owns GitHub reads, publishing, and review rendering. `apps/action` and `apps/app` supply credentials and call the shared engine.
 - `apps/app/src/api/contract*.ts` defines dashboard REST schemas consumed by `apps/web`. Update producers and consumers together.
 - Use TypeScript ESM and `.js` extensions in relative imports. Keep user-visible text in the Arabic/English dictionaries under `apps/web/src/i18n/`.
-- Match the existing components and styling for dashboard changes. Keep code and identifiers in English; respect the user's requested conversation language.
+- Match the existing components and styling for dashboard changes. Keep code and identifiers in English.
+
+## Conversation language
+
+- Reply to the owner in simple Egyptian Arabic only, even when the owner writes in English. This covers every reply: status lines, progress updates, questions and final summaries. Switch to English only when the owner asks for an English reply in that message. Reply to anyone else (for example a contributor commenting on a PR) in the language they wrote in.
+- Code, identifiers, commit messages, PR titles and descriptions, and English documentation stay in English. Keep file paths, commands, model names and error messages verbatim inside the Arabic text.
 
 ## Review and credential invariants
 
@@ -23,8 +28,8 @@ MergePilot reviews pull requests through a shared TypeScript engine, a GitHub Ac
 - Keep credentials out of logs, error bodies, prompts, and dashboard responses. Redact individual access and refresh tokens, not only serialized credential values.
 - Keep custom provider URLs in trusted workspace settings or Action inputs; repository config cannot redirect credentials. Preserve the custom URL SSRF checks.
 - Surface provider failures as `LlmFailure`. Model fallback must be explicitly configured and disclosed.
-- The dashboard supports API keys and consumer subscriptions for OpenAI/Codex, Anthropic/Claude, and xAI/Grok. Each workspace has one active credential per provider, except gemini, openrouter and opencode-zen (ADR-0026 multi-key list) and anthropic, openai and xai which may keep a subscription and up to 20 API keys together with a stored default method (ADR-0027).
-- Delegate OAuth protocol details to the pi-ai provider library. Use device codes for Codex/Grok and copy-code login for Claude on the web server.
+- The dashboard supports API keys and consumer subscriptions for OpenAI/Codex, Anthropic/Claude, and xAI/Grok, and a subscription-only Google Antigravity provider (`google-antigravity`, ADR-0032) that has no API keys and is offered only when `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_ID` and `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_SECRET` are configured. `gemini` stays API-key only. Each workspace has one active credential per provider, except gemini, openrouter and opencode-zen (ADR-0026 multi-key list) and anthropic, openai and xai which may keep a subscription and up to 20 API keys together with a stored default method (ADR-0027).
+- Delegate OAuth protocol details to the pi-ai provider library. Use device codes for Codex/Grok and copy-code login for Claude on the web server. Exception (ADR-0032): pi-ai has no Google provider, so Google Antigravity's OAuth and Cloud Code Assist protocol live in `packages/engine/src/providers/subscription/antigravity/`, with a paste-the-address login behind a required Terms-of-Service acknowledgement. Never commit its client values.
 - Store subscription envelopes through the existing vault. Login, replacement, restore, disconnect, master-key rotation, and token refresh must share the workspace/provider credential lock across web and worker processes.
 - Subscription calls retain token usage and report zero incremental API cost; they may carry a display-only API-equivalent figure (`result.pricing.apiEquivalentUsd`, ADR-0024) only when every review call stayed on the subscription. Dual-method providers (ADR-0027) may fall back between subscription and API keys on quota or rate limit; that switch is disclosed, API-key calls count toward the monthly budget, and method-only fallbacks record known `cost_usd`. Judge calls and configured model fallbacks keep their own accounting rules.
 

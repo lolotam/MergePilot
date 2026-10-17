@@ -34,13 +34,14 @@ import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { prepareFollowUp, promptPrOf, type FollowUp } from './follow-up.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
 import { manifestFileOf, type ManifestFile } from './manifest.js';
+import { reviewOutputTokensFor, verifyOutputTokensFor, type OutputLimitDisclosure } from './output-budget.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 import { anchorIndexOf, redactPatches } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, type CappedBatches } from './split.js';
 import { estimateReviewCostUsd, paidSwitchFits, SpendTracker } from './spend.js';
-import { runVerifyPass, VERIFY_MAX_OUTPUT_TOKENS } from './verify-pass.js';
+import { runVerifyPass } from './verify-pass.js';
 import type { VerifyRejectedFinding } from './verify.js';
 
 // ── Input types ──
@@ -116,6 +117,8 @@ export type ReviewRunResult =
       judge?: JudgeFilterSummary | undefined;
       /** Repository context sent and left out (ADR-0029); a disclosure, not an incomplete reason. */
       context?: ContextDisclosure | undefined;
+      /** The model's output limit clamped the answer budget below what maxFindings needs (ADR-0033). */
+      outputLimit?: OutputLimitDisclosure | undefined;
       /** Every attempted call, failures included, was on a subscription: the run cost $0. */
       onlySubscriptionCalls: boolean;
     } & Partial<FallbackDisclosure>)
@@ -258,11 +261,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       })
     : [promptTokens];
 
-  const maxOutputTokens = 4096;
+  // Each call may return up to maxFindings findings, so its answer budget grows with them (ADR-0033).
+  const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
   // Price the output limit each call really requests: answer budget + effort's thinking headroom
   // (largest across the chain). Thinking is billed as output, so pricing less could overspend.
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
-  const verifyOutputTokens = model.outputTokensFor(VERIFY_MAX_OUTPUT_TOKENS);
+  // Worst case: every call returned its maxFindings findings, all of them verified.
+  const verifyOutputTokens = model.outputTokensFor(verifyOutputTokensFor(reviewCfg.maxFindings * callPromptTokens.length));
   const initialPricing = currentPricing();
   if (initialPricing) {
     // Worst case for the verification call: it shows each file at most once (capped at
@@ -321,6 +326,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
   let totalUsage = pass.totalUsage;
   incompleteReasons.push(...pass.incompleteReasons);
+  // The answer budget of the model that answered the review (a fallback's own limit after a
+  // fallback), read before verification can move the chain on: the summary then says the answer
+  // may hold fewer findings (ADR-0033).
+  const answerTokens = model.answerTokensFor(maxOutputTokens);
+  const outputLimit: OutputLimitDisclosure | undefined =
+    answerTokens < maxOutputTokens
+      ? { maxFindings: reviewCfg.maxFindings, answerTokens, neededTokens: maxOutputTokens }
+      : undefined;
 
   // ── Step e2: verification pass ─────────────────────────────────────────
   let modelFindings = pass.findings;
@@ -407,6 +420,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     ...(verifyRejected.length > 0 ? { verifyRejected } : {}),
     ...(judge ? { judge } : {}),
     ...(contextDisclosure ? { context: contextDisclosure } : {}),
+    ...(outputLimit ? { outputLimit } : {}),
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls,
   };

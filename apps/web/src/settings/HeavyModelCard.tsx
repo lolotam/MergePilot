@@ -76,6 +76,7 @@ export function HeavyModelCard({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-ink-100 dark:border-ink-800">
           <ProviderSelect
             id="heavy-provider"
+            workspaceId={workspaceId}
             label={t('heavyProviderLabel')}
             value={provider}
             options={providers}

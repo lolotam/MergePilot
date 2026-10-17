@@ -157,6 +157,10 @@ export function finishMemoryMaintenance(
 }
 
 export function latestMemoryMaintenance(log: MaintenanceRun[], kind: MaintenanceKind): MaintenanceRun | null {
-  const runs = log.filter((r) => r.kind === kind).sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
-  return runs[0] ? { ...runs[0] } : null;
+  // Two runs can start in the same millisecond: the one recorded last wins the tie.
+  let latest: MaintenanceRun | undefined;
+  for (const run of log) {
+    if (run.kind === kind && (!latest || run.startedAt.getTime() >= latest.startedAt.getTime())) latest = run;
+  }
+  return latest ? { ...latest } : null;
 }

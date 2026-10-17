@@ -170,6 +170,7 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <ProviderSelect
             id={`${prefix}-provider`}
+            workspaceId={workspaceId}
             label={t('providerLabel')}
             value={provider}
             options={keyedProviders}

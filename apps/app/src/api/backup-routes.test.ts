@@ -85,6 +85,7 @@ describe('settings backup: export and restore (ADR-0018)', { timeout: 60000 }, (
     });
 
     expect(await get('settings', 'ws-2')).toEqual({ settings: { ...(await get('settings', 'ws-1')).settings, workspaceId: 'ws-2' } });
+    expect((await get('settings', 'ws-2')).settings.maxFindings).toBe(25);
     expect((await get('bots', 'ws-2')).bots).toEqual((await get('bots', 'ws-1')).bots);
     // The decrypted keys equal the originals (checked server-side, through the vault).
     expect(await plainKeys('ws-2')).toEqual(Object.fromEntries(SEEDED.map((p) => [p, fakeKey(p)])));
@@ -119,7 +120,7 @@ describe('settings backup: export and restore (ADR-0018)', { timeout: 60000 }, (
     const res = await restoreBackup(h, { file, passphrase: PASSPHRASE, dryRun: true });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ dryRun: true, bots: 2, keysTested: false });
-    expect(res.json().settingsChanged).toEqual(expect.arrayContaining(['provider', 'model', 'judge', 'botName', 'panelMode']));
+    expect(res.json().settingsChanged).toEqual(expect.arrayContaining(['provider', 'model', 'maxFindings', 'judge', 'botName', 'panelMode']));
     expect((await get('settings', 'ws-2')).settings).toBeNull();
     expect((await get('bots', 'ws-2')).bots).toEqual([]);
     expect(await h.store.listCredentials('ws-2')).toEqual([]);

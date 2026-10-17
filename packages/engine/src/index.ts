@@ -14,6 +14,7 @@ export * from './review/prompt.js';
 export * from './review/types.js';
 export * from './review/verify.js';
 export * from './review/split.js';
+export type { OutputLimitDisclosure } from './review/output-budget.js';
 export * from './review/batch-run.js';
 export * from './review/truncation.js';
 export * from './review/call.js';

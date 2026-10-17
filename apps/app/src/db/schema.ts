@@ -76,6 +76,8 @@ export const workspaceSettings = pgTable('workspace_settings', {
   panelMinAgreement: smallint('panel_min_agreement').notNull().default(1),
   /** Migration 0010: the judge's uses (ADR-0015 multi-use). */
   judgeUses: text('judge_uses').array().notNull().default(sql`'{}'::text[]`),
+  /** Migration 0013: findings per published review, 5-50 in steps of 5 (ADR-0033). */
+  maxFindings: smallint('max_findings').notNull().default(5),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),

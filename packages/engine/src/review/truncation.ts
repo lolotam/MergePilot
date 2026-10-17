@@ -12,6 +12,7 @@ import type { ReviewDeadline } from './call.js';
 import type { ManifestFile } from './manifest.js';
 import type { PromptPr } from './follow-up.js';
 import type { ReviewModel } from './model.js';
+import { reviewRetryOutputTokens } from './output-budget.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
 import {
   batchFilesBySize,
@@ -21,7 +22,13 @@ import {
   type ReviewableFileWithPatch,
   type RulesFileInput,
 } from './split.js';
-import { describeCallError, requestedOutputTokens, type SpendTracker } from './spend.js';
+import {
+  describeCallError,
+  OUTPUT_LIMIT_RETRY_SKIPPED,
+  requestedOutputTokens,
+  retryAddsAnswerRoom,
+  type SpendTracker,
+} from './spend.js';
 
 export interface RecoverReviewTruncationInput {
   parseResult: ParseReviewAnswerResult;
@@ -76,10 +83,13 @@ export async function recoverReviewTruncation(
   }
 
   // 1. Retry once with 2x allowance if budget permits
-  const retryOutputTokens = Math.min(maxOutputTokens * 2, 16384);
+  const retryOutputTokens = reviewRetryOutputTokens(maxOutputTokens);
   const retryRequested = requestedOutputTokens(model, retryOutputTokens);
 
-  if (!spend.canAfford(promptTokens, retryRequested)) {
+  if (!retryAddsAnswerRoom(model, maxOutputTokens, retryOutputTokens, input.thinkingOff ? 'off' : undefined)) {
+    // The output limit already clamped the first call: go straight to the batch split.
+    if (redactedReviewableFiles.length <= 1) incompleteReasons.push(OUTPUT_LIMIT_RETRY_SKIPPED);
+  } else if (!spend.canAfford(promptTokens, retryRequested)) {
     incompleteReasons.push('truncation retry skipped: budget limit reached');
   } else {
     try {

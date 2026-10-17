@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Secret, decodeSubscription, encodeSubscription, isSubscriptionProvider, refreshSubscription, SUBSCRIPTION_PREFIX,
+import { Secret, decodeSubscription, encodeSubscription, isSubscriptionOnlyProvider, isSubscriptionProvider, refreshSubscription, SUBSCRIPTION_PREFIX,
   type SubscriptionCredential, type SubscriptionProvider } from '@mergepilot/engine';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { KeyProvider, KeyQuotaStatus, ProviderAuthMethod, AppStore, StoredCredential, Vault } from '../core/types.js';
@@ -285,6 +285,10 @@ export class CredentialService {
       const subscription = decodeSubscription(trimmed, params.provider)!;
       if (params.baseUrl) throw new Error('Subscription credentials cannot use a custom base URL');
       return this.sealSubscription(params.workspaceId, subscription.provider, subscription.credential, params.userId);
+    }
+
+    if (isSubscriptionOnlyProvider(params.provider)) {
+      throw new Error('This provider has no API keys. Use its subscription sign-in.');
     }
 
     if (trimmed.startsWith('sk-ant-oat')) {

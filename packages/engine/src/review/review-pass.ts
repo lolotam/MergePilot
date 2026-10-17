@@ -12,6 +12,7 @@ import { FINDINGS_MISSING_REASON } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ManifestFile } from './manifest.js';
+import { reviewRetryOutputTokens } from './output-budget.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import type { PromptPr } from './follow-up.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
@@ -185,7 +186,7 @@ export async function runBatchedPass(
     rulesFiles: ctx.redactedRulesFiles,
     model: ctx.model,
     maxOutputTokens: ctx.maxOutputTokens,
-    retryOutputTokens: Math.min(ctx.maxOutputTokens * 2, 16384),
+    retryOutputTokens: reviewRetryOutputTokens(ctx.maxOutputTokens),
     reviewOutputTokens: ctx.reviewOutputTokens,
     spend: ctx.spend,
     knownSecrets: ctx.knownSecrets,
