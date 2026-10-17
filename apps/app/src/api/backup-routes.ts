@@ -4,7 +4,7 @@ import { requireRole } from '../auth/guard.js';
 import {
   BotNameTakenError, InvalidBotSlotError, SkillLimitError, SkillNameTakenError, UnknownSkillError, WorkspaceDeletedError,
 } from '../core/types.js';
-import { buildBackupFile } from './backup-export.js';
+import { BackupChangedError, buildBackupFile } from './backup-export.js';
 import { planRestore, RestoreProblem } from './backup-restore.js';
 import {
   BACKUP_MAX_BYTES,
@@ -57,11 +57,18 @@ export function registerBackupRoutes(app: FastifyInstance, deps: DashboardApiDep
       const org = await orgAdapter.findOrganizationById(workspaceId);
       if (!org) return sendError(reply, 404, 'not_found', 'Workspace not found');
 
-      const { file, filename, counts } = await buildBackupFile(
-        deps,
-        { id: workspaceId, name: org.name, slug: org.slug ?? workspaceId },
-        { includeKeys, passphrase, now: deps.now ? deps.now() : new Date() },
-      );
+      let built: Awaited<ReturnType<typeof buildBackupFile>>;
+      try {
+        built = await buildBackupFile(
+          deps,
+          { id: workspaceId, name: org.name, slug: org.slug ?? workspaceId },
+          { includeKeys, passphrase, now: deps.now ? deps.now() : new Date() },
+        );
+      } catch (error) {
+        if (error instanceof BackupChangedError) return sendError(reply, 409, 'backup_changed', error.message);
+        throw error;
+      }
+      const { file, filename, counts } = built;
       request.log.info({ event: 'backup.export', workspaceId, includeKeys, ...counts }, 'Settings backup exported');
       return reply
         .status(200)

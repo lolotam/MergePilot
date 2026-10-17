@@ -24,6 +24,14 @@ export interface BackupExportResult {
   counts: { settings: boolean; bots: number; credentials: number; keys: number; skills: number };
 }
 
+/** A listed skill was deleted while the export read it: the backup would name a skill it lacks. */
+export class BackupChangedError extends Error {
+  constructor() {
+    super('The workspace skills changed during the export; try again');
+    this.name = 'BackupChangedError';
+  }
+}
+
 /** `mergepilot-settings-<workspace-slug>-<YYYYMMDD>.json`; the slug keeps only safe characters. */
 export function backupFilename(slug: string, now: Date): string {
   const safeSlug = slug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'workspace';
@@ -52,8 +60,11 @@ export async function buildBackupFile(
   const skills: BackupSkill[] = [];
   for (const summary of skillList) {
     const skill = await deps.store.getReviewSkill(workspace.id, summary.id);
+    // A skill deleted since the listing would leave the settings or bots naming a skill the file
+    // lacks, and they would restore on Default: refuse an incomplete backup instead.
+    if (!skill) throw new BackupChangedError();
     // The listed name, which the settings and bots above name too, even if a rename raced the export.
-    if (skill) skills.push({ name: summary.name, content: skill.content });
+    skills.push({ name: summary.name, content: skill.content });
   }
 
   const salt = options.includeKeys ? newBackupSalt() : null;
