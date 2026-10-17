@@ -39,7 +39,7 @@ describe('runReview — what an unusable answer said', () => {
     if (result.status !== 'failed') return;
     expect(result.answerAttempts).toEqual([
       { chars: first.length, finishReason: 'stop', outputTokens: 12, preview: first },
-      { chars: 500, finishReason: 'stop', preview: 'x'.repeat(200) },
+      { chars: 500, finishReason: 'stop', preview: 'x'.repeat(200), tail: 'x'.repeat(200) },
     ]);
   });
 

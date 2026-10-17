@@ -338,6 +338,14 @@ export async function finishBotRun(
       provider: finish.provider, model: finish.model, attempts: runResult.answerAttempts,
     }, `Review job ${ctx.job.deliveryId}: the model answered without the JSON asked for`);
   }
+  if (runResult?.status === 'completed' && runResult.answerAttempts) {
+    // A summary without the findings list, even after the reminder (ADR-0011): logs only.
+    ctx.logger.warn({
+      event: 'review.findings-list-missing', jobId: ctx.job.deliveryId, runId: br.run.id,
+      ...(ctx.panelActive ? { botSlot: br.bot.slot } : {}),
+      provider: finish.provider, model: finish.model, attempts: runResult.answerAttempts,
+    }, `Review job ${ctx.job.deliveryId}: the model answered without a findings list`);
+  }
 }
 
 /**

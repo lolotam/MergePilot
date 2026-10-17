@@ -140369,10 +140369,11 @@ function describePaths(paths, max = 10, maxLength = 60) {
   return paths.length > max ? `${shown2} +${paths.length - max} more` : shown2;
 }
 var JSON_ONLY_REMINDER = "\n\nIMPORTANT: your previous reply was not the required JSON. Reply with only the JSON object described above: no prose, no markdown fences, nothing before or after it.";
+var FINDINGS_LIST_REMINDER = '\n\nIMPORTANT: your previous reply had no "findings" key. Reply with the whole JSON object described above, including "findings": an empty list [] when nothing qualifies.';
 async function retryUnusableAnswer(input2) {
   const { parsed } = input2;
   if (parsed.ok)
-    return { parsed, thinkingOff: false };
+    return parsed.findingsMissing ? retryForFindingsList(input2) : { parsed, thinkingOff: false };
   if (parsed.code === "invalid-json")
     return retryForJsonOnly(input2);
   if (parsed.code !== "empty-response")
@@ -140401,6 +140402,25 @@ async function retryUnusableAnswer(input2) {
       note: `empty-response retry failed: ${describeCallError(err, input2.knownSecrets)}`,
       thinkingOff: false
     };
+  }
+}
+async function retryForFindingsList(input2) {
+  const { parsed, spend, requestedOutputTokens: requestedOutputTokens2 } = input2;
+  const promptTokens = input2.promptTokens + estimateTokens(FINDINGS_LIST_REMINDER);
+  if (!spend.canAfford(promptTokens, requestedOutputTokens2)) {
+    return { parsed, note: "findings-list retry skipped: budget limit reached", thinkingOff: false };
+  }
+  try {
+    const response = await input2.model.generate({ ...input2.request, user: `${input2.request.user}${FINDINGS_LIST_REMINDER}` });
+    spend.record(promptTokens, requestedOutputTokens2, response.usage);
+    const retried = input2.parse(response);
+    if (!retried.ok) {
+      return { parsed, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
+    }
+    return { parsed: retried, response, usage: response.usage, thinkingOff: false };
+  } catch (err) {
+    spend.record(promptTokens, requestedOutputTokens2, void 0);
+    return { parsed, note: `findings-list retry failed: ${describeCallError(err, input2.knownSecrets)}`, thinkingOff: false };
   }
 }
 async function retryForJsonOnly(input2) {
@@ -141357,11 +141377,13 @@ async function recoverReviewTruncation(input2) {
 
 var ANSWER_PREVIEW_CHARS = 200;
 function answerAttemptOf(response, knownSecrets) {
+  const redacted = redactSecrets(response.text, [...knownSecrets]).text;
   return {
     chars: response.text.length,
     finishReason: response.finishReason,
     ...response.usage ? { outputTokens: response.usage.outputTokens } : {},
-    preview: redactSecrets(response.text, [...knownSecrets]).text.slice(0, ANSWER_PREVIEW_CHARS)
+    preview: redacted.slice(0, ANSWER_PREVIEW_CHARS),
+    ...redacted.length > ANSWER_PREVIEW_CHARS ? { tail: redacted.slice(-ANSWER_PREVIEW_CHARS) } : {}
   };
 }
 function failedCall(err, knownSecrets) {
@@ -141422,9 +141444,10 @@ async function runSinglePass(ctx) {
     deadline: ctx.deadline
   });
   const parsed = recovery.parseResult;
+  const attempts = () => [response, empty.response].filter((r2) => r2 !== void 0).map((r2) => answerAttemptOf(r2, ctx.knownSecrets));
   if (!parsed.ok) {
     const detail = [...notes, ...recovery.incompleteReasons].join("; ");
-    const answerAttempts = parsed.code === "invalid-json" ? [response, empty.response].filter((r2) => r2 !== void 0).map((r2) => answerAttemptOf(r2, ctx.knownSecrets)) : void 0;
+    const answerAttempts = parsed.code === "invalid-json" ? attempts() : void 0;
     return {
       ok: false,
       reason: parsed.error,
@@ -141439,7 +141462,8 @@ async function runSinglePass(ctx) {
     findings: parsed.findings,
     droppedInvalid: parsed.droppedInvalid,
     totalUsage: recovery.totalUsage,
-    incompleteReasons: parsed.findingsMissing ? [...recovery.incompleteReasons, FINDINGS_MISSING_REASON] : recovery.incompleteReasons
+    incompleteReasons: parsed.findingsMissing ? [...notes, ...recovery.incompleteReasons, FINDINGS_MISSING_REASON] : [...notes, ...recovery.incompleteReasons],
+    ...parsed.findingsMissing ? { answerAttempts: attempts() } : {}
   };
 }
 async function runBatchedPass(ctx, batches) {
@@ -142087,6 +142111,7 @@ async function runReview(input2) {
     ...judge ? { judge } : {},
     ...contextDisclosure ? { context: contextDisclosure } : {},
     ...outputLimit ? { outputLimit } : {},
+    ...pass.answerAttempts ? { answerAttempts: pass.answerAttempts } : {},
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls
   };
