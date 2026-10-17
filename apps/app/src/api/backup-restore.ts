@@ -29,7 +29,7 @@ import {
   type BackupPreview,
   type BackupSection,
 } from './contract-backup.js';
-import { botNameTakenByExtraBot, mergeSettings, validateFallback, validateSettings } from './settings-validation.js';
+import { botNameTakenByExtraBot, mergeSettings, validateFallback, validateSettings, withoutSkillFields } from './settings-validation.js';
 import { RestoreProblem, zodProblem } from './backup-restore-problem.js';
 import { planSkills, resolveSkillName, takeSkillRef, type SkillRestorePlan } from './backup-skills.js';
 
@@ -308,7 +308,8 @@ async function planSettings(
     const field = problem.code.startsWith('judge_') ? 'settings.judge' : (SETTINGS_PROBLEM_FIELDS[problem.code] ?? 'settings');
     throw new RestoreProblem(400, problem.code, problem.message, field);
   }
-  return merged;
+  // A file without skillName keeps the stored skill: the store keeps it inside the write.
+  return ref.present ? merged : withoutSkillFields(merged);
 }
 
 /** Each bot through PUT /bots/:slot's slot rule, schema and fallback check; names must not clash. */

@@ -58,6 +58,16 @@ export function mergeSettings(
   };
 }
 
+/**
+ * The settings to write when the request left the skill out: without the skill fields, so the
+ * store keeps the stored skill and note inside its write instead of a value read earlier, which a
+ * concurrent delete may have changed (ADR-0034).
+ */
+export function withoutSkillFields(settings: WorkspaceSettings): WorkspaceSettings {
+  const { skillId: _skill, skillRemovedName: _note, ...rest } = settings;
+  return rest;
+}
+
 /** A skill id from a PUT body that is not one of this workspace's skills (ADR-0034). */
 export async function unknownSkillProblem(store: AppStore, workspaceId: string, skillId: string | null | undefined): Promise<SettingsProblem | null> {
   if (!skillId || (await store.getReviewSkill(workspaceId, skillId))) return null;

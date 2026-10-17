@@ -11,13 +11,28 @@ import { NAME_CREDENTIAL, skillContentMessage } from './skill-routes.js';
 
 const key = (name: string) => name.trim().toLowerCase();
 
-/** A settings or bot DTO for the file: its skill by name (null = Default), never by id. */
+/** A skill changed while the export read it: the backup would name a skill it lacks. */
+export class BackupChangedError extends Error {
+  constructor() {
+    super('The workspace skills changed during the export; try again');
+    this.name = 'BackupChangedError';
+  }
+}
+
+/**
+ * A settings or bot DTO for the file: its skill by name (null = Default), never by id. A skill id
+ * missing from `skills` (assigned or deleted since the listing) throws BackupChangedError rather
+ * than exporting the bot on Default.
+ */
 export function withSkillName<T extends { skillId?: string | null | undefined; skillRemovedName?: string | null | undefined }>(
   dto: T,
   skills: readonly ReviewSkillSummary[],
 ): Omit<T, 'skillId' | 'skillRemovedName'> & { skillName: string | null } {
   const { skillId, skillRemovedName: _removed, ...rest } = dto;
-  return { ...rest, skillName: skills.find((s) => s.id === skillId)?.name ?? null };
+  if (!skillId) return { ...rest, skillName: null };
+  const skill = skills.find((s) => s.id === skillId);
+  if (!skill) throw new BackupChangedError();
+  return { ...rest, skillName: skill.name };
 }
 
 /**

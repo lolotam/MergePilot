@@ -2,7 +2,9 @@ import { deriveBackupKey, newBackupSalt, sealBackupKey } from '../backup/passphr
 import type { AppStore } from '../core/types.js';
 import { isDualMethodProvider, isKeyListProvider } from '../credentials/multi-key.js';
 import type { CredentialService } from '../credentials/service.js';
-import { withSkillName } from './backup-skills.js';
+import { BackupChangedError, withSkillName } from './backup-skills.js';
+
+export { BackupChangedError };
 import { BACKUP_FORMAT, BACKUP_VERSION, type BackupCredential, type BackupFile, type BackupSkill } from './contract-backup.js';
 
 // Settings backup export (ADR-0018). The keys are decrypted with the workspace vault and sealed
@@ -22,14 +24,6 @@ export interface BackupExportResult {
   file: BackupFile;
   filename: string;
   counts: { settings: boolean; bots: number; credentials: number; keys: number; skills: number };
-}
-
-/** A listed skill was deleted while the export read it: the backup would name a skill it lacks. */
-export class BackupChangedError extends Error {
-  constructor() {
-    super('The workspace skills changed during the export; try again');
-    this.name = 'BackupChangedError';
-  }
 }
 
 /** `mergepilot-settings-<workspace-slug>-<YYYYMMDD>.json`; the slug keeps only safe characters. */

@@ -29,7 +29,9 @@ import { registerRunsRoutes } from './runs-routes.js';
 import type { RunStreamOptions } from './runs-events-routes.js';
 import { registerBackupRoutes } from './backup-routes.js';
 import { registerBotRoutes } from './bot-routes.js';
-import { botNameTakenByExtraBot, mergeSettings, unavailableProviderProblem, unknownSkillProblem, validateSettings } from './settings-validation.js';
+import {
+  botNameTakenByExtraBot, mergeSettings, unavailableProviderProblem, unknownSkillProblem, validateSettings, withoutSkillFields,
+} from './settings-validation.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
 import { registerSubscriptionRoutes, subscriptionAvailability } from './subscription-routes.js';
@@ -157,7 +159,7 @@ export function registerDashboardApi(
       }
 
       try {
-        await deps.store.saveSettings(merged);
+        await deps.store.saveSettings(parsed.data.skillId === undefined ? withoutSkillFields(merged) : merged);
       } catch (error) {
         // A bot saved the same name between the check above and this write (the store re-checks it under a lock).
         if (error instanceof BotNameTakenError) {
