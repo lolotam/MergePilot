@@ -9,8 +9,11 @@ import { KeyProviderSchema } from './contract-judge.js';
 
 export const BACKUP_FORMAT = 'mergepilot-settings';
 export const BACKUP_VERSION = 1;
-/** The restore request (file plus passphrase) is capped at 1 MB; a bigger one answers 413. */
-export const BACKUP_MAX_BYTES = 1024 * 1024;
+/**
+ * The restore request (file plus passphrase) is capped at 8 MB; a bigger one answers 413. The cap
+ * leaves room for 50 review skills of 28,000 characters (ADR-0034): up to 4.2 MB in a 3-byte script.
+ */
+export const BACKUP_MAX_BYTES = 8 * 1024 * 1024;
 export const MIN_PASSPHRASE_LENGTH = 12;
 export const MAX_PASSPHRASE_LENGTH = 1024;
 

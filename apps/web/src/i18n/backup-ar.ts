@@ -41,7 +41,7 @@ export const arBackup = {
   backupRestoreConfirmQuestion: 'نبدّل الإعدادات اللي اخترتها في مساحة العمل دي باللي في الملف؟',
   backupRestoring: 'بنسترجع...',
   backupRestored: 'الإعدادات اترجعت',
-  backupFileTooLarge: 'الملف أكبر من 1 ميجابايت.',
+  backupFileTooLarge: 'الملف أكبر من 8 ميجابايت.',
   backupFileInvalid: 'الملف ده مش JSON سليم.',
   backupBadPassphrase: 'كلمة المرور غلط، أو الملف اتعدّل.',
 };

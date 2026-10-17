@@ -67,17 +67,32 @@ export async function getPgReviewSkill(db: AppDb, workspaceId: string, skillId: 
   return rows[0] ?? null;
 }
 
+/** Serialises the writes that add skills to a workspace until the transaction ends. */
+export async function lockSkills(tx: AppTx, workspaceId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(${SKILL_LOCK_NAMESPACE}, hashtext(${workspaceId}))`);
+}
+
+/** How many skills the workspace has, inside the caller's transaction. */
+export async function countSkills(tx: AppTx, workspaceId: string): Promise<number> {
+  const [row] = await tx.select({ n: count() }).from(reviewSkills).where(eq(reviewSkills.workspaceId, workspaceId));
+  return row?.n ?? 0;
+}
+
+/** True when `error` is the unique violation of a skill name (ignoring case) in the workspace. */
+export function isSkillNameConflict(error: unknown): boolean {
+  return isConstraintViolation(error, '23505', [SKILL_NAME_INDEX]);
+}
+
 /** Creates a skill under the live-workspace lock; the count check and the insert are serialised. */
 export async function createPgReviewSkill(db: AppDb, workspaceId: string, skill: NewReviewSkill): Promise<ReviewSkillRecord> {
   try {
     return await withLiveWorkspace(db, workspaceId, async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(${SKILL_LOCK_NAMESPACE}, hashtext(${workspaceId}))`);
-      const [existing] = await tx.select({ n: count() }).from(reviewSkills).where(eq(reviewSkills.workspaceId, workspaceId));
-      if ((existing?.n ?? 0) >= MAX_WORKSPACE_SKILLS) throw new SkillLimitError();
+      await lockSkills(tx, workspaceId);
+      if ((await countSkills(tx, workspaceId)) >= MAX_WORKSPACE_SKILLS) throw new SkillLimitError();
       return insertSkill(tx, workspaceId, skill);
     });
   } catch (error) {
-    if (isConstraintViolation(error, '23505', [SKILL_NAME_INDEX])) throw new SkillNameTakenError(skill.name);
+    if (isSkillNameConflict(error)) throw new SkillNameTakenError(skill.name);
     throw error;
   }
 }
@@ -114,7 +129,7 @@ export async function updatePgReviewSkill(
   try {
     return await withLiveWorkspace(db, workspaceId, (tx) => updateSkill(tx, workspaceId, skillId, change));
   } catch (error) {
-    if (isConstraintViolation(error, '23505', [SKILL_NAME_INDEX])) throw new SkillNameTakenError(change.name ?? '');
+    if (isSkillNameConflict(error)) throw new SkillNameTakenError(change.name ?? '');
     throw error;
   }
 }

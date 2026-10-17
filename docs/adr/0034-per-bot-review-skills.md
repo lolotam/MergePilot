@@ -6,7 +6,7 @@
 
 Every bot of a panel gets the same review prompt (`packages/engine/src/review/prompt.ts`, ADR-0023, ADR-0028). The bots differ only by model. The owner asked for Markdown "skills" uploaded in a new dashboard section, one chosen per bot from a dropdown, so each bot can follow different, specific instructions instead of one big prompt. After we explained that a skill should sit **on top of** a fixed core prompt rather than replace it, the owner answered «أبدأ».
 
-The review comparison (`MergePilot-review-comparison/recommendations.md`, pass 2, 40 PRs) shows why one shared prompt is not enough. The panel matched 20 of 95 comparable Codex findings (21%). Of the 84 panel misses:
+The review comparison (`MergePilot-review-comparison/recommendations.md`, pass 2, 40 PRs) shows why one shared prompt is not enough. The panel matched 20 of 95 comparable Codex findings (21%). The comparison assigned a cause to 84 reference findings the panel missed (Codex and CodeRabbit together):
 
 | Cause | Misses |
 |---|---|
@@ -141,6 +141,9 @@ In v1 a skill comes only from trusted workspace settings, written by an admin or
   - skills are upserted by name (same checks as `POST /skills`); skills of the workspace that the file does not name are kept;
   - then the settings' and the bots' `skillName` is resolved to the workspace's skill id. When the name does not exist (the `skills` section was not restored, or the file has no such skill), the bot is restored on **Default**, and the preview lists the name in `skillsMissing`; it also counts the restored skills (`skills`);
   - a file from before this ADR has no `skillName`: restoring its settings keeps the main bot's skill, and its bots (which a restore replaces) come back on Default.
+- Export writes each skill under the name the settings and bots refer to, so a rename racing the export cannot break the mapping.
+- The restore writes the skills under the skill lock and checks the 50-skill limit again; a skill created or renamed since the preview makes the restore answer 409 (`skill_limit`, or `skills_changed`) and write nothing.
+- The restore request cap of ADR-0018 rises from 1 MB to 8 MB, so a backup holding 50 skills at the size cap still restores.
 - A skill holds no secret (§2), so it is never sealed with the passphrase.
 
 ### 11. Starter skills: templates copied into the workspace

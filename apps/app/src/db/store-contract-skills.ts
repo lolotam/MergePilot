@@ -160,6 +160,22 @@ export function defineReviewSkillContract(
     }
   });
 
+  it('refuses a restore that would pass the skill limit, writing nothing', async () => {
+    const store = await createStore();
+    try {
+      for (let i = 1; i < MAX_WORKSPACE_SKILLS; i++) await store.createReviewSkill(WS, newSkill({ name: `Kept ${i}` }));
+      const attempt = store.restoreWorkspace(WS, {
+        skills: [newSkill({ name: 'New A' }), newSkill({ name: 'New B' })],
+        bots: [bot()],
+      });
+      await expect(attempt).rejects.toBeInstanceOf(SkillLimitError);
+      expect(await store.listReviewSkills(WS)).toHaveLength(MAX_WORKSPACE_SKILLS - 1);
+      expect(await store.listReviewerBots(WS)).toEqual([]);
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   it('restores skills by id: a same-id skill is replaced, a new one inserted, and bots may use them', async () => {
     const store = await createStore();
     try {

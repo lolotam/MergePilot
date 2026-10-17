@@ -13,7 +13,7 @@ import { deleteMemoryWorkspaceAuthPreferences } from './memory-auth-preferences.
 import {
   assertMemorySkill, deleteMemoryWorkspaceSkills, getMemorySkill, insertMemorySkill, updateMemorySkill, type MemorySkills,
 } from './memory-skills.js';
-import type { ReviewSkillRecord } from './skill-types.js';
+import { MAX_WORKSPACE_SKILLS, SkillLimitError, type ReviewSkillRecord } from './skill-types.js';
 import { listMemoryProviderKeys } from './memory-provider-keys.js';
 import type { MemoryStore } from './memory-store.js';
 import type { MemoryKeyTables } from './memory-provider-keys.js';
@@ -158,6 +158,7 @@ export async function restoreMemoryWorkspace(
       insertMemorySkill(store.skills, workspaceId, skill);
     }
   }
+  if ([...store.skills.values()].filter((s) => s.workspaceId === workspaceId).length > MAX_WORKSPACE_SKILLS) throw new SkillLimitError();
   for (const bot of restore.bots ?? []) assertMemorySkill(store.skills, workspaceId, bot.skillId);
   if (restore.bots) {
     deleteMemoryWorkspaceBots(store.bots, workspaceId);

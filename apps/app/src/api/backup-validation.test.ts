@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { BACKUP_MAX_BYTES } from './contract-backup.js';
 import {
   createBackupHarness,
   exportBackup,
@@ -69,7 +70,7 @@ describe('settings restore validation (ADR-0018)', { timeout: 60000 }, () => {
     expect(await refusal({ file: { ...file, version: 2 } })).toEqual([400, 'unsupported_backup_version', 'version']);
     expect(await refusal({ file: { ...file, bots: 'none' } })).toEqual([400, 'validation_error', 'bots']);
 
-    const big = await restoreBackup(h, { file: { ...file, padding: 'x'.repeat(1024 * 1024) }, passphrase: PASSPHRASE });
+    const big = await restoreBackup(h, { file: { ...file, padding: 'x'.repeat(BACKUP_MAX_BYTES) }, passphrase: PASSPHRASE });
     expect(big.statusCode).toBe(413);
     expect(big.json().error.code).toBe('file_too_large');
     await expectWs2Untouched();

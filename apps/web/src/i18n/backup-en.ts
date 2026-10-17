@@ -42,7 +42,7 @@ export const enBackup = {
   backupRestoreConfirmQuestion: 'Replace the selected settings of this workspace with the ones in the file?',
   backupRestoring: 'Restoring...',
   backupRestored: 'Settings restored',
-  backupFileTooLarge: 'The file is larger than 1 MB.',
+  backupFileTooLarge: 'The file is larger than 8 MB.',
   backupFileInvalid: 'This file is not valid JSON.',
   backupBadPassphrase: 'Wrong passphrase, or the file was changed.',
 };

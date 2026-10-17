@@ -24,18 +24,25 @@ export function SkillEditDialog({ workspaceId, skill, limits, onClose }: SkillEd
   const [name, setName] = useState(skill.name);
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A picked file that was refused: saving must not report success while ignoring it.
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const handleFile = async (file: File | undefined) => {
     setError(null);
+    setFileError(null);
     setContent(null);
     if (!file) return;
     const read = await readSkillFile(file, limits.maxTokens, t);
     if (read.ok) setContent(read.content);
-    else setError(read.error);
+    else {
+      setFileError(read.error);
+      setError(read.error);
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (fileError) return setError(fileError);
     const problem = skillNameError(name, limits.maxNameLength, t);
     if (problem) return setError(problem);
     const renamed = name.trim() !== skill.name;

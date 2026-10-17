@@ -13,7 +13,7 @@ import { readFileText } from './read-file-text.js';
 import { useRestoreBackup } from './useBackup.js';
 
 // The server's BACKUP_MAX_BYTES (type-checked; the web never imports server runtime code).
-const BACKUP_MAX_BYTES: typeof SERVER_BACKUP_MAX_BYTES = 1024 * 1024;
+const BACKUP_MAX_BYTES: typeof SERVER_BACKUP_MAX_BYTES = 8 * 1024 * 1024;
 
 // Every BACKUP_SECTIONS entry, in the server's order (a missing one fails the type check).
 const SECTION_LABELS = {

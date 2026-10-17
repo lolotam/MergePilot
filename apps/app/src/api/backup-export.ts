@@ -52,7 +52,8 @@ export async function buildBackupFile(
   const skills: BackupSkill[] = [];
   for (const summary of skillList) {
     const skill = await deps.store.getReviewSkill(workspace.id, summary.id);
-    if (skill) skills.push({ name: skill.name, content: skill.content });
+    // The listed name, which the settings and bots above name too, even if a rename raced the export.
+    if (skill) skills.push({ name: summary.name, content: skill.content });
   }
 
   const salt = options.includeKeys ? newBackupSalt() : null;

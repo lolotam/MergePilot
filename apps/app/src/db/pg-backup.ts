@@ -9,12 +9,18 @@ import {
   type StoredCredential,
   type StoredProviderKey,
   type WorkspaceRestore,
+  MAX_WORKSPACE_SKILLS,
+  SkillLimitError,
+  SkillNameTakenError,
+  UnknownSkillError,
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { writePgSettings } from './pg-settings.js';
 import { listPgProviderKeys, replacePgProviderKeys, writePgKeyCursor } from './pg-provider-keys.js';
 import { readParentCredential, writeProviderKeyChangeTx } from './pg-key-roster.js';
-import { insertSkill, updateSkill } from './pg-skills.js';
+import {
+  countSkills, insertSkill, isConstraintViolation, isSkillNameConflict, lockSkills, SKILL_FOREIGN_KEYS, updateSkill,
+} from './pg-skills.js';
 import { providerCredentials, reviewerBots, reviewSkills, workspaceSettings } from './schema.js';
 import { lockBotNames, lockCredential, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
@@ -73,8 +79,12 @@ async function replacePgBots(tx: AppTx, workspaceId: string, bots: NonNullable<W
   );
 }
 
-/** Upserts the restored skills by id (the plan reuses the id of a same-named skill, ADR-0034). */
+/**
+ * Upserts the restored skills by id (the plan reuses the id of a same-named skill, ADR-0034) under
+ * the skill lock, and re-checks the workspace limit: a skill created since the plan may push it over.
+ */
 async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable<WorkspaceRestore['skills']>): Promise<void> {
+  await lockSkills(tx, workspaceId);
   for (const skill of skills) {
     const [existing] = await tx
       .select({ id: reviewSkills.id })
@@ -90,9 +100,25 @@ async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable
       await insertSkill(tx, workspaceId, skill);
     }
   }
+  if ((await countSkills(tx, workspaceId)) > MAX_WORKSPACE_SKILLS) throw new SkillLimitError();
+}
+
+/** A restore racing a skill write: the plan's names or ids no longer match the workspace. */
+function skillRaceError(error: unknown, restore: WorkspaceRestore): Error | undefined {
+  if (isSkillNameConflict(error)) return new SkillNameTakenError(restore.skills?.[0]?.name ?? '');
+  if (isConstraintViolation(error, '23503', SKILL_FOREIGN_KEYS)) return new UnknownSkillError('restored');
+  return undefined;
 }
 
 export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore: WorkspaceRestore): Promise<void> {
+  try {
+    await writeRestore(db, workspaceId, restore);
+  } catch (error) {
+    throw skillRaceError(error, restore) ?? error;
+  }
+}
+
+async function writeRestore(db: AppDb, workspaceId: string, restore: WorkspaceRestore): Promise<void> {
   await withLiveWorkspace(db, workspaceId, async (tx) => {
     await lockBotNames(tx, workspaceId);
     // Skills first: the restored settings and bots may name them (ADR-0034).

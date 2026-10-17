@@ -123,6 +123,21 @@ describe('SkillsCard (ADR-0034)', () => {
     expect(server.writes()[0]?.body).toEqual({ name: 'Security 2', content: security?.content });
   });
 
+  it('will not save an edit while the picked replacement file was refused', async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    const server = fakeSkillsServer([skill()]);
+    renderCard();
+    await user.click(within(await findRow('Security')).getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('Skill name'));
+    await user.type(within(dialog).getByLabelText('Skill name'), 'Security v2');
+    await user.upload(within(dialog).getByLabelText('New file (optional)'), new File(['x'], 'rules.txt', { type: 'text/plain' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('Only .md and .markdown files are accepted');
+    expect(server.writes()).toHaveLength(0);
+  });
+
   it('confirms a delete in the page, naming the bots that fall back to the core prompt', async () => {
     const user = userEvent.setup();
     const server = fakeSkillsServer([skill({ usedBy: [1, 3] })]);
