@@ -178,6 +178,47 @@ describe('Worker structured logging', () => {
     expect(result.detail ?? '').not.toContain(prose);
   });
 
+  it('logs at warn what the model said when a completed review still had no findings list', async () => {
+    const { stream, lines } = createCapture();
+    const logger = createLogger({ service: 'worker', stream });
+    const summaryOnly = '{"summary":"Docs-only PR; no blocking defects found."}';
+    const mockModel: ReviewModel = {
+      label: 'anthropic:claude-3-5-sonnet',
+      generate: vi.fn().mockResolvedValue({ text: summaryOnly, finishReason: 'stop' as const }),
+    };
+    const mockClient = {
+      getFileContent: async () => null,
+      listPullRequestFilesPage: async () => [
+        { filename: 'src/main.ts', status: 'modified', additions: 1, deletions: 0, changes: 1, patch: '@@ -1,1 +1,2 @@\n test\n+added' },
+      ],
+      getPullRequest: async () => ({ head: { sha: headSha } }),
+      listReviewsPage: async () => [],
+      createReview: async () => ({ id: 1001, html_url: 'https://github.com/acme/repo/pull/15#review-1001' }),
+      compareCommits: async () => null,
+    };
+    const deps: ProcessReviewDeps = {
+      store,
+      credentials: { resolve: vi.fn().mockResolvedValue(new Secret('sk-test-unused')) },
+      githubAppFactory: vi.fn().mockResolvedValue({
+        client: mockClient as unknown as import('@mergepilot/github').GitHubClient,
+        publisherLogin: 'mergepilot[bot]',
+      }),
+      createModelForProvider: vi.fn().mockResolvedValue(mockModel),
+      logger,
+    };
+
+    const result = await processReviewJob(job, deps);
+    expect(result.status).toBe('completed');
+
+    const answerLine = lines.find((l) => l.event === 'review.findings-list-missing');
+    expect(answerLine?.level).toBe(40);
+    expect(answerLine?.provider).toBe('anthropic');
+    expect(answerLine?.attempts).toEqual([
+      { chars: summaryOnly.length, finishReason: 'stop', preview: summaryOnly },
+      { chars: summaryOnly.length, finishReason: 'stop', preview: summaryOnly },
+    ]);
+  });
+
   it('logs failures at error level with failure code and redacted message', async () => {
     const { stream, lines } = createCapture();
     const logger = createLogger({ service: 'worker', stream });

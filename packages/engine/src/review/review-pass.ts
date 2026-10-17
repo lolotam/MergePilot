@@ -53,6 +53,8 @@ export type ReviewPassResult =
       droppedInvalid: number;
       totalUsage: TokenUsage | undefined;
       incompleteReasons: string[];
+      /** Each answer that left the findings list out, when the last one did too; for logs only. */
+      answerAttempts?: AnswerAttempt[] | undefined;
     }
   | {
       ok: false;
@@ -70,16 +72,20 @@ export interface AnswerAttempt {
   outputTokens?: number;
   /** The first characters of the answer, secret-redacted. */
   preview: string;
+  /** The last characters, secret-redacted, when the answer is longer than the preview. */
+  tail?: string;
 }
 
 const ANSWER_PREVIEW_CHARS = 200;
 
 function answerAttemptOf(response: ReviewModelResponse, knownSecrets: readonly Secret[]): AnswerAttempt {
+  const redacted = redactSecrets(response.text, [...knownSecrets]).text;
   return {
     chars: response.text.length,
     finishReason: response.finishReason,
     ...(response.usage ? { outputTokens: response.usage.outputTokens } : {}),
-    preview: redactSecrets(response.text, [...knownSecrets]).text.slice(0, ANSWER_PREVIEW_CHARS),
+    preview: redacted.slice(0, ANSWER_PREVIEW_CHARS),
+    ...(redacted.length > ANSWER_PREVIEW_CHARS ? { tail: redacted.slice(-ANSWER_PREVIEW_CHARS) } : {}),
   };
 }
 
@@ -148,12 +154,14 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
   });
 
   const parsed = recovery.parseResult;
+  const attempts = (): AnswerAttempt[] =>
+    [response, empty.response ?? empty.rejected, ...recovery.answers]
+      .filter((r) => r !== undefined)
+      .map((r) => answerAttemptOf(r, ctx.knownSecrets));
   if (!parsed.ok) {
     // Skipped or failed recovery steps are disclosed alongside the parse error.
     const detail = [...notes, ...recovery.incompleteReasons].join('; ');
-    const answerAttempts = parsed.code === 'invalid-json'
-      ? [response, empty.response].filter((r) => r !== undefined).map((r) => answerAttemptOf(r, ctx.knownSecrets))
-      : undefined;
+    const answerAttempts = parsed.code === 'invalid-json' ? attempts() : undefined;
     return {
       ok: false,
       reason: parsed.error,
@@ -169,8 +177,9 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     droppedInvalid: parsed.droppedInvalid,
     totalUsage: recovery.totalUsage,
     incompleteReasons: parsed.findingsMissing
-      ? [...recovery.incompleteReasons, FINDINGS_MISSING_REASON]
-      : recovery.incompleteReasons,
+      ? [...notes, ...recovery.incompleteReasons, FINDINGS_MISSING_REASON]
+      : [...notes, ...recovery.incompleteReasons],
+    ...(parsed.findingsMissing ? { answerAttempts: attempts() } : {}),
   };
 }
 

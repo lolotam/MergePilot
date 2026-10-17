@@ -156,3 +156,34 @@ the call has none. pi-ai places that message after the Claude Code identity bloc
 OAuth, and passes it as instructions to Codex and Grok. The output limit is unchanged. The parser and
 its disclosure are unchanged: an answer that still has no findings list is disclosed as before.
 The Google Antigravity adapter (ADR-0032) has its own protocol and does not send the schema yet.
+
+## Amendment (2026-10-17, later): one reminder retry for a missing findings list
+
+The schema fix above shipped (b7b9646, live 18:09 UTC) and did not stop it. On lolotam/eyadex#81
+(review at 18:44 UTC, run on the new image) Claude again answered a summary-only object: "No
+blocking defects found. A few claims cannot be confirmed from what is shown: …". It keeps its
+below-threshold doubts in the summary, as the CONFIDENCE rule asks, and leaves the empty list out.
+The answer text was not stored, because a summary-only answer is a successful parse.
+
+**Decision.**
+- `retryUnusableAnswer` (`review/call.ts`) now retries a summary-only answer once, the same way it
+  retries an answer without JSON: the same request with a reminder appended to the user prompt
+  (`FINDINGS_LIST_REMINDER`), gated and charged by the same budget rule. This covers the whole-PR
+  call and every batch, and the answer of a truncation retry too (`remindMissingFindingsList`,
+  only the reminder, at that retry's output size). The verification pass never sees such an answer.
+- The first answer is usable, so the retry can only improve it. An answer that has the list
+  replaces it, and the review is complete. An answer that still has no list replaces it and stays
+  disclosed. A retry that is skipped (budget), fails or is unusable keeps the first answer, still
+  disclosed, with a note: `findings-list retry skipped: budget limit reached`,
+  `findings-list retry failed: <code>` or `findings-list retry unusable: <code>`. A cut retry
+  answer never reaches the truncation recovery.
+- When the whole-PR answer still has no list, the run keeps a secret-redacted preview of the
+  first answer and of the reminder's answer, kept or not (its first and, when longer, its last 200
+  characters), and the worker logs it at warn as
+  `review.findings-list-missing`, like `review.unusable-answer` for an answer without JSON. It never
+  reaches the PR or the dashboard.
+- The parser and its disclosure are unchanged: a review is never published as clean without a
+  findings list.
+
+**Cost.** A summary-only answer costs one more review call. On the subscription that is $0; on an
+API key it is priced like the JSON-only retry and runs only within `budget.perReviewUsd`.

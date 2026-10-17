@@ -105,7 +105,7 @@ export function describePaths(paths: readonly string[], max = 10, maxLength = 60
   return paths.length > max ? `${shown} +${paths.length - max} more` : shown;
 }
 
-type ParsedAnswer = { ok: true } | { ok: false; code: string; error: string };
+type ParsedAnswer = { ok: true; findingsMissing?: true } | { ok: false; code: string; error: string };
 
 export interface EmptyRetryInput<P extends ParsedAnswer> {
   parsed: P;
@@ -124,6 +124,8 @@ export interface EmptyRetryResult<P extends ParsedAnswer> {
   parsed: P;
   /** The retry's response, when one was made: its finish reason drives any truncation retry. */
   response?: ReviewModelResponse | undefined;
+  /** A findings-list retry's response that was not kept; for the logs' answer previews only. */
+  rejected?: ReviewModelResponse | undefined;
   usage?: TokenUsage | undefined;
   /** Disclosure when the retry was skipped or failed; the caller reports it with the error. */
   note?: string | undefined;
@@ -135,17 +137,23 @@ export interface EmptyRetryResult<P extends ParsedAnswer> {
 export const JSON_ONLY_REMINDER =
   '\n\nIMPORTANT: your previous reply was not the required JSON. Reply with only the JSON object described above: no prose, no markdown fences, nothing before or after it.';
 
+/** Appended to the user prompt for the one retry after an answer that left the findings list out. */
+export const FINDINGS_LIST_REMINDER =
+  '\n\nIMPORTANT: your previous reply had no "findings" key. Reply with the whole JSON object described above, including "findings": an empty list [] when nothing qualifies.';
+
 /**
  * Retries a call ONCE when its answer was unusable, and returns anything else unchanged:
  * - no visible text (e.g. a GLM model that spent every output token on reasoning): with thinking off;
  * - text without the JSON object asked for (e.g. a subscription model, whose backend cannot
- *   enforce the response schema, answering in prose): with a JSON-only reminder.
+ *   enforce the response schema, answering in prose): with a JSON-only reminder;
+ * - a summary without the findings list (Claude on the subscription when it found nothing,
+ *   ADR-0011): with a findings-list reminder.
  */
 export async function retryUnusableAnswer<P extends ParsedAnswer>(
   input: EmptyRetryInput<P>,
 ): Promise<EmptyRetryResult<P>> {
   const { parsed } = input;
-  if (parsed.ok) return { parsed, thinkingOff: false };
+  if (parsed.ok) return parsed.findingsMissing ? retryForFindingsList(input) : { parsed, thinkingOff: false };
   if (parsed.code === 'invalid-json') return retryForJsonOnly(input);
   if (parsed.code !== 'empty-response') return { parsed, thinkingOff: false };
   const { spend, promptTokens, requestedOutputTokens } = input;
@@ -173,6 +181,40 @@ export async function retryUnusableAnswer<P extends ParsedAnswer>(
       note: `empty-response retry failed: ${describeCallError(err, input.knownSecrets)}`,
       thinkingOff: false,
     };
+  }
+}
+
+/**
+ * The first answer is usable (a summary, its missing list disclosed), so the retry can only improve
+ * it: an answer that still has no list is kept as the newer one, and a retry that fails, is skipped
+ * or is unusable keeps the first answer, with a note. Its response is returned as `response` only
+ * when its answer is the one kept, so a cut retry never reaches the truncation recovery.
+ */
+/**
+ * Only the findings-list reminder, for an answer that a truncation retry produced: its other
+ * failures keep their own handling (the batch split, or a disclosed error), as before.
+ */
+export async function remindMissingFindingsList<P extends ParsedAnswer>(input: EmptyRetryInput<P>): Promise<EmptyRetryResult<P>> {
+  return input.parsed.ok && input.parsed.findingsMissing ? retryForFindingsList(input) : { parsed: input.parsed, thinkingOff: false };
+}
+
+async function retryForFindingsList<P extends ParsedAnswer>(input: EmptyRetryInput<P>): Promise<EmptyRetryResult<P>> {
+  const { parsed, spend, requestedOutputTokens } = input;
+  const promptTokens = input.promptTokens + estimateTokens(FINDINGS_LIST_REMINDER);
+  if (!spend.canAfford(promptTokens, requestedOutputTokens)) {
+    return { parsed, note: 'findings-list retry skipped: budget limit reached', thinkingOff: false };
+  }
+  try {
+    const response = await input.model.generate({ ...input.request, user: `${input.request.user}${FINDINGS_LIST_REMINDER}` });
+    spend.record(promptTokens, requestedOutputTokens, response.usage);
+    const retried = input.parse(response);
+    if (!retried.ok) {
+      return { parsed, rejected: response, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
+    }
+    return { parsed: retried, response, usage: response.usage, thinkingOff: false };
+  } catch (err) {
+    spend.record(promptTokens, requestedOutputTokens, undefined);
+    return { parsed, note: `findings-list retry failed: ${describeCallError(err, input.knownSecrets)}`, thinkingOff: false };
   }
 }
 

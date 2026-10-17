@@ -119,6 +119,8 @@ export type ReviewRunResult =
       context?: ContextDisclosure | undefined;
       /** The model's output limit clamped the answer budget below what maxFindings needs (ADR-0033). */
       outputLimit?: OutputLimitDisclosure | undefined;
+      /** Each answer that left the findings list out (secret-redacted preview); for logs only, never the summary. */
+      answerAttempts?: AnswerAttempt[] | undefined;
       /** Every attempted call, failures included, was on a subscription: the run cost $0. */
       onlySubscriptionCalls: boolean;
     } & Partial<FallbackDisclosure>)
@@ -421,6 +423,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     ...(judge ? { judge } : {}),
     ...(contextDisclosure ? { context: contextDisclosure } : {}),
     ...(outputLimit ? { outputLimit } : {}),
+    ...(pass.answerAttempts ? { answerAttempts: pass.answerAttempts } : {}),
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls,
   };
