@@ -31,7 +31,8 @@ export function toRunDto(r: ReviewRun): ReviewRunDto {
     effort: r.effort ?? null,
     fallbackFrom: r.fallbackFrom ?? null,
     findingsCount: r.findingsCount ?? null,
-    severityCounts: r.result ? computeSeverityCounts(r.result.findings, r.result.outOfDiff) : null,
+    // A failed run's result holds only its spend and methods, never findings (ADR-0027 amendment).
+    severityCounts: r.result && r.status !== 'failed' ? computeSeverityCounts(r.result.findings, r.result.outOfDiff) : null,
     reviewUrl: r.reviewUrl ?? null,
     inputTokens: tokens.inputTokens,
     outputTokens: tokens.outputTokens,

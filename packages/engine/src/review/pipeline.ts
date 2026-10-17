@@ -13,6 +13,7 @@ import {
   DEFAULT_PR_CONTEXT_TOKENS,
   REVIEW_LIMIT_DEFAULTS,
   type MergePilotConfig,
+  type ModelPricing,
   type ReviewLimits,
 } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
@@ -129,6 +130,11 @@ export type ReviewRunResult =
       detail?: string | undefined;
       /** Each answer that had no usable JSON (secret-redacted preview); for logs only, never the summary. */
       answerAttempts?: AnswerAttempt[] | undefined;
+      /** Tokens of the calls that answered before the failure. */
+      usage?: TokenUsage | undefined;
+      /** What those calls cost, by the same rule as a completed run; absent when unknown. */
+      costUsd?: number | undefined;
+      onlySubscriptionCalls: boolean;
     } & Partial<FallbackDisclosure>);
 
 // ── Pipeline ──
@@ -304,12 +310,18 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   };
   const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
   if (!pass.ok) {
+    // Calls that answered before the failure were still paid for (ADR-0027 amendment).
+    const disclosure = model.disclosure(knownSecrets);
+    const failedCostUsd = knownCostUsd(model, disclosure, budgetCfg.pricing, spend);
     return {
       status: 'failed',
       reason: pass.reason,
       ...(pass.detail ? { detail: pass.detail } : {}),
       ...(pass.answerAttempts ? { answerAttempts: pass.answerAttempts } : {}),
-      ...model.disclosure(knownSecrets),
+      ...(pass.totalUsage ? { usage: pass.totalUsage } : {}),
+      ...(failedCostUsd !== undefined ? { costUsd: failedCostUsd } : {}),
+      ...disclosure,
+      onlySubscriptionCalls: model.onlySubscriptionCalls,
     };
   }
   let totalUsage = pass.totalUsage;
@@ -391,18 +403,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   };
 
   const contextDisclosure = context.disclosure();
-  // Pricing belongs to the configured model; after a model fallback the cost is unknown (tokens still count).
   const disclosure = model.disclosure(knownSecrets);
-  const methodOnlyFallback =
-    disclosure.fallbackFromMethod !== undefined && disclosure.modelUsed === disclosure.fallbackFrom;
-  let reviewCostUsd: number | undefined;
-  if (model.onlySubscriptionCalls) {
-    reviewCostUsd = 0;
-  } else if (budgetCfg.pricing && (!disclosure.fallbackFrom || methodOnlyFallback)) {
-    // Real cost where usage was reported, the estimate for calls without usage (ADR-0011). A
-    // method-only fallback stays on the configured model, so its total is known too (ADR-0027).
-    reviewCostUsd = spend.spentUsd;
-  }
+  const reviewCostUsd = knownCostUsd(model, disclosure, budgetCfg.pricing, spend);
 
   return {
     status: 'completed',
@@ -422,6 +424,25 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     ...disclosure,
     onlySubscriptionCalls: model.onlySubscriptionCalls,
   };
+}
+
+/**
+ * A review's cost, for completed and failed runs alike: $0 when every call was on a subscription.
+ * Pricing belongs to the configured model, so after a model fallback the cost is unknown (tokens
+ * still count). Otherwise it is the real cost where usage was reported and the estimate for calls
+ * without usage (ADR-0011); a method-only fallback stays on the configured model, so its total is
+ * known too (ADR-0027).
+ */
+function knownCostUsd(
+  model: FallbackChain,
+  disclosure: FallbackDisclosure,
+  pricing: ModelPricing | undefined,
+  spend: SpendTracker,
+): number | undefined {
+  if (model.onlySubscriptionCalls) return 0;
+  const methodOnlyFallback =
+    disclosure.fallbackFromMethod !== undefined && disclosure.modelUsed === disclosure.fallbackFrom;
+  return pricing && (!disclosure.fallbackFrom || methodOnlyFallback) ? spend.spentUsd : undefined;
 }
 
 /** The ADR-0013 limits, defaulted for a config built in code without the schema. */

@@ -268,6 +268,11 @@ export const ReviewRunFindingSchema = z.object({
 });
 export type ReviewRunFinding = z.infer<typeof ReviewRunFindingSchema>;
 
+/**
+ * A run's stored result. On a failed run it carries only what the calls before the failure spent
+ * and how (usage, pricing, the method switch, key rotation), with an empty summary, highlights
+ * and findings (ADR-0027 amendment).
+ */
 export const ReviewRunResultSchema = z.object({
   v: z.literal(1),
   summary: z.string(),

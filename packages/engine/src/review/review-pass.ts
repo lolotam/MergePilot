@@ -54,7 +54,14 @@ export type ReviewPassResult =
       totalUsage: TokenUsage | undefined;
       incompleteReasons: string[];
     }
-  | { ok: false; reason: string; detail?: string | undefined; answerAttempts?: AnswerAttempt[] | undefined };
+  | {
+      ok: false;
+      reason: string;
+      detail?: string | undefined;
+      answerAttempts?: AnswerAttempt[] | undefined;
+      /** Tokens of the calls that answered before the pass failed; absent when none did. */
+      totalUsage?: TokenUsage | undefined;
+    };
 
 /** What one answer without the JSON asked for looked like; for the operator's logs only. */
 export interface AnswerAttempt {
@@ -147,7 +154,13 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     const answerAttempts = parsed.code === 'invalid-json'
       ? [response, empty.response].filter((r) => r !== undefined).map((r) => answerAttemptOf(r, ctx.knownSecrets))
       : undefined;
-    return { ok: false, reason: parsed.error, ...(detail ? { detail } : {}), ...(answerAttempts ? { answerAttempts } : {}) };
+    return {
+      ok: false,
+      reason: parsed.error,
+      ...(detail ? { detail } : {}),
+      ...(answerAttempts ? { answerAttempts } : {}),
+      ...(recovery.totalUsage ? { totalUsage: recovery.totalUsage } : {}),
+    };
   }
   return {
     ok: true,
@@ -190,6 +203,7 @@ export async function runBatchedPass(
       ok: false,
       reason: `no batch produced an answer (${batches.length} batches)`,
       ...(detail ? { detail } : {}),
+      ...(result.totalUsage ? { totalUsage: result.totalUsage } : {}),
     };
   }
   return {

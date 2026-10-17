@@ -222,6 +222,34 @@ describe('RunDetailPage - header, grouped findings, plain text rendering, filter
     expect(screen.getByText('Rate limit exceeded on provider API')).toBeDefined();
   });
 
+  it('shows what a failed run spent and its method switch, without a summary or findings', () => {
+    const failedRun = {
+      ...sampleRun,
+      status: 'failed' as const,
+      costUsd: 0.0009,
+      detail: 'invalid-json',
+      findingsCount: null,
+      result: {
+        v: 1 as const,
+        summary: '',
+        highlights: [],
+        findings: [],
+        language: 'en' as const,
+        usage: { inputTokens: 100, outputTokens: 40 },
+        fallbackFromMethod: 'subscription' as const,
+        modelUsedMethod: 'api-key' as const,
+      },
+    };
+    const { getByTestId } = renderComponent(failedRun);
+
+    expect(screen.getByText('$0.0009')).toBeDefined();
+    expect(screen.getByText('100 in / 40 out')).toBeDefined();
+    expect(getByTestId('failed-run-spend').textContent).toMatch(/before the review failed/);
+    expect(getByTestId('method-fallback-notice').textContent).toMatch(/API key/i);
+    expect(screen.queryByText('Summary')).toBeNull();
+    expect(screen.queryByText(/^Findings \(/)).toBeNull();
+  });
+
   it('renders enabled Retry button for failed runs when user is admin or owner, and triggers mutation on click', async () => {
     vi.mocked(client.fetchApi).mockResolvedValueOnce({ runId: 'run-retry-new' });
 
