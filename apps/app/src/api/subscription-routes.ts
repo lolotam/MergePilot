@@ -13,11 +13,16 @@ import { sendError } from './helpers.js';
 import { allow, invalidateModelsCache } from './provider-routes.js';
 import type { DashboardApiDeps } from './routes.js';
 
+/** Which subscriptions this deployment offers: the test seam, else the server environment (ADR-0032). */
+export function subscriptionAvailability(deps: Pick<DashboardApiDeps, 'subscriptionAvailable'>): (provider: SubscriptionProvider) => boolean {
+  return deps.subscriptionAvailable ?? ((provider) => isSubscriptionAvailable(provider));
+}
+
 export function registerSubscriptionRoutes(app: FastifyInstance, deps: DashboardApiDeps): void {
   const logins = new SubscriptionLogins(deps.subscriptionLogin);
   app.addHook('onClose', async () => { logins.close(); });
   const guard = { preHandler: [requireRole('admin', deps.auth)] };
-  const available = deps.subscriptionAvailable ?? ((provider: SubscriptionProvider) => isSubscriptionAvailable(provider));
+  const available = subscriptionAvailability(deps);
   const root = '/api/workspaces/:workspaceId/subscriptions';
   app.get(root, guard, async (_request, reply) => {
     const body: SubscriptionAvailability = { providers: SubscriptionProviderSchema.options.filter((provider) => available(provider)) };

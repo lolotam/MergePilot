@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import type {
   DUAL_METHOD_PROVIDER_IDS as ServerDualIds,
   MAX_PROVIDER_KEYS as ServerMaxKeys,
@@ -45,16 +44,6 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
   const [keyProvider, setKeyProvider] = useState<KeyProvider>('anthropic');
   const dualProvider = isDualMethodProvider(keyProvider);
   const subscriptionOnly = isSubscriptionOnlyProvider(keyProvider);
-  const availability = useQuery({
-    queryKey: ['workspaces', workspaceId, 'subscriptions', 'available'],
-    queryFn: () => api.getSubscriptionAvailability(workspaceId!),
-    enabled: isOpen && Boolean(workspaceId),
-    staleTime: 5 * 60 * 1000,
-    retry: false,
-  });
-  // A subscription-only provider is offered only where the server has its sign-in configured.
-  const offeredProviders = KEY_PROVIDERS.filter((provider) =>
-    !isSubscriptionOnlyProvider(provider) || availability.data?.providers.includes(provider));
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [baseUrlInput, setBaseUrlInput] = useState('');
   const [keyError, setKeyError] = useState('');
@@ -215,7 +204,8 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
           id="key-provider-select"
           label={t('keyProviderCol')}
           value={keyProvider}
-          options={offeredProviders}
+          options={KEY_PROVIDERS}
+          workspaceId={workspaceId}
           onChange={(next) => {
             setKeyProvider(next);
             setApiKeyInput('');

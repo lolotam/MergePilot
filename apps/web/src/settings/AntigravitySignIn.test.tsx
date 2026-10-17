@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { api, type SubscriptionLogin } from '../api/client.js';
 import { AddKeyModal } from '../components/AddKeyModal.js';
+import { ProviderSelect } from './providers.js';
 import { SubscriptionSignIn } from './SubscriptionSignIn.js';
 import { renderSettings } from './settings.fixtures.js';
 
@@ -66,6 +67,33 @@ describe('Google Antigravity sign-in', () => {
     await user.click(screen.getByRole('checkbox', { name: /understand the risk/ }));
     await user.click(screen.getByRole('button', { name: /Sign in with Google/ }));
     expect((await screen.findByRole('alert')).textContent).toMatch(/verify this account/);
+  });
+});
+
+describe('review provider selects with Google Antigravity', () => {
+  const select = (value: 'anthropic' | 'google-antigravity') =>
+    renderSettings(<ProviderSelect id="p" label="Provider" value={value} workspaceId="ws" onChange={vi.fn()} />, 'en');
+
+  it('hide the provider when the server does not offer it', async () => {
+    vi.mocked(api.getSubscriptionAvailability).mockResolvedValue({ providers: ['openai', 'anthropic', 'xai'] });
+    select('anthropic');
+    await vi.waitFor(() => expect(api.getSubscriptionAvailability).toHaveBeenCalledWith('ws'));
+    expect(screen.getByRole('option', { name: 'Google Gemini' })).toBeDefined();
+    expect(screen.queryByRole('option', { name: 'Google Antigravity' })).toBeNull();
+  });
+
+  it('show the provider when the server offers it', async () => {
+    vi.mocked(api.getSubscriptionAvailability).mockResolvedValue({ providers: ['openai', 'anthropic', 'xai', 'google-antigravity'] });
+    select('anthropic');
+    expect(await screen.findByRole('option', { name: 'Google Antigravity' })).toBeDefined();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('keep a saved Google Antigravity choice visible with a note when the server no longer offers it', async () => {
+    vi.mocked(api.getSubscriptionAvailability).mockResolvedValue({ providers: ['openai', 'anthropic', 'xai'] });
+    select('google-antigravity');
+    expect((screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement).value).toBe('google-antigravity');
+    expect((await screen.findByRole('note')).textContent).toMatch(/does not offer Google Antigravity sign-in/);
   });
 });
 

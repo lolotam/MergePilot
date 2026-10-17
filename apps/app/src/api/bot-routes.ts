@@ -17,7 +17,8 @@ import {
 import { ReviewerBotInputSchema, type BotsResponse } from './contract.js';
 import { sendError } from './helpers.js';
 import type { DashboardApiDeps } from './routes.js';
-import { validateFallback } from './settings-validation.js';
+import { unavailableProviderProblem, validateFallback } from './settings-validation.js';
+import { subscriptionAvailability } from './subscription-routes.js';
 
 const SLOT_MESSAGE = `Bot slot must be ${MIN_EXTRA_BOT_SLOT}-${MAX_EXTRA_BOT_SLOT} (slot 1 is the main bot, set in the settings)`;
 
@@ -88,10 +89,11 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
         effort: input.effort ?? null,
         fallback: input.fallback,
       };
-      const problem = await validateFallback(deps.store, workspaceId, bot, bot.fallback);
+      const previous = (await deps.store.listReviewerBots(workspaceId)).find((b) => b.slot === slot) ?? null;
+      const problem = unavailableProviderProblem(bot, previous, subscriptionAvailability(deps))
+        ?? await validateFallback(deps.store, workspaceId, bot, bot.fallback);
       if (problem) return sendError(reply, 400, problem.code, problem.message);
 
-      const previous = (await deps.store.listReviewerBots(workspaceId)).find((b) => b.slot === slot) ?? null;
       let saved: ReviewerBot;
       try {
         saved = await deps.store.upsertReviewerBot(workspaceId, bot);

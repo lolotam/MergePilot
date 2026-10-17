@@ -29,9 +29,9 @@ import { registerRunsRoutes } from './runs-routes.js';
 import type { RunStreamOptions } from './runs-events-routes.js';
 import { registerBackupRoutes } from './backup-routes.js';
 import { registerBotRoutes } from './bot-routes.js';
-import { botNameTakenByExtraBot, mergeSettings, validateSettings } from './settings-validation.js';
+import { botNameTakenByExtraBot, mergeSettings, unavailableProviderProblem, validateSettings } from './settings-validation.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
-import { registerSubscriptionRoutes } from './subscription-routes.js';
+import { registerSubscriptionRoutes, subscriptionAvailability } from './subscription-routes.js';
 import type { SubscriptionLoginFn } from '../credentials/subscription-login.js';
 
 export interface DashboardApiDeps {
@@ -146,7 +146,8 @@ export function registerDashboardApi(
       // A patch over the stored settings: fields left out keep their value, null clears them.
       const previous = await deps.store.getSettings(workspaceId);
       const merged = mergeSettings(workspaceId, previous, parsed.data);
-      const problem = await validateSettings(deps.store, workspaceId, merged);
+      const problem = unavailableProviderProblem(merged, previous, subscriptionAvailability(deps))
+        ?? await validateSettings(deps.store, workspaceId, merged);
       if (problem) return sendError(reply, 400, problem.code, problem.message);
       // The main bot's name must differ from every extra bot's (ADR-0017).
       if (parsed.data.botName !== undefined && (await botNameTakenByExtraBot(deps.store, workspaceId, parsed.data.botName))) {

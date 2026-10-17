@@ -11,6 +11,7 @@ export const enAntigravity: Record<keyof typeof arAntigravity, string> = {
   antigravityPasteHelp:
     'After signing in, the browser opens a page that cannot load (localhost). Copy the whole address from the address bar and paste it below. A program listening on port 51121 on your computer would receive the code instead.',
   antigravityPasteLabel: 'Address from the browser',
+  providerUnavailableNote: 'This server does not offer {provider} sign-in, so this saved choice will not work. Choose another provider.',
   subscriptionErrorDenied: 'Google sign-in was cancelled or denied.',
   subscriptionErrorStateMismatch: 'That address belongs to another sign-in. Start a new sign-in and paste the address it opens.',
   subscriptionErrorInvalidPaste: 'Paste the whole address from the browser, starting with http://localhost:51121/.',
