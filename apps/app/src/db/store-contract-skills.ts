@@ -189,6 +189,19 @@ export function defineReviewSkillContract(
     }
   });
 
+  it("never overwrites another workspace's skill that has the same id", async () => {
+    const store = await createStore();
+    try {
+      const foreign = await store.createReviewSkill(WS_OTHER, newSkill({ name: 'Foreign' }));
+      const attempt = store.restoreWorkspace(WS, { skills: [{ ...newSkill({ name: 'Mine' }), id: foreign.id }] });
+      await expect(attempt).rejects.toThrow();
+      expect(await store.getReviewSkill(WS_OTHER, foreign.id)).toMatchObject({ name: 'Foreign', content: foreign.content });
+      expect(await store.listReviewSkills(WS)).toEqual([]);
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   it('restores skills by id: a same-id skill is replaced, a new one inserted, and bots may use them', async () => {
     const store = await createStore();
     try {

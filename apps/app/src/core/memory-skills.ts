@@ -48,6 +48,8 @@ export function createMemorySkill(skills: MemorySkills, workspaceId: string, ski
 
 /** Inserts without the per-workspace count check (a restore checks the total itself). */
 export function insertMemorySkill(skills: MemorySkills, workspaceId: string, skill: NewReviewSkill): ReviewSkillRecord {
+  // The id is the primary key across workspaces, as in Postgres: never overwrite another skill.
+  if (skills.has(skill.id)) throw new Error(`review skill ${skill.id} already exists`);
   assertNameFree(skills, workspaceId, skill.name);
   const now = new Date();
   const record: ReviewSkillRecord = {
