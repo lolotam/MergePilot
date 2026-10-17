@@ -86,6 +86,15 @@ describe('Google Antigravity credentials', () => {
     expect((await store.getCredential('ws', PROVIDER))!.ciphertext).toBe(before);
   });
 
+  it('keeps the stored credential and says to try again when Google cannot be reached', async () => {
+    const { service, store } = fixture();
+    await service.saveSubscription('ws', PROVIDER, credential(0), 'user');
+    const before = (await store.getCredential('ws', PROVIDER))!.ciphertext;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 503 })));
+    await expect(service.resolve('ws', PROVIDER)).rejects.toMatchObject({ name: 'SubscriptionRefreshError', transient: true });
+    expect((await store.getCredential('ws', PROVIDER))!.ciphertext).toBe(before);
+  });
+
   it('serializes disconnect after a pending refresh so the credential is not recreated', async () => {
     const { service, store } = fixture();
     await service.saveSubscription('ws', PROVIDER, credential(0), 'user');
