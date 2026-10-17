@@ -44,3 +44,33 @@ describe('bot identity header (ADR-0017)', () => {
     expect(withBot).toBe(`${renderBotIdentity({ name: 'Owl', logo: 'owl', modelLabel: 'openai:gpt-5', baseUrl: BASE })}\n\n${plain}`);
   });
 });
+
+describe('bot identity header — review skill (ADR-0034)', () => {
+  const owl = { name: 'Owl', logo: 'owl', modelLabel: 'openai:gpt-5' };
+
+  it('names the skill after the model, in the review language, never its content', () => {
+    expect(renderBotIdentity({ ...owl, skill: 'Security' })).toBe('**Owl** · `openai:gpt-5` · skill: Security');
+    expect(renderBotIdentity({ ...owl, skill: 'Security' }, 'ar')).toBe('**Owl** · `openai:gpt-5` · المهارة: Security');
+  });
+
+  it('escapes the skill name like the bot name', () => {
+    const line = renderBotIdentity({ ...owl, skill: '<!-- x --> @team' });
+    expect(line).not.toContain('<!--');
+    expect(line).toContain('@​team');
+  });
+
+  it('puts the skill in an Arabic review summary', () => {
+    const summary = renderReviewSummary({
+      language: 'ar',
+      summary: 'ok',
+      summaryOnly: [],
+      inlineCount: 0,
+      complete: true,
+      incompleteReasons: [],
+      modelLabel: 'openai:gpt-5',
+      outcome: 'completed',
+      identity: { ...owl, skill: 'الأمان' },
+    });
+    expect(summary).toContain('**Owl** · `openai:gpt-5` · المهارة: الأمان\n');
+  });
+});

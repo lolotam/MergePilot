@@ -10,6 +10,7 @@ describe('buildBackupFile', () => {
     const store = {
       getSettings: async () => null,
       listReviewerBots: async () => [],
+      listReviewSkills: async () => [],
     } as unknown as AppStore;
     // The listing still shows the old URL; the credential was rotated to a new URL meanwhile.
     const credentials = {

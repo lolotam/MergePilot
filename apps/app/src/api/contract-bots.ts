@@ -14,6 +14,7 @@ import {
   MAX_FALLBACK_MODELS,
   ModelIdSchema,
 } from './contract-models.js';
+import { SkillIdSchema } from './contract-skills.js';
 
 // The reviewer panel (ADR-0017): up to five bots per workspace. Re-exported by contract.ts.
 
@@ -34,6 +35,8 @@ export const ReviewerBotInputSchema = z.object({
   model: ModelIdSchema,
   effort: EffortSchema.nullable().optional(),
   fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).optional().default([]),
+  /** The bot's review skill (ADR-0034); null = Default. Left out keeps the stored skill. */
+  skillId: SkillIdSchema.nullable().optional(),
 });
 export type ReviewerBotInput = z.infer<typeof ReviewerBotInputSchema>;
 
@@ -46,6 +49,10 @@ export const ReviewerBotSchema = z.object({
   model: z.string(),
   effort: z.string().nullable(),
   fallback: z.array(FallbackEntrySchema),
+  /** The bot's review skill (ADR-0034); left out on Default. */
+  skillId: z.string().nullable().optional(),
+  /** The name of the bot's skill that was deleted; left out unless the bot fell back to Default. */
+  skillRemovedName: z.string().nullable().optional(),
 });
 export type ReviewerBotDto = z.infer<typeof ReviewerBotSchema>;
 

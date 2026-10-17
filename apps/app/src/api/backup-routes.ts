@@ -117,6 +117,7 @@ export function registerBackupRoutes(app: FastifyInstance, deps: DashboardApiDep
           sections: preview.sections,
           settingsChanged: preview.settingsChanged,
           bots: preview.bots,
+          skills: preview.skills,
           credentials: preview.credentials.length,
         },
         'Settings backup restored',

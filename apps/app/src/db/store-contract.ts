@@ -13,6 +13,7 @@ import { defineRetentionContract } from './store-contract-retention.js';
 import { definePricesContract } from './store-contract-prices.js';
 import { defineReviewerBotContract } from './store-contract-bots.js';
 import { defineBackupRestoreContract } from './store-contract-backup.js';
+import { defineReviewSkillContract } from './store-contract-skills.js';
 import { defineProviderKeyCursorContract } from './store-contract-provider-keys.js';
 import { defineDualAuthStoreContract } from './store-contract-dual-auth.js';
 
@@ -30,6 +31,8 @@ export const STORE_CONTRACT_WORKSPACES = [
   'ws-bots-other',
   'ws-backup',
   'ws-backup-other',
+  'ws-skills',
+  'ws-skills-other',
 ] as const;
 
 export function describeStoreContract(
@@ -389,6 +392,7 @@ export function describeStoreContract(
     defineRetentionContract(createStore, cleanup);
     definePricesContract(createStore, cleanup);
     defineReviewerBotContract(createStore, cleanup);
+    defineReviewSkillContract(createStore, cleanup);
     defineBackupRestoreContract(createStore, cleanup);
     defineProviderKeyCursorContract(createStore, cleanup);
     defineDualAuthStoreContract(createStore, cleanup);

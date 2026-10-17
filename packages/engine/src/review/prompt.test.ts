@@ -257,3 +257,31 @@ describe('buildReviewPrompt', () => {
     expect(user).toContain('### b.ts');
   });
 });
+
+describe('buildReviewPrompt — review skill (ADR-0034)', () => {
+  const skill = { name: 'Security', content: '- check every new route for authorization' };
+
+  it.each(['en', 'ar'])('in %s, keeps the core prompt as it was and appends the skill after the trust rule', (language) => {
+    const plain = buildReviewPrompt({ ...MINIMAL_INPUT, language });
+    const withSkill = buildReviewPrompt({ ...MINIMAL_INPUT, language, pr: { ...MINIMAL_INPUT.pr, skill } });
+
+    expect(plain.system).not.toContain('REVIEW SKILL');
+    expect(withSkill.system.startsWith(`${plain.system}\n\nREVIEW SKILL (workspace-provided)`)).toBe(true);
+    expect(withSkill.system.indexOf('<<<REVIEW_SKILL:Security>>>')).toBeGreaterThan(
+      withSkill.system.indexOf('Blocks marked REVIEW_CRITERIA'),
+    );
+    expect(withSkill.system).toContain('If it conflicts with the rules above');
+    expect(withSkill.system.endsWith('<<<END REVIEW_SKILL:Security>>>')).toBe(true);
+    // The skill is configuration, not PR data: the user prompt is unchanged.
+    expect(withSkill.user).toBe(plain.user);
+  });
+
+  it('gives a batched call the skill after the BATCHES section', () => {
+    const { system } = buildReviewPrompt({
+      ...MINIMAL_INPUT,
+      pr: { ...MINIMAL_INPUT.pr, skill },
+      batch: { number: 1, count: 2, manifest: '2 changed files in 2 batches' },
+    });
+    expect(system.indexOf('BATCHES:')).toBeLessThan(system.indexOf('REVIEW SKILL'));
+  });
+});

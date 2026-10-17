@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseConfig } from '@mergepilot/engine';
 import type { LoadRepoConfigResult } from '@mergepilot/github';
 import type { MaxFindingsChoice } from '../core/types.js';
-import { effectiveConfigFor } from './effective-config.js';
+import { effectiveConfigFor, skillKeyOf } from './effective-config.js';
 
 // The review marker's config hash covers the workspace findings limit wherever the review inherits
 // it (ADR-0033), so changing the dashboard limit makes the next review a full one.
@@ -55,5 +55,41 @@ describe('effectiveConfigFor — config hash and the workspace findings limit', 
   it('still uses the file pricing for the same model when only the limit was filled in', () => {
     const text = 'provider: openai\nmodel: gpt-x\nbudget:\n  pricing:\n    inputPerMTok: 1\n    outputPerMTok: 2\n';
     expect(effective((limit) => repoFile(text, limit), 20).repoPricing).toMatchObject({ inputPerMTok: 1, outputPerMTok: 2 });
+  });
+});
+
+describe('effectiveConfigFor — config hash and the review skill (ADR-0034)', () => {
+  const withSkill = (repo: (limit: MaxFindingsChoice | undefined) => LoadRepoConfigResult, skillKey?: string, maxFindings?: MaxFindingsChoice) =>
+    effectiveConfigFor(repo(maxFindings), CHOICE, [], { language: 'en', minSeverity: 'medium', maxFindings }, skillKey);
+
+  it.each([
+    ['no repository file', noFile],
+    ['a file without review.maxFindings', fileWithoutLimit],
+    ['a file that names review.maxFindings', fileWithLimit],
+  ])('with %s, Default keeps the old hash and a skill or a new skill text changes it', (_name, repo) => {
+    const before = effective(repo).configHash;
+    expect(withSkill(repo).configHash).toBe(before);
+    const security = withSkill(repo, 'a'.repeat(64)).configHash;
+    expect(security).not.toBe(before);
+    expect(withSkill(repo, 'b'.repeat(64)).configHash).not.toBe(security);
+    // A skill and an inherited limit both count, each on its own.
+    expect(withSkill(repo, 'a'.repeat(64), 20).configHash).not.toBe(withSkill(repo, undefined, 20).configHash);
+  });
+});
+
+describe('skillKeyOf', () => {
+  const skill = (contentHash: string) => ({ contentHash });
+
+  it("is a lone bot's own content hash, and undefined on Default", () => {
+    expect(skillKeyOf([{ slot: 1 }])).toBeUndefined();
+    expect(skillKeyOf([{ slot: 3, skill: skill('h3') }])).toBe('h3');
+  });
+
+  it("covers every bot of a consensus panel, so any bot's skill change makes the panel's next review full", () => {
+    const panel = [{ slot: 1 }, { slot: 2, skill: skill('h2') }, { slot: 3 }];
+    const key = skillKeyOf(panel);
+    expect(key).toBe(JSON.stringify([{ slot: 2, skill: 'h2' }]));
+    expect(skillKeyOf([{ slot: 1 }, { slot: 2, skill: skill('h2') }, { slot: 3, skill: skill('h3') }])).not.toBe(key);
+    expect(skillKeyOf([{ slot: 1 }, { slot: 2 }])).toBeUndefined();
   });
 });

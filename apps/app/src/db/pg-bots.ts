@@ -9,8 +9,11 @@ import {
   type BotLogo,
   type FallbackSetting,
   type ReviewerBot,
+  UnknownSkillError,
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
+import { skillFields } from './pg-settings.js';
+import { isConstraintViolation, SKILL_FOREIGN_KEYS } from './pg-skills.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
 import { lockBotNames, withLiveWorkspace } from './workspace-lock.js';
 
@@ -28,6 +31,7 @@ function mapBotRow(row: typeof reviewerBots.$inferSelect): ReviewerBot {
     model: row.model,
     effort: row.effort ?? null,
     fallback: Array.isArray(row.fallback) ? (row.fallback as FallbackSetting[]) : [],
+    ...skillFields(row),
   };
 }
 
@@ -68,6 +72,8 @@ export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: R
     model: bot.model,
     effort: bot.effort,
     fallback: bot.fallback,
+    skillId: bot.skillId ?? null,
+    skillRemovedName: bot.skillRemovedName ?? null,
     updatedAt: new Date(),
   };
   try {
@@ -94,6 +100,7 @@ export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: R
     });
   } catch (error) {
     if (isBotNameConflict(error)) throw new BotNameTakenError(bot.name);
+    if (bot.skillId && isConstraintViolation(error, '23503', SKILL_FOREIGN_KEYS)) throw new UnknownSkillError(bot.skillId);
     throw error;
   }
 }

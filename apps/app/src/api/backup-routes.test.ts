@@ -65,9 +65,9 @@ describe('settings backup: export and restore (ADR-0018)', { timeout: 60000 }, (
   it('exports every key of the GET /settings DTO, so new settings fields are backed up without changes', async () => {
     const { settings } = await get('settings', 'ws-1');
     const file = await exported({ includeKeys: false });
-    const { workspaceId: _ws, ...dto } = settings;
-    expect(Object.keys(file.settings).sort()).toEqual(Object.keys(dto).sort());
-    expect(file.settings).toEqual(dto);
+    // The skill travels by name, never by id (ADR-0034); the main bot here is on Default.
+    const { workspaceId: _ws, skillId: _skill, skillRemovedName: _removed, ...dto } = settings;
+    expect(file.settings).toEqual({ ...dto, skillName: null });
   });
 
   it('round trip: restores settings, bots and keys into another owned workspace exactly', async () => {
@@ -76,7 +76,7 @@ describe('settings backup: export and restore (ADR-0018)', { timeout: 60000 }, (
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
       dryRun: false,
-      sections: ['settings', 'bots', 'credentials'],
+      sections: ['settings', 'bots', 'credentials', 'skills'],
       bots: 2,
       keysTested: false,
       credentials: [...SEEDED]

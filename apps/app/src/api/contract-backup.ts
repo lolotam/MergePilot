@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_EXTRA_BOTS } from '../core/bot-types.js';
+import { MAX_WORKSPACE_SKILLS } from '../core/skill-types.js';
 import { MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
 import { KeyProviderSchema } from './contract-judge.js';
 
@@ -13,8 +14,8 @@ export const BACKUP_MAX_BYTES = 1024 * 1024;
 export const MIN_PASSPHRASE_LENGTH = 12;
 export const MAX_PASSPHRASE_LENGTH = 1024;
 
-/** What a restore may write; the request picks any of them (default: all three). */
-export const BACKUP_SECTIONS = ['settings', 'bots', 'credentials'] as const;
+/** What a restore may write; the request picks any of them (default: all four). */
+export const BACKUP_SECTIONS = ['settings', 'bots', 'credentials', 'skills'] as const;
 export const BackupSectionSchema = z.enum(BACKUP_SECTIONS);
 export type BackupSection = z.infer<typeof BackupSectionSchema>;
 
@@ -45,6 +46,13 @@ export const BackupCredentialSchema = z.object({
 export type BackupCredential = z.infer<typeof BackupCredentialSchema>;
 
 /**
+ * A review skill in the file (ADR-0034): name and Markdown content, no secret (uploads with one are
+ * refused), so it is never sealed. Checked like POST /skills on restore.
+ */
+export const BackupSkillSchema = z.object({ name: z.string().max(200), content: z.string().max(100_000) });
+export type BackupSkill = z.infer<typeof BackupSkillSchema>;
+
+/**
  * The file. `settings` is the GET /settings DTO and each bot the GET /bots DTO, kept loose here:
  * the restore runs them through the same schemas and checks as PUT /settings and PUT /bots/:slot,
  * so a field added to those contracts is backed up and validated without changes here.
@@ -58,6 +66,11 @@ export const BackupFileSchema = z.object({
   settings: z.record(z.string(), z.unknown()).nullable(),
   bots: z.array(z.record(z.string(), z.unknown())).max(MAX_EXTRA_BOTS),
   credentials: z.array(BackupCredentialSchema).max(KeyProviderSchema.options.length),
+  /**
+   * Review skills (ADR-0034); absent in files from before them. Settings and bots name their skill
+   * by `skillName` (null = Default), never by id: ids differ between workspaces.
+   */
+  skills: z.array(BackupSkillSchema).max(MAX_WORKSPACE_SKILLS).optional(),
 });
 export type BackupFile = z.infer<typeof BackupFileSchema>;
 
@@ -89,6 +102,10 @@ export const BackupPreviewSchema = z.object({
   settingsChanged: z.array(z.string()),
   /** Extra bots after the restore (they replace the current ones); 0 when bots are not restored. */
   bots: z.number().int(),
+  /** Skills written, upserted by name (ADR-0034); 0 when skills are not restored. */
+  skills: z.number().int(),
+  /** Skill names the settings or bots name that will not exist: those bots restore on Default. */
+  skillsMissing: z.array(z.string()),
   credentials: z.array(
     z.object({ provider: KeyProviderSchema, last4: z.string(), action: z.enum(['add', 'replace']) }),
   ),

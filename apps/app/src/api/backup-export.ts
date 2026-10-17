@@ -2,7 +2,8 @@ import { deriveBackupKey, newBackupSalt, sealBackupKey } from '../backup/passphr
 import type { AppStore } from '../core/types.js';
 import { isDualMethodProvider, isKeyListProvider } from '../credentials/multi-key.js';
 import type { CredentialService } from '../credentials/service.js';
-import { BACKUP_FORMAT, BACKUP_VERSION, type BackupCredential, type BackupFile } from './contract-backup.js';
+import { withSkillName } from './backup-skills.js';
+import { BACKUP_FORMAT, BACKUP_VERSION, type BackupCredential, type BackupFile, type BackupSkill } from './contract-backup.js';
 
 // Settings backup export (ADR-0018). The keys are decrypted with the workspace vault and sealed
 // with the owner's passphrase here, on the server; the response never carries a plaintext key.
@@ -20,7 +21,7 @@ export interface BackupExportOptions {
 export interface BackupExportResult {
   file: BackupFile;
   filename: string;
-  counts: { settings: boolean; bots: number; credentials: number; keys: number };
+  counts: { settings: boolean; bots: number; credentials: number; keys: number; skills: number };
 }
 
 /** `mergepilot-settings-<workspace-slug>-<YYYYMMDD>.json`; the slug keeps only safe characters. */
@@ -35,16 +36,23 @@ export async function buildBackupFile(
   workspace: { id: string; name: string; slug: string },
   options: BackupExportOptions,
 ): Promise<BackupExportResult> {
-  const [stored, bots, keys] = await Promise.all([
+  const [stored, bots, keys, skillList] = await Promise.all([
     deps.store.getSettings(workspace.id),
     deps.store.listReviewerBots(workspace.id),
     deps.credentials.listKeys(workspace.id),
+    deps.store.listReviewSkills(workspace.id),
   ]);
-  // The GET /settings DTO as it is, without the workspace id (the target comes from the URL).
+  // The GET /settings DTO without the workspace id (the target comes from the URL), its skill by
+  // name: skill ids differ between workspaces (ADR-0034).
   let settings: Record<string, unknown> | null = null;
   if (stored) {
     const { workspaceId: _ws, ...dto } = stored;
-    settings = dto;
+    settings = withSkillName(dto, skillList);
+  }
+  const skills: BackupSkill[] = [];
+  for (const summary of skillList) {
+    const skill = await deps.store.getReviewSkill(workspace.id, summary.id);
+    if (skill) skills.push({ name: skill.name, content: skill.content });
   }
 
   const salt = options.includeKeys ? newBackupSalt() : null;
@@ -102,8 +110,9 @@ export async function buildBackupFile(
     app: { version: BACKUP_APP_VERSION },
     workspace: { name: workspace.name },
     settings,
-    bots: bots.map((b) => ({ ...b })),
+    bots: bots.map((b) => withSkillName({ ...b }, skillList)),
     credentials,
+    skills,
   };
   return {
     file,
@@ -113,6 +122,7 @@ export async function buildBackupFile(
       bots: bots.length,
       credentials: credentials.length,
       keys: credentials.filter((c) => c.key).length,
+      skills: skills.length,
     },
   };
 }

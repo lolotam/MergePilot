@@ -14,6 +14,7 @@
 import { matchesGlob } from '../diff/glob.js';
 import { ESCAPED_MARKER_NOTE, escapeDelimiters, escapeLabel } from './delimiters.js';
 import { followUpWhatYouSee, renderOpenFindings, type FollowUp, type PromptPr } from './follow-up.js';
+import { renderSkillSection, type ReviewSkill } from './skill.js';
 
 const PR_BODY_MAX_CHARS = 4000;
 
@@ -294,6 +295,7 @@ function buildSystemPrompt(
   maxFindings: number,
   batched: boolean,
   followUp: FollowUp | undefined,
+  skill: ReviewSkill | undefined,
 ): string {
   const isArabic = language === 'ar';
 
@@ -322,6 +324,8 @@ function buildSystemPrompt(
     `Return at most ${maxFindings} findings. Prefer high-severity, high-confidence findings.`,
     '',
     TRUST_RULE,
+    // Last, so "the rules above" in its precedence line covers every core section (ADR-0034).
+    ...(skill ? ['', renderSkillSection(skill)] : []),
   ].join('\n');
 }
 
@@ -388,7 +392,7 @@ function buildUserPrompt(input: PromptInput): string {
  */
 export function buildReviewPrompt(input: PromptInput): BuiltPrompt {
   return {
-    system: buildSystemPrompt(input.language, input.maxFindings, input.batch !== undefined, input.pr.followUp),
+    system: buildSystemPrompt(input.language, input.maxFindings, input.batch !== undefined, input.pr.followUp, input.pr.skill),
     user: buildUserPrompt(input),
   };
 }

@@ -16,6 +16,7 @@ import { EffortSelect, effortFor } from '../EffortSelect.js';
 import { FallbackModelsCard } from '../FallbackModelsCard.js';
 import { ModelSelect } from '../ModelSelect.js';
 import { ProviderSelect, useModelEfforts } from '../providers.js';
+import { SkillSelect } from '../skills/SkillSelect.js';
 import { BotIdentityFields } from './BotIdentityFields.js';
 import { botNameError, sameBotName } from './BotLogo.js';
 
@@ -38,7 +39,7 @@ export interface ExtraBotCardProps {
   onDeleted: () => void;
 }
 
-type Errors = Partial<Record<'name' | 'model' | 'fallback' | 'form', string>>;
+type Errors = Partial<Record<'name' | 'model' | 'fallback' | 'skill' | 'form', string>>;
 
 const cleanFallback = (list: readonly FallbackEntry[]): FallbackEntry[] =>
   list.map((f) => ({ provider: f.provider, model: f.model.trim(), effort: f.effort ?? null }));
@@ -69,6 +70,15 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
   const [model, setModel] = useState(bot.model);
   const [effort, setEffort] = useState<string | null>(bot.effort);
   const [fallback, setFallback] = useState<FallbackEntry[]>(bot.fallback);
+  // The bot's review skill (ADR-0034); null = Default. Follows the server when it changes there
+  // (deleting a skill sets its bots to Default).
+  const savedSkillId = bot.skillId ?? null;
+  const [skillId, setSkillId] = useState<string | null>(savedSkillId);
+  const [shownSkillId, setShownSkillId] = useState<string | null>(savedSkillId);
+  if (shownSkillId !== savedSkillId) {
+    setShownSkillId(savedSkillId);
+    setSkillId(savedSkillId);
+  }
   const [errors, setErrors] = useState<Errors>({});
   const [copied, setCopied] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -83,6 +93,7 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
     if (code === 'bot_name_taken') return { name: t('botNameTaken') };
     if (code === 'fallback_duplicate') return { fallback: t('botFallbackDuplicate') };
     if (code === 'fallback_key_missing') return { fallback: t('botFallbackKeyMissing') };
+    if (code === 'unknown_skill') return { skill: t('skillErrorUnknown') };
     const message = err instanceof Error && err.message ? err.message : t('error');
     return { form: t('botSaveFailed', { message }) };
   };
@@ -106,6 +117,8 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
       model: model.trim(),
       effort,
       fallback: cleanFallback(fallback),
+      // Always sent: saving the bot confirms the skill choice and clears a deleted-skill note.
+      skillId,
     };
     try {
       await save.mutateAsync({ slot: bot.slot, input });
@@ -197,6 +210,20 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
             {errors.model && <p className="text-xs text-red-500 mt-1 ms-2">{errors.model}</p>}
           </div>
           <EffortSelect id={`${prefix}-effort`} efforts={efforts} value={effort} onChange={setEffort} disabled={isMember} />
+          <div>
+            <SkillSelect
+              id={`${prefix}-skill`}
+              workspaceId={workspaceId}
+              value={skillId}
+              onChange={(next) => {
+                setSkillId(next);
+                clear('skill');
+              }}
+              disabled={isMember}
+              removedName={bot.skillId ? null : bot.skillRemovedName}
+            />
+            {errors.skill && <p className="text-xs text-red-500 mt-1 ms-2">{errors.skill}</p>}
+          </div>
         </div>
         <p className="text-[11px] text-ink-500 dark:text-ink-400 -mt-3 ms-1">{t('botNoHeavyHint')}</p>
 

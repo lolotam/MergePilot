@@ -23,6 +23,7 @@ import {
 } from './contract-models.js';
 import { RepoColorsSchema, RunRetentionDaysSchema } from './contract-runs.js';
 import { PriceOverridesSchema, RunPricingSchema } from './contract-prices.js';
+import { SkillIdSchema } from './contract-skills.js';
 
 export * from './contract-backup.js';
 export * from './contract-bots.js';
@@ -31,6 +32,7 @@ export * from './contract-runs.js';
 export * from './contract-judge.js';
 export * from './contract-prices.js';
 export * from './contract-subscriptions.js';
+export * from './contract-skills.js';
 
 export type Severity = z.infer<typeof SeveritySchema>;
 
@@ -93,6 +95,10 @@ export const SettingsSchema = z.object({
   panelMode: PanelModeSchema.optional(),
   /** Consensus only: bots that must find a finding to keep it (critical and high are always kept). */
   panelMinAgreement: PanelMinAgreementSchema.optional(),
+  /** The main bot's review skill (ADR-0034); null = Default. Left out on PUT keeps it. */
+  skillId: SkillIdSchema.nullable().optional(),
+  /** Read only: the name of the main bot's skill that was deleted, until a skill is chosen again. */
+  skillRemovedName: z.string().nullable().optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -336,6 +342,8 @@ export const ReviewRunSchema = z.object({
   /** The reviewer-panel bot that ran it (1 = main) and its name then (ADR-0017). */
   botSlot: z.number().int().optional(),
   botName: z.string().nullable().optional(),
+  /** The review skill the run used, by name then (ADR-0034); left out on Default. */
+  skillName: z.string().nullable().optional(),
 });
 export type ReviewRun = z.infer<typeof ReviewRunSchema>;
 

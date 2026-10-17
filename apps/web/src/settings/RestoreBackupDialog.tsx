@@ -6,18 +6,26 @@ import type {
 } from '@mergepilot/app/contract';
 import { ApiClientError } from '../api/client.js';
 import { Modal } from '../components/Modal.js';
+import type { I18nKey } from '../i18n/ar.js';
 import { useI18n, type I18nContextValue } from '../i18n/context.js';
 import { useProviderLabel } from './providers.js';
+import { readFileText } from './read-file-text.js';
 import { useRestoreBackup } from './useBackup.js';
 
 // The server's BACKUP_MAX_BYTES (type-checked; the web never imports server runtime code).
 const BACKUP_MAX_BYTES: typeof SERVER_BACKUP_MAX_BYTES = 1024 * 1024;
 
-const SECTIONS: ReadonlyArray<{ id: BackupSection; label: 'backupSectionSettings' | 'backupSectionBots' | 'backupSectionCredentials' }> = [
-  { id: 'settings', label: 'backupSectionSettings' },
-  { id: 'bots', label: 'backupSectionBots' },
-  { id: 'credentials', label: 'backupSectionCredentials' },
-];
+// Every BACKUP_SECTIONS entry, in the server's order (a missing one fails the type check).
+const SECTION_LABELS = {
+  settings: 'backupSectionSettings',
+  bots: 'backupSectionBots',
+  credentials: 'backupSectionCredentials',
+  skills: 'backupSectionSkills',
+} as const satisfies Record<BackupSection, I18nKey>;
+
+const SECTIONS: ReadonlyArray<{ id: BackupSection; label: I18nKey }> = Object.entries(SECTION_LABELS).map(
+  ([id, label]) => ({ id: id as BackupSection, label }),
+);
 
 export interface RestoreBackupDialogProps {
   workspaceId: string;
@@ -33,16 +41,6 @@ function errorText(err: unknown, t: I18nContextValue['t']): string {
     return err.message;
   }
   return err instanceof Error ? err.message : t('error');
-}
-
-/** Reads a picked file as text (FileReader works in every browser and in jsdom). */
-function readText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(reader.error ?? new Error('read failed'));
-    reader.readAsText(file);
-  });
 }
 
 /** Pick a file, preview the dry-run diff, then confirm the restore (ADR-0018). */
@@ -74,7 +72,7 @@ export function RestoreBackupDialog({ workspaceId, isOpen, onClose }: RestoreBac
     if (!picked) return;
     if (picked.size > BACKUP_MAX_BYTES) return setError(t('backupFileTooLarge'));
     try {
-      setFile(JSON.parse(await readText(picked)) as unknown);
+      setFile(JSON.parse(await readFileText(picked)) as unknown);
     } catch {
       setError(t('backupFileInvalid'));
     }
@@ -159,6 +157,12 @@ export function RestoreBackupDialog({ workspaceId, isOpen, onClose }: RestoreBac
               </p>
             )}
             {preview.sections.includes('bots') && <p>{t('backupPreviewBots', { count: preview.bots })}</p>}
+            {preview.sections.includes('skills') && <p>{t('backupPreviewSkills', { count: preview.skills })}</p>}
+            {preview.skillsMissing.length > 0 && (
+              <p dir="auto" className="text-amber-700 dark:text-amber-300">
+                {t('backupPreviewSkillsMissing', { names: preview.skillsMissing.join(', ') })}
+              </p>
+            )}
             {preview.credentials.length > 0 && (
               <ul className="flex flex-col gap-0.5">
                 {preview.credentials.map((c) => (

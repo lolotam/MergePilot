@@ -62,6 +62,16 @@ describe('bot chip on runs', () => {
     await waitFor(() => expect(chips().map((c) => c.textContent)).toContain('Captain'));
   });
 
+  it("shows the run's skill by name next to the bot, and nothing on Default (ADR-0034)", () => {
+    renderRunsPage({
+      groups: [
+        makeGroup([makeRun({ id: 's', pullNumber: 1, skillName: 'Security' })]),
+        makeGroup([makeRun({ id: 'd', pullNumber: 2, skillName: null })]),
+      ],
+    });
+    expect(screen.getAllByTestId('run-skill-name').map((el) => el.textContent)).toEqual(['Skill: Security']);
+  });
+
   it('logo lookup: slot 1 is the main bot; an extra slot only while it keeps the run name', () => {
     expect(runBotLogo(BOTS, 1, null)).toBe('pilot');
     expect(runBotLogo(BOTS, 2, 'owl BOT')).toBe('owl');

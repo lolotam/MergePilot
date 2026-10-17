@@ -1,4 +1,5 @@
 import type { ReviewerBot } from './bot-types.js';
+import type { NewReviewSkill } from './skill-types.js';
 import type { KeyProvider, ProviderKeyChange, StoredCredential, StoredProviderKey, WorkspaceSettings } from './types.js';
 
 // Settings restore (ADR-0018). Re-exported by types.ts.
@@ -29,6 +30,11 @@ export interface WorkspaceRestore {
   providerKeys?: StoredProviderKey[] | undefined;
   /** ADR-0027 dual providers: one locked change per entry inside the restore transaction. */
   dualProviderKeyChanges?: RestoreProviderKeyEntry[] | undefined;
+  /**
+   * Review skills (ADR-0034), written first: a skill whose id exists in the workspace is replaced,
+   * the others are inserted. Skills not listed stay.
+   */
+  skills?: NewReviewSkill[] | undefined;
 }
 
 /** The restore part of AppStore. */

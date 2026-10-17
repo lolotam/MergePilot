@@ -16,6 +16,11 @@ import {
 import { BotNameTakenError, sameBotName, type ReviewerBot } from './bot-types.js';
 import { deleteMemoryWorkspace, restoreMemoryWorkspace } from './memory-workspace.js';
 import {
+  assertMemorySkill, createMemorySkill, deleteMemorySkill, getMemorySkill, listMemorySkills, updateMemorySkill,
+  withSetSkillFields, type MemorySkills,
+} from './memory-skills.js';
+import type { DeletedReviewSkill, NewReviewSkill, ReviewSkillChange, ReviewSkillRecord, ReviewSkillSummary } from './skill-types.js';
+import {
   listMemoryProviderKeys, listMemoryWorkspaceProviderKeys, modifyMemoryProviderKeys, readMemoryKeyCursor,
   recordMemoryProviderKeyTest, writeMemoryKeyCursor,
 } from './memory-provider-keys.js';
@@ -56,6 +61,8 @@ export class MemoryStore implements AppStore {
   readonly prices = new MemoryPriceTable();
   /** Extra reviewer-panel bots (slots 2-5), see memory-bots.ts. */
   readonly bots = new Map<string, ReviewerBot>();
+  /** Review skills by id (ADR-0034), see memory-skills.ts. */
+  readonly skills: MemorySkills = new Map();
 
   /** Mirrors the Postgres organization check: no writes for a workspace deleted in this store. */
   private assertLive(workspaceId: string): void {
@@ -109,7 +116,7 @@ export class MemoryStore implements AppStore {
   async getSettings(workspaceId: string): Promise<WorkspaceSettings | null> {
     const s = this.settings.get(workspaceId);
     if (!s) return null;
-    return {
+    return withSetSkillFields({
       ...s,
       heavyThresholdLines: s.heavyThresholdLines ?? 800,
       fallback: s.fallback ?? [],
@@ -120,7 +127,7 @@ export class MemoryStore implements AppStore {
       judge: s.judge ? { ...s.judge, uses: [...s.judge.uses], fallback: [...s.judge.fallback] } : null,
       priceOverrides: (s.priceOverrides ?? []).map((o) => ({ ...o })),
       ...panelSettingsOrDefaults(s),
-    };
+    });
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<void> {
@@ -128,6 +135,7 @@ export class MemoryStore implements AppStore {
     // Like the Postgres store: undefined keeps the stored retention, colors, judge and price overrides,
     // and only a renamed main bot is checked against the extra bots' names.
     const stored = this.settings.get(settings.workspaceId);
+    assertMemorySkill(this.skills, settings.workspaceId, settings.skillId);
     const botName = settings.botName;
     const renamed = botName !== undefined && !(stored?.botName && sameBotName(stored.botName, botName));
     if (renamed && listMemoryBots(this.bots, settings.workspaceId).some((bot) => sameBotName(bot.name, botName))) {
@@ -144,6 +152,9 @@ export class MemoryStore implements AppStore {
       judge: settings.judge !== undefined ? settings.judge : (stored?.judge ?? null),
       priceOverrides: (settings.priceOverrides ?? stored?.priceOverrides ?? []).map((o) => ({ ...o })),
       ...keepPanelSettings(settings, stored),
+      // A skill choice (null included) clears the deleted-skill note; undefined keeps both (ADR-0034).
+      skillId: settings.skillId !== undefined ? settings.skillId : (stored?.skillId ?? null),
+      skillRemovedName: settings.skillId !== undefined ? null : (stored?.skillRemovedName ?? null),
     });
   }
 
@@ -153,7 +164,34 @@ export class MemoryStore implements AppStore {
 
   async upsertReviewerBot(workspaceId: string, bot: ReviewerBot): Promise<ReviewerBot> {
     this.assertLive(workspaceId);
+    assertMemorySkill(this.skills, workspaceId, bot.skillId);
     return upsertMemoryBot(this.bots, workspaceId, bot, this.settings.get(workspaceId)?.botName);
+  }
+
+  async listReviewSkills(workspaceId: string): Promise<ReviewSkillSummary[]> {
+    return listMemorySkills(this.skills, workspaceId);
+  }
+
+  async getReviewSkill(workspaceId: string, skillId: string): Promise<ReviewSkillRecord | null> {
+    return getMemorySkill(this.skills, workspaceId, skillId);
+  }
+
+  async createReviewSkill(workspaceId: string, skill: NewReviewSkill): Promise<ReviewSkillRecord> {
+    this.assertLive(workspaceId);
+    return createMemorySkill(this.skills, workspaceId, skill);
+  }
+
+  async updateReviewSkill(workspaceId: string, skillId: string, change: ReviewSkillChange): Promise<ReviewSkillRecord | null> {
+    this.assertLive(workspaceId);
+    return updateMemorySkill(this.skills, workspaceId, skillId, change);
+  }
+
+  async deleteReviewSkill(workspaceId: string, skillId: string): Promise<DeletedReviewSkill | null> {
+    return deleteMemorySkill(this.skills, workspaceId, skillId, {
+      settings: this.settings,
+      extras: listMemoryBots(this.bots, workspaceId),
+      saveExtra: (bot) => upsertMemoryBot(this.bots, workspaceId, bot, this.settings.get(workspaceId)?.botName),
+    });
   }
 
   async deleteReviewerBot(workspaceId: string, slot: number): Promise<boolean> {

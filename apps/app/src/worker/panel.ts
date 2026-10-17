@@ -11,15 +11,27 @@ import {
 } from '../core/types.js';
 import { selectBotFiles } from './bot-review-run.js';
 import { publishConsensus } from './panel-consensus.js';
-import type { BotOutcome, BotRun, PanelBot, PanelContext } from './panel-types.js';
+import type { BotOutcome, BotRun, BotSkill, PanelBot, PanelContext } from './panel-types.js';
 import { failBotRun, finishBotRun, runBot } from './review-bot.js';
 import { startRunHeartbeat } from './run-heartbeat.js';
 import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
 
 export const NO_KEY_DETAIL = 'no key';
 
-/** The main bot (slot 1, the workspace settings) followed by the active extra bots, by slot. */
-export function panelBots(settings: WorkspaceSettings, extras: readonly ReviewerBot[]): PanelBot[] {
+/**
+ * The main bot (slot 1, the workspace settings) followed by the active extra bots, by slot, each
+ * with its review skill from `skills` (by id; ADR-0034). A skill id missing from `skills` (deleted
+ * since) reviews on Default.
+ */
+export function panelBots(
+  settings: WorkspaceSettings,
+  extras: readonly ReviewerBot[],
+  skills: ReadonlyMap<string, BotSkill> = new Map(),
+): PanelBot[] {
+  const skillOf = (id: string | null | undefined) => {
+    const skill = id ? skills.get(id) : undefined;
+    return skill ? { skill } : {};
+  };
   const main: PanelBot = {
     slot: MAIN_BOT_SLOT,
     name: settings.botName ?? DEFAULT_BOT_NAME,
@@ -28,12 +40,31 @@ export function panelBots(settings: WorkspaceSettings, extras: readonly Reviewer
     model: settings.model,
     effort: settings.effort ?? null,
     fallback: settings.fallback ?? [],
+    ...skillOf(settings.skillId),
   };
   const active = extras
     .filter((b) => b.active && b.slot > MAIN_BOT_SLOT)
     .sort((a, b) => a.slot - b.slot)
-    .map((b) => ({ slot: b.slot, name: b.name, logo: b.logo, provider: b.provider, model: b.model, effort: b.effort, fallback: b.fallback }));
+    .map((b) => ({
+      slot: b.slot, name: b.name, logo: b.logo, provider: b.provider, model: b.model, effort: b.effort, fallback: b.fallback,
+      ...skillOf(b.skillId),
+    }));
   return [main, ...active];
+}
+
+/** The skills the bots of this workspace use, by id, read once per job (ADR-0034). */
+export async function loadBotSkills(
+  store: Pick<ProcessReviewDeps['store'], 'getReviewSkill'>,
+  workspaceId: string,
+  ids: ReadonlyArray<string | null | undefined>,
+): Promise<Map<string, BotSkill>> {
+  const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+  const found = await Promise.all(unique.map((id) => store.getReviewSkill(workspaceId, id)));
+  const skills = new Map<string, BotSkill>();
+  for (const skill of found) {
+    if (skill) skills.set(skill.id, { name: skill.name, content: skill.content, contentHash: skill.contentHash });
+  }
+  return skills;
 }
 
 export interface StartedRuns {
@@ -73,6 +104,7 @@ export async function startBotRuns(ctx: StartContext, bots: PanelBot[]): Promise
     ...initial,
     botSlot: bot.slot,
     botName: bot.name,
+    ...(bot.skill ? { skillName: bot.skill.name } : {}),
   });
   try {
     for (const bot of bots) {

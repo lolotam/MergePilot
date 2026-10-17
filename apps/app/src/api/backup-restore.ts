@@ -1,4 +1,3 @@
-import type { z } from 'zod';
 import { SUBSCRIPTION_PREFIX } from '@mergepilot/engine';
 import { BadPassphraseError, deriveBackupKey, openBackupKey, sealedKeySalt, type SealedKey } from '../backup/passphrase-crypto.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
@@ -31,6 +30,8 @@ import {
   type BackupSection,
 } from './contract-backup.js';
 import { botNameTakenByExtraBot, mergeSettings, validateFallback, validateSettings } from './settings-validation.js';
+import { RestoreProblem, zodProblem } from './backup-restore-problem.js';
+import { planSkills, resolveSkillName, takeSkillRef, type SkillRestorePlan } from './backup-skills.js';
 
 // Settings restore (ADR-0018): every part of a (possibly hand-edited) file goes through the same
 // checks as PUT /settings, PUT /bots/:slot and PUT /keys/:provider before anything is written.
@@ -49,37 +50,11 @@ export interface RestoreRequest {
   sections?: readonly BackupSection[] | undefined;
 }
 
-/** A refused restore: `field` names the part of the file that failed (e.g. `settings.provider`). */
-export class RestoreProblem extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    readonly field?: string | undefined,
-  ) {
-    super(message);
-    this.name = 'RestoreProblem';
-  }
-}
+export { RestoreProblem };
 
 export interface RestorePlan {
   restore: WorkspaceRestore;
   preview: Omit<BackupPreview, 'dryRun'>;
-}
-
-/** `credentials.0.provider` → `credentials[0].provider`. */
-function fieldOf(prefix: string, path: readonly PropertyKey[]): string {
-  return path.reduce<string>(
-    (out, part) => (typeof part === 'number' ? `${out}[${part}]` : out ? `${out}.${String(part)}` : String(part)),
-    prefix,
-  );
-}
-
-function zodProblem(prefix: string, error: z.ZodError, secret?: string): RestoreProblem {
-  const issue = error.issues[0];
-  const field = fieldOf(prefix, issue?.path ?? []) || undefined;
-  const message = `${field ?? 'file'}: ${issue?.message ?? 'Invalid value'}`;
-  return new RestoreProblem(400, 'validation_error', secret ? message.replaceAll(secret, '[REDACTED]') : message, field);
 }
 
 /** Which settings field a validateSettings problem is about. */
@@ -319,10 +294,15 @@ async function planSettings(
   workspaceId: string,
   raw: Record<string, unknown>,
   previous: WorkspaceSettings | null,
+  skills: SkillRestorePlan,
+  missingSkills: Set<string>,
 ): Promise<WorkspaceSettings> {
-  const parsed = SettingsUpdateSchema.safeParse(raw);
+  // The file names the main bot's skill by name (ADR-0034); an older file without it keeps the skill.
+  const ref = takeSkillRef(raw);
+  const parsed = SettingsUpdateSchema.safeParse(ref.rest);
   if (!parsed.success) throw zodProblem('settings', parsed.error);
-  const merged = mergeSettings(workspaceId, previous, parsed.data);
+  const update = ref.present ? { ...parsed.data, skillId: resolveSkillName(skills, ref.name, missingSkills) } : parsed.data;
+  const merged = mergeSettings(workspaceId, previous, update);
   const problem = await validateSettings(checkStore, workspaceId, merged);
   if (problem) {
     const field = problem.code.startsWith('judge_') ? 'settings.judge' : (SETTINGS_PROBLEM_FIELDS[problem.code] ?? 'settings');
@@ -332,7 +312,14 @@ async function planSettings(
 }
 
 /** Each bot through PUT /bots/:slot's slot rule, schema and fallback check; names must not clash. */
-async function planBots(checkStore: AppStore, workspaceId: string, raw: BackupFile['bots'], mainName: string): Promise<ReviewerBot[]> {
+async function planBots(
+  checkStore: AppStore,
+  workspaceId: string,
+  raw: BackupFile['bots'],
+  mainName: string,
+  skills: SkillRestorePlan,
+  missingSkills: Set<string>,
+): Promise<ReviewerBot[]> {
   const bots: ReviewerBot[] = [];
   for (const [index, entry] of raw.entries()) {
     const field = `bots[${index}]`;
@@ -340,9 +327,11 @@ async function planBots(checkStore: AppStore, workspaceId: string, raw: BackupFi
     if (typeof slot !== 'number' || !isExtraBotSlot(slot) || bots.some((b) => b.slot === slot)) {
       throw new RestoreProblem(400, 'invalid_slot', `${field}.slot: each extra bot needs its own slot 2-5`, `${field}.slot`);
     }
-    const parsed = ReviewerBotInputSchema.safeParse(entry);
+    const ref = takeSkillRef(entry);
+    const parsed = ReviewerBotInputSchema.safeParse(ref.rest);
     if (!parsed.success) throw zodProblem(field, parsed.error);
     const input = parsed.data;
+    const skillId = resolveSkillName(skills, ref.name, missingSkills);
     const bot: ReviewerBot = {
       slot,
       name: input.name,
@@ -352,6 +341,7 @@ async function planBots(checkStore: AppStore, workspaceId: string, raw: BackupFi
       model: input.model,
       effort: input.effort ?? null,
       fallback: input.fallback,
+      ...(skillId ? { skillId } : {}),
     };
     if (sameBotName(bot.name, mainName) || bots.some((other) => sameBotName(other.name, bot.name))) {
       throw new RestoreProblem(409, 'bot_name_taken', 'Another bot in this workspace already has this name', `${field}.name`);
@@ -393,10 +383,15 @@ export async function planRestore(deps: RestoreDeps, req: RestoreRequest): Promi
     deps.credentials.hasConnectedSubscription(ws, provider),
   );
 
+  // Skills first: the settings and the bots name theirs (ADR-0034).
+  const skills = await planSkills(deps.store, ws, file.skills, req.userId, sections.includes('skills'));
+  if (skills.skills.length > 0) restore.skills = skills.skills;
+  const missingSkills = new Set<string>();
+
   let settingsChanged: string[] = [];
   let mainName = previous?.botName ?? DEFAULT_BOT_NAME;
   if (sections.includes('settings') && file.settings) {
-    const merged = await planSettings(checkStore, ws, file.settings, previous);
+    const merged = await planSettings(checkStore, ws, file.settings, previous, skills, missingSkills);
     mainName = merged.botName ?? mainName;
     settingsChanged = changedFields(previous, merged);
     // Without the bots section, the main bot's name must differ from the bots that stay.
@@ -406,7 +401,7 @@ export async function planRestore(deps: RestoreDeps, req: RestoreRequest): Promi
     restore.settings = merged;
   }
   if (incomingBots) {
-    restore.bots = await planBots(checkStore, ws, incomingBots, mainName);
+    restore.bots = await planBots(checkStore, ws, incomingBots, mainName, skills, missingSkills);
   }
   if (sections.includes('credentials')) {
     restore.credentials = credentials;
@@ -423,6 +418,8 @@ export async function planRestore(deps: RestoreDeps, req: RestoreRequest): Promi
     sections: [...sections],
     settingsChanged,
     bots: restore.bots?.length ?? 0,
+    skills: restore.skills?.length ?? 0,
+    skillsMissing: [...missingSkills].sort(),
     credentials: (
       await Promise.all(
         [

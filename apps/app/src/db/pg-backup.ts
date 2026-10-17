@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   BotNameTakenError,
   DEFAULT_BOT_NAME,
@@ -14,7 +14,8 @@ import type { AppDb } from './pg-store.js';
 import { writePgSettings } from './pg-settings.js';
 import { listPgProviderKeys, replacePgProviderKeys, writePgKeyCursor } from './pg-provider-keys.js';
 import { readParentCredential, writeProviderKeyChangeTx } from './pg-key-roster.js';
-import { providerCredentials, reviewerBots, workspaceSettings } from './schema.js';
+import { insertSkill, updateSkill } from './pg-skills.js';
+import { providerCredentials, reviewerBots, reviewSkills, workspaceSettings } from './schema.js';
 import { lockBotNames, lockCredential, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
 // Settings restore (ADR-0018): settings, extra bots and keys in one transaction.
@@ -67,13 +68,35 @@ async function replacePgBots(tx: AppTx, workspaceId: string, bots: NonNullable<W
       model: bot.model,
       effort: bot.effort,
       fallback: bot.fallback,
+      skillId: bot.skillId ?? null,
     })),
   );
+}
+
+/** Upserts the restored skills by id (the plan reuses the id of a same-named skill, ADR-0034). */
+async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable<WorkspaceRestore['skills']>): Promise<void> {
+  for (const skill of skills) {
+    const [existing] = await tx
+      .select({ id: reviewSkills.id })
+      .from(reviewSkills)
+      .where(and(eq(reviewSkills.workspaceId, workspaceId), eq(reviewSkills.id, skill.id)));
+    if (existing) {
+      await updateSkill(tx, workspaceId, skill.id, {
+        name: skill.name,
+        content: { text: skill.content, hash: skill.contentHash, sizeTokens: skill.sizeTokens },
+        userId: skill.userId,
+      });
+    } else {
+      await insertSkill(tx, workspaceId, skill);
+    }
+  }
 }
 
 export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore: WorkspaceRestore): Promise<void> {
   await withLiveWorkspace(db, workspaceId, async (tx) => {
     await lockBotNames(tx, workspaceId);
+    // Skills first: the restored settings and bots may name them (ADR-0034).
+    if (restore.skills) await writePgSkills(tx, workspaceId, restore.skills);
     // Old extra bots go first, so the settings' bot name is checked against the restored ones only.
     if (restore.bots) await tx.delete(reviewerBots).where(eq(reviewerBots.workspaceId, workspaceId));
     if (restore.settings) await writePgSettings(tx, { ...restore.settings, workspaceId });

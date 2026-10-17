@@ -40,6 +40,7 @@ export function mapReviewRunRow(row: typeof reviewRuns.$inferSelect): ReviewRun 
     reviewUrl: row.reviewUrl ?? null,
     botSlot: Number(row.botSlot ?? 1),
     botName: row.botName ?? null,
+    ...(row.skillName ? { skillName: row.skillName } : {}),
   };
 }
 
@@ -119,6 +120,7 @@ function startingValues(run: NewReviewRun, now: Date) {
     reviewUrl: run.reviewUrl ?? null,
     botSlot: run.botSlot ?? 1,
     botName: run.botName ?? null,
+    skillName: run.skillName ?? null,
   };
 }
 
@@ -253,6 +255,7 @@ export async function listPgLatestFailedRuns(
       reviewUrl: reviewRuns.reviewUrl,
       botSlot: reviewRuns.botSlot,
       botName: reviewRuns.botName,
+      skillName: reviewRuns.skillName,
       rn: sql<number>`row_number() over (partition by ${reviewRuns.repoFullName}, ${reviewRuns.pullNumber} order by ${reviewRuns.createdAt} desc, ${reviewRuns.id} desc)`.as('rn'),
     })
     .from(reviewRuns)

@@ -84,11 +84,14 @@ export async function panelSetup(options: PanelSetupOptions = {}) {
   let active = 0;
   const flight = { max: 0 };
   const calledModels: string[] = [];
+  /** Every model call's system prompt, by model name. */
+  const systems: Array<{ model: string; system: string }> = [];
   const createModelForProvider = vi.fn(async (config: MergePilotConfig, _secret: Secret): Promise<ReviewModel> => {
     const name = config.model ?? '';
     return {
       label: `${config.provider}:${name}`,
-      generate: vi.fn(async () => {
+      generate: vi.fn(async (request: { system: string }) => {
+        systems.push({ model: name, system: request.system });
         if (!calledModels.includes(name)) calledModels.push(name);
         active++;
         flight.max = Math.max(flight.max, active);
@@ -119,5 +122,5 @@ export async function panelSetup(options: PanelSetupOptions = {}) {
   const job: ReviewJob = { deliveryId: 'del-panel', installationId: INSTALLATION, repoFullName: 'acme/repo', pullNumber: 7, headSha: HEAD, baseSha: 'sha-base' };
   const runs = async () => (await store.listReviewRuns(WS, 50)).sort((a, b) => (a.botSlot ?? 1) - (b.botSlot ?? 1));
   const events = (name: string) => lines.filter((l) => l.event === name);
-  return { store, deps, job, created, client, createModelForProvider, flight, calledModels, runs, events };
+  return { store, deps, job, created, client, createModelForProvider, flight, calledModels, systems, runs, events };
 }

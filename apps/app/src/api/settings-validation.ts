@@ -48,7 +48,20 @@ export function mergeSettings(
     botLogo: update.botLogo ?? current?.botLogo,
     panelMode: update.panelMode ?? current?.panelMode,
     panelMinAgreement: update.panelMinAgreement ?? current?.panelMinAgreement,
+    // ADR-0034: undefined keeps the stored skill (and its deleted-skill note); null is Default.
+    ...(update.skillId !== undefined
+      ? { skillId: update.skillId }
+      : {
+          ...(current?.skillId ? { skillId: current.skillId } : {}),
+          ...(current?.skillRemovedName ? { skillRemovedName: current.skillRemovedName } : {}),
+        }),
   };
+}
+
+/** A skill id from a PUT body that is not one of this workspace's skills (ADR-0034). */
+export async function unknownSkillProblem(store: AppStore, workspaceId: string, skillId: string | null | undefined): Promise<SettingsProblem | null> {
+  if (!skillId || (await store.getReviewSkill(workspaceId, skillId))) return null;
+  return { code: 'unknown_skill', message: "That skill is not one of this workspace's skills" };
 }
 
 export interface SettingsProblem {

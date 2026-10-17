@@ -38,6 +38,7 @@ export function memoryCreateReviewRun(store: MemoryRunTables, run: NewReviewRun)
     reviewUrl: run.reviewUrl ?? null,
     botSlot: run.botSlot ?? 1,
     botName: run.botName ?? null,
+    ...(run.skillName ? { skillName: run.skillName } : {}),
   };
   let reusable: ReviewRun | undefined;
   if (run.jobId) {

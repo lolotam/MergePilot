@@ -2,7 +2,7 @@
 export const arBackup = {
   backupCardTitle: 'النسخة الاحتياطية والاسترجاع',
   backupCardDesc:
-    'نزّل كل الإعدادات وبوتات المراجعة ومفاتيح الـ API في ملف JSON واحد، واسترجعه هنا أو في مساحة عمل تانية إنت مالكها.',
+    'نزّل كل الإعدادات وبوتات المراجعة ومهارات المراجعة ومفاتيح الـ API في ملف JSON واحد، واسترجعه هنا أو في مساحة عمل تانية إنت مالكها.',
   backupKeysWarning:
     'مفاتيح الـ API جوه الملف متشفرة بكلمة المرور اللي بتكتبها. احفظ الملف وكلمة المرور كويس وكل واحد في مكان: من غير كلمة المرور المفاتيح مش ممكن ترجع، لا ليك ولا لينا.',
   backupExportTitle: 'تنزيل نسخة احتياطية',
@@ -25,12 +25,15 @@ export const arBackup = {
   backupSectionSettings: 'إعدادات النماذج',
   backupSectionBots: 'بوتات المراجعة (بتحل محل الموجودين)',
   backupSectionCredentials: 'مفاتيح الـ API',
+  backupSectionSkills: 'مهارات المراجعة (بتتحدّث بالاسم)',
   backupPreview: 'معاينة',
   backupPreviewing: 'بنراجع الملف...',
   backupPreviewTitle: 'اللي هيتغير',
   backupPreviewSettings: 'حقول الإعدادات اللي هتتغير: {fields}',
   backupPreviewNoSettings: 'مفيش إعدادات هتتغير.',
   backupPreviewBots: 'عدد بوتات المراجعة الإضافية بعد الاسترجاع: {count}',
+  backupPreviewSkills: 'عدد المهارات اللي هتتكتب: {count}',
+  backupPreviewSkillsMissing: 'مهارات مش هتبقى موجودة، والبوتات اللي بتستخدمها هترجع على الافتراضي: {names}',
   backupPreviewKeyAdd: 'إضافة',
   backupPreviewKeyReplace: 'استبدال',
   backupPreviewKeysNotTested: 'المفاتيح المسترجعة ماتختبرتش. دوس «اختبار الاتصال» جنب كل مفتاح بعد الاسترجاع.',

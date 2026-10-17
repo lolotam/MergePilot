@@ -20,7 +20,8 @@ import { pausedWithNotice, PAUSED_DETAIL } from './pause-check.js';
 import { changedLinesOf, chooseModel, fallbackChain } from './model-choice.js';
 import { noteBudgetSkipped } from './budget-skip-note.js';
 import { noteNothingNew } from './nothing-new-note.js';
-import { closeRuns, panelBots, runPanel, startBotRuns, type StartedRuns } from './panel.js';
+import { closeRuns, loadBotSkills, panelBots, runPanel, startBotRuns, type StartedRuns } from './panel.js';
+import { skillKeyOf } from './effective-config.js';
 import type { BotRun, PanelContext } from './panel-types.js';
 import { reviewUsesSubscriptionAdmission } from './dual-method-review.js';
 import { failBotRun, WORKSPACE_DELETED } from './review-bot.js';
@@ -89,9 +90,14 @@ export async function processReviewJob(
     return { status: 'skipped', detail: 'workspace not configured' };
   }
 
-  const bots = panelBots(settings, await deps.store.listReviewerBots(workspaceId));
+  const extras = await deps.store.listReviewerBots(workspaceId);
+  const skills = await loadBotSkills(deps.store, workspaceId, [settings.skillId, ...extras.filter((b) => b.active).map((b) => b.skillId)]);
+  const bots = panelBots(settings, extras, skills);
   const panelActive = bots.length > 1;
   const mode = settings.panelMode ?? DEFAULT_PANEL_MODE;
+  // Slot 1's marker hash holds its own skill; in consensus, where the panel selects files once with
+  // that marker, the skills of every bot (ADR-0034).
+  const mainSkillKey = skillKeyOf(panelActive && mode === 'consensus' ? bots : bots.filter((b) => b.slot === MAIN_BOT_SLOT));
   if (panelActive) {
     logger.info(
       { event: 'panel.start', jobId: job.deliveryId, bots: bots.map((b) => b.slot), mode },
@@ -137,7 +143,7 @@ export async function processReviewJob(
 
     let ctx: PanelContext;
     try {
-      const shared = await sharedSteps({ ...base, settings }, runs, main, lead, logSkip, startTime, panelActive);
+      const shared = await sharedSteps({ ...base, settings }, runs, main, lead, logSkip, startTime, panelActive, mainSkillKey);
       if ('result' in shared) return shared.result;
       releaseBudget = shared.releaseBudget;
       ctx = { ...shared.ctx, mode };
@@ -177,6 +183,7 @@ async function sharedSteps(
   logSkip: (reason: string, message: string, fields?: Record<string, unknown>) => void,
   startTime: number,
   panelActive: boolean,
+  mainSkillKey: string | undefined,
 ): Promise<SharedOutcome> {
   const { settings, ...base } = shared;
   const { job, deps, workspaceId } = base;
@@ -221,6 +228,7 @@ async function sharedSteps(
     fallbackChain(settings.fallback ?? [], mainChoice),
     settings,
     deps.store,
+    mainSkillKey,
   );
 
   if (settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined) {

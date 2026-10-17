@@ -13,6 +13,7 @@ import { fieldClass, labelClass, ProviderSelect, useModelEfforts } from './provi
 import { SeveritySelect } from './SeveritySelect.js';
 import { BotIdentityFields } from './bots/BotIdentityFields.js';
 import { botNameError, MAIN_BOT_DEFAULT_LOGO, MAIN_BOT_DEFAULT_NAME } from './bots/BotLogo.js';
+import { SkillSelect } from './skills/SkillSelect.js';
 
 export interface ReviewSettingsCardProps {
   workspaceId: string;
@@ -25,7 +26,7 @@ export interface ReviewSettingsCardProps {
   keyedProviders?: readonly ApiProvider[] | undefined;
 }
 
-type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'heavy' | 'fallback', string>>;
+type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'heavy' | 'fallback' | 'skill', string>>;
 
 const NO_HEAVY: HeavyModelValue = { heavyProvider: null, heavyModel: null, heavyEffort: null, heavyThresholdLines: null };
 
@@ -56,6 +57,8 @@ export function ReviewSettingsCard({
   // The main bot's identity (ADR-0017), saved with the settings.
   const [botName, setBotName] = useState(MAIN_BOT_DEFAULT_NAME);
   const [botLogo, setBotLogo] = useState<BotLogo>(MAIN_BOT_DEFAULT_LOGO);
+  // The main bot's review skill (ADR-0034); null = Default.
+  const [skillId, setSkillId] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const efforts = useModelEfforts(workspaceId, provider, model);
   // The heavy model starts on the main provider when it has a key, else on the first keyed one.
@@ -70,12 +73,13 @@ export function ReviewSettingsCard({
     const key = JSON.stringify([
       settings.botName, settings.botLogo, settings.provider, settings.model, settings.effort, settings.heavyProvider,
       settings.heavyModel, settings.heavyEffort, settings.heavyThresholdLines, settings.fallback, settings.minSeverity,
-      settings.maxFindings, settings.language, settings.monthlyBudgetUsd,
+      settings.maxFindings, settings.language, settings.monthlyBudgetUsd, settings.skillId, settings.skillRemovedName,
     ]);
     if (key === shownKey.current) return;
     shownKey.current = key;
     setBotName(settings.botName ?? MAIN_BOT_DEFAULT_NAME);
     setBotLogo(settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO);
+    setSkillId(settings.skillId ?? null);
     setProvider(settings.provider);
     setModel(settings.model);
     setEffort(settings.effort ?? null);
@@ -133,10 +137,13 @@ export function ReviewSettingsCard({
         maxFindings,
         botName: botName.trim(),
         botLogo,
+        // Always sent: saving the form confirms the skill choice and clears a deleted-skill note.
+        skillId,
       });
     } catch (err) {
-      // A taken bot name is shown on the field; other errors were already shown as a toast.
+      // A taken bot name and an unknown skill are shown on their field; other errors were already shown as a toast.
       if (err instanceof ApiClientError && err.code === 'bot_name_taken') setErrors({ botName: t('botNameTaken') });
+      if (err instanceof ApiClientError && err.code === 'unknown_skill') setErrors({ skill: t('skillErrorUnknown') });
     }
   };
 
@@ -196,6 +203,20 @@ export function ReviewSettingsCard({
             </div>
 
             <EffortSelect id="settings-effort" efforts={efforts} value={effort} onChange={setEffort} disabled={isMember} />
+            <div>
+              <SkillSelect
+                id="settings-skill"
+                workspaceId={workspaceId}
+                value={skillId}
+                onChange={(next) => {
+                  setSkillId(next);
+                  if (errors.skill) setErrors(withoutError(errors, 'skill'));
+                }}
+                disabled={isMember}
+                removedName={settings?.skillId ? null : settings?.skillRemovedName}
+              />
+              {errors.skill && <p className="text-xs text-red-500 mt-1 ms-2">{errors.skill}</p>}
+            </div>
             <SeveritySelect value={minSeverity} onChange={setMinSeverity} disabled={isMember} />
             <MaxFindingsSelect value={maxFindings} onChange={setMaxFindings} disabled={isMember} />
 

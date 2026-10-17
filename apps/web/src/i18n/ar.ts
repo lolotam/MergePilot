@@ -6,6 +6,7 @@ import { arBackup } from './backup-ar.js';
 import { arPrices } from './prices-ar.js';
 import { arBots } from './bots-ar.js';
 import { arAntigravity } from './antigravity-ar.js';
+import { arSkills } from './skills-ar.js';
 
 export const ar = {
   ...arSettings,
@@ -16,6 +17,7 @@ export const ar = {
   ...arPrices,
   ...arBots,
   ...arAntigravity,
+  ...arSkills,
   // App
   appName: 'MergePilot',
   appTagline: 'محرك مراجعة طلبات السحب المدعوم بالذكاء الاصطناعي',

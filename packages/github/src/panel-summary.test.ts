@@ -105,3 +105,19 @@ describe('renderPanelSummary (consensus, ADR-0017)', () => {
     expect(body.match(/Fallback model/g)).toHaveLength(1);
   });
 });
+
+describe('renderPanelSummary — review skills (ADR-0034)', () => {
+  it('adds a Skill column only when a bot has a skill, with — for Default', async () => {
+    const plain = renderPanelSummary({ language: 'en', bots, merge: await merged(), minAgreement: 2, inlineCount: 1 });
+    expect(plain).not.toContain('Skill');
+
+    const withSkill = bots.map((bot) => (bot.slot === 2 ? { ...bot, skill: 'Security' } : bot));
+    const body = renderPanelSummary({ language: 'en', bots: withSkill, merge: await merged(), minAgreement: 2, inlineCount: 1 });
+    expect(body).toContain('|  | Bot | Model | Skill | Status | Findings | Cost |');
+    expect(body).toContain('| **Owl** | `openai:gpt-5` | Security | ✅ completed | 1 | $0.5000 |');
+    expect(body).toContain('| **Fox** | `gemini:g-2` | — | ❌ failed | — | — |');
+
+    const arabic = renderPanelSummary({ language: 'ar', bots: withSkill, merge: await merged(), minAgreement: 2, inlineCount: 1 });
+    expect(arabic).toContain('| المراجع | النموذج | المهارة | الحالة |');
+  });
+});

@@ -25,6 +25,15 @@ export interface PanelBot {
   model: string;
   effort: string | null;
   fallback: FallbackSetting[];
+  /** The bot's review skill (ADR-0034), read when the job started; undefined = Default. */
+  skill?: BotSkill | undefined;
+}
+
+/** A review skill as a bot runs with it. */
+export interface BotSkill {
+  name: string;
+  content: string;
+  contentHash: string;
 }
 
 /** A bot whose run row is `running`, with its heartbeat. */

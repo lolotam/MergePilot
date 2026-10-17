@@ -11,6 +11,8 @@ export interface BotIdentity {
   modelLabel: string;
   /** The app's public URL (`MERGEPILOT_BASE_URL`); without it the logo is left out. */
   baseUrl?: string | undefined;
+  /** The name of the bot's review skill (ADR-0034); never its content. Left out on Default. */
+  skill?: string | undefined;
 }
 
 const LOGO_KEY = /^[a-z][a-z0-9-]{0,23}$/;
@@ -39,10 +41,14 @@ export function renderBotLogo(baseUrl: string | undefined, logo: string): string
   return `<img src="${base}/bots/${key}.svg" width="20" height="20" alt="">`;
 }
 
-/** The identity line a bot's review starts with: logo, bold name and `· provider:model`. */
-export function renderBotIdentity(identity: BotIdentity): string {
+/**
+ * The identity line a bot's review starts with: logo, bold name, `· provider:model`, and
+ * `· skill: <name>` when the bot reviews with a skill (ADR-0034).
+ */
+export function renderBotIdentity(identity: BotIdentity, language: 'ar' | 'en' = 'en'): string {
   const logo = renderBotLogo(identity.baseUrl, identity.logo);
   const name = `**${escapeInline(identity.name)}**`;
   const model = `\`${identity.modelLabel.replace(/`/g, '')}\``;
-  return `${logo ? `${logo} ` : ''}${name} · ${model}`;
+  const skill = identity.skill ? ` · ${language === 'ar' ? 'المهارة' : 'skill'}: ${escapeInline(identity.skill)}` : '';
+  return `${logo ? `${logo} ` : ''}${name} · ${model}${skill}`;
 }

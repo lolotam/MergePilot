@@ -10,7 +10,7 @@ import type {
   StoredProviderKey, WorkspaceRestore,
   WorkspaceSettings, ModelKey,
   StaleRunRef,
-  StoredModelPrice,
+  StoredModelPrice, DeletedReviewSkill, NewReviewSkill, ReviewSkillChange, ReviewSkillRecord, ReviewSkillSummary,
 } from '../core/types.js';
 import type { PriceEntry, PriceSource } from '@mergepilot/engine';
 import { getPgModelPrice, listPgModelPrices, pgPricesFetchedAt, replacePgModelPrices } from './pg-prices.js';
@@ -28,6 +28,7 @@ import {
   recordStoredProviderKeyTest, writeStoredKeyCursor,
 } from './pg-key-roster.js';
 import { deletePgReviewerBot, listPgReviewerBots, upsertPgReviewerBot } from './pg-bots.js';
+import { createPgReviewSkill, deletePgReviewSkill, getPgReviewSkill, listPgReviewSkills, updatePgReviewSkill } from './pg-skills.js';
 import { listPgRunGroups } from './pg-run-groups.js';
 import {
   createPgReviewRun, findPgActiveReviewRun, listPgLatestFailedRuns, mapReviewRunRow, queryPgReviewRuns,
@@ -194,6 +195,13 @@ export class PgStore implements AppStore {
   async deleteReviewerBot(workspaceId: string, slot: number): Promise<boolean> {
     return deletePgReviewerBot(this.db, workspaceId, slot);
   }
+
+  // Review skills (ADR-0034), see pg-skills.ts.
+  listReviewSkills = (workspaceId: string): Promise<ReviewSkillSummary[]> => listPgReviewSkills(this.db, workspaceId);
+  getReviewSkill = (workspaceId: string, skillId: string): Promise<ReviewSkillRecord | null> => getPgReviewSkill(this.db, workspaceId, skillId);
+  createReviewSkill = (workspaceId: string, skill: NewReviewSkill): Promise<ReviewSkillRecord> => createPgReviewSkill(this.db, workspaceId, skill);
+  updateReviewSkill = (ws: string, id: string, change: ReviewSkillChange): Promise<ReviewSkillRecord | null> => updatePgReviewSkill(this.db, ws, id, change);
+  deleteReviewSkill = (workspaceId: string, skillId: string): Promise<DeletedReviewSkill | null> => deletePgReviewSkill(this.db, workspaceId, skillId);
 
   async saveCredential(credential: StoredCredential): Promise<void> {
     await withLiveWorkspace(this.db, credential.workspaceId, (tx) => writePgCredential(tx, credential));

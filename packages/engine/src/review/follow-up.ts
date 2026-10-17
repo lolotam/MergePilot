@@ -12,6 +12,7 @@
 
 import type { Secret } from '../credentials/secret.js';
 import { redactSecrets } from '../security/redact.js';
+import type { ReviewSkill } from './skill.js';
 
 /** One of the bot's own inline findings from an earlier commit whose thread is still open. */
 export interface OpenFinding {
@@ -31,11 +32,16 @@ export interface FollowUp {
   openFindings: OpenFinding[];
 }
 
-/** The pull request as a prompt sees it; `followUp` is set on an incremental run only. */
+/**
+ * The pull request as a prompt sees it; `followUp` is set on an incremental run only. `skill` is the
+ * bot's review skill (ADR-0034): it rides here, like the follow-up, so every review call of the run
+ * (whole-PR, batches, truncation recovery) gets it.
+ */
 export interface PromptPr {
   title: string;
   body: string;
   followUp?: FollowUp | undefined;
+  skill?: ReviewSkill | undefined;
 }
 
 /** At most this many open findings are shown; the caller keeps the most relevant first. */
@@ -49,9 +55,14 @@ const cut = (text: string, max: number): string => {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
-/** The pull request for every prompt of a review, with the follow-up when there is one. */
-export function promptPrOf(title: string, body: string, followUp: FollowUp | undefined): PromptPr {
-  return followUp ? { title, body, followUp } : { title, body };
+/** The pull request for every prompt of a review, with the follow-up and the skill when set. */
+export function promptPrOf(
+  title: string,
+  body: string,
+  followUp: FollowUp | undefined,
+  skill?: ReviewSkill | undefined,
+): PromptPr {
+  return { title, body, ...(followUp ? { followUp } : {}), ...(skill ? { skill } : {}) };
 }
 
 /**

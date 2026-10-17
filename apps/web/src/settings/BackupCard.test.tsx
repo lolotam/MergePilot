@@ -13,6 +13,8 @@ const PREVIEW = {
   sections: ['settings', 'credentials'],
   settingsChanged: ['model', 'judge'],
   bots: 0,
+  skills: 0,
+  skillsMissing: [] as string[],
   credentials: [{ provider: 'anthropic', last4: 'q7q7', action: 'replace' }],
   keysTested: false,
 };
@@ -136,7 +138,7 @@ describe('BackupCard (ADR-0018)', () => {
     await waitFor(() => expect(within(dialog).getByText('What will change')).toBeDefined());
     expect(calls[0]).toEqual({
       url: '/api/workspaces/ws-1/backup/restore',
-      body: { file: FILE, passphrase: PASSPHRASE, dryRun: true, sections: ['settings', 'credentials'] },
+      body: { file: FILE, passphrase: PASSPHRASE, dryRun: true, sections: ['settings', 'credentials', 'skills'] },
     });
     expect(within(dialog).getByText('Settings fields that change: model, judge')).toBeDefined();
     expect(within(dialog).getByText(/••••q7q7/)).toBeDefined();
@@ -145,8 +147,30 @@ describe('BackupCard (ADR-0018)', () => {
     await user.click(restoreNow);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByText('Settings restored')).toBeDefined());
-    expect(calls[1]?.body).toMatchObject({ dryRun: false, sections: ['settings', 'credentials'] });
+    expect(calls[1]?.body).toMatchObject({ dryRun: false, sections: ['settings', 'credentials', 'skills'] });
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('offers the skills section and previews the skills written and the missing ones (ADR-0034)', async () => {
+    const user = userEvent.setup();
+    restoreAnswer = () =>
+      new Response(
+        JSON.stringify({ ...PREVIEW, sections: ['bots', 'skills'], bots: 2, skills: 3, skillsMissing: ['Security', 'Owner rules'] }),
+        { status: 200 },
+      );
+    renderCard();
+    await user.click(screen.getByRole('button', { name: /Restore from file/ }));
+    const dialog = screen.getByRole('dialog');
+    expect((within(dialog).getByLabelText('Review skills (updated by name)') as HTMLInputElement).checked).toBe(true);
+
+    await user.upload(within(dialog).getByLabelText('Backup file'), new File([JSON.stringify(FILE)], 'b.json', { type: 'application/json' }));
+    await previewWhenReady(dialog);
+
+    await waitFor(() => expect(within(dialog).getByText('Skills written: 3')).toBeDefined());
+    expect(calls[0]?.body.sections).toEqual(['settings', 'bots', 'credentials', 'skills']);
+    expect(
+      within(dialog).getByText('Skills that will not exist; the bots naming them restore on Default: Security, Owner rules'),
+    ).toBeDefined();
   });
 
   it('shows a wrong passphrase and a broken file in the dialog, and restores nothing without confirmation', async () => {

@@ -7,6 +7,7 @@ import { enBackup } from './backup-en.js';
 import { enPrices } from './prices-en.js';
 import { enBots } from './bots-en.js';
 import { enAntigravity } from './antigravity-en.js';
+import { enSkills } from './skills-en.js';
 
 export const en: I18nDictionary = {
   ...enSettings,
@@ -17,6 +18,7 @@ export const en: I18nDictionary = {
   ...enPrices,
   ...enBots,
   ...enAntigravity,
+  ...enSkills,
   // App
   appName: 'MergePilot',
   appTagline: 'AI-Powered Pull Request Review Engine',

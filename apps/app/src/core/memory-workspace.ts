@@ -10,6 +10,10 @@ import {
 import type { KeyProvider, ProviderKeyChange, StoredCredential, StoredProviderKey, WorkspaceSettings } from './types.js';
 import { deleteMemoryWorkspaceBots, listMemoryBots, upsertMemoryBot, type MemoryBots } from './memory-bots.js';
 import { deleteMemoryWorkspaceAuthPreferences } from './memory-auth-preferences.js';
+import {
+  assertMemorySkill, deleteMemoryWorkspaceSkills, getMemorySkill, insertMemorySkill, updateMemorySkill, type MemorySkills,
+} from './memory-skills.js';
+import type { ReviewSkillRecord } from './skill-types.js';
 import { listMemoryProviderKeys } from './memory-provider-keys.js';
 import type { MemoryStore } from './memory-store.js';
 import type { MemoryKeyTables } from './memory-provider-keys.js';
@@ -19,6 +23,7 @@ import type { MemoryKeyTables } from './memory-provider-keys.js';
 
 export interface MemoryRestoreTarget {
   readonly bots: MemoryBots;
+  readonly skills: MemorySkills;
   readonly settings: Map<string, WorkspaceSettings>;
   readonly credentials: Map<string, StoredCredential>;
   readonly providerKeys: Map<string, StoredProviderKey[]>;
@@ -35,6 +40,7 @@ const slotKey = (workspaceId: string, provider: string): string => `${workspaceI
 
 interface WorkspaceSnapshot {
   settings: WorkspaceSettings | undefined;
+  skills: ReviewSkillRecord[];
   bots: ReviewerBot[];
   credentials: StoredCredential[];
   providerKeys: StoredProviderKey[];
@@ -58,6 +64,7 @@ function snapshotWorkspace(store: MemoryRestoreTarget, workspaceId: string): Wor
   const authPrefs = [...mem.authPreferences.entries()].filter(([key]) => key.startsWith(`${workspaceId}:`));
   return {
     settings: store.settings.get(workspaceId) ? { ...store.settings.get(workspaceId)! } : undefined,
+    skills: [...store.skills.values()].filter((s) => s.workspaceId === workspaceId).map((s) => ({ ...s })),
     bots: listMemoryBots(store.bots, workspaceId),
     credentials,
     providerKeys,
@@ -70,6 +77,8 @@ function revertWorkspace(store: MemoryRestoreTarget, workspaceId: string, snap: 
   const mem = store as MemoryStore;
   if (snap.settings) store.settings.set(workspaceId, { ...snap.settings });
   else store.settings.delete(workspaceId);
+  deleteMemoryWorkspaceSkills(store.skills, workspaceId);
+  for (const skill of snap.skills) store.skills.set(skill.id, { ...skill });
   deleteMemoryWorkspaceBots(store.bots, workspaceId);
   for (const bot of snap.bots) upsertMemoryBot(store.bots, workspaceId, bot, snap.settings?.botName);
   for (const key of [...store.credentials.keys()]) {
@@ -138,6 +147,18 @@ export async function restoreMemoryWorkspace(
 
   const snapshot = snapshotWorkspace(store, workspaceId);
   try {
+  for (const skill of restore.skills ?? []) {
+    if (getMemorySkill(store.skills, workspaceId, skill.id)) {
+      updateMemorySkill(store.skills, workspaceId, skill.id, {
+        name: skill.name,
+        content: { text: skill.content, hash: skill.contentHash, sizeTokens: skill.sizeTokens },
+        userId: skill.userId,
+      });
+    } else {
+      insertMemorySkill(store.skills, workspaceId, skill);
+    }
+  }
+  for (const bot of restore.bots ?? []) assertMemorySkill(store.skills, workspaceId, bot.skillId);
   if (restore.bots) {
     deleteMemoryWorkspaceBots(store.bots, workspaceId);
     for (const bot of restore.bots) upsertMemoryBot(store.bots, workspaceId, bot, mainName);
@@ -175,7 +196,7 @@ export async function restoreMemoryWorkspace(
 
 /** Drops the workspace's keys, settings, bots, runs and usage, and unlinks its installations. */
 export function deleteMemoryWorkspace(
-  store: Pick<MemoryStore, 'deletedWorkspaces' | 'credentials' | 'providerKeys' | 'keyCursors' | 'authPreferences' | 'settings' | 'bots' | 'runs' | 'usage' | 'installations'>,
+  store: Pick<MemoryStore, 'deletedWorkspaces' | 'credentials' | 'providerKeys' | 'keyCursors' | 'authPreferences' | 'settings' | 'bots' | 'runs' | 'usage' | 'installations'> & { skills: MemorySkills },
   workspaceId: string,
 ): void {
   store.deletedWorkspaces.add(workspaceId);
@@ -193,6 +214,7 @@ export function deleteMemoryWorkspace(
   deleteMemoryWorkspaceAuthPreferences(store, workspaceId);
   store.settings.delete(workspaceId);
   deleteMemoryWorkspaceBots(store.bots, workspaceId);
+  deleteMemoryWorkspaceSkills(store.skills, workspaceId);
   for (const [key, run] of store.runs.entries()) {
     if (run.workspaceId === workspaceId) {
       store.runs.delete(key);

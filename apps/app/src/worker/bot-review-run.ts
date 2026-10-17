@@ -5,6 +5,7 @@ import {
   type MergePilotConfig,
   type ReviewModel,
   type ReviewRunResult,
+  type ReviewSkill,
   type Secret,
 } from '@mergepilot/engine';
 import {
@@ -58,6 +59,8 @@ export interface BotReviewParams {
   selection?: SelectIncrementalFilesResult | undefined;
   /** `@mergepilot review`: the whole PR, published even when this head was already reviewed. */
   force?: boolean | undefined;
+  /** The bot's review skill (ADR-0034): added on top of the core review prompt. */
+  skill?: ReviewSkill | undefined;
 }
 
 export type BotReviewRun =
@@ -152,6 +155,7 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     model,
     knownSecrets,
     judge,
+    ...(params.skill ? { skill: params.skill } : {}),
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
   const context = contextDisclosureOf(
