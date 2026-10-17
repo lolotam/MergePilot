@@ -652,7 +652,7 @@
 **الطلب (2026-10-16):** نضيف دخول اشتراك Google (Antigravity / `agy`) من لوحة التحكم بنفس طريقة اشتراك Codex، بعد قرار س45.
 
 **اللي لقيناه في البحث (التفاصيل والمصادر في [ADR-0032](adr/0032-google-antigravity-subscription.md)):**
-- Google وقّفت Gemini CLI لحسابات الأفراد (Pro وUltra والمجاني) يوم 2026-06-18. الطريق الوحيد الشغال للأفراد دلوقتي هو Antigravity.
+- Google وقّفت Gemini CLI لحسابات الأفراد (Pro وUltra والمجاني) يوم 2026-06-18. Antigravity هو الطريق الوحيد الباقي للأفراد بـ **اشتراك** (من غير مفتاح API)، ومفتاح Gemini API لسه شغال عادي.
 - صفحة الأسئلة الشائعة الرسمية بتاعة Antigravity بتقول بالنص إن استخدام أي برنامج أو أداة طرف تالت للوصول لـ Antigravity مخالف لشروط الخدمة، وممكن يوقف حساب Antigravity أو يقفله، ونصحت بمفتاح API من AI Studio أو Gemini Enterprise. وفيه ناس بلّغت إن حساباتها اتوقفت (403 مخالفة شروط) ورجعت بعد استئناف، وناس لأ. ده أقوى من الملاحظة اللي في س45.
 - `agy` مش مفتوح المصدر. البروتوكول معروف من كود Gemini CLI (رخصة Apache-2.0) ومن إضافات طرف تالت برخصة MIT: OAuth بـ PKCE، وبعده API اسمه Cloud Code Assist على `cloudcode-pa.googleapis.com`.
 - pi-ai (النسخة 1.1.0 اللي عندنا و1.3.0) مفيهاش دخول Google. pi شالت مزوّدَي Gemini CLI وAntigravity في الإصدار 0.71.0. الإضافات اللي رجّعتهم معمولة لوكلاء pi وOpenCode، مش مكتبة نقدر نستخدمها. فالكود هيتكتب عندنا في `packages/engine/src/providers/subscription/antigravity/`.

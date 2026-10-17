@@ -51,7 +51,7 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
 3. **Client credentials.** The OAuth client ID and its non-confidential installed-app secret come from server configuration, `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_ID` and `GOOGLE_ANTIGRAVITY_OAUTH_CLIENT_SECRET`, never from the repository (س47-ب). Without both:
    - `GET /api/workspaces/:ws/subscriptions` leaves the provider out, so the add-credential dialog does not offer it;
    - `POST …/subscriptions/google-antigravity` answers `400 invalid_provider`;
-   - a refresh fails with "sign in again".
+   - a refresh fails, before any request, with `not-configured`: "Google Antigravity sign-in is not configured on this server".
 
    The values are sent only to Google's token endpoint and are never logged or returned.
 
@@ -69,7 +69,7 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
 5. **Persistence.** The existing `mergepilot:oauth:v1:` envelope in the vault column: `{ provider: 'google-antigravity', credential: { type: 'oauth', access, refresh, expires, projectId, tier } }`. The account email is not stored. `credentialSecretValues` redacts `access` and `refresh` individually. The single-credential paths (backup export/restore, master-key rotation in `vault/rotate.ts`, delete) need no provider-specific code.
 
 6. **Refresh.** `CredentialService.resolve` unchanged: a lock-free read while `expires` is more than 60 s away, otherwise `coordinateRefresh` under the workspace/provider advisory lock, then a refresh grant to Google's token endpoint (`oauth2.googleapis.com`). The new expiry is now plus the lifetime Google returns. When Google sends a new refresh value it replaces the stored one; otherwise the old one is kept, with the project. Any failure keeps the stored credential and raises `SubscriptionRefreshError`:
-   - **permanent** for 400/401 with `invalid_grant` (or any other refusal), or a 200 without an access token: "Subscription token refresh failed; sign in again". Only a known RFC 6749 error code is kept from a refused answer; the rest of the body is read to its end and dropped;
+   - **permanent** for 400/401 with `invalid_grant` or any other refusal except `invalid_client`, or a 200 without an access token: "Subscription token refresh failed; sign in again". Only a known RFC 6749 error code is kept from a refused answer; the rest of the body is read to its end and dropped;
    - **transient** for no answer, an unreadable (non-JSON) answer, 408, 429 or 5xx: "could not reach the provider; try again";
    - **not configured** when the server lacks the OAuth client, or Google rejects it (`invalid_client` at refresh; `invalid_client`, `unauthorized_client` or `invalid_request` at the code exchange).: "Google Antigravity sign-in is not configured on this server". This is an operator problem, so the adapter reports it as `PROVIDER_NOT_CONFIGURED` (failure kind `server`, which a configured fallback still covers) rather than asking the user to sign in again. A sign-in started then fails with the `not-configured` reason. At refresh, `unauthorized_client` and `invalid_request` are permanent ("sign in again") instead: `unauthorized_client` there also means the refresh token belongs to an earlier client the operator replaced.
 
