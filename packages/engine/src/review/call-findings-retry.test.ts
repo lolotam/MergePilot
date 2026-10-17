@@ -171,6 +171,32 @@ describe('a review whose model leaves the findings list out', () => {
   });
 });
 
+describe('a truncated review whose retries leave the findings list out', () => {
+  it('previews the cut answer, the truncation retry and the reminder in the logs', async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: '{"summary": "cut', finishReason: 'max-tokens' })
+      .mockResolvedValue({ text: SUMMARY_ONLY, finishReason: 'stop' });
+
+    const result = await runReview({
+      config: makeConfig(),
+      pr: { title: 'T', body: 'B' },
+      files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }],
+      rulesFiles: [],
+      model: { label: 'fake:test', generate },
+      knownSecrets: [],
+    });
+
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.result.incompleteReasons).toContain(FINDINGS_MISSING_REASON);
+      expect(result.answerAttempts?.map((a) => a.preview)).toEqual(
+        ['{"summary": "cut', SUMMARY_ONLY.slice(0, 200), SUMMARY_ONLY.slice(0, 200)],
+      );
+    }
+  });
+});
+
 describe('a batch whose truncation retry leaves the findings list out', () => {
   it('gets the reminder and is merged as complete', async () => {
     const patch = SIMPLE_PATCH;

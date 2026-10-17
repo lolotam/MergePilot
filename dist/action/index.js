@@ -141328,8 +141328,9 @@ async function recoverReviewTruncation(input2) {
   const { modelResponse, prompt, promptTokens, maxOutputTokens, reviewOutputTokens } = input2;
   const { model, config: config2, spend, redactedReviewableFiles, libraryDocs, signal } = input2;
   const incompleteReasons = [];
+  const answers = [];
   if (!needsTruncationRetry(parseResult, modelResponse.finishReason)) {
-    return { parseResult, totalUsage, incompleteReasons };
+    return { parseResult, totalUsage, incompleteReasons, answers };
   }
   const retryOutputTokens = reviewRetryOutputTokens(maxOutputTokens);
   const retryRequested = requestedOutputTokens(model, retryOutputTokens);
@@ -141362,6 +141363,7 @@ async function recoverReviewTruncation(input2) {
         knownSecrets: input2.knownSecrets
       });
       totalUsage = combineUsage(totalUsage, reminded.usage);
+      answers.push(retryResponse, ...[reminded.response ?? reminded.rejected].filter((r2) => r2 !== void 0));
       if (reminded.note)
         incompleteReasons.push(reminded.note);
       if (reminded.parsed.ok) {
@@ -141402,7 +141404,7 @@ async function recoverReviewTruncation(input2) {
       };
     }
   }
-  return { parseResult, totalUsage, incompleteReasons };
+  return { parseResult, totalUsage, incompleteReasons, answers };
 }
 
 var ANSWER_PREVIEW_CHARS = 200;
@@ -141474,7 +141476,7 @@ async function runSinglePass(ctx) {
     deadline: ctx.deadline
   });
   const parsed = recovery.parseResult;
-  const attempts = () => [response, empty.response ?? empty.rejected].filter((r2) => r2 !== void 0).map((r2) => answerAttemptOf(r2, ctx.knownSecrets));
+  const attempts = () => [response, empty.response ?? empty.rejected, ...recovery.answers].filter((r2) => r2 !== void 0).map((r2) => answerAttemptOf(r2, ctx.knownSecrets));
   if (!parsed.ok) {
     const detail = [...notes, ...recovery.incompleteReasons].join("; ");
     const answerAttempts = parsed.code === "invalid-json" ? attempts() : void 0;

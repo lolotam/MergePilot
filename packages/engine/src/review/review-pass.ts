@@ -155,7 +155,9 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
 
   const parsed = recovery.parseResult;
   const attempts = (): AnswerAttempt[] =>
-    [response, empty.response ?? empty.rejected].filter((r) => r !== undefined).map((r) => answerAttemptOf(r, ctx.knownSecrets));
+    [response, empty.response ?? empty.rejected, ...recovery.answers]
+      .filter((r) => r !== undefined)
+      .map((r) => answerAttemptOf(r, ctx.knownSecrets));
   if (!parsed.ok) {
     // Skipped or failed recovery steps are disclosed alongside the parse error.
     const detail = [...notes, ...recovery.incompleteReasons].join('; ');

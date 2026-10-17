@@ -11,7 +11,7 @@ import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
 import { remindMissingFindingsList, type ReviewDeadline } from './call.js';
 import type { ManifestFile } from './manifest.js';
 import type { PromptPr } from './follow-up.js';
-import type { ReviewModel, ReviewModelRequest } from './model.js';
+import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { reviewRetryOutputTokens } from './output-budget.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
 import {
@@ -62,6 +62,8 @@ export interface RecoverReviewTruncationResult {
   parseResult: ParseReviewAnswerResult;
   totalUsage?: TokenUsage | undefined;
   incompleteReasons: string[];
+  /** The truncation retry's answer and its reminder's, kept or not; for the logs' answer previews only. */
+  answers: ReviewModelResponse[];
 }
 
 /**
@@ -77,9 +79,10 @@ export async function recoverReviewTruncation(
   const { modelResponse, prompt, promptTokens, maxOutputTokens, reviewOutputTokens } = input;
   const { model, config, spend, redactedReviewableFiles, libraryDocs, signal } = input;
   const incompleteReasons: string[] = [];
+  const answers: ReviewModelResponse[] = [];
 
   if (!needsTruncationRetry(parseResult, modelResponse.finishReason)) {
-    return { parseResult, totalUsage, incompleteReasons };
+    return { parseResult, totalUsage, incompleteReasons, answers };
   }
 
   // 1. Retry once with 2x allowance if budget permits
@@ -110,6 +113,7 @@ export async function recoverReviewTruncation(
         requestedOutputTokens: retryRequested, parse: parseReviewResponse, knownSecrets: input.knownSecrets,
       });
       totalUsage = combineUsage(totalUsage, reminded.usage);
+      answers.push(retryResponse, ...[reminded.response ?? reminded.rejected].filter((r) => r !== undefined));
       if (reminded.note) incompleteReasons.push(reminded.note);
       if (reminded.parsed.ok) {
         parseResult = reminded.parsed;
@@ -153,5 +157,5 @@ export async function recoverReviewTruncation(
     }
   }
 
-  return { parseResult, totalUsage, incompleteReasons };
+  return { parseResult, totalUsage, incompleteReasons, answers };
 }
