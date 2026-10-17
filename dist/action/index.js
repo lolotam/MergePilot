@@ -141921,7 +141921,10 @@ async function runReview(input2) {
   }
   const redactedPrTitle = redactSecrets(pr.title, knownSecrets).text;
   const redactedPrBody = redactSecrets(pr.body, knownSecrets).text;
-  const skill = input2.skill && { name: input2.skill.name, content: redactSecrets(input2.skill.content, knownSecrets).text };
+  const skill = input2.skill && {
+    name: redactSecrets(input2.skill.name, knownSecrets).text,
+    content: redactSecrets(input2.skill.content, knownSecrets).text
+  };
   const promptPr = promptPrOf(redactedPrTitle, redactedPrBody, followUp, skill);
   const redactedRulesFiles = rulesFiles.map((rf) => ({
     path: rf.path,

@@ -64,7 +64,7 @@ export const SKILL_ERROR_CODES = [
   'skill_empty',
   'skill_too_large',
   'skill_not_text',
-  'skill_contains_secret',
+  'skill_has_credential',
   'unknown_skill',
 ] as const;
 export type SkillErrorCode = (typeof SKILL_ERROR_CODES)[number];

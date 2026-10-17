@@ -23,7 +23,7 @@ export type SkillContentProblem =
   | { code: 'skill_empty' }
   | { code: 'skill_too_large'; tokens: number }
   | { code: 'skill_not_text'; line: number }
-  | { code: 'skill_contains_secret'; line: number };
+  | { code: 'skill_has_credential'; line: number };
 
 /**
  * The index of the first character that is not plain text: a control character other than tab,
@@ -51,8 +51,16 @@ export function checkSkillContent(content: string): SkillContentProblem | null {
   const bad = firstNotText(content);
   if (bad >= 0) return { code: 'skill_not_text', line: lineAt(content, bad) };
   const secret = redactSecrets(content).found[0];
-  if (secret) return { code: 'skill_contains_secret', line: secret.line };
+  if (secret) return { code: 'skill_has_credential', line: secret.line };
   return null;
+}
+
+/**
+ * True when a skill name holds a credential the secret scanner recognises: names are shown to
+ * every workspace member, logged and sent to the model, so they are checked like the content.
+ */
+export function skillNameHasCredential(name: string): boolean {
+  return redactSecrets(name).found.length > 0;
 }
 
 function lineAt(text: string, index: number): number {

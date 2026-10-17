@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { checkSkillContent, estimateTokens, skillContentHash } from '@mergepilot/engine';
+import { checkSkillContent, estimateTokens, skillContentHash, skillNameHasCredential } from '@mergepilot/engine';
 import { MAX_WORKSPACE_SKILLS, type AppStore, type NewReviewSkill, type ReviewSkillSummary } from '../core/types.js';
 import { SkillNameSchema } from './contract-skills.js';
 import type { BackupFile } from './contract-backup.js';
 import { RestoreProblem } from './backup-restore-problem.js';
-import { skillContentMessage } from './skill-routes.js';
+import { NAME_CREDENTIAL, skillContentMessage } from './skill-routes.js';
 
 // Review skills in the settings backup (ADR-0034, ADR-0018). Skill ids differ between workspaces,
 // so the file names a bot's skill by name (`skillName`) and a restore maps names back to ids.
@@ -58,6 +58,7 @@ export async function planSkills(
     const field = `skills[${index}]`;
     const name = SkillNameSchema.safeParse(entry.name);
     if (!name.success) throw new RestoreProblem(400, 'validation_error', `${field}.name: ${name.error.issues[0]?.message ?? 'Invalid name'}`, `${field}.name`);
+    if (skillNameHasCredential(name.data)) throw new RestoreProblem(400, 'skill_has_credential', `${field}.name: ${NAME_CREDENTIAL}`, `${field}.name`);
     if (skills.some((s) => key(s.name) === key(name.data))) {
       throw new RestoreProblem(409, 'skill_name_taken', `${field}.name: another skill in the file has this name`, `${field}.name`);
     }

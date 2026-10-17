@@ -76,7 +76,7 @@ const ERROR_KEYS: Record<SkillErrorCode, I18nKey> = {
   skill_empty: 'skillErrorEmpty',
   skill_too_large: 'skillErrorTooLarge',
   skill_not_text: 'skillErrorNotText',
-  skill_contains_secret: 'skillErrorContainsSecret',
+  skill_has_credential: 'skillErrorCredential',
   unknown_skill: 'skillErrorUnknown',
 };
 

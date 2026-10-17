@@ -66,7 +66,7 @@ export const arSkills = {
   skillErrorEmpty: 'الملف فاضي',
   skillErrorTooLarge: 'المهارة أكبر من الحد المسموح ({max} توكن)',
   skillErrorNotText: 'الملف ده مش نص عادي',
-  skillErrorContainsSecret: 'الملف فيه حاجة شكلها مفتاح أو كلمة سر. شيلها وارفعه تاني.',
+  skillErrorCredential: 'الاسم أو الملف فيه حاجة شكلها مفتاح أو كلمة سر. شيلها وجرّب تاني.',
   skillErrorUnknown: 'المهارة دي مش موجودة في مساحة العمل',
 
   // The per-bot dropdown

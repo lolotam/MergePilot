@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { checkSkillContent, estimateTokens, skillContentHash, type SkillContentProblem } from '@mergepilot/engine';
+import { checkSkillContent, estimateTokens, skillContentHash, skillNameHasCredential, type SkillContentProblem } from '@mergepilot/engine';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireRole } from '../auth/guard.js';
 import {
@@ -24,6 +24,7 @@ import { sendError } from './helpers.js';
 import type { DashboardApiDeps } from './routes.js';
 
 const NAME_TAKEN = 'Another skill in this workspace already has this name';
+export const NAME_CREDENTIAL = 'The skill name looks like a credential; choose another name';
 
 /** The 400 answer for content `checkSkillContent` refused; a secret's value is never echoed. */
 export function skillContentMessage(problem: SkillContentProblem): string {
@@ -34,7 +35,7 @@ export function skillContentMessage(problem: SkillContentProblem): string {
       return `The skill is about ${problem.tokens} tokens; the limit is ${MAX_SKILL_TOKENS}`;
     case 'skill_not_text':
       return `Line ${problem.line} has a character that is not plain text; upload a UTF-8 Markdown file`;
-    case 'skill_contains_secret':
+    case 'skill_has_credential':
       return `Line ${problem.line} looks like a credential; remove it before uploading`;
   }
 }
@@ -101,6 +102,7 @@ export function registerSkillRoutes(app: FastifyInstance, deps: DashboardApiDeps
       const parsed = CreateSkillBodySchema.safeParse(request.body);
       if (!parsed.success) return sendError(reply, 400, 'validation_error', parsed.error.issues[0]?.message ?? 'Invalid skill');
       const { name, content } = parsed.data;
+      if (skillNameHasCredential(name)) return sendError(reply, 400, 'skill_has_credential', NAME_CREDENTIAL);
       const problem = checkSkillContent(content);
       if (problem) return sendError(reply, 400, problem.code, skillContentMessage(problem));
       try {
@@ -133,6 +135,7 @@ export function registerSkillRoutes(app: FastifyInstance, deps: DashboardApiDeps
       const parsed = UpdateSkillBodySchema.safeParse(request.body);
       if (!parsed.success) return sendError(reply, 400, 'validation_error', parsed.error.issues[0]?.message ?? 'Invalid skill');
       const { name, content } = parsed.data;
+      if (name !== undefined && skillNameHasCredential(name)) return sendError(reply, 400, 'skill_has_credential', NAME_CREDENTIAL);
       if (content !== undefined) {
         const problem = checkSkillContent(content);
         if (problem) return sendError(reply, 400, problem.code, skillContentMessage(problem));

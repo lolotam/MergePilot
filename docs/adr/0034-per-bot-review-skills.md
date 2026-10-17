@@ -70,7 +70,7 @@ Plus `UNIQUE (workspace_id, id)` for the composite foreign keys below.
   - It stays two thirds of `review.maxRulesTokens` (12,000).
   - Long project knowledge belongs in `AGENTS.md` (read as rules from the base commit, ADR-0028) or in a spec the PR cites, not in a skill. The dashboard shows each skill's size in tokens.
 - **Markdown only.** The dashboard's upload accepts `.md` and `.markdown` files. The server cannot prove a text is Markdown; it enforces what it can: valid UTF-8 text with no NUL bytes and no control characters other than tab, line feed and carriage return (400 `skill_not_text`). Blank content is refused (400 `skill_empty`). The request body of a skill write is capped at 128 KB, above 28,000 characters of any script.
-- **No secrets.** The server runs the engine's secret detector (`redactSecrets`) on the content and refuses an upload where it finds one (400 `skill_contains_secret`, naming the line, never the value). The engine also redacts the skill with the review's known secrets before building the prompt, like rules files (`pipeline.ts`).
+- **No secrets.** The server runs the engine's secret detector (`redactSecrets`) on the content and on the name, and refuses a write or a restore where it finds a credential in either (400 `skill_has_credential`; for content it names the line, never the value). Names are checked because they are shown to every member, logged, and printed in the prompt. The engine also redacts the skill (name and content) with the review's known secrets before building the prompt, like rules files (`pipeline.ts`).
 - **Preview without HTML.** The dashboard shows a skill as plain text in a `<pre>` block. No Markdown rendering and no HTML execution in v1, and no new dependency.
 
 ### 3. API and permissions
@@ -79,7 +79,7 @@ All routes are under `/api/workspaces/:workspaceId`, so a skill is only ever rea
 
 - `GET /skills` (member): each skill's id, name, size in tokens, content hash, last update time, and the bot slots using it (`usedBy`, 1 = main bot); no content. It also returns the limits (50 skills, 8,000 tokens, 60-character names) for the dashboard.
 - `GET /skills/:skillId` (member): one skill with its content.
-- `POST /skills` (admin/owner): `{ name, content }` → 201. Errors: 409 `skill_name_taken`, 409 `skill_limit`, 400 `skill_empty`, 400 `skill_too_large`, 400 `skill_not_text`, 400 `skill_contains_secret`, 400 `validation_error` (a name that is blank or over 60 characters).
+- `POST /skills` (admin/owner): `{ name, content }` → 201. Errors: 409 `skill_name_taken`, 409 `skill_limit`, 400 `skill_empty`, 400 `skill_too_large`, 400 `skill_not_text`, 400 `skill_has_credential`, 400 `validation_error` (a name that is blank or over 60 characters).
 - `PUT /skills/:skillId` (admin/owner): `{ name?, content? }`, at least one; same checks. A skill id that is not a uuid of this workspace answers 404 on every route.
 - `DELETE /skills/:skillId` (admin/owner): 204; the bots that used it fall back to Default (§4). 404 when the skill is not in this workspace.
 - Writes log `skill.created`, `skill.updated` (with the changed field names) and `skill.deleted`, with the skill id and name only, never the content.

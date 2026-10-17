@@ -68,8 +68,12 @@ describe('review skills API (ADR-0034)', { timeout: 25000 }, () => {
     expect(await codeOf(create({ name: 'Huge', content: 'x'.repeat(28_001) }))).toEqual([400, 'skill_too_large']);
     expect(await codeOf(create({ name: 'Binary', content: '# ok\nbad\u0000byte' }))).toEqual([400, 'skill_not_text']);
     const secret = await create({ name: 'Leaky', content: `# Rules\naws ${FAKE_AWS_KEY}` });
-    expect([secret.statusCode, secret.json().error.code]).toEqual([400, 'skill_contains_secret']);
+    expect([secret.statusCode, secret.json().error.code]).toEqual([400, 'skill_has_credential']);
     expect(secret.body).not.toContain(FAKE_AWS_KEY);
+    // The name is shown to members, logged and sent to the model: it is checked too.
+    const leakyName = await create({ name: `aws ${FAKE_AWS_KEY}`, content: '# x' });
+    expect([leakyName.statusCode, leakyName.json().error.code]).toEqual([400, 'skill_has_credential']);
+    expect(leakyName.body).not.toContain(FAKE_AWS_KEY);
     expect(await codeOf(create({ name: 'n'.repeat(61), content: '# x' }))).toEqual([400, 'validation_error']);
     expect((await list()).json().skills).toEqual([]);
 

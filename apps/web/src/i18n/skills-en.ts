@@ -68,7 +68,7 @@ export const enSkills: Record<keyof typeof arSkills, string> = {
   skillErrorEmpty: 'The file is empty',
   skillErrorTooLarge: 'The skill is larger than the limit ({max} tokens)',
   skillErrorNotText: 'This file is not plain text',
-  skillErrorContainsSecret: 'The file contains what looks like a key or password. Remove it and upload again.',
+  skillErrorCredential: 'The name or the file contains what looks like a key or password. Remove it and try again.',
   skillErrorUnknown: 'This skill is not in this workspace',
 
   // The per-bot dropdown

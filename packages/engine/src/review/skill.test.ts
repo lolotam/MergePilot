@@ -32,7 +32,7 @@ describe('checkSkillContent', () => {
 
   it('refuses a recognised credential and names its line, never its value', () => {
     const problem = checkSkillContent(`# Rules\nUse ${FAKE_ANTHROPIC_KEY} for tests`);
-    expect(problem).toEqual({ code: 'skill_contains_secret', line: 2 });
+    expect(problem).toEqual({ code: 'skill_has_credential', line: 2 });
     expect(JSON.stringify(problem)).not.toContain(FAKE_ANTHROPIC_KEY);
   });
 });

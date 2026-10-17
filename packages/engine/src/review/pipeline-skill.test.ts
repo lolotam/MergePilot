@@ -83,14 +83,14 @@ describe('runReview — review skill (ADR-0034)', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('redacts known secrets in the skill', async () => {
+  it('redacts known secrets in the skill name and content', async () => {
     const value = 'workspace-only-value-1234567890';
     const { model, requests } = recordingModel();
     await runReview(input(model, makeConfig(), {
-      skill: { name: 'Leaky', content: `token ${value}` },
+      skill: { name: `Leaky ${value}`, content: `token ${value}` },
       knownSecrets: [new Secret(value)],
     }));
     expect(requests[0]!.system).not.toContain(value);
-    expect(requests[0]!.system).toContain('<<<REVIEW_SKILL:Leaky>>>');
+    expect(requests[0]!.system).toContain('<<<REVIEW_SKILL:Leaky [REDACTED');
   });
 });

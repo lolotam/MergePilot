@@ -195,8 +195,12 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const redactedPrTitle = redactSecrets(pr.title, knownSecrets).text;
   const redactedPrBody = redactSecrets(pr.body, knownSecrets).text;
   // Every prompt of the review, batches included, carries the follow-up (ADR-0030) and the skill
-  // (ADR-0034). The skill is workspace text, redacted like the rules files.
-  const skill = input.skill && { name: input.skill.name, content: redactSecrets(input.skill.content, knownSecrets).text };
+  // (ADR-0034). The skill is workspace text, redacted like the rules files: its name too, since it
+  // is printed in the prompt's block markers.
+  const skill = input.skill && {
+    name: redactSecrets(input.skill.name, knownSecrets).text,
+    content: redactSecrets(input.skill.content, knownSecrets).text,
+  };
   const promptPr = promptPrOf(redactedPrTitle, redactedPrBody, followUp, skill);
 
   // Redact rules files
