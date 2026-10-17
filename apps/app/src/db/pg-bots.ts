@@ -73,8 +73,8 @@ export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: R
     model: bot.model,
     effort: bot.effort,
     fallback: bot.fallback,
-    skillId: bot.skillId ?? null,
-    skillRemovedName: bot.skillRemovedName ?? null,
+    // Left out (undefined), the update keeps the stored skill and note; a new row starts on Default.
+    ...(bot.skillId !== undefined ? { skillId: bot.skillId, skillRemovedName: bot.skillRemovedName ?? null } : {}),
     updatedAt: new Date(),
   };
   try {

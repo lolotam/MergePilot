@@ -55,6 +55,9 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
       showToast(t('skillsUploaded'), 'success');
       setName('');
       setContent(null);
+      // A file picked during the upload is dropped with the reset, and its read is ignored.
+      latestPick.current++;
+      setReading(false);
       setFileKey((k) => k + 1);
     } catch (err) {
       setError(skillErrorText(err, t, limits.maxTokens));
@@ -75,7 +78,7 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
             dir="auto"
             value={name}
             maxLength={limits.maxNameLength}
-            disabled={disabled}
+            disabled={disabled || create.isPending}
             onChange={(e) => {
               setName(e.target.value);
               setError(null);
@@ -92,7 +95,7 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
             id="skill-upload-file"
             type="file"
             accept={SKILL_FILE_ACCEPT}
-            disabled={disabled}
+            disabled={disabled || create.isPending}
             onChange={(e) => void handleFile(e.target.files?.[0])}
             className="block w-full text-xs text-ink-700 dark:text-ink-300 py-1.5"
           />

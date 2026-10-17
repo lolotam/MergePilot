@@ -133,6 +133,10 @@ export function defineReviewSkillContract(
       expect(main?.skillRemovedName).toBe('Security');
       expect(await store.listReviewerBots(WS)).toEqual([bot({ skillRemovedName: 'Security' })]);
 
+      // A bot save that leaves the skill out keeps the note too, inside the write.
+      await store.upsertReviewerBot(WS, bot({ model: 'gpt-5-mini' }));
+      expect(await store.listReviewerBots(WS)).toEqual([bot({ model: 'gpt-5-mini', skillRemovedName: 'Security' })]);
+
       // Saving without a skill keeps the note; choosing Default (null) clears it.
       await store.saveSettings(settings());
       expect((await store.getSettings(WS))?.skillRemovedName).toBe('Security');

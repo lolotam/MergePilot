@@ -58,7 +58,8 @@ export interface ReviewerBot {
   skillId?: string | null | undefined;
   /**
    * The name of the bot's skill that was deleted (set by deleteReviewSkill); shown on the bot until
-   * a skill is chosen again. Upserts write the given value (null clears it).
+   * a skill is chosen again. An upsert with `skillId` undefined keeps both stored fields; with a
+   * `skillId` it writes this value (null clears it).
    */
   skillRemovedName?: string | null | undefined;
 }

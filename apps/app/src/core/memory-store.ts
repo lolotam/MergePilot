@@ -165,7 +165,10 @@ export class MemoryStore implements AppStore {
   async upsertReviewerBot(workspaceId: string, bot: ReviewerBot): Promise<ReviewerBot> {
     this.assertLive(workspaceId);
     assertMemorySkill(this.skills, workspaceId, bot.skillId);
-    return upsertMemoryBot(this.bots, workspaceId, bot, this.settings.get(workspaceId)?.botName);
+    // Like Postgres: a skill left out keeps the stored skill and its note.
+    const stored = bot.skillId === undefined ? listMemoryBots(this.bots, workspaceId).find((b) => b.slot === bot.slot) : undefined;
+    const next = stored ? { ...bot, skillId: stored.skillId ?? null, skillRemovedName: stored.skillRemovedName ?? null } : bot;
+    return upsertMemoryBot(this.bots, workspaceId, next, this.settings.get(workspaceId)?.botName);
   }
 
   async listReviewSkills(workspaceId: string): Promise<ReviewSkillSummary[]> {

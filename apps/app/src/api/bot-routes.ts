@@ -85,9 +85,9 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
       const previous = (await deps.store.listReviewerBots(workspaceId)).find((b) => b.slot === slot) ?? null;
       // ADR-0034: a skill left out keeps the stored one (and its deleted-skill note); any choice,
       // null (Default) included, clears the note.
-      const skillChoice = input.skillId !== undefined
-        ? { skillId: input.skillId, skillRemovedName: null }
-        : { skillId: previous?.skillId ?? null, skillRemovedName: previous?.skillRemovedName ?? null };
+      // Left out, the store keeps the stored skill and its note inside the write, so a concurrent
+      // change is not overwritten by what this request read earlier.
+      const skillChoice = input.skillId !== undefined ? { skillId: input.skillId, skillRemovedName: null } : {};
       const bot: ReviewerBot = {
         slot,
         name: input.name,
