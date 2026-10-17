@@ -5,6 +5,7 @@ import type { BotsResponse } from '../../api/bots.js';
 import { ApiClientError, fetchApi } from '../../api/client.js';
 import type { SkillSummary } from '../../api/skills.js';
 import { ToastProvider } from '../../components/Toast.js';
+import { readFileText } from '../read-file-text.js';
 import { renderSettings } from '../settings.fixtures.js';
 import { SkillsCard } from './SkillsCard.js';
 import { SKILL_TEMPLATES } from './templates.js';
@@ -12,6 +13,12 @@ import { SKILL_TEMPLATES } from './templates.js';
 vi.mock('../../api/client.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/client.js')>();
   return { ...actual, fetchApi: vi.fn() };
+});
+
+// The browser's file read (FileReader) is the boundary; real by default, held open in one test.
+vi.mock('../read-file-text.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../read-file-text.js')>();
+  return { readFileText: vi.fn(actual.readFileText) };
 });
 
 const SKILL_ID = '00000000-0000-4000-8000-000000000001';
@@ -135,6 +142,23 @@ describe('SkillsCard (ADR-0034)', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     expect((await within(dialog).findByRole('alert')).textContent).toBe('Only .md and .markdown files are accepted');
+    expect(server.writes()).toHaveLength(0);
+  });
+
+  it('will not save an edit while the replacement file is still being read', async () => {
+    const user = userEvent.setup();
+    const server = fakeSkillsServer([skill()]);
+    vi.mocked(readFileText).mockReturnValueOnce(new Promise(() => undefined));
+    renderCard();
+    await user.click(within(await findRow('Security')).getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('Skill name'));
+    await user.type(within(dialog).getByLabelText('Skill name'), 'Security v2');
+    await user.upload(within(dialog).getByLabelText('New file (optional)'), new File(['# v2'], 'rules.md', { type: 'text/markdown' }));
+
+    const save = within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(true));
+    await user.click(save);
     expect(server.writes()).toHaveLength(0);
   });
 

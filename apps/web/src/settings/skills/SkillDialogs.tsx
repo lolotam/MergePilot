@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useDeleteSkillMutation, useUpdateSkillMutation, type SkillsResponse, type SkillSummary } from '../../api/skills.js';
 import { Modal } from '../../components/Modal.js';
 import { useToast } from '../../components/Toast.js';
@@ -24,15 +24,22 @@ export function SkillEditDialog({ workspaceId, skill, limits, onClose }: SkillEd
   const [name, setName] = useState(skill.name);
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // A picked file that was refused: saving must not report success while ignoring it.
+  // A picked file that is still being read, or was refused: saving must not report success while
+  // ignoring it. Only the latest pick counts, so a slow earlier read cannot replace it.
+  const [reading, setReading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const latestPick = useRef(0);
 
   const handleFile = async (file: File | undefined) => {
+    const pick = ++latestPick.current;
     setError(null);
     setFileError(null);
     setContent(null);
-    if (!file) return;
+    if (!file) return setReading(false);
+    setReading(true);
     const read = await readSkillFile(file, limits.maxTokens, t);
+    if (pick !== latestPick.current) return;
+    setReading(false);
     if (read.ok) setContent(read.content);
     else {
       setFileError(read.error);
@@ -42,6 +49,7 @@ export function SkillEditDialog({ workspaceId, skill, limits, onClose }: SkillEd
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (reading) return;
     if (fileError) return setError(fileError);
     const problem = skillNameError(name, limits.maxNameLength, t);
     if (problem) return setError(problem);
@@ -102,7 +110,7 @@ export function SkillEditDialog({ workspaceId, skill, limits, onClose }: SkillEd
           </button>
           <button
             type="submit"
-            disabled={update.isPending}
+            disabled={update.isPending || reading}
             className="px-4 py-2 rounded-full text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50"
           >
             {update.isPending ? t('saving') : t('skillsSave')}
