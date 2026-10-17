@@ -94,14 +94,20 @@ async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable
       .where(and(eq(reviewSkills.workspaceId, workspaceId), eq(reviewSkills.id, skill.id)))
       .for('update');
     if (existing && !sameSkillName(existing.name, skill.name)) throw new SkillNameTakenError(skill.name);
-    if (existing) {
-      await updateSkill(tx, workspaceId, skill.id, {
-        name: skill.name,
-        content: { text: skill.content, hash: skill.contentHash, sizeTokens: skill.sizeTokens },
-        userId: skill.userId,
-      });
-    } else {
-      await insertSkill(tx, workspaceId, skill);
+    try {
+      if (existing) {
+        await updateSkill(tx, workspaceId, skill.id, {
+          name: skill.name,
+          content: { text: skill.content, hash: skill.contentHash, sizeTokens: skill.sizeTokens },
+          userId: skill.userId,
+        });
+      } else {
+        await insertSkill(tx, workspaceId, skill);
+      }
+    } catch (error) {
+      // Named after the skill that clashed: another skill took its name since the plan.
+      if (isSkillNameConflict(error)) throw new SkillNameTakenError(skill.name);
+      throw error;
     }
   }
   if ((await countSkills(tx, workspaceId)) > MAX_WORKSPACE_SKILLS) throw new SkillLimitError();
@@ -109,9 +115,8 @@ async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable
 
 const sameSkillName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** A restore racing a skill write: the plan's names or ids no longer match the workspace. */
-function skillRaceError(error: unknown, restore: WorkspaceRestore): Error | undefined {
-  if (isSkillNameConflict(error)) return new SkillNameTakenError(restore.skills?.[0]?.name ?? '');
+/** A restore racing a skill delete: a bot names a skill id that is gone. */
+function skillRaceError(error: unknown): Error | undefined {
   if (isConstraintViolation(error, '23503', SKILL_FOREIGN_KEYS)) return new UnknownSkillError('restored');
   return undefined;
 }
@@ -120,7 +125,7 @@ export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore
   try {
     await writeRestore(db, workspaceId, restore);
   } catch (error) {
-    throw skillRaceError(error, restore) ?? error;
+    throw skillRaceError(error) ?? error;
   }
 }
 

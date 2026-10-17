@@ -94,7 +94,7 @@ All routes are under `/api/workspaces/:workspaceId`, so a skill is only ever rea
   - the delete dialog names the bots using the skill and says they will review with the core prompt only, and that their next review of each open pull request will be a full one (their `configHash` changes, §5);
   - in one transaction, the API sets `skill_id` to `null` on those bots and records the deleted skill's name in their `skill_removed_name` column, then deletes the skill;
   - each of those bots' tabs then shows «The skill "<name>" was deleted; this bot now reviews with the core prompt only.» until an admin saves a skill choice for it (any `skillId` in the save clears the note);
-  - the composite foreign keys use `ON DELETE SET NULL (skill_id)` (PostgreSQL 15 or later; we run 17), so the database falls back the same way if a row is deleted some other way, without nulling `workspace_id`.
+  - the composite foreign keys use `ON DELETE SET NULL (skill_id)` (PostgreSQL 15 or later; compose, Dokploy and CI run 17, and the migration stops with a clear message on an older server), so the database falls back the same way if a row is deleted some other way, without nulling `workspace_id`.
 - Deleting a workspace removes its skills, bots and settings through the existing cascade from the organization.
 
 ### 5. `configHash`: a skill change makes that bot's next review full

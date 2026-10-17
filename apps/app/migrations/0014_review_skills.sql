@@ -4,6 +4,15 @@
 -- core prompt only), so every existing bot reviews exactly as before.
 -- The migration runner applies this file in one transaction.
 
+-- `ON DELETE SET NULL (skill_id)` below needs PostgreSQL 15 or later (we deploy 17): fail early
+-- with a clear message instead of a syntax error halfway through.
+DO $$
+BEGIN
+  IF current_setting('server_version_num')::int < 150000 THEN
+    RAISE EXCEPTION 'migration 0014_review_skills needs PostgreSQL 15 or later (found %)', current_setting('server_version');
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS review_skills (
   id uuid PRIMARY KEY,
   workspace_id text NOT NULL REFERENCES "organization"("id") ON DELETE CASCADE,

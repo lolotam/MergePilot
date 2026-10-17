@@ -28,6 +28,8 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
   // while it is still being read.
   const [reading, setReading] = useState(false);
   const latestPick = useRef(0);
+  // The name the last pick filled in, so a new pick may replace it (but never a typed one).
+  const autoName = useRef<string | null>(null);
 
   const handleFile = async (file: File | undefined) => {
     const pick = ++latestPick.current;
@@ -40,8 +42,12 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
     setReading(false);
     if (!read.ok) return setError(read.error);
     setContent(read.content);
-    // On the current name: the admin may have typed one while the file was read.
-    setName((current) => (current.trim() ? current : nameFromFile(file.name, limits.maxNameLength)));
+    // On the current name: keep one the admin typed (even while the file was read); replace one
+    // that was filled from an earlier pick.
+    const fromFile = nameFromFile(file.name, limits.maxNameLength);
+    const previousAuto = autoName.current;
+    autoName.current = fromFile;
+    setName((current) => (current.trim() && current !== previousAuto ? current : fromFile));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

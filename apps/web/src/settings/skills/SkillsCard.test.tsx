@@ -135,6 +135,25 @@ describe('SkillsCard (ADR-0034)', () => {
     expect(server.writes()[0]?.body).toEqual({ name: 'new', content: '# New' });
   });
 
+  it('follows a new pick with a name filled from a file, but keeps a typed name', async () => {
+    const user = userEvent.setup();
+    fakeSkillsServer([]);
+    renderCard();
+    await screen.findByText('This workspace has no skills yet.');
+    const fileInput = screen.getByLabelText('Markdown file (.md or .markdown)');
+    const nameInput = screen.getByLabelText('Skill name') as HTMLInputElement;
+
+    await user.upload(fileInput, new File(['# A'], 'a.md', { type: 'text/markdown' }));
+    await waitFor(() => expect(nameInput.value).toBe('a'));
+    await user.upload(fileInput, new File(['# B'], 'b.md', { type: 'text/markdown' }));
+    await waitFor(() => expect(nameInput.value).toBe('b'));
+
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Team rules');
+    await user.upload(fileInput, new File(['# C'], 'c.md', { type: 'text/markdown' }));
+    await waitFor(() => expect(nameInput.value).toBe('Team rules'));
+  });
+
   it('adds a template as a new skill with a free name', async () => {
     const user = userEvent.setup();
     const server = fakeSkillsServer([skill({ name: 'security' })]);
