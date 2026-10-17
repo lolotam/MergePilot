@@ -140404,6 +140404,9 @@ async function retryUnusableAnswer(input2) {
     };
   }
 }
+async function remindMissingFindingsList(input2) {
+  return input2.parsed.ok && input2.parsed.findingsMissing ? retryForFindingsList(input2) : { parsed: input2.parsed, thinkingOff: false };
+}
 async function retryForFindingsList(input2) {
   const { parsed, spend, requestedOutputTokens: requestedOutputTokens2 } = input2;
   const promptTokens = input2.promptTokens + estimateTokens(FINDINGS_LIST_REMINDER);
@@ -140415,7 +140418,7 @@ async function retryForFindingsList(input2) {
     spend.record(promptTokens, requestedOutputTokens2, response.usage);
     const retried = input2.parse(response);
     if (!retried.ok) {
-      return { parsed, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
+      return { parsed, rejected: response, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
     }
     return { parsed: retried, response, usage: response.usage, thinkingOff: false };
   } catch (err) {
@@ -140978,14 +140981,28 @@ async function reviewOneBatch(input2, prompt, promptTokens) {
       notes.push("truncation retry skipped: budget limit reached");
     } else {
       try {
-        const retry3 = await model.generate({
+        const retryRequest = {
           ...request2,
           maxOutputTokens: retryOutputTokens,
           ...empty.thinkingOff ? { thinking: "off" } : {}
-        });
+        };
+        const retry3 = await model.generate(retryRequest);
         spend.record(promptTokens, retryRequested, retry3.usage);
         usage = combineUsage(usage, retry3.usage);
-        parsed = parseReviewResponse(retry3);
+        const reminded = await remindMissingFindingsList({
+          parsed: parseReviewResponse(retry3),
+          model,
+          spend,
+          request: retryRequest,
+          promptTokens,
+          requestedOutputTokens: retryRequested,
+          parse: parseReviewResponse,
+          knownSecrets: input2.knownSecrets
+        });
+        parsed = reminded.parsed;
+        usage = combineUsage(usage, reminded.usage);
+        if (reminded.note)
+          notes.push(reminded.note);
       } catch (err) {
         spend.record(promptTokens, retryRequested, void 0);
         notes.push(`truncation retry failed: ${describeCallError(err, input2.knownSecrets)}`);
@@ -141323,19 +141340,32 @@ async function recoverReviewTruncation(input2) {
     incompleteReasons.push("truncation retry skipped: budget limit reached");
   } else {
     try {
-      const retryResponse = await model.generate({
+      const retryRequest = {
         system: prompt.system,
         user: prompt.user,
         maxOutputTokens: retryOutputTokens,
         responseSchema: reviewJsonSchema(),
         ...input2.thinkingOff ? { thinking: "off" } : {},
         ...signal ? { signal } : {}
-      });
+      };
+      const retryResponse = await model.generate(retryRequest);
       spend.record(promptTokens, retryRequested, retryResponse.usage);
       totalUsage = combineUsage(totalUsage, retryResponse.usage);
-      const retryParse = parseReviewResponse(retryResponse);
-      if (retryParse.ok) {
-        parseResult = retryParse;
+      const reminded = await remindMissingFindingsList({
+        parsed: parseReviewResponse(retryResponse),
+        model,
+        spend,
+        request: retryRequest,
+        promptTokens,
+        requestedOutputTokens: retryRequested,
+        parse: parseReviewResponse,
+        knownSecrets: input2.knownSecrets
+      });
+      totalUsage = combineUsage(totalUsage, reminded.usage);
+      if (reminded.note)
+        incompleteReasons.push(reminded.note);
+      if (reminded.parsed.ok) {
+        parseResult = reminded.parsed;
       }
     } catch (err) {
       spend.record(promptTokens, retryRequested, void 0);
@@ -141444,7 +141474,7 @@ async function runSinglePass(ctx) {
     deadline: ctx.deadline
   });
   const parsed = recovery.parseResult;
-  const attempts = () => [response, empty.response].filter((r2) => r2 !== void 0).map((r2) => answerAttemptOf(r2, ctx.knownSecrets));
+  const attempts = () => [response, empty.response ?? empty.rejected].filter((r2) => r2 !== void 0).map((r2) => answerAttemptOf(r2, ctx.knownSecrets));
   if (!parsed.ok) {
     const detail = [...notes, ...recovery.incompleteReasons].join("; ");
     const answerAttempts = parsed.code === "invalid-json" ? attempts() : void 0;

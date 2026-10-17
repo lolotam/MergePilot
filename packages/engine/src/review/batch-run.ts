@@ -9,7 +9,7 @@ import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { FINDINGS_MISSING_REASON, parseReviewAnswer, type ParseReviewAnswerResult } from './answer.js';
 import { estimateTokens } from './budget.js';
-import { describePaths, retryUnusableAnswer, type ReviewDeadline } from './call.js';
+import { describePaths, remindMissingFindingsList, retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { PromptPr } from './follow-up.js';
 import { renderManifest, type ManifestFile } from './manifest.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
@@ -141,14 +141,22 @@ async function reviewOneBatch(
       notes.push('truncation retry skipped: budget limit reached');
     } else {
       try {
-        const retry = await model.generate({
+        const retryRequest: ReviewModelRequest = {
           ...request,
           maxOutputTokens: retryOutputTokens,
           ...(empty.thinkingOff ? { thinking: 'off' as const } : {}),
-        });
+        };
+        const retry = await model.generate(retryRequest);
         spend.record(promptTokens, retryRequested, retry.usage);
         usage = combineUsage(usage, retry.usage);
-        parsed = parseReviewResponse(retry);
+        // A summary without the list gets the same one reminder as a first answer (ADR-0011).
+        const reminded = await remindMissingFindingsList({
+          parsed: parseReviewResponse(retry), model, spend, request: retryRequest, promptTokens,
+          requestedOutputTokens: retryRequested, parse: parseReviewResponse, knownSecrets: input.knownSecrets,
+        });
+        parsed = reminded.parsed;
+        usage = combineUsage(usage, reminded.usage);
+        if (reminded.note) notes.push(reminded.note);
       } catch (err) {
         spend.record(promptTokens, retryRequested, undefined);
         notes.push(`truncation retry failed: ${describeCallError(err, input.knownSecrets)}`);

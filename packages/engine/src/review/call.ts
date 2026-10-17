@@ -124,6 +124,8 @@ export interface EmptyRetryResult<P extends ParsedAnswer> {
   parsed: P;
   /** The retry's response, when one was made: its finish reason drives any truncation retry. */
   response?: ReviewModelResponse | undefined;
+  /** A findings-list retry's response that was not kept; for the logs' answer previews only. */
+  rejected?: ReviewModelResponse | undefined;
   usage?: TokenUsage | undefined;
   /** Disclosure when the retry was skipped or failed; the caller reports it with the error. */
   note?: string | undefined;
@@ -185,9 +187,17 @@ export async function retryUnusableAnswer<P extends ParsedAnswer>(
 /**
  * The first answer is usable (a summary, its missing list disclosed), so the retry can only improve
  * it: an answer that still has no list is kept as the newer one, and a retry that fails, is skipped
- * or is unusable keeps the first answer, with a note. Its response is returned only when its answer
- * is the one kept, so a cut retry never reaches the truncation recovery.
+ * or is unusable keeps the first answer, with a note. Its response is returned as `response` only
+ * when its answer is the one kept, so a cut retry never reaches the truncation recovery.
  */
+/**
+ * Only the findings-list reminder, for an answer that a truncation retry produced: its other
+ * failures keep their own handling (the batch split, or a disclosed error), as before.
+ */
+export async function remindMissingFindingsList<P extends ParsedAnswer>(input: EmptyRetryInput<P>): Promise<EmptyRetryResult<P>> {
+  return input.parsed.ok && input.parsed.findingsMissing ? retryForFindingsList(input) : { parsed: input.parsed, thinkingOff: false };
+}
+
 async function retryForFindingsList<P extends ParsedAnswer>(input: EmptyRetryInput<P>): Promise<EmptyRetryResult<P>> {
   const { parsed, spend, requestedOutputTokens } = input;
   const promptTokens = input.promptTokens + estimateTokens(FINDINGS_LIST_REMINDER);
@@ -199,7 +209,7 @@ async function retryForFindingsList<P extends ParsedAnswer>(input: EmptyRetryInp
     spend.record(promptTokens, requestedOutputTokens, response.usage);
     const retried = input.parse(response);
     if (!retried.ok) {
-      return { parsed, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
+      return { parsed, rejected: response, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
     }
     return { parsed: retried, response, usage: response.usage, thinkingOff: false };
   } catch (err) {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LlmFailure } from '../llm/failure.js';
 import { FINDINGS_MISSING_REASON, parseReviewAnswer } from './answer.js';
-import { FINDINGS_LIST_REMINDER, retryUnusableAnswer } from './call.js';
+import { FINDINGS_LIST_REMINDER, remindMissingFindingsList, retryUnusableAnswer } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { makeConfig, SIMPLE_PATCH } from './pipeline.fixtures.js';
 import { runReview } from './pipeline.js';
@@ -64,7 +64,20 @@ describe('retryUnusableAnswer — an answer without a findings list', () => {
 
     expect(result.parsed).toBe(summaryOnly);
     expect(result.response).toBeUndefined();
+    expect(result.rejected?.text).toBe('{"summary": "cut');
     expect(result.note).toMatch(/^findings-list retry unusable: truncated/);
+  });
+
+  it('reminds only about the list after a truncation retry, leaving its other failures alone', async () => {
+    const model = modelReturning(FULL);
+    const cut = parseReviewAnswer('{"summary": "cut', { finishReason: 'max-tokens' });
+
+    const result = await remindMissingFindingsList({
+      parsed: cut, model, spend: new SpendTracker(undefined, 1), request: REQUEST, promptTokens: 10, requestedOutputTokens: 100, parse,
+    });
+
+    expect(model.generate).not.toHaveBeenCalled();
+    expect(result.parsed).toBe(cut);
   });
 
   it('skips the retry, disclosed, when the budget cannot afford it', async () => {
@@ -126,6 +139,67 @@ describe('a review whose model leaves the findings list out', () => {
         preview: SUMMARY_ONLY.slice(0, 200), tail: SUMMARY_ONLY.slice(-200),
       };
       expect(result.answerAttempts).toEqual([attempt, attempt]);
+    }
+  });
+
+  it('keeps the unusable second answer in the previews too', async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: SUMMARY_ONLY, finishReason: 'stop' })
+      .mockResolvedValueOnce({ text: '{"summary": "cut', finishReason: 'max-tokens' });
+
+    const result = await review(generate);
+
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.result.incompleteReasons).toContain('findings-list retry unusable: truncated');
+      expect(result.answerAttempts?.map((a) => a.preview)).toEqual([SUMMARY_ONLY.slice(0, 200), '{"summary": "cut']);
+    }
+  });
+
+  it('reminds an answer that came from the truncation retry, at the size of that retry', async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: '{"summary": "cut', finishReason: 'max-tokens' })
+      .mockResolvedValueOnce({ text: SUMMARY_ONLY, finishReason: 'stop' })
+      .mockResolvedValueOnce({ text: FULL, finishReason: 'stop' });
+
+    const result = await review(generate);
+
+    expect(generate).toHaveBeenCalledTimes(3);
+    const [, retry, reminder] = generate.mock.calls.map(([request]) => request as ReviewModelRequest);
+    expect(reminder).toMatchObject({ maxOutputTokens: retry?.maxOutputTokens, user: `${retry?.user}${FINDINGS_LIST_REMINDER}` });
+    expect(result).toMatchObject({ status: 'completed', complete: true });
+  });
+});
+
+describe('a batch whose truncation retry leaves the findings list out', () => {
+  it('gets the reminder and is merged as complete', async () => {
+    const patch = SIMPLE_PATCH;
+    const answers = [
+      { text: '{"summary": "cut', finishReason: 'max-tokens' }, // whole PR
+      { text: '{"summary": "still cut', finishReason: 'max-tokens' }, // whole-PR truncation retry
+      { text: '{"summary": "batch cut', finishReason: 'max-tokens' }, // batch 1
+      { text: SUMMARY_ONLY, finishReason: 'stop' }, // batch 1 truncation retry
+      { text: FULL, finishReason: 'stop' }, // batch 1 reminder
+      { text: FULL, finishReason: 'stop' }, // batch 2
+    ];
+    const generate = vi.fn(async () => answers.shift() ?? { text: FULL, finishReason: 'stop' });
+
+    const result = await runReview({
+      config: makeConfig(),
+      pr: { title: 'T', body: 'B' },
+      files: [
+        { path: 'src/a.ts', status: 'modified', patch, changes: 3 },
+        { path: 'src/b.ts', status: 'modified', patch, changes: 3 },
+      ],
+      rulesFiles: [],
+      model: { label: 'fake:test', outputTokensFor: (max) => max, generate },
+      knownSecrets: [],
+    });
+
+    expect(answers).toHaveLength(0);
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.result.incompleteReasons.join(' ')).not.toContain(FINDINGS_MISSING_REASON);
     }
   });
 });

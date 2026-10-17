@@ -8,10 +8,10 @@ import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import type { ParseReviewAnswerResult } from './answer.js';
 import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
-import type { ReviewDeadline } from './call.js';
+import { remindMissingFindingsList, type ReviewDeadline } from './call.js';
 import type { ManifestFile } from './manifest.js';
 import type { PromptPr } from './follow-up.js';
-import type { ReviewModel } from './model.js';
+import type { ReviewModel, ReviewModelRequest } from './model.js';
 import { reviewRetryOutputTokens } from './output-budget.js';
 import type { ContextFile, LibraryDoc } from './prompt.js';
 import {
@@ -93,19 +93,26 @@ export async function recoverReviewTruncation(
     incompleteReasons.push('truncation retry skipped: budget limit reached');
   } else {
     try {
-      const retryResponse = await model.generate({
+      const retryRequest: ReviewModelRequest = {
         system: prompt.system,
         user: prompt.user,
         maxOutputTokens: retryOutputTokens,
         responseSchema: reviewJsonSchema(),
         ...(input.thinkingOff ? { thinking: 'off' as const } : {}),
         ...(signal ? { signal } : {}),
-      });
+      };
+      const retryResponse = await model.generate(retryRequest);
       spend.record(promptTokens, retryRequested, retryResponse.usage);
       totalUsage = combineUsage(totalUsage, retryResponse.usage);
-      const retryParse = parseReviewResponse(retryResponse);
-      if (retryParse.ok) {
-        parseResult = retryParse;
+      // A summary without the list gets the same one reminder as a first answer (ADR-0011).
+      const reminded = await remindMissingFindingsList({
+        parsed: parseReviewResponse(retryResponse), model, spend, request: retryRequest, promptTokens,
+        requestedOutputTokens: retryRequested, parse: parseReviewResponse, knownSecrets: input.knownSecrets,
+      });
+      totalUsage = combineUsage(totalUsage, reminded.usage);
+      if (reminded.note) incompleteReasons.push(reminded.note);
+      if (reminded.parsed.ok) {
+        parseResult = reminded.parsed;
       }
     } catch (err) {
       spend.record(promptTokens, retryRequested, undefined);
