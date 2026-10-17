@@ -213,8 +213,9 @@ describe('refreshAntigravity', () => {
   it.each([
     ['invalid_grant', 'sign-in'],
     ['invalid_client', 'not-configured'],
-    ['unauthorized_client', 'not-configured'],
-    ['invalid_request', 'not-configured'],
+    // Also a refresh token issued to another client after the operator changed the client values.
+    ['unauthorized_client', 'sign-in'],
+    ['invalid_request', 'sign-in'],
     ['some_future_code', 'sign-in'],
   ])('reads the OAuth error %s from a refused refresh as %s', async (code, reason) => {
     const { deps: d } = deps({ '/token': () => Response.json({ error: code, error_description: `echo ${refresh}` }, { status: 400 }) });

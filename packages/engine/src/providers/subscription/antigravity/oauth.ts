@@ -116,7 +116,7 @@ async function postToken(deps: AntigravityDeps, form: Record<string, string>, si
 /** The RFC 6749 error codes kept from a failed token answer; anything else is dropped. */
 const OAUTH_ERRORS = new Set(['invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client', 'unsupported_grant_type', 'invalid_scope']);
 
-/** Codes that mean this server's OAuth client is wrong or missing: the operator's problem, not the user's. */
+/** At the code exchange, codes that mean this server's OAuth client is wrong or missing: the operator's problem. */
 const CLIENT_ERRORS = new Set(['invalid_request', 'invalid_client', 'unauthorized_client']);
 
 async function oauthErrorOf(response: Response): Promise<string | undefined> {
@@ -138,6 +138,15 @@ class TokenEndpointError extends Error {
 
   get clientRejected(): boolean {
     return this.oauthError !== undefined && CLIENT_ERRORS.has(this.oauthError);
+  }
+
+  /**
+   * At refresh only `invalid_client` blames the server's client. `unauthorized_client` there also means
+   * the refresh token was issued to another client (the operator changed the client values), and the fix
+   * is to sign in again.
+   */
+  get refreshClientRejected(): boolean {
+    return this.oauthError === 'invalid_client';
   }
 }
 
@@ -270,7 +279,7 @@ async function postRefresh(deps: AntigravityDeps, refresh: string, signal: Abort
     if (error instanceof TokenEndpointError) {
       if (transientStatus(error.status)) throw new SubscriptionRefreshError('unreachable');
       // invalid_grant (or any other refusal) means the sign-in itself is gone; a rejected client is the server's setup.
-      throw new SubscriptionRefreshError(error.clientRejected ? 'not-configured' : 'sign-in');
+      throw new SubscriptionRefreshError(error.refreshClientRejected ? 'not-configured' : 'sign-in');
     }
     if (signal.aborted) throw error;
     // No answer at all (DNS, connection, timeout, unreadable body): the sign-in may still be valid.
