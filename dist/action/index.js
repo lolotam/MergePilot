@@ -22271,11 +22271,11 @@ function extractWebSocketCloseError(event) {
     const reason = "reason" in event ? event.reason : void 0;
     const wasClean = "wasClean" in event ? event.wasClean : void 0;
     const codeText = typeof code === "number" ? ` ${code}` : "";
-    let reasonText = typeof reason === "string" && reason.length > 0 ? ` ${reason}` : "";
-    if (!reasonText && code === WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE) {
-      reasonText = " message too big";
+    let reasonText2 = typeof reason === "string" && reason.length > 0 ? ` ${reason}` : "";
+    if (!reasonText2 && code === WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE) {
+      reasonText2 = " message too big";
     }
-    return new WebSocketCloseError(`WebSocket closed${codeText}${reasonText}`.trim(), {
+    return new WebSocketCloseError(`WebSocket closed${codeText}${reasonText2}`.trim(), {
       code: typeof code === "number" ? code : void 0,
       reason: typeof reason === "string" && reason.length > 0 ? reason : void 0,
       wasClean: typeof wasClean === "boolean" ? wasClean : void 0
@@ -30348,8 +30348,8 @@ var init_ChatCompletionStream = __esm({
           const structuredResponse = isParseableResponseFormat(__classPrivateFieldGet2(this, _ChatCompletionStream_params, "f")?.response_format);
           const boundedSnapshot = structuredResponse || __classPrivateFieldGet2(this, _ChatCompletionStream_hasAutoParseableTool, "f");
           const messageSnapshot = boundedSnapshot ? captureStructuredMessageSnapshot(choiceSnapshot) : choiceSnapshot.message;
-          const refusal = boundedSnapshot ? captureStructuredJSONSnapshot(messageSnapshot, "refusal") : messageSnapshot.refusal;
-          const parseableContent = !refusal && structuredResponse;
+          const refusal2 = boundedSnapshot ? captureStructuredJSONSnapshot(messageSnapshot, "refusal") : messageSnapshot.refusal;
+          const parseableContent = !refusal2 && structuredResponse;
           const messageContent = parseableContent ? captureStructuredJSONSnapshot(messageSnapshot, "content") : messageSnapshot.content;
           if (delta?.content != null && messageSnapshot.role === "assistant" && messageContent) {
             this._emit("content", delta.content, messageContent);
@@ -30359,10 +30359,10 @@ var init_ChatCompletionStream = __esm({
               parsed: messageSnapshot.parsed
             });
           }
-          if (delta?.refusal != null && messageSnapshot.role === "assistant" && refusal) {
+          if (delta?.refusal != null && messageSnapshot.role === "assistant" && refusal2) {
             this._emit("refusal.delta", {
               delta: delta.refusal,
-              snapshot: refusal
+              snapshot: refusal2
             });
           }
           if (choice.logprobs?.content != null && messageSnapshot.role === "assistant") {
@@ -30478,22 +30478,22 @@ var init_ChatCompletionStream = __esm({
         const structuredResponse = isParseableResponseFormat(__classPrivateFieldGet2(this, _ChatCompletionStream_params, "f")?.response_format);
         const boundedSnapshot = structuredResponse || __classPrivateFieldGet2(this, _ChatCompletionStream_hasAutoParseableTool, "f");
         const messageSnapshot = boundedSnapshot ? captureStructuredMessageSnapshot(choiceSnapshot) : choiceSnapshot.message;
-        const refusal = boundedSnapshot ? captureStructuredJSONSnapshot(messageSnapshot, "refusal") : messageSnapshot.refusal;
-        const parseableContent = !refusal && structuredResponse;
+        const refusal2 = boundedSnapshot ? captureStructuredJSONSnapshot(messageSnapshot, "refusal") : messageSnapshot.refusal;
+        const parseableContent = !refusal2 && structuredResponse;
         const content = parseableContent ? captureStructuredJSONSnapshot(messageSnapshot, "content") : messageSnapshot.content;
-        if (content != null && (content !== "" || !refusal && !messageSnapshot.tool_calls?.length && !messageSnapshot.function_call) && !state3.content_done) {
+        if (content != null && (content !== "" || !refusal2 && !messageSnapshot.tool_calls?.length && !messageSnapshot.function_call) && !state3.content_done) {
           if (parseableContent && __classPrivateFieldGet2(this, _ChatCompletionStream_currentChatCompletionSnapshot, "f")) {
             __classPrivateFieldGet2(this, _ChatCompletionStream_instances, "m", _ChatCompletionStream_validateStructuredSnapshots).call(this, __classPrivateFieldGet2(this, _ChatCompletionStream_currentChatCompletionSnapshot, "f"));
           }
           state3.content_done = true;
           this._emit("content.done", {
             content,
-            parsed: refusal ? null : parseResponseFormatContent(__classPrivateFieldGet2(this, _ChatCompletionStream_params, "f")?.response_format, parseableContent ? validateStructuredJSONSnapshot(content) : content)
+            parsed: refusal2 ? null : parseResponseFormatContent(__classPrivateFieldGet2(this, _ChatCompletionStream_params, "f")?.response_format, parseableContent ? validateStructuredJSONSnapshot(content) : content)
           });
         }
-        if (refusal && !state3.refusal_done) {
+        if (refusal2 && !state3.refusal_done) {
           state3.refusal_done = true;
-          this._emit("refusal.done", { refusal });
+          this._emit("refusal.done", { refusal: refusal2 });
         }
         if (choiceSnapshot.logprobs?.content && !state3.logprobs_content_done) {
           state3.logprobs_content_done = true;
@@ -30517,19 +30517,19 @@ var init_ChatCompletionStream = __esm({
             continue;
           }
           const message = captureStructuredMessageSnapshot(choice);
-          const refusal = captureStructuredJSONSnapshot(message, "refusal");
+          const refusal2 = captureStructuredJSONSnapshot(message, "refusal");
           const content = captureStructuredJSONSnapshot(message, "content");
           const validatedTools = /* @__PURE__ */ new Map();
           const toolCalls = captureSnapshotArray(message, "tool_calls", MAX_STREAM_TOOL_CALLS, "tool-call");
           validatedMessages.set(choice, Object.freeze({
             message,
             content,
-            refusal,
+            refusal: refusal2,
             toolCallCollection: toolCalls,
             toolCalls: validatedTools
           }));
           const state3 = __classPrivateFieldGet2(this, _ChatCompletionStream_choiceEventStates, "f")[choice.index];
-          if (parseableContent && !refusal && typeof content === "string") {
+          if (parseableContent && !refusal2 && typeof content === "string") {
             validateStructuredJSONSnapshot(content, finalJSONBudget, __classPrivateFieldGet2(this, _ChatCompletionStream_partialJSONParseBudget, "f"));
           }
           for (const [index, identity] of state3?.tool_call_identities ?? []) {
@@ -30642,16 +30642,16 @@ var init_ChatCompletionStream = __esm({
           }
           if (logprobs) {
             if (choice.logprobs) {
-              const { content: content2, refusal: refusal2, ...rest3 } = logprobs;
+              const { content: content2, refusal: refusal3, ...rest3 } = logprobs;
               assertIsEmpty(rest3);
               assignOwnProperties(choice.logprobs, rest3);
               if (content2) {
                 (_a15 = choice.logprobs).content ?? (_a15.content = []);
                 choice.logprobs.content.push(...content2);
               }
-              if (refusal2) {
+              if (refusal3) {
                 (_b = choice.logprobs).refusal ?? (_b.refusal = []);
-                choice.logprobs.refusal.push(...refusal2);
+                choice.logprobs.refusal.push(...refusal3);
               }
             } else {
               choice.logprobs = { ...logprobs };
@@ -30680,16 +30680,16 @@ var init_ChatCompletionStream = __esm({
             continue;
           }
           __classPrivateFieldGet2(this, _ChatCompletionStream_audioDoneChoiceIndexes, "f").delete(index);
-          const { audio, content, refusal, function_call, role, ...capturedDeltaFields } = delta;
+          const { audio, content, refusal: refusal2, function_call, role, ...capturedDeltaFields } = delta;
           const { tool_calls: capturedToolCallDelta, ...rest2 } = capturedDeltaFields;
           const tool_calls = hasOwn2(capturedDeltaFields, "tool_calls") ? capturedToolCallDelta : delta.tool_calls;
           assertIsEmpty(rest2);
           assignOwnProperties(choice.message, rest2);
-          if (audio?.expires_at != null && audio.id == null && audio.data == null && audio.transcript == null && content == null && refusal == null && function_call == null && role == null && tool_calls == null && Object.keys(rest2).length === 0) {
+          if (audio?.expires_at != null && audio.id == null && audio.data == null && audio.transcript == null && content == null && refusal2 == null && function_call == null && role == null && tool_calls == null && Object.keys(rest2).length === 0) {
             __classPrivateFieldGet2(this, _ChatCompletionStream_audioDoneChoiceIndexes, "f").add(index);
           }
-          if (refusal) {
-            choice.message.refusal = (choice.message.refusal || "") + refusal;
+          if (refusal2) {
+            choice.message.refusal = (choice.message.refusal || "") + refusal2;
           }
           if (role) {
             choice.message.role = role;
@@ -137169,15 +137169,29 @@ function antigravityUrl(host, method) {
   return `${host}/${ANTIGRAVITY_API_VERSION}:${method}`;
 }
 
+var MESSAGES = {
+  "sign-in": "Subscription token refresh failed; sign in again",
+  unreachable: "Subscription token refresh could not reach the provider; try again",
+  "not-configured": "Google Antigravity sign-in is not configured on this server"
+};
 var SubscriptionRefreshError = class extends Error {
-  transient;
-  constructor(transient) {
-    super(transient ? "Subscription token refresh could not reach the provider; try again" : "Subscription token refresh failed; sign in again");
-    this.transient = transient;
+  reason;
+  constructor(reason) {
+    super(MESSAGES[reason]);
+    this.reason = reason;
     this.name = "SubscriptionRefreshError";
+  }
+  get transient() {
+    return this.reason === "unreachable";
   }
 };
 
+async function discardBody(response) {
+  try {
+    await response.body?.cancel();
+  } catch {
+  }
+}
 async function fetchWithHosts(doFetch, method, init) {
   for (let index = 0; ; index++) {
     const host = ANTIGRAVITY_HOSTS[index];
@@ -137191,7 +137205,7 @@ async function fetchWithHosts(doFetch, method, init) {
       continue;
     }
     if (!last && (response.status === 404 || response.status >= 500)) {
-      await response.body?.cancel().catch(() => void 0);
+      await discardBody(response);
       continue;
     }
     return response;
@@ -137613,6 +137627,7 @@ var KIND_BY_CODE = {
   QUOTA: "quota",
   QUOTA_EXHAUSTED_ALL_KEYS: "quota",
   INVALID_CREDENTIAL: "auth",
+  PROVIDER_NOT_CONFIGURED: "auth",
   RATE_LIMIT: "rate-limit",
   SERVER: "server",
   TIMEOUT: "network",
@@ -138180,8 +138195,10 @@ function parseChunk(data) {
   const content = candidate?.content && typeof candidate.content === "object" ? candidate.content : void 0;
   const parts = Array.isArray(content?.parts) ? content.parts : [];
   const text = parts.filter((part) => part.thought !== true && typeof part.text === "string").map((part) => part.text).join("");
+  const feedback = response.promptFeedback && typeof response.promptFeedback === "object" ? response.promptFeedback : void 0;
   return {
     text,
+    ...typeof feedback?.blockReason === "string" && feedback.blockReason ? { blockReason: feedback.blockReason } : {},
     ...typeof candidate?.finishReason === "string" ? { finishReason: candidate.finishReason } : {},
     ...response.usageMetadata && typeof response.usageMetadata === "object" ? { usage: response.usageMetadata } : {}
   };
@@ -138246,18 +138263,34 @@ function usageOf(usage) {
   };
 }
 
+var BLOCKED_FINISH = /* @__PURE__ */ new Set(["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "LANGUAGE"]);
+var ENUM_NAME = /^[A-Z_]{2,40}$/;
+function reasonText(reason) {
+  return ENUM_NAME.test(reason) ? ` (${reason})` : "";
+}
+function refusal(reason) {
+  return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "BAD_REQUEST", message: `Google Antigravity declined to answer${reasonText(reason)}` });
+}
 function finishOf(reason) {
+  if (reason === "STOP")
+    return "stop";
   if (reason === "MAX_TOKENS")
     return "max-tokens";
-  if (reason === "SAFETY" || reason === "RECITATION" || reason === "BLOCKLIST" || reason === "PROHIBITED_CONTENT")
-    return "error";
-  return "stop";
+  if (BLOCKED_FINISH.has(reason))
+    throw refusal(reason);
+  throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "UNKNOWN", message: `Google Antigravity ended the answer abnormally${reasonText(reason)}` });
 }
 function resolveFailure(error62, signal) {
   if (signal?.aborted)
     return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "ABORTED", message: "request aborted" });
   if (error62 instanceof SubscriptionRefreshError) {
-    return error62.transient ? new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "NETWORK", message: "Could not refresh the Google Antigravity sign-in; try again" }) : new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "INVALID_CREDENTIAL", message: "Google Antigravity sign-in expired or was revoked; sign in again" });
+    if (error62.reason === "unreachable") {
+      return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "NETWORK", message: "Could not refresh the Google Antigravity sign-in; try again" });
+    }
+    if (error62.reason === "not-configured") {
+      return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "PROVIDER_NOT_CONFIGURED", message: "Google Antigravity sign-in is not configured on this server" });
+    }
+    return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "INVALID_CREDENTIAL", message: "Google Antigravity sign-in expired or was revoked; sign in again" });
   }
   return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "SERVER", message: "Could not load the Google Antigravity credential; try again" });
 }
@@ -138326,6 +138359,8 @@ var AntigravityAdapter = class extends LlmAdapter {
         const chunk = parseChunk(event);
         if (chunk.error)
           throw antigravityFailure(chunk.error.status, chunk.error.body, options.model);
+        if (chunk.blockReason)
+          throw refusal(chunk.blockReason);
         if (chunk.text)
           yield { type: "text-delta", text: chunk.text };
         if (chunk.finishReason)
@@ -138339,8 +138374,9 @@ var AntigravityAdapter = class extends LlmAdapter {
     if (!finishReason) {
       throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "NETWORK", message: "Google Antigravity stream ended before the answer was complete" });
     }
+    const finish = finishOf(finishReason);
     yield { type: "usage", usage: usageOf(usage) };
-    yield { type: "finish", reason: finishOf(finishReason) };
+    yield { type: "finish", reason: finish };
   }
 };
 
@@ -139885,7 +139921,8 @@ var KNOWN_CODES = /* @__PURE__ */ new Set([
   "BAD_REQUEST",
   "ABORTED",
   "UNKNOWN",
-  "QUOTA_EXHAUSTED_ALL_KEYS"
+  "QUOTA_EXHAUSTED_ALL_KEYS",
+  "PROVIDER_NOT_CONFIGURED"
 ]);
 function failureKindOf(error62) {
   if (typeof error62 !== "object" || error62 === null || !("code" in error62))
@@ -149511,8 +149548,8 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
       const structuredResponse = isParseableResponseFormat2(__classPrivateFieldGet3(this, _ChatCompletionStream_params2, "f")?.response_format);
       const boundedSnapshot = structuredResponse || __classPrivateFieldGet3(this, _ChatCompletionStream_hasAutoParseableTool2, "f");
       const messageSnapshot = boundedSnapshot ? captureStructuredMessageSnapshot2(choiceSnapshot) : choiceSnapshot.message;
-      const refusal = boundedSnapshot ? captureStructuredJSONSnapshot2(messageSnapshot, "refusal") : messageSnapshot.refusal;
-      const parseableContent = !refusal && structuredResponse;
+      const refusal2 = boundedSnapshot ? captureStructuredJSONSnapshot2(messageSnapshot, "refusal") : messageSnapshot.refusal;
+      const parseableContent = !refusal2 && structuredResponse;
       const messageContent = parseableContent ? captureStructuredJSONSnapshot2(messageSnapshot, "content") : messageSnapshot.content;
       if (delta?.content != null && messageSnapshot.role === "assistant" && messageContent) {
         this._emit("content", delta.content, messageContent);
@@ -149522,10 +149559,10 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
           parsed: messageSnapshot.parsed
         });
       }
-      if (delta?.refusal != null && messageSnapshot.role === "assistant" && refusal) {
+      if (delta?.refusal != null && messageSnapshot.role === "assistant" && refusal2) {
         this._emit("refusal.delta", {
           delta: delta.refusal,
-          snapshot: refusal
+          snapshot: refusal2
         });
       }
       if (choice.logprobs?.content != null && messageSnapshot.role === "assistant") {
@@ -149641,22 +149678,22 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
     const structuredResponse = isParseableResponseFormat2(__classPrivateFieldGet3(this, _ChatCompletionStream_params2, "f")?.response_format);
     const boundedSnapshot = structuredResponse || __classPrivateFieldGet3(this, _ChatCompletionStream_hasAutoParseableTool2, "f");
     const messageSnapshot = boundedSnapshot ? captureStructuredMessageSnapshot2(choiceSnapshot) : choiceSnapshot.message;
-    const refusal = boundedSnapshot ? captureStructuredJSONSnapshot2(messageSnapshot, "refusal") : messageSnapshot.refusal;
-    const parseableContent = !refusal && structuredResponse;
+    const refusal2 = boundedSnapshot ? captureStructuredJSONSnapshot2(messageSnapshot, "refusal") : messageSnapshot.refusal;
+    const parseableContent = !refusal2 && structuredResponse;
     const content = parseableContent ? captureStructuredJSONSnapshot2(messageSnapshot, "content") : messageSnapshot.content;
-    if (content != null && (content !== "" || !refusal && !messageSnapshot.tool_calls?.length && !messageSnapshot.function_call) && !state3.content_done) {
+    if (content != null && (content !== "" || !refusal2 && !messageSnapshot.tool_calls?.length && !messageSnapshot.function_call) && !state3.content_done) {
       if (parseableContent && __classPrivateFieldGet3(this, _ChatCompletionStream_currentChatCompletionSnapshot2, "f")) {
         __classPrivateFieldGet3(this, _ChatCompletionStream_instances2, "m", _ChatCompletionStream_validateStructuredSnapshots2).call(this, __classPrivateFieldGet3(this, _ChatCompletionStream_currentChatCompletionSnapshot2, "f"));
       }
       state3.content_done = true;
       this._emit("content.done", {
         content,
-        parsed: refusal ? null : parseResponseFormatContent2(__classPrivateFieldGet3(this, _ChatCompletionStream_params2, "f")?.response_format, parseableContent ? validateStructuredJSONSnapshot2(content) : content)
+        parsed: refusal2 ? null : parseResponseFormatContent2(__classPrivateFieldGet3(this, _ChatCompletionStream_params2, "f")?.response_format, parseableContent ? validateStructuredJSONSnapshot2(content) : content)
       });
     }
-    if (refusal && !state3.refusal_done) {
+    if (refusal2 && !state3.refusal_done) {
       state3.refusal_done = true;
-      this._emit("refusal.done", { refusal });
+      this._emit("refusal.done", { refusal: refusal2 });
     }
     if (choiceSnapshot.logprobs?.content && !state3.logprobs_content_done) {
       state3.logprobs_content_done = true;
@@ -149680,19 +149717,19 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
         continue;
       }
       const message = captureStructuredMessageSnapshot2(choice);
-      const refusal = captureStructuredJSONSnapshot2(message, "refusal");
+      const refusal2 = captureStructuredJSONSnapshot2(message, "refusal");
       const content = captureStructuredJSONSnapshot2(message, "content");
       const validatedTools = /* @__PURE__ */ new Map();
       const toolCalls = captureSnapshotArray2(message, "tool_calls", MAX_STREAM_TOOL_CALLS2, "tool-call");
       validatedMessages.set(choice, Object.freeze({
         message,
         content,
-        refusal,
+        refusal: refusal2,
         toolCallCollection: toolCalls,
         toolCalls: validatedTools
       }));
       const state3 = __classPrivateFieldGet3(this, _ChatCompletionStream_choiceEventStates2, "f")[choice.index];
-      if (parseableContent && !refusal && typeof content === "string") {
+      if (parseableContent && !refusal2 && typeof content === "string") {
         validateStructuredJSONSnapshot2(content, finalJSONBudget, __classPrivateFieldGet3(this, _ChatCompletionStream_partialJSONParseBudget2, "f"));
       }
       for (const [index, identity] of state3?.tool_call_identities ?? []) {
@@ -149811,16 +149848,16 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
       }
       if (logprobs) {
         if (choice.logprobs) {
-          const { content: content2, refusal: refusal2, ...rest3 } = logprobs;
+          const { content: content2, refusal: refusal3, ...rest3 } = logprobs;
           assertIsEmpty2(rest3);
           assignOwnProperties2(choice.logprobs, rest3);
           if (content2) {
             (_a15 = choice.logprobs).content ?? (_a15.content = []);
             choice.logprobs.content.push(...content2);
           }
-          if (refusal2) {
+          if (refusal3) {
             (_b = choice.logprobs).refusal ?? (_b.refusal = []);
-            choice.logprobs.refusal.push(...refusal2);
+            choice.logprobs.refusal.push(...refusal3);
           }
         } else {
           choice.logprobs = { ...logprobs };
@@ -149849,16 +149886,16 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
         continue;
       }
       __classPrivateFieldGet3(this, _ChatCompletionStream_audioDoneChoiceIndexes2, "f").delete(index);
-      const { audio, content, refusal, function_call, role, ...capturedDeltaFields } = delta;
+      const { audio, content, refusal: refusal2, function_call, role, ...capturedDeltaFields } = delta;
       const { tool_calls: capturedToolCallDelta, ...rest2 } = capturedDeltaFields;
       const tool_calls = hasOwn4(capturedDeltaFields, "tool_calls") ? capturedToolCallDelta : delta.tool_calls;
       assertIsEmpty2(rest2);
       assignOwnProperties2(choice.message, rest2);
-      if (audio?.expires_at != null && audio.id == null && audio.data == null && audio.transcript == null && content == null && refusal == null && function_call == null && role == null && tool_calls == null && Object.keys(rest2).length === 0) {
+      if (audio?.expires_at != null && audio.id == null && audio.data == null && audio.transcript == null && content == null && refusal2 == null && function_call == null && role == null && tool_calls == null && Object.keys(rest2).length === 0) {
         __classPrivateFieldGet3(this, _ChatCompletionStream_audioDoneChoiceIndexes2, "f").add(index);
       }
-      if (refusal) {
-        choice.message.refusal = (choice.message.refusal || "") + refusal;
+      if (refusal2) {
+        choice.message.refusal = (choice.message.refusal || "") + refusal2;
       }
       if (role) {
         choice.message.role = role;
