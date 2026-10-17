@@ -6,6 +6,18 @@ import type { WorkspaceSettings } from '../core/types.js';
 /** Flat-rate token plans priced $0 in the catalog, and the plain API provider of the same models. */
 const TOKEN_PLAN_API_PROVIDER: Record<string, string> = { 'zai-coding': 'zai' };
 
+/**
+ * Google Antigravity serves other vendors' models (decisions log س47-ز): the API price is the same
+ * model at its own vendor. `-thinking` variants are priced as the base model. Undefined for a
+ * model no API provider sells (`gpt-oss-*`), so no equivalent is shown.
+ */
+export function antigravityApiModel(model: string): { provider: string; model: string } | undefined {
+  const base = model.replace(/-thinking$/, '');
+  if (base.startsWith('claude-')) return { provider: 'anthropic', model: base };
+  if (base.startsWith('gemini-')) return { provider: 'gemini', model: base };
+  return undefined;
+}
+
 export interface ApiEquivalentPrice {
   pricing: ModelPricing;
   source: PricingSource;
@@ -27,8 +39,16 @@ export async function apiEquivalentPrice(
   configured: Pick<RunPricing, 'inputPerMTok' | 'outputPerMTok'>,
 ): Promise<ApiEquivalentPrice | undefined> {
   let apiProvider: string | undefined;
+  let apiModel = choice.model;
   if (model.includedInSubscription) {
-    apiProvider = choice.provider;
+    if (choice.provider === 'google-antigravity') {
+      const vendor = antigravityApiModel(choice.model);
+      if (!vendor) return undefined;
+      apiProvider = vendor.provider;
+      apiModel = vendor.model;
+    } else {
+      apiProvider = choice.provider;
+    }
   } else {
     apiProvider = TOKEN_PLAN_API_PROVIDER[choice.provider];
     if (!apiProvider) return undefined;
@@ -39,7 +59,7 @@ export async function apiEquivalentPrice(
     if (configured.inputPerMTok !== 0 || configured.outputPerMTok !== 0) return undefined;
   }
   if (!apiProvider) return undefined;
-  const resolved = await resolvePricing({ store, settings }, apiProvider, choice.model);
+  const resolved = await resolvePricing({ store, settings }, apiProvider, apiModel);
   return resolved.pricing ? { pricing: resolved.pricing, source: resolved.record.source } : undefined;
 }
 

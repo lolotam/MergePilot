@@ -1,7 +1,7 @@
 import fastify, { type FastifyInstance } from 'fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import type { FetchLike } from '@mergepilot/engine';
+import type { FetchLike, SubscriptionProvider } from '@mergepilot/engine';
 import { createAuth } from '../auth/auth.js';
 import * as authSchema from '../auth/schema.js';
 import { registerAuthRoutes } from '../auth/fastify.js';
@@ -53,7 +53,11 @@ export interface ProviderHarness {
 }
 
 /** Fastify + PGlite with an admin and a member in workspace `ws-1`; DNS and custom fetch faked. */
-export async function createProviderHarness(customFetch?: FetchLike, subscriptionLogin?: SubscriptionLoginFn): Promise<ProviderHarness> {
+export async function createProviderHarness(
+  customFetch?: FetchLike,
+  subscriptionLogin?: SubscriptionLoginFn,
+  subscriptionAvailable?: (provider: SubscriptionProvider) => boolean,
+): Promise<ProviderHarness> {
   resetProviderTestRateLimits();
   const pglite = new PGlite();
   await runMigrations(pglite);
@@ -77,6 +81,7 @@ export async function createProviderHarness(customFetch?: FetchLike, subscriptio
     ssrfLookup,
     validateKey: async () => undefined,
     ...(subscriptionLogin ? { subscriptionLogin } : {}),
+    ...(subscriptionAvailable ? { subscriptionAvailable } : {}),
     ...(customFetch ? { customFetch } : {}),
   });
 

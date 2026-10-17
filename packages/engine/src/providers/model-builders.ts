@@ -3,7 +3,7 @@
  * the adapter's own retries, and the ADR-0026 key rotation over an ordered roster.
  */
 import type { Secret } from '../credentials/secret.js';
-import { decodeSubscription, isSubscriptionProvider } from '../credentials/subscription.js';
+import { decodeSubscription, isSubscriptionOnlyProvider, isSubscriptionProvider } from '../credentials/subscription.js';
 import type { LlmAdapter } from '../llm/adapter.js';
 import { LlmFailure } from '../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, withRetry } from '../llm/retry.js';
@@ -16,7 +16,7 @@ import type { ApiProviderId } from './ids.js';
 import { callWithKeyRotation, type KeyRotationEvent } from './key-rotation.js';
 import { OpenAIAdapter } from './openai/adapter.js';
 import { providerEntry } from './registry.js';
-import { SubscriptionAdapter } from './subscription/adapter.js';
+import { createSubscriptionAdapter, isSubscriptionAdapter } from './subscription/adapter.js';
 
 /** Ordered keys for one provider. `startIndex` is 0-based and advances after a successful call. */
 export interface KeyRoster {
@@ -48,8 +48,9 @@ export function createAdapter(
 ): LlmAdapter {
   if (apiKey && decodeSubscription(apiKey.reveal(), provider)) {
     if (!isSubscriptionProvider(provider)) throw new Error('Subscription authentication is unavailable for this provider');
-    return new SubscriptionAdapter(provider, apiKey, resolveSubscriptionSecret);
+    return createSubscriptionAdapter(provider, apiKey, resolveSubscriptionSecret);
   }
+  if (isSubscriptionOnlyProvider(provider)) throw new Error(`Provider ${provider} needs a subscription sign-in, not an API key`);
   const entry = providerEntry(provider);
   if (entry.kind === 'openai-compatible') {
     if (provider === 'custom' && !customBaseUrl?.trim()) throw new Error(CUSTOM_BASE_URL_MISSING);
@@ -136,7 +137,7 @@ export function rotatingReviewModel(
 export function withRetries(adapter: LlmAdapter, model: string, effort: string | undefined): ReviewModel {
   const base = modelFromAdapter(adapter, model, effort);
   const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
-  const subscription = adapter instanceof SubscriptionAdapter;
+  const subscription = isSubscriptionAdapter(adapter);
   return {
     label: base.label,
     authMethod: subscription ? 'subscription' : 'api-key',

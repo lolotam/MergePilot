@@ -68,6 +68,7 @@ function FallbackRow({ idPrefix, workspaceId, index, count, entry, providers, di
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <ProviderSelect
           id={`${prefix}-provider`}
+          workspaceId={workspaceId}
           label={t('providerLabel')}
           value={entry.provider}
           options={providers}

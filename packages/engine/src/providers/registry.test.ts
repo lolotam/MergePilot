@@ -11,6 +11,7 @@ describe('provider registry', () => {
         'anthropic',
         'openai',
         'gemini',
+        'google-antigravity',
         'xai',
         'deepseek',
         'nvidia',
@@ -48,9 +49,9 @@ describe('provider registry', () => {
     expect(Object.isFrozen(PROVIDER_REGISTRY)).toBe(true);
   });
 
-  it('marks the three SDK providers native and the presets openai-compatible', () => {
+  it('marks the SDK providers and Google Antigravity native and the presets openai-compatible', () => {
     const natives = listProviders().filter((p) => p.kind === 'native').map((p) => p.id);
-    expect(natives).toEqual(['anthropic', 'openai', 'gemini']);
+    expect(natives).toEqual(['anthropic', 'openai', 'gemini', 'google-antigravity']);
     expect(providerEntry('zai').thinkingStyle).toBe('glm');
     expect(providerEntry('deepseek').thinkingStyle).toBe('deepseek');
     expect(providerEntry('anthropic').keyHint).toBe('sk-ant-');

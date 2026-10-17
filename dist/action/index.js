@@ -7679,15 +7679,15 @@ function betaEditTool(ctx) {
           throw e2;
         throw new ToolError(`edit: ${fsErrorMessage(e2, file_path)}`);
       }
-      const count = data.split(old_string).length - 1;
-      if (count === 0)
+      const count2 = data.split(old_string).length - 1;
+      if (count2 === 0)
         throw new ToolError(`edit: old_string not found in ${file_path}`);
       let updated;
       if (replace_all) {
         updated = data.split(old_string).join(new_string);
       } else {
-        if (count > 1)
-          throw new ToolError(`edit: old_string appears ${count} times in ${file_path} (must be unique)`);
+        if (count2 > 1)
+          throw new ToolError(`edit: old_string appears ${count2} times in ${file_path} (must be unique)`);
         updated = data.replace(old_string, () => new_string);
       }
       try {
@@ -7695,7 +7695,7 @@ function betaEditTool(ctx) {
       } catch (e2) {
         throw new ToolError(`edit: write: ${fsErrorMessage(e2, file_path)}`);
       }
-      return `edited ${file_path} (${replace_all ? count : 1} replacement(s))`;
+      return `edited ${file_path} (${replace_all ? count2 : 1} replacement(s))`;
     }
   });
 }
@@ -22271,11 +22271,11 @@ function extractWebSocketCloseError(event) {
     const reason = "reason" in event ? event.reason : void 0;
     const wasClean = "wasClean" in event ? event.wasClean : void 0;
     const codeText = typeof code === "number" ? ` ${code}` : "";
-    let reasonText = typeof reason === "string" && reason.length > 0 ? ` ${reason}` : "";
-    if (!reasonText && code === WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE) {
-      reasonText = " message too big";
+    let reasonText2 = typeof reason === "string" && reason.length > 0 ? ` ${reason}` : "";
+    if (!reasonText2 && code === WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE) {
+      reasonText2 = " message too big";
     }
-    return new WebSocketCloseError(`WebSocket closed${codeText}${reasonText}`.trim(), {
+    return new WebSocketCloseError(`WebSocket closed${codeText}${reasonText2}`.trim(), {
       code: typeof code === "number" ? code : void 0,
       reason: typeof reason === "string" && reason.length > 0 ? reason : void 0,
       wasClean: typeof wasClean === "boolean" ? wasClean : void 0
@@ -30348,8 +30348,8 @@ var init_ChatCompletionStream = __esm({
           const structuredResponse = isParseableResponseFormat(__classPrivateFieldGet2(this, _ChatCompletionStream_params, "f")?.response_format);
           const boundedSnapshot = structuredResponse || __classPrivateFieldGet2(this, _ChatCompletionStream_hasAutoParseableTool, "f");
           const messageSnapshot = boundedSnapshot ? captureStructuredMessageSnapshot(choiceSnapshot) : choiceSnapshot.message;
-          const refusal = boundedSnapshot ? captureStructuredJSONSnapshot(messageSnapshot, "refusal") : messageSnapshot.refusal;
-          const parseableContent = !refusal && structuredResponse;
+          const refusal2 = boundedSnapshot ? captureStructuredJSONSnapshot(messageSnapshot, "refusal") : messageSnapshot.refusal;
+          const parseableContent = !refusal2 && structuredResponse;
           const messageContent = parseableContent ? captureStructuredJSONSnapshot(messageSnapshot, "content") : messageSnapshot.content;
           if (delta?.content != null && messageSnapshot.role === "assistant" && messageContent) {
             this._emit("content", delta.content, messageContent);
@@ -30359,10 +30359,10 @@ var init_ChatCompletionStream = __esm({
               parsed: messageSnapshot.parsed
             });
           }
-          if (delta?.refusal != null && messageSnapshot.role === "assistant" && refusal) {
+          if (delta?.refusal != null && messageSnapshot.role === "assistant" && refusal2) {
             this._emit("refusal.delta", {
               delta: delta.refusal,
-              snapshot: refusal
+              snapshot: refusal2
             });
           }
           if (choice.logprobs?.content != null && messageSnapshot.role === "assistant") {
@@ -30478,22 +30478,22 @@ var init_ChatCompletionStream = __esm({
         const structuredResponse = isParseableResponseFormat(__classPrivateFieldGet2(this, _ChatCompletionStream_params, "f")?.response_format);
         const boundedSnapshot = structuredResponse || __classPrivateFieldGet2(this, _ChatCompletionStream_hasAutoParseableTool, "f");
         const messageSnapshot = boundedSnapshot ? captureStructuredMessageSnapshot(choiceSnapshot) : choiceSnapshot.message;
-        const refusal = boundedSnapshot ? captureStructuredJSONSnapshot(messageSnapshot, "refusal") : messageSnapshot.refusal;
-        const parseableContent = !refusal && structuredResponse;
+        const refusal2 = boundedSnapshot ? captureStructuredJSONSnapshot(messageSnapshot, "refusal") : messageSnapshot.refusal;
+        const parseableContent = !refusal2 && structuredResponse;
         const content = parseableContent ? captureStructuredJSONSnapshot(messageSnapshot, "content") : messageSnapshot.content;
-        if (content != null && (content !== "" || !refusal && !messageSnapshot.tool_calls?.length && !messageSnapshot.function_call) && !state3.content_done) {
+        if (content != null && (content !== "" || !refusal2 && !messageSnapshot.tool_calls?.length && !messageSnapshot.function_call) && !state3.content_done) {
           if (parseableContent && __classPrivateFieldGet2(this, _ChatCompletionStream_currentChatCompletionSnapshot, "f")) {
             __classPrivateFieldGet2(this, _ChatCompletionStream_instances, "m", _ChatCompletionStream_validateStructuredSnapshots).call(this, __classPrivateFieldGet2(this, _ChatCompletionStream_currentChatCompletionSnapshot, "f"));
           }
           state3.content_done = true;
           this._emit("content.done", {
             content,
-            parsed: refusal ? null : parseResponseFormatContent(__classPrivateFieldGet2(this, _ChatCompletionStream_params, "f")?.response_format, parseableContent ? validateStructuredJSONSnapshot(content) : content)
+            parsed: refusal2 ? null : parseResponseFormatContent(__classPrivateFieldGet2(this, _ChatCompletionStream_params, "f")?.response_format, parseableContent ? validateStructuredJSONSnapshot(content) : content)
           });
         }
-        if (refusal && !state3.refusal_done) {
+        if (refusal2 && !state3.refusal_done) {
           state3.refusal_done = true;
-          this._emit("refusal.done", { refusal });
+          this._emit("refusal.done", { refusal: refusal2 });
         }
         if (choiceSnapshot.logprobs?.content && !state3.logprobs_content_done) {
           state3.logprobs_content_done = true;
@@ -30517,19 +30517,19 @@ var init_ChatCompletionStream = __esm({
             continue;
           }
           const message = captureStructuredMessageSnapshot(choice);
-          const refusal = captureStructuredJSONSnapshot(message, "refusal");
+          const refusal2 = captureStructuredJSONSnapshot(message, "refusal");
           const content = captureStructuredJSONSnapshot(message, "content");
           const validatedTools = /* @__PURE__ */ new Map();
           const toolCalls = captureSnapshotArray(message, "tool_calls", MAX_STREAM_TOOL_CALLS, "tool-call");
           validatedMessages.set(choice, Object.freeze({
             message,
             content,
-            refusal,
+            refusal: refusal2,
             toolCallCollection: toolCalls,
             toolCalls: validatedTools
           }));
           const state3 = __classPrivateFieldGet2(this, _ChatCompletionStream_choiceEventStates, "f")[choice.index];
-          if (parseableContent && !refusal && typeof content === "string") {
+          if (parseableContent && !refusal2 && typeof content === "string") {
             validateStructuredJSONSnapshot(content, finalJSONBudget, __classPrivateFieldGet2(this, _ChatCompletionStream_partialJSONParseBudget, "f"));
           }
           for (const [index, identity] of state3?.tool_call_identities ?? []) {
@@ -30642,16 +30642,16 @@ var init_ChatCompletionStream = __esm({
           }
           if (logprobs) {
             if (choice.logprobs) {
-              const { content: content2, refusal: refusal2, ...rest3 } = logprobs;
+              const { content: content2, refusal: refusal3, ...rest3 } = logprobs;
               assertIsEmpty(rest3);
               assignOwnProperties(choice.logprobs, rest3);
               if (content2) {
                 (_a15 = choice.logprobs).content ?? (_a15.content = []);
                 choice.logprobs.content.push(...content2);
               }
-              if (refusal2) {
+              if (refusal3) {
                 (_b = choice.logprobs).refusal ?? (_b.refusal = []);
-                choice.logprobs.refusal.push(...refusal2);
+                choice.logprobs.refusal.push(...refusal3);
               }
             } else {
               choice.logprobs = { ...logprobs };
@@ -30680,16 +30680,16 @@ var init_ChatCompletionStream = __esm({
             continue;
           }
           __classPrivateFieldGet2(this, _ChatCompletionStream_audioDoneChoiceIndexes, "f").delete(index);
-          const { audio, content, refusal, function_call, role, ...capturedDeltaFields } = delta;
+          const { audio, content, refusal: refusal2, function_call, role, ...capturedDeltaFields } = delta;
           const { tool_calls: capturedToolCallDelta, ...rest2 } = capturedDeltaFields;
           const tool_calls = hasOwn2(capturedDeltaFields, "tool_calls") ? capturedToolCallDelta : delta.tool_calls;
           assertIsEmpty(rest2);
           assignOwnProperties(choice.message, rest2);
-          if (audio?.expires_at != null && audio.id == null && audio.data == null && audio.transcript == null && content == null && refusal == null && function_call == null && role == null && tool_calls == null && Object.keys(rest2).length === 0) {
+          if (audio?.expires_at != null && audio.id == null && audio.data == null && audio.transcript == null && content == null && refusal2 == null && function_call == null && role == null && tool_calls == null && Object.keys(rest2).length === 0) {
             __classPrivateFieldGet2(this, _ChatCompletionStream_audioDoneChoiceIndexes, "f").add(index);
           }
-          if (refusal) {
-            choice.message.refusal = (choice.message.refusal || "") + refusal;
+          if (refusal2) {
+            choice.message.refusal = (choice.message.refusal || "") + refusal2;
           }
           if (role) {
             choice.message.role = role;
@@ -36058,14 +36058,14 @@ function isPrimitiveAssistantStreamArrayDelta(accumulator, delta) {
   return delta.every(isPrimitiveAssistantStreamValue) && accumulator.every(isPrimitiveAssistantStreamValue);
 }
 function countOwnAssistantStreamArrayEntries(accumulator) {
-  let count = 0;
+  let count2 = 0;
   for (const key of Object.keys(accumulator)) {
     const index = Number(key);
     if (Number.isSafeInteger(index) && index >= 0 && index < accumulator.length && String(index) === key) {
-      count += 1;
+      count2 += 1;
     }
   }
-  return count;
+  return count2;
 }
 function getAssistantStreamArrayOwnEntryCount(accumulator, enforceSparseHoleBudget, cachedState) {
   if (!enforceSparseHoleBudget) {
@@ -44368,11 +44368,11 @@ var require_retry_operation = __commonJS({
       for (var i2 = 0; i2 < this._errors.length; i2++) {
         var error62 = this._errors[i2];
         var message = error62.message;
-        var count = (counts[message] || 0) + 1;
-        counts[message] = count;
-        if (count >= mainErrorCount) {
+        var count2 = (counts[message] || 0) + 1;
+        counts[message] = count2;
+        if (count2 >= mainErrorCount) {
           mainError = error62;
-          mainErrorCount = count;
+          mainErrorCount = count2;
         }
       }
       return mainError;
@@ -52705,7 +52705,7 @@ var require_gaxios = __commonJS({
     var retry_js_1 = require_retry3();
     var stream_1 = __require("stream");
     var interceptor_js_1 = require_interceptor();
-    var randomUUID4 = async () => globalThis.crypto?.randomUUID() || (await import("crypto")).randomUUID();
+    var randomUUID5 = async () => globalThis.crypto?.randomUUID() || (await import("crypto")).randomUUID();
     var HTTP_STATUS_NO_CONTENT = 204;
     var Gaxios = class {
       agentCache = /* @__PURE__ */ new Map();
@@ -52978,7 +52978,7 @@ var require_gaxios = __commonJS({
          */
         ["Blob", "File", "FormData"].includes(opts.data?.constructor?.name || "");
         if (opts.multipart?.length) {
-          const boundary = await randomUUID4();
+          const boundary = await randomUUID5();
           preparedHeaders.set("content-type", `multipart/related; boundary=${boundary}`);
           opts.body = stream_1.Readable.from(this.getMultipartRequest(opts.multipart, boundary));
         } else if (shouldDirectlyPassData) {
@@ -55770,8 +55770,8 @@ var require_crypto = __commonJS({
         const outputBuffer = await window.crypto.subtle.digest("SHA-256", inputBuffer);
         return base64js.fromByteArray(new Uint8Array(outputBuffer));
       }
-      randomBytesBase64(count) {
-        const array2 = new Uint8Array(count);
+      randomBytesBase64(count2) {
+        const array2 = new Uint8Array(count2);
         window.crypto.getRandomValues(array2);
         return base64js.fromByteArray(array2);
       }
@@ -55857,8 +55857,8 @@ var require_crypto2 = __commonJS({
       async sha256DigestBase64(str) {
         return crypto6.createHash("sha256").update(str).digest("base64");
       }
-      randomBytesBase64(count) {
-        return crypto6.randomBytes(count).toString("base64");
+      randomBytesBase64(count2) {
+        return crypto6.randomBytes(count2).toString("base64");
       }
       async verify(pubkey, data, signature) {
         const verifier = crypto6.createVerify("RSA-SHA256");
@@ -89000,13 +89000,13 @@ function buildParams4(model, context, options = {}) {
     }
   };
   if (options.thinking?.enabled && model.reasoning) {
-    const thinkingConfig = { includeThoughts: true };
+    const thinkingConfig2 = { includeThoughts: true };
     if (options.thinking.level !== void 0) {
-      thinkingConfig.thinkingLevel = toGoogleSdkThinkingLevel(options.thinking.level);
+      thinkingConfig2.thinkingLevel = toGoogleSdkThinkingLevel(options.thinking.level);
     } else if (options.thinking.budgetTokens !== void 0) {
-      thinkingConfig.thinkingBudget = options.thinking.budgetTokens;
+      thinkingConfig2.thinkingBudget = options.thinking.budgetTokens;
     }
-    config2.thinkingConfig = thinkingConfig;
+    config2.thinkingConfig = thinkingConfig2;
   } else if (model.reasoning && options.thinking && !options.thinking.enabled) {
     config2.thinkingConfig = getDisabledGoogleThinkingConfig(model);
   }
@@ -90377,8 +90377,8 @@ var require_Node = __commonJS({
         };
         const res = toJS.toJS(this, "", ctx);
         if (typeof onAnchor === "function")
-          for (const { count, res: res2 } of ctx.anchors.values())
-            onAnchor(res2, count);
+          for (const { count: count2, res: res2 } of ctx.anchors.values())
+            onAnchor(res2, count2);
         return typeof reviver === "function" ? applyReviver.applyReviver(reviver, { "": res }, "", res) : res;
       }
     };
@@ -90485,13 +90485,13 @@ var require_Alias = __commonJS({
         const anchor2 = anchors2 && source && anchors2.get(source);
         return anchor2 ? anchor2.count * anchor2.aliasCount : 0;
       } else if (identity.isCollection(node2)) {
-        let count = 0;
+        let count2 = 0;
         for (const item of node2.items) {
           const c = getAliasCount(doc, item, anchors2);
-          if (c > count)
-            count = c;
+          if (c > count2)
+            count2 = c;
         }
-        return count;
+        return count2;
       } else if (identity.isPair(node2)) {
         const kc = getAliasCount(doc, node2.key, anchors2);
         const vc = getAliasCount(doc, node2.value, anchors2);
@@ -93406,8 +93406,8 @@ var require_Document = __commonJS({
         };
         const res = toJS.toJS(this.contents, jsonArg ?? "", ctx);
         if (typeof onAnchor === "function")
-          for (const { count, res: res2 } of ctx.anchors.values())
-            onAnchor(res2, count);
+          for (const { count: count2, res: res2 } of ctx.anchors.values())
+            onAnchor(res2, count2);
         return typeof reviver === "function" ? applyReviver.applyReviver(reviver, { "": res }, "", res) : res;
       }
       /**
@@ -93483,12 +93483,12 @@ var require_errors = __commonJS({
         lineStr = prev + lineStr;
       }
       if (/[^ ]/.test(lineStr)) {
-        let count = 1;
+        let count2 = 1;
         const end = error62.linePos[1];
         if (end?.line === line && end.col > col) {
-          count = Math.max(1, Math.min(end.col - col, 80 - ci));
+          count2 = Math.max(1, Math.min(end.col - col, 80 - ci));
         }
-        const pointer = " ".repeat(ci) + "^".repeat(count);
+        const pointer = " ".repeat(ci) + "^".repeat(count2);
         error62.message += `:
 
 ${lineStr}
@@ -105178,15 +105178,15 @@ function betaEditTool2(ctx) {
           throw e2;
         throw new ToolError2(`edit: ${fsErrorMessage2(e2, file_path)}`);
       }
-      const count = data.split(old_string).length - 1;
-      if (count === 0)
+      const count2 = data.split(old_string).length - 1;
+      if (count2 === 0)
         throw new ToolError2(`edit: old_string not found in ${file_path}`);
       let updated;
       if (replace_all) {
         updated = data.split(old_string).join(new_string);
       } else {
-        if (count > 1)
-          throw new ToolError2(`edit: old_string appears ${count} times in ${file_path} (must be unique)`);
+        if (count2 > 1)
+          throw new ToolError2(`edit: old_string appears ${count2} times in ${file_path} (must be unique)`);
         updated = data.replace(old_string, () => new_string);
       }
       try {
@@ -105194,7 +105194,7 @@ function betaEditTool2(ctx) {
       } catch (e2) {
         throw new ToolError2(`edit: write: ${fsErrorMessage2(e2, file_path)}`);
       }
-      return `edited ${file_path} (${replace_all ? count : 1} replacement(s))`;
+      return `edited ${file_path} (${replace_all ? count2 : 1} replacement(s))`;
     }
   });
 }
@@ -117068,6 +117068,7 @@ var API_PROVIDER_IDS = [
   "anthropic",
   "openai",
   "gemini",
+  "google-antigravity",
   "xai",
   "deepseek",
   "nvidia",
@@ -117114,6 +117115,15 @@ var ENTRIES = {
     thinkingStyle: "gemini",
     defaultModel: "gemini-3.8-flash",
     envName: "GEMINI_API_KEY"
+  },
+  // Subscription only (ADR-0032): no API key; requests use the Cloud Code Assist protocol.
+  "google-antigravity": {
+    label: "Google Antigravity",
+    kind: "native",
+    baseUrl: "https://cloudcode-pa.googleapis.com",
+    thinkingStyle: "gemini",
+    defaultModel: "gemini-3.8-flash",
+    envName: "GOOGLE_ANTIGRAVITY_SUBSCRIPTION"
   },
   xai: {
     label: "xAI (Grok)",
@@ -118503,14 +118513,14 @@ function codePointLength(str) {
   const units = str.length;
   if (!highSurrogate.test(str))
     return units;
-  let count = units;
+  let count2 = units;
   for (let i2 = 0; i2 < units - 1; i2++) {
     if ((str.charCodeAt(i2) & 64512) === 55296 && (str.charCodeAt(i2 + 1) & 64512) === 56320) {
-      count--;
+      count2--;
       i2++;
     }
   }
-  return count;
+  return count2;
 }
 function getLengthableOrigin(input2) {
   if (Array.isArray(input2))
@@ -122852,8 +122862,8 @@ function az_default() {
   };
 }
 
-function getBelarusianPlural(count, one, few, many) {
-  const absCount = Math.abs(count);
+function getBelarusianPlural(count2, one, few, many) {
+  const absCount = Math.abs(count2);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
   if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
@@ -125479,8 +125489,8 @@ function hu_default() {
   };
 }
 
-function getArmenianPlural(count, one, many) {
-  return Math.abs(count) === 1 ? one : many;
+function getArmenianPlural(count2, one, many) {
+  return Math.abs(count2) === 1 ? one : many;
 }
 function withDefiniteArticle(word) {
   if (!word)
@@ -128195,8 +128205,8 @@ function ro_default() {
   };
 }
 
-function getRussianPlural(count, one, few, many) {
-  const absCount = Math.abs(count);
+function getRussianPlural(count2, one, few, many) {
+  const absCount = Math.abs(count2);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
   if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
@@ -136865,7 +136875,11 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
-var SUBSCRIPTION_PROVIDERS = ["openai", "anthropic", "xai"];
+var SUBSCRIPTION_PROVIDERS = ["openai", "anthropic", "xai", "google-antigravity"];
+var SUBSCRIPTION_ONLY_PROVIDERS = ["google-antigravity"];
+function isSubscriptionOnlyProvider(provider) {
+  return SUBSCRIPTION_ONLY_PROVIDERS.includes(provider);
+}
 var SUBSCRIPTION_PREFIX = "mergepilot:oauth:v1:";
 var CredentialSchema = external_exports.object({
   type: external_exports.literal("oauth"),
@@ -137131,6 +137145,71 @@ function xaiProvider() {
     models: Object.values(XAI_MODELS),
     api: openAIResponsesApi()
   });
+}
+
+var ANTIGRAVITY_HOSTS = [
+  "https://daily-cloudcode-pa.sandbox.googleapis.com",
+  "https://cloudcode-pa.googleapis.com"
+];
+var ANTIGRAVITY_API_VERSION = "v1internal";
+var ANTIGRAVITY_USER_AGENT = "antigravity/1.15.8 linux/amd64";
+var ANTIGRAVITY_API_CLIENT = "google-cloud-sdk vscode_cloudshelleditor/0.1";
+var ANTIGRAVITY_CLIENT_METADATA = { ideType: "ANTIGRAVITY", platform: "PLATFORM_UNSPECIFIED", pluginType: "GEMINI" };
+function antigravityHeaders(accessToken, stream8 = false) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    "User-Agent": ANTIGRAVITY_USER_AGENT,
+    "X-Goog-Api-Client": ANTIGRAVITY_API_CLIENT,
+    "Client-Metadata": JSON.stringify(ANTIGRAVITY_CLIENT_METADATA),
+    ...stream8 ? { Accept: "text/event-stream" } : {}
+  };
+}
+function antigravityUrl(host, method) {
+  return `${host}/${ANTIGRAVITY_API_VERSION}:${method}`;
+}
+
+var MESSAGES = {
+  "sign-in": "Subscription token refresh failed; sign in again",
+  unreachable: "Subscription token refresh could not reach the provider; try again",
+  "not-configured": "Google Antigravity sign-in is not configured on this server"
+};
+var SubscriptionRefreshError = class extends Error {
+  reason;
+  constructor(reason) {
+    super(MESSAGES[reason]);
+    this.reason = reason;
+    this.name = "SubscriptionRefreshError";
+  }
+  get transient() {
+    return this.reason === "unreachable";
+  }
+};
+
+async function discardBody(response) {
+  try {
+    await response.body?.cancel();
+  } catch {
+  }
+}
+async function fetchWithHosts(doFetch, method, init) {
+  for (let index = 0; ; index++) {
+    const host = ANTIGRAVITY_HOSTS[index];
+    const last = index === ANTIGRAVITY_HOSTS.length - 1;
+    let response;
+    try {
+      response = await doFetch(antigravityUrl(host, method), init);
+    } catch (error62) {
+      if (last || init.signal?.aborted)
+        throw error62;
+      continue;
+    }
+    if (!last && (response.status === 404 || response.status >= 500)) {
+      await discardBody(response);
+      continue;
+    }
+    return response;
+  }
 }
 
 function subscriptionProvider(provider) {
@@ -137548,6 +137627,8 @@ var KIND_BY_CODE = {
   QUOTA: "quota",
   QUOTA_EXHAUSTED_ALL_KEYS: "quota",
   INVALID_CREDENTIAL: "auth",
+  // The operator's server lacks the sign-in client: nothing the user's credential can fix.
+  PROVIDER_NOT_CONFIGURED: "server",
   RATE_LIMIT: "rate-limit",
   SERVER: "server",
   TIMEOUT: "network",
@@ -137982,6 +138063,324 @@ function responsesReasoningHeadroom(model, reasoning) {
   return model.reasoning && model.thinkingLevelMap?.off === null ? DEFAULT_THINKING_HEADROOM : 0;
 }
 
+import { randomUUID as randomUUID2 } from "node:crypto";
+
+var ANTIGRAVITY_PROVIDER = "google-antigravity";
+var RATE_LIMIT_MAX_DELAY_MS = 6e4;
+var CONTEXT_WORDING2 = /context (length|window)|too many tokens|prompt is too long|maximum context|exceeds the maximum number of tokens/i;
+var SUSPENSION_WORDING = /terms of service|has been disabled|suspended|violation/i;
+var RPC_STATUS = /^[A-Z_]{3,40}$/;
+function rpcError(bodyText) {
+  try {
+    const body = JSON.parse(bodyText);
+    const error62 = body && typeof body === "object" ? body.error : void 0;
+    return error62 && typeof error62 === "object" ? error62 : {};
+  } catch {
+    return {};
+  }
+}
+function durationMs(value) {
+  if (typeof value !== "string")
+    return void 0;
+  const match3 = /^(\d+(?:\.\d+)?)s$/.exec(value.trim());
+  return match3 ? Math.round(Number(match3[1]) * 1e3) : void 0;
+}
+function resetAfterMs(message) {
+  const match3 = /reset(?:s)? after\s+((?:\d+h)?(?:\d+m)?(?:\d+(?:\.\d+)?s)?)/i.exec(message);
+  if (!match3?.[1])
+    return void 0;
+  const part = (unit) => Number(new RegExp(`(\\d+(?:\\.\\d+)?)${unit}`).exec(match3[1])?.[1] ?? 0);
+  const ms = (part("h") * 3600 + part("m") * 60 + part("s")) * 1e3;
+  return ms > 0 ? Math.round(ms) : void 0;
+}
+function detailOfType(error62, suffix) {
+  return error62.details?.find((detail) => typeof detail["@type"] === "string" && detail["@type"].endsWith(suffix));
+}
+function quotaOrRateLimit(error62) {
+  const reason = detailOfType(error62, "google.rpc.ErrorInfo")?.reason;
+  const delay3 = durationMs(detailOfType(error62, "google.rpc.RetryInfo")?.retryDelay) ?? resetAfterMs(error62.message ?? "");
+  if (reason === "QUOTA_EXHAUSTED" || delay3 !== void 0 && delay3 > RATE_LIMIT_MAX_DELAY_MS) {
+    return { code: "QUOTA", ...delay3 !== void 0 ? { retryAfterMs: delay3 } : {} };
+  }
+  return { code: "RATE_LIMIT", ...delay3 !== void 0 ? { retryAfterMs: delay3 } : {} };
+}
+function forbidden(bodyText) {
+  if (/VALIDATION_REQUIRED/.test(bodyText)) {
+    return "Google asks you to verify this account in the browser; verify it, then sign in again";
+  }
+  if (SUSPENSION_WORDING.test(bodyText))
+    return "Google disabled Antigravity access for this account";
+  return "Google refused access for this account; sign in again";
+}
+function antigravityFailure(status, bodyText, model) {
+  const error62 = rpcError(bodyText);
+  const base = { provider: ANTIGRAVITY_PROVIDER, status };
+  if (status === 429 || error62.status === "RESOURCE_EXHAUSTED") {
+    const { code: code2, retryAfterMs } = quotaOrRateLimit(error62);
+    const text = code2 === "QUOTA" ? "Google Antigravity quota is exhausted for this account" : "Google Antigravity rate limit reached";
+    return new LlmFailure({ ...base, code: code2, message: text, ...retryAfterMs !== void 0 ? { retryAfterMs } : {} });
+  }
+  if (status === 401) {
+    return new LlmFailure({ ...base, code: "INVALID_CREDENTIAL", message: "Google Antigravity sign-in expired or was revoked; sign in again" });
+  }
+  if (status === 403)
+    return new LlmFailure({ ...base, code: "INVALID_CREDENTIAL", message: forbidden(bodyText) });
+  if (status === 404) {
+    return new LlmFailure({ ...base, code: "BAD_REQUEST", message: `Model ${model} is not available to this Google Antigravity account` });
+  }
+  if (status === 408 || status === 504)
+    return new LlmFailure({ ...base, code: "TIMEOUT", message: "Google Antigravity timed out" });
+  if (status >= 500)
+    return new LlmFailure({ ...base, code: "SERVER", message: `Google Antigravity returned HTTP ${status}` });
+  const code = CONTEXT_WORDING2.test(bodyText) ? "CONTEXT_WINDOW_EXCEEDED" : "BAD_REQUEST";
+  const rpcStatus = typeof error62.status === "string" && RPC_STATUS.test(error62.status) ? ` ${error62.status}` : "";
+  return new LlmFailure({ ...base, code, message: `Google Antigravity rejected the request: HTTP ${status}${rpcStatus} (${code})` });
+}
+
+function claudeThinkingBudget(options) {
+  if (options.thinking === "off")
+    return 0;
+  return thinkingHeadroom(options.effort);
+}
+function antigravityOutputTokens(options) {
+  if (options.model.startsWith("claude-"))
+    return options.maxOutputTokens + claudeThinkingBudget(options);
+  if (!options.model.startsWith("gemini-"))
+    return options.maxOutputTokens;
+  const effort = options.thinking === "off" ? "off" : options.effort;
+  if (effort !== void 0) {
+    const config2 = geminiThinkingConfig(options.model, effort);
+    const thinks = config2 !== void 0 && !("thinkingBudget" in config2 && config2.thinkingBudget === 0);
+    return options.maxOutputTokens + (thinks ? thinkingHeadroom(effort) : 0);
+  }
+  return options.maxOutputTokens + (geminiThinksByDefault(options.model) ? DEFAULT_THINKING_HEADROOM : 0);
+}
+function thinkingConfig(options) {
+  if (options.model.startsWith("claude-")) {
+    const budget = claudeThinkingBudget(options);
+    return budget > 0 ? { thinkingBudget: budget, includeThoughts: false } : void 0;
+  }
+  if (!options.model.startsWith("gemini-"))
+    return void 0;
+  const config2 = geminiThinkingConfig(options.model, options.thinking === "off" ? "off" : options.effort);
+  return config2 ? { ...config2, includeThoughts: false } : void 0;
+}
+function generateRequestBody(options, projectId, requestId) {
+  const system = options.messages.filter((message) => message.role === "system").map((message) => message.content);
+  const contents = options.messages.filter((message) => message.role !== "system").map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] }));
+  const thinking = thinkingConfig(options);
+  return {
+    project: projectId,
+    model: options.model,
+    userAgent: "antigravity",
+    requestId,
+    request: {
+      contents,
+      ...system.length > 0 ? { systemInstruction: { role: "user", parts: [{ text: system.join("\n\n") }] } } : {},
+      generationConfig: {
+        maxOutputTokens: antigravityOutputTokens(options),
+        ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
+        ...thinking ? { thinkingConfig: thinking } : {}
+      }
+    }
+  };
+}
+function parseChunk(data) {
+  const record3 = data && typeof data === "object" ? data : {};
+  if (record3.error && typeof record3.error === "object") {
+    const code = record3.error.code;
+    return { text: "", error: { status: typeof code === "number" ? code : 500, body: JSON.stringify(record3) } };
+  }
+  const response = record3.response && typeof record3.response === "object" ? record3.response : record3;
+  const candidate = Array.isArray(response.candidates) ? response.candidates[0] : void 0;
+  const content = candidate?.content && typeof candidate.content === "object" ? candidate.content : void 0;
+  const parts = Array.isArray(content?.parts) ? content.parts : [];
+  const text = parts.filter((part) => part.thought !== true && typeof part.text === "string").map((part) => part.text).join("");
+  const feedback = response.promptFeedback && typeof response.promptFeedback === "object" ? response.promptFeedback : void 0;
+  return {
+    text,
+    ...typeof feedback?.blockReason === "string" && feedback.blockReason ? { blockReason: feedback.blockReason } : {},
+    ...typeof candidate?.finishReason === "string" ? { finishReason: candidate.finishReason } : {},
+    ...response.usageMetadata && typeof response.usageMetadata === "object" ? { usage: response.usageMetadata } : {}
+  };
+}
+function parseEvent(payload) {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "UNKNOWN", message: "Google Antigravity sent a malformed stream event" });
+  }
+}
+async function* sseJson(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let data = [];
+  let finished3 = false;
+  const flush = function* () {
+    if (data.length === 0)
+      return;
+    const payload = data.join("\n");
+    data = [];
+    yield parseEvent(payload);
+  };
+  try {
+    for (; ; ) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0) {
+        const line = buffer.slice(0, newline).replace(/\r$/, "");
+        buffer = buffer.slice(newline + 1);
+        if (line === "")
+          yield* flush();
+        else if (line.startsWith("data:"))
+          data.push(line.slice(5).trimStart());
+        newline = buffer.indexOf("\n");
+      }
+      if (done)
+        break;
+    }
+    if (buffer.startsWith("data:"))
+      data.push(buffer.slice(5).trimStart());
+    yield* flush();
+    finished3 = true;
+  } finally {
+    if (!finished3)
+      await reader.cancel().catch(() => void 0);
+    reader.releaseLock();
+  }
+}
+function count(value) {
+  return typeof value === "number" && value > 0 ? value : 0;
+}
+function usageOf(usage) {
+  const cached2 = count(usage?.cachedContentTokenCount);
+  return {
+    inputTokens: Math.max(0, count(usage?.promptTokenCount) - cached2),
+    outputTokens: count(usage?.candidatesTokenCount) + count(usage?.thoughtsTokenCount),
+    cacheReadTokens: cached2,
+    cacheWriteTokens: 0
+  };
+}
+
+var BLOCKED_FINISH = /* @__PURE__ */ new Set(["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "LANGUAGE"]);
+var ENUM_NAME = /^[A-Z_]{2,40}$/;
+function reasonText(reason) {
+  return ENUM_NAME.test(reason) ? ` (${reason})` : "";
+}
+function refusal(reason) {
+  return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "BAD_REQUEST", message: `Google Antigravity declined to answer${reasonText(reason)}` });
+}
+function finishOf(reason) {
+  if (reason === "STOP")
+    return "stop";
+  if (reason === "MAX_TOKENS")
+    return "max-tokens";
+  if (BLOCKED_FINISH.has(reason))
+    throw refusal(reason);
+  throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "UNKNOWN", message: `Google Antigravity ended the answer abnormally${reasonText(reason)}` });
+}
+function resolveFailure(error62, signal) {
+  if (signal?.aborted)
+    return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "ABORTED", message: "request aborted" });
+  if (error62 instanceof SubscriptionRefreshError) {
+    if (error62.reason === "unreachable") {
+      return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "NETWORK", message: "Could not refresh the Google Antigravity sign-in; try again" });
+    }
+    if (error62.reason === "not-configured") {
+      return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "PROVIDER_NOT_CONFIGURED", message: "Google Antigravity sign-in is not configured on this server" });
+    }
+    return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "INVALID_CREDENTIAL", message: "Google Antigravity sign-in expired or was revoked; sign in again" });
+  }
+  return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "SERVER", message: "Could not load the Google Antigravity credential; try again" });
+}
+function thrownFailure(error62, signal) {
+  if (error62 instanceof LlmFailure)
+    return error62;
+  if (signal?.aborted)
+    return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "ABORTED", message: "request aborted" });
+  const timeout = error62 instanceof Error && error62.name === "TimeoutError";
+  return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: timeout ? "TIMEOUT" : "NETWORK", message: "Could not reach Google Antigravity" });
+}
+var AntigravityAdapter = class extends LlmAdapter {
+  secret;
+  resolveSecret;
+  fetchFn;
+  provider = ANTIGRAVITY_PROVIDER;
+  retryPolicy = DEFAULT_RETRY_POLICY;
+  constructor(secret, resolveSecret, fetchFn = (input2, init) => fetch(input2, init)) {
+    super();
+    this.secret = secret;
+    this.resolveSecret = resolveSecret;
+    this.fetchFn = fetchFn;
+  }
+  requestedOutputTokens(options) {
+    return antigravityOutputTokens(options);
+  }
+  async credential(signal) {
+    if (this.resolveSecret) {
+      try {
+        this.secret = await this.resolveSecret();
+      } catch (error62) {
+        throw resolveFailure(error62, signal);
+      }
+    }
+    let envelope;
+    try {
+      envelope = decodeSubscription(this.secret.reveal(), ANTIGRAVITY_PROVIDER);
+    } catch {
+    }
+    const projectId = envelope?.credential.projectId;
+    if (envelope && typeof projectId === "string" && projectId)
+      return { access: envelope.credential.access, projectId };
+    throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "INVALID_CREDENTIAL", message: "Google Antigravity sign-in is required; sign in again" });
+  }
+  async *stream(options) {
+    const { access: access3, projectId } = await this.credential(options.signal);
+    let response;
+    try {
+      response = await fetchWithHosts(this.fetchFn, "streamGenerateContent?alt=sse", {
+        method: "POST",
+        headers: antigravityHeaders(access3, true),
+        body: JSON.stringify(generateRequestBody(options, projectId, `agent-${randomUUID2()}`)),
+        ...options.signal ? { signal: options.signal } : {}
+      });
+    } catch (error62) {
+      throw thrownFailure(error62, options.signal);
+    }
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => "");
+      throw antigravityFailure(response.status, text, options.model);
+    }
+    let finishReason;
+    let usage;
+    try {
+      for await (const event of sseJson(response.body)) {
+        const chunk = parseChunk(event);
+        if (chunk.error)
+          throw antigravityFailure(chunk.error.status, chunk.error.body, options.model);
+        if (chunk.blockReason)
+          throw refusal(chunk.blockReason);
+        if (chunk.text)
+          yield { type: "text-delta", text: chunk.text };
+        if (chunk.finishReason)
+          finishReason = chunk.finishReason;
+        if (chunk.usage)
+          usage = chunk.usage;
+      }
+    } catch (error62) {
+      throw thrownFailure(error62, options.signal);
+    }
+    if (!finishReason) {
+      throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "NETWORK", message: "Google Antigravity stream ended before the answer was complete" });
+    }
+    const finish = finishOf(finishReason);
+    yield { type: "usage", usage: usageOf(usage) };
+    yield { type: "finish", reason: finish };
+  }
+};
+
 function levelFor(levels, options) {
   const effort = options.thinking === "off" && levels.includes("off") ? "off" : options.effort;
   return levels.find((level) => level === effort || effort === "none" && level === "off");
@@ -138129,6 +138528,14 @@ var SubscriptionAdapter = class extends LlmAdapter {
     }
   }
 };
+function createSubscriptionAdapter(provider, secret, resolveSecret) {
+  if (provider === "google-antigravity")
+    return new AntigravityAdapter(secret, resolveSecret);
+  return new SubscriptionAdapter(provider, secret, resolveSecret);
+}
+function isSubscriptionAdapter(adapter) {
+  return adapter instanceof SubscriptionAdapter || adapter instanceof AntigravityAdapter;
+}
 
 var import_yaml = __toESM(require_dist5(), 1);
 
@@ -138664,8 +139071,8 @@ function hunkAround(patch, line) {
     const header2 = HUNK_HEADER.exec(row);
     if (header2) {
       const start = Number(header2[1]);
-      const count = header2[2] === void 0 ? 1 : Number(header2[2]);
-      hunks.push({ start, end: start + Math.max(count, 1) - 1, text: [row] });
+      const count2 = header2[2] === void 0 ? 1 : Number(header2[2]);
+      hunks.push({ start, end: start + Math.max(count2, 1) - 1, text: [row] });
     } else {
       hunks.at(-1)?.text.push(row);
     }
@@ -139515,7 +139922,8 @@ var KNOWN_CODES = /* @__PURE__ */ new Set([
   "BAD_REQUEST",
   "ABORTED",
   "UNKNOWN",
-  "QUOTA_EXHAUSTED_ALL_KEYS"
+  "QUOTA_EXHAUSTED_ALL_KEYS",
+  "PROVIDER_NOT_CONFIGURED"
 ]);
 function failureKindOf(error62) {
   if (typeof error62 !== "object" || error62 === null || !("code" in error62))
@@ -147987,10 +148395,10 @@ _a10 = AbstractChatCompletionRunner2, _AbstractChatCompletionRunner_completionAr
             if (!hasOwn4(details, name)) {
               continue;
             }
-            const count = details[name];
-            if (typeof count === "number") {
+            const count2 = details[name];
+            if (typeof count2 === "number") {
               Object.defineProperty(totalDetails, name, {
-                value: (hasOwn4(totalDetails, name) ? totalDetails[name] ?? 0 : 0) + count,
+                value: (hasOwn4(totalDetails, name) ? totalDetails[name] ?? 0 : 0) + count2,
                 enumerable: true,
                 configurable: true,
                 writable: true
@@ -149141,8 +149549,8 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
       const structuredResponse = isParseableResponseFormat2(__classPrivateFieldGet3(this, _ChatCompletionStream_params2, "f")?.response_format);
       const boundedSnapshot = structuredResponse || __classPrivateFieldGet3(this, _ChatCompletionStream_hasAutoParseableTool2, "f");
       const messageSnapshot = boundedSnapshot ? captureStructuredMessageSnapshot2(choiceSnapshot) : choiceSnapshot.message;
-      const refusal = boundedSnapshot ? captureStructuredJSONSnapshot2(messageSnapshot, "refusal") : messageSnapshot.refusal;
-      const parseableContent = !refusal && structuredResponse;
+      const refusal2 = boundedSnapshot ? captureStructuredJSONSnapshot2(messageSnapshot, "refusal") : messageSnapshot.refusal;
+      const parseableContent = !refusal2 && structuredResponse;
       const messageContent = parseableContent ? captureStructuredJSONSnapshot2(messageSnapshot, "content") : messageSnapshot.content;
       if (delta?.content != null && messageSnapshot.role === "assistant" && messageContent) {
         this._emit("content", delta.content, messageContent);
@@ -149152,10 +149560,10 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
           parsed: messageSnapshot.parsed
         });
       }
-      if (delta?.refusal != null && messageSnapshot.role === "assistant" && refusal) {
+      if (delta?.refusal != null && messageSnapshot.role === "assistant" && refusal2) {
         this._emit("refusal.delta", {
           delta: delta.refusal,
-          snapshot: refusal
+          snapshot: refusal2
         });
       }
       if (choice.logprobs?.content != null && messageSnapshot.role === "assistant") {
@@ -149271,22 +149679,22 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
     const structuredResponse = isParseableResponseFormat2(__classPrivateFieldGet3(this, _ChatCompletionStream_params2, "f")?.response_format);
     const boundedSnapshot = structuredResponse || __classPrivateFieldGet3(this, _ChatCompletionStream_hasAutoParseableTool2, "f");
     const messageSnapshot = boundedSnapshot ? captureStructuredMessageSnapshot2(choiceSnapshot) : choiceSnapshot.message;
-    const refusal = boundedSnapshot ? captureStructuredJSONSnapshot2(messageSnapshot, "refusal") : messageSnapshot.refusal;
-    const parseableContent = !refusal && structuredResponse;
+    const refusal2 = boundedSnapshot ? captureStructuredJSONSnapshot2(messageSnapshot, "refusal") : messageSnapshot.refusal;
+    const parseableContent = !refusal2 && structuredResponse;
     const content = parseableContent ? captureStructuredJSONSnapshot2(messageSnapshot, "content") : messageSnapshot.content;
-    if (content != null && (content !== "" || !refusal && !messageSnapshot.tool_calls?.length && !messageSnapshot.function_call) && !state3.content_done) {
+    if (content != null && (content !== "" || !refusal2 && !messageSnapshot.tool_calls?.length && !messageSnapshot.function_call) && !state3.content_done) {
       if (parseableContent && __classPrivateFieldGet3(this, _ChatCompletionStream_currentChatCompletionSnapshot2, "f")) {
         __classPrivateFieldGet3(this, _ChatCompletionStream_instances2, "m", _ChatCompletionStream_validateStructuredSnapshots2).call(this, __classPrivateFieldGet3(this, _ChatCompletionStream_currentChatCompletionSnapshot2, "f"));
       }
       state3.content_done = true;
       this._emit("content.done", {
         content,
-        parsed: refusal ? null : parseResponseFormatContent2(__classPrivateFieldGet3(this, _ChatCompletionStream_params2, "f")?.response_format, parseableContent ? validateStructuredJSONSnapshot2(content) : content)
+        parsed: refusal2 ? null : parseResponseFormatContent2(__classPrivateFieldGet3(this, _ChatCompletionStream_params2, "f")?.response_format, parseableContent ? validateStructuredJSONSnapshot2(content) : content)
       });
     }
-    if (refusal && !state3.refusal_done) {
+    if (refusal2 && !state3.refusal_done) {
       state3.refusal_done = true;
-      this._emit("refusal.done", { refusal });
+      this._emit("refusal.done", { refusal: refusal2 });
     }
     if (choiceSnapshot.logprobs?.content && !state3.logprobs_content_done) {
       state3.logprobs_content_done = true;
@@ -149310,19 +149718,19 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
         continue;
       }
       const message = captureStructuredMessageSnapshot2(choice);
-      const refusal = captureStructuredJSONSnapshot2(message, "refusal");
+      const refusal2 = captureStructuredJSONSnapshot2(message, "refusal");
       const content = captureStructuredJSONSnapshot2(message, "content");
       const validatedTools = /* @__PURE__ */ new Map();
       const toolCalls = captureSnapshotArray2(message, "tool_calls", MAX_STREAM_TOOL_CALLS2, "tool-call");
       validatedMessages.set(choice, Object.freeze({
         message,
         content,
-        refusal,
+        refusal: refusal2,
         toolCallCollection: toolCalls,
         toolCalls: validatedTools
       }));
       const state3 = __classPrivateFieldGet3(this, _ChatCompletionStream_choiceEventStates2, "f")[choice.index];
-      if (parseableContent && !refusal && typeof content === "string") {
+      if (parseableContent && !refusal2 && typeof content === "string") {
         validateStructuredJSONSnapshot2(content, finalJSONBudget, __classPrivateFieldGet3(this, _ChatCompletionStream_partialJSONParseBudget2, "f"));
       }
       for (const [index, identity] of state3?.tool_call_identities ?? []) {
@@ -149441,16 +149849,16 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
       }
       if (logprobs) {
         if (choice.logprobs) {
-          const { content: content2, refusal: refusal2, ...rest3 } = logprobs;
+          const { content: content2, refusal: refusal3, ...rest3 } = logprobs;
           assertIsEmpty2(rest3);
           assignOwnProperties2(choice.logprobs, rest3);
           if (content2) {
             (_a15 = choice.logprobs).content ?? (_a15.content = []);
             choice.logprobs.content.push(...content2);
           }
-          if (refusal2) {
+          if (refusal3) {
             (_b = choice.logprobs).refusal ?? (_b.refusal = []);
-            choice.logprobs.refusal.push(...refusal2);
+            choice.logprobs.refusal.push(...refusal3);
           }
         } else {
           choice.logprobs = { ...logprobs };
@@ -149479,16 +149887,16 @@ var ChatCompletionStream2 = class _ChatCompletionStream extends AbstractChatComp
         continue;
       }
       __classPrivateFieldGet3(this, _ChatCompletionStream_audioDoneChoiceIndexes2, "f").delete(index);
-      const { audio, content, refusal, function_call, role, ...capturedDeltaFields } = delta;
+      const { audio, content, refusal: refusal2, function_call, role, ...capturedDeltaFields } = delta;
       const { tool_calls: capturedToolCallDelta, ...rest2 } = capturedDeltaFields;
       const tool_calls = hasOwn4(capturedDeltaFields, "tool_calls") ? capturedToolCallDelta : delta.tool_calls;
       assertIsEmpty2(rest2);
       assignOwnProperties2(choice.message, rest2);
-      if (audio?.expires_at != null && audio.id == null && audio.data == null && audio.transcript == null && content == null && refusal == null && function_call == null && role == null && tool_calls == null && Object.keys(rest2).length === 0) {
+      if (audio?.expires_at != null && audio.id == null && audio.data == null && audio.transcript == null && content == null && refusal2 == null && function_call == null && role == null && tool_calls == null && Object.keys(rest2).length === 0) {
         __classPrivateFieldGet3(this, _ChatCompletionStream_audioDoneChoiceIndexes2, "f").add(index);
       }
-      if (refusal) {
-        choice.message.refusal = (choice.message.refusal || "") + refusal;
+      if (refusal2) {
+        choice.message.refusal = (choice.message.refusal || "") + refusal2;
       }
       if (role) {
         choice.message.role = role;
@@ -156907,14 +157315,14 @@ function isPrimitiveAssistantStreamArrayDelta2(accumulator, delta) {
   return delta.every(isPrimitiveAssistantStreamValue2) && accumulator.every(isPrimitiveAssistantStreamValue2);
 }
 function countOwnAssistantStreamArrayEntries2(accumulator) {
-  let count = 0;
+  let count2 = 0;
   for (const key of Object.keys(accumulator)) {
     const index = Number(key);
     if (Number.isSafeInteger(index) && index >= 0 && index < accumulator.length && String(index) === key) {
-      count += 1;
+      count2 += 1;
     }
   }
-  return count;
+  return count2;
 }
 function getAssistantStreamArrayOwnEntryCount2(accumulator, enforceSparseHoleBudget, cachedState) {
   if (!enforceSparseHoleBudget) {
@@ -188062,9 +188470,9 @@ var GeminiAdapter = class extends LlmAdapter {
     }
   }
   requestedOutputTokens(options) {
-    const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
+    const thinkingConfig2 = geminiThinkingConfig(options.model, options.effort);
     if (options.effort !== void 0) {
-      const thinks = thinkingConfig !== void 0 && !("thinkingBudget" in thinkingConfig && thinkingConfig.thinkingBudget === 0);
+      const thinks = thinkingConfig2 !== void 0 && !("thinkingBudget" in thinkingConfig2 && thinkingConfig2.thinkingBudget === 0);
       return options.maxOutputTokens + (thinks ? thinkingHeadroom(options.effort) : 0);
     }
     const thinksByDefault = geminiThinksByDefault(options.model);
@@ -188084,10 +188492,10 @@ var GeminiAdapter = class extends LlmAdapter {
       role: m2.role === "assistant" ? "model" : "user",
       parts: [{ text: m2.content }]
     }));
-    const thinkingConfig = geminiThinkingConfig(options.model, options.effort);
+    const thinkingConfig2 = geminiThinkingConfig(options.model, options.effort);
     const config2 = {
       maxOutputTokens: this.requestedOutputTokens(options),
-      ...thinkingConfig ? { thinkingConfig } : {},
+      ...thinkingConfig2 ? { thinkingConfig: thinkingConfig2 } : {},
       ...options.signal ? { abortSignal: options.signal } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
       ...systemInstruction !== void 0 ? { systemInstruction } : {}
@@ -188190,7 +188598,7 @@ var GeminiAdapter = class extends LlmAdapter {
   }
 };
 
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 
 function parseSseChunk(buffer) {
   const blocks = buffer.replace(/\r\n/g, "\n").split("\n\n");
@@ -188274,7 +188682,7 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
   #fetch;
   #style;
   #streamUsage;
-  #sessionId = randomUUID3();
+  #sessionId = randomUUID4();
   constructor(options) {
     super();
     const entry = providerEntry(options.provider);
@@ -188465,8 +188873,10 @@ function createAdapter(provider, apiKey, customBaseUrl, customFetch, resolveSubs
   if (apiKey && decodeSubscription(apiKey.reveal(), provider)) {
     if (!isSubscriptionProvider(provider))
       throw new Error("Subscription authentication is unavailable for this provider");
-    return new SubscriptionAdapter(provider, apiKey, resolveSubscriptionSecret);
+    return createSubscriptionAdapter(provider, apiKey, resolveSubscriptionSecret);
   }
+  if (isSubscriptionOnlyProvider(provider))
+    throw new Error(`Provider ${provider} needs a subscription sign-in, not an API key`);
   const entry = providerEntry(provider);
   if (entry.kind === "openai-compatible") {
     if (provider === "custom" && !customBaseUrl?.trim())
@@ -188531,7 +188941,7 @@ function rotatingReviewModel(provider, model, effort, roster, rotation, resolveS
 function withRetries(adapter, model, effort) {
   const base = modelFromAdapter(adapter, model, effort);
   const policy = adapter.retryPolicy ?? DEFAULT_RETRY_POLICY;
-  const subscription = adapter instanceof SubscriptionAdapter;
+  const subscription = isSubscriptionAdapter(adapter);
   return {
     label: base.label,
     authMethod: subscription ? "subscription" : "api-key",
@@ -188699,6 +189109,8 @@ async function createReviewModel(config2, store, opts) {
   chain.skipped.push(...configured.skipped);
   return { ...primary.model, ...attachments(apiKey, chain) };
 }
+
+var ANTIGRAVITY_MODELS_TTL_MS = 4 * 60 * 60 * 1e3;
 
 var BINARY_EXTENSIONS2 = /* @__PURE__ */ new Set([
   ".png",
@@ -194506,11 +194918,11 @@ function openFindingsLine(open4, isArabic) {
   }
   if (shown2 === 0)
     return void 0;
-  const count = open4.total !== void 0 && open4.total > shown2 ? `${shown2}${isArabic ? " \u0645\u0646 " : " of "}${open4.total}` : `${shown2}`;
+  const count2 = open4.total !== void 0 && open4.total > shown2 ? `${shown2}${isArabic ? " \u0645\u0646 " : " of "}${open4.total}` : `${shown2}`;
   if (open4.unchecked) {
-    return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${count}\u060C \u0644\u0643\u0646 \u0628\u0639\u0636 \u0627\u0644\u0628\u0648\u062A\u0627\u062A \u062A\u0639\u0630\u0651\u0631 \u0639\u0644\u064A\u0647\u0627 \u0642\u0631\u0627\u0621\u0629 \u062D\u0627\u0644\u0629 \u0627\u0644\u0645\u062D\u0627\u062F\u062B\u0627\u062A.` : `> \u2139\uFE0F Open findings re-checked: ${count}, but some bots could not read their thread status.`;
+    return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${count2}\u060C \u0644\u0643\u0646 \u0628\u0639\u0636 \u0627\u0644\u0628\u0648\u062A\u0627\u062A \u062A\u0639\u0630\u0651\u0631 \u0639\u0644\u064A\u0647\u0627 \u0642\u0631\u0627\u0621\u0629 \u062D\u0627\u0644\u0629 \u0627\u0644\u0645\u062D\u0627\u062F\u062B\u0627\u062A.` : `> \u2139\uFE0F Open findings re-checked: ${count2}, but some bots could not read their thread status.`;
   }
-  return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${count}.` : `> \u2139\uFE0F Open findings re-checked: ${count}.`;
+  return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u0641\u062A\u0648\u062D\u0629 \u0623\u064F\u0639\u064A\u062F \u0641\u062D\u0635\u0647\u0627: ${count2}.` : `> \u2139\uFE0F Open findings re-checked: ${count2}.`;
 }
 
 function renderHeader(outcome, isArabic) {
@@ -194562,12 +194974,12 @@ function renderMethodNotice(used, why, usedMethod, isArabic) {
 }
 function renderScopeLine(scope, isArabic) {
   if (scope.mode === "incremental") {
-    const count = scope.commitCount ?? 1;
+    const count2 = scope.commitCount ?? 1;
     const shortSha2 = scope.sinceSha.slice(0, 7);
     if (isArabic) {
-      return `> \u062A\u0645\u062A \u0645\u0631\u0627\u062C\u0639\u0629 ${count} \u0645\u0646 \u0627\u0644\u0627\u0644\u062A\u0632\u0627\u0645\u0627\u062A \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0645\u0646\u0630 \`${shortSha2}\``;
+      return `> \u062A\u0645\u062A \u0645\u0631\u0627\u062C\u0639\u0629 ${count2} \u0645\u0646 \u0627\u0644\u0627\u0644\u062A\u0632\u0627\u0645\u0627\u062A \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0645\u0646\u0630 \`${shortSha2}\``;
     }
-    const plural2 = count === 1 ? "1 new commit" : `${count} new commits`;
+    const plural2 = count2 === 1 ? "1 new commit" : `${count2} new commits`;
     return `> Reviewed ${plural2} since \`${shortSha2}\``;
   }
   if (isArabic) {

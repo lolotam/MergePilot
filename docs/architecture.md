@@ -24,6 +24,7 @@ packages/
       llm/             عقد LlmAdapter + LlmFailure + retry policy (مشتق من Harness، ADR-0003)
       providers/       anthropic/ openai/ gemini/ compatible/ — adapters لمزوّدي الـ API
                        subscription/ — تسجيل دخول وبروتوكولات اشتراكات Codex وClaude وGrok عن طريق pi-ai
+                       subscription/antigravity/ — دخول اشتراك Google Antigravity وبروتوكول Cloud Code Assist، كود بتاعنا (ADR-0032)
                        claude-code/ — تشغيل Claude Code الأصلي للـ Action
       credentials/     CredentialStore + CredentialInfo (ADR-0002)
                        subscription.ts — envelope مشفّر لبيانات الاشتراك، منفصل عن مفتاح الـ API
@@ -91,4 +92,4 @@ interface CredentialStore {
 - **أي سر اتحمّل مابيتكتبش في log، ولا بيرجع في خطأ، ولا بيروح للنموذج.**
 - **مفيش تحويل خفي لمزود أو نموذج تاني.** أي فشل بيرجع `LlmFailure` واضح.
 - **الكود اللي بننسخه من مراجع بترخيص MIT** ملفه بيحتفظ بإشعار الحقوق الأصلي، وبيتسجل في [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
-- **تسجيل الدخول بالاشتراك** بيستخدم مكتبة pi-ai، وتوكناته بتتخزن في الخزنة المشفّرة. استبدال بيانات الدخول وحذفها وتجديدها بيتزامنوا بقفل لكل مساحة عمل ومزوّد؛ التفاصيل في [تسجيل الدخول بالاشتراك](subscription-auth.md).
+- **تسجيل الدخول بالاشتراك** بيستخدم مكتبة pi-ai، ما عدا Google Antigravity: pi-ai مفيهاش Google، فدخوله وبروتوكوله كود بتاعنا في `subscription/antigravity/` ([ADR-0032](adr/0032-google-antigravity-subscription.md)). التوكنات في الحالتين بتتخزن في الخزنة المشفّرة. استبدال بيانات الدخول وحذفها وتجديدها بيتزامنوا بقفل لكل مساحة عمل ومزوّد؛ التفاصيل في [تسجيل الدخول بالاشتراك](subscription-auth.md).

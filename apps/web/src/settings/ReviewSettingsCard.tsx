@@ -169,6 +169,7 @@ export function ReviewSettingsCard({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ProviderSelect
               id="settings-provider"
+              workspaceId={workspaceId}
               label={t('providerLabel')}
               value={provider}
               disabled={isMember}
