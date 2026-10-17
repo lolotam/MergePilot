@@ -137169,6 +137169,15 @@ function antigravityUrl(host, method) {
   return `${host}/${ANTIGRAVITY_API_VERSION}:${method}`;
 }
 
+var SubscriptionRefreshError = class extends Error {
+  transient;
+  constructor(transient) {
+    super(transient ? "Subscription token refresh could not reach the provider; try again" : "Subscription token refresh failed; sign in again");
+    this.transient = transient;
+    this.name = "SubscriptionRefreshError";
+  }
+};
+
 async function fetchWithHosts(doFetch, method, init) {
   for (let index = 0; ; index++) {
     const host = ANTIGRAVITY_HOSTS[index];
@@ -138044,6 +138053,7 @@ var ANTIGRAVITY_PROVIDER = "google-antigravity";
 var RATE_LIMIT_MAX_DELAY_MS = 6e4;
 var CONTEXT_WORDING2 = /context (length|window)|too many tokens|prompt is too long|maximum context|exceeds the maximum number of tokens/i;
 var SUSPENSION_WORDING = /terms of service|has been disabled|suspended|violation/i;
+var RPC_STATUS = /^[A-Z_]{3,40}$/;
 function rpcError(bodyText) {
   try {
     const body = JSON.parse(bodyText);
@@ -138086,7 +138096,7 @@ function forbidden(bodyText) {
     return "Google disabled Antigravity access for this account";
   return "Google refused access for this account; sign in again";
 }
-function antigravityFailure(status, bodyText, model, secrets) {
+function antigravityFailure(status, bodyText, model) {
   const error62 = rpcError(bodyText);
   const base = { provider: ANTIGRAVITY_PROVIDER, status };
   if (status === 429 || error62.status === "RESOURCE_EXHAUSTED") {
@@ -138106,9 +138116,9 @@ function antigravityFailure(status, bodyText, model, secrets) {
     return new LlmFailure({ ...base, code: "TIMEOUT", message: "Google Antigravity timed out" });
   if (status >= 500)
     return new LlmFailure({ ...base, code: "SERVER", message: `Google Antigravity returned HTTP ${status}` });
-  const detail = redactSecrets(providerMessage(bodyText), [...secrets]).text;
   const code = CONTEXT_WORDING2.test(bodyText) ? "CONTEXT_WINDOW_EXCEEDED" : "BAD_REQUEST";
-  return new LlmFailure({ ...base, code, message: `Google Antigravity returned HTTP ${status} (${code})${detail ? `: ${detail}` : ""}` });
+  const rpcStatus = typeof error62.status === "string" && RPC_STATUS.test(error62.status) ? ` ${error62.status}` : "";
+  return new LlmFailure({ ...base, code, message: `Google Antigravity rejected the request: HTTP ${status}${rpcStatus} (${code})` });
 }
 
 function claudeThinkingBudget(options) {
@@ -138176,20 +138186,25 @@ function parseChunk(data) {
     ...response.usageMetadata && typeof response.usageMetadata === "object" ? { usage: response.usageMetadata } : {}
   };
 }
+function parseEvent(payload) {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "UNKNOWN", message: "Google Antigravity sent a malformed stream event" });
+  }
+}
 async function* sseJson(body) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let data = [];
+  let finished3 = false;
   const flush = function* () {
     if (data.length === 0)
       return;
     const payload = data.join("\n");
     data = [];
-    try {
-      yield JSON.parse(payload);
-    } catch {
-    }
+    yield parseEvent(payload);
   };
   try {
     for (; ; ) {
@@ -138211,7 +138226,10 @@ async function* sseJson(body) {
     if (buffer.startsWith("data:"))
       data.push(buffer.slice(5).trimStart());
     yield* flush();
+    finished3 = true;
   } finally {
+    if (!finished3)
+      await reader.cancel().catch(() => void 0);
     reader.releaseLock();
   }
 }
@@ -138234,6 +138252,14 @@ function finishOf(reason) {
   if (reason === "SAFETY" || reason === "RECITATION" || reason === "BLOCKLIST" || reason === "PROHIBITED_CONTENT")
     return "error";
   return "stop";
+}
+function resolveFailure(error62, signal) {
+  if (signal?.aborted)
+    return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "ABORTED", message: "request aborted" });
+  if (error62 instanceof SubscriptionRefreshError) {
+    return error62.transient ? new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "NETWORK", message: "Could not refresh the Google Antigravity sign-in; try again" }) : new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "INVALID_CREDENTIAL", message: "Google Antigravity sign-in expired or was revoked; sign in again" });
+  }
+  return new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "SERVER", message: "Could not load the Google Antigravity credential; try again" });
 }
 function thrownFailure(error62, signal) {
   if (error62 instanceof LlmFailure)
@@ -138259,17 +138285,21 @@ var AntigravityAdapter = class extends LlmAdapter {
     return antigravityOutputTokens(options);
   }
   async credential(signal) {
-    try {
-      if (this.resolveSecret)
+    if (this.resolveSecret) {
+      try {
         this.secret = await this.resolveSecret();
-      const envelope = decodeSubscription(this.secret.reveal(), ANTIGRAVITY_PROVIDER);
-      const projectId = envelope?.credential.projectId;
-      if (envelope && typeof projectId === "string" && projectId)
-        return { access: envelope.credential.access, projectId };
-    } catch {
-      if (signal?.aborted)
-        throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "ABORTED", message: "request aborted" });
+      } catch (error62) {
+        throw resolveFailure(error62, signal);
+      }
     }
+    let envelope;
+    try {
+      envelope = decodeSubscription(this.secret.reveal(), ANTIGRAVITY_PROVIDER);
+    } catch {
+    }
+    const projectId = envelope?.credential.projectId;
+    if (envelope && typeof projectId === "string" && projectId)
+      return { access: envelope.credential.access, projectId };
     throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "INVALID_CREDENTIAL", message: "Google Antigravity sign-in is required; sign in again" });
   }
   async *stream(options) {
@@ -138287,32 +138317,27 @@ var AntigravityAdapter = class extends LlmAdapter {
     }
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => "");
-      throw antigravityFailure(response.status, text, options.model, [this.secret]);
+      throw antigravityFailure(response.status, text, options.model);
     }
     let finishReason;
     let usage;
-    let sawCandidate = false;
     try {
       for await (const event of sseJson(response.body)) {
         const chunk = parseChunk(event);
         if (chunk.error)
-          throw antigravityFailure(chunk.error.status, chunk.error.body, options.model, [this.secret]);
-        if (chunk.text) {
-          sawCandidate = true;
+          throw antigravityFailure(chunk.error.status, chunk.error.body, options.model);
+        if (chunk.text)
           yield { type: "text-delta", text: chunk.text };
-        }
-        if (chunk.finishReason) {
-          sawCandidate = true;
+        if (chunk.finishReason)
           finishReason = chunk.finishReason;
-        }
         if (chunk.usage)
           usage = chunk.usage;
       }
     } catch (error62) {
       throw thrownFailure(error62, options.signal);
     }
-    if (!sawCandidate) {
-      throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "UNKNOWN", message: "Google Antigravity stream ended without a result" });
+    if (!finishReason) {
+      throw new LlmFailure({ provider: ANTIGRAVITY_PROVIDER, code: "NETWORK", message: "Google Antigravity stream ended before the answer was complete" });
     }
     yield { type: "usage", usage: usageOf(usage) };
     yield { type: "finish", reason: finishOf(finishReason) };
