@@ -24,7 +24,10 @@ type Dialog = { kind: 'edit' | 'delete'; skill: SkillSummary } | null;
  */
 export function SkillsCard({ workspaceId, isMember }: SkillsCardProps) {
   const { t } = useI18n();
-  const { data, isLoading } = useSkillsQuery(workspaceId);
+  const query = useSkillsQuery(workspaceId);
+  const { data, isLoading } = query;
+  // Without the list there is nothing to show or check names against: no empty state, no writes.
+  const failed = query.isError && !data;
   const botNames = useBotNames(workspaceId);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -47,6 +50,17 @@ export function SkillsCard({ workspaceId, isMember }: SkillsCardProps) {
 
       {isLoading ? (
         <div className="py-4 text-sm text-ink-400">{t('loading')}</div>
+      ) : failed ? (
+        <div role="alert" className="py-4 flex flex-wrap items-center gap-3 text-xs text-red-600 dark:text-red-400">
+          <span>{t('skillsLoadFailed')}</span>
+          <button
+            type="button"
+            onClick={() => void query.refetch()}
+            className="px-3 py-1 rounded-full font-semibold border border-red-200 dark:border-red-900 hover:bg-red-50 dark:hover:bg-red-950/50"
+          >
+            {t('retry')}
+          </button>
+        </div>
       ) : skills.length === 0 ? (
         <div className="py-6 text-center text-xs text-ink-500 dark:text-ink-400 border border-dashed border-ink-200 dark:border-ink-800 rounded-[10px]">
           {t('skillsEmpty')}
@@ -84,7 +98,7 @@ export function SkillsCard({ workspaceId, isMember }: SkillsCardProps) {
         </div>
       )}
 
-      {!isMember && (
+      {!isMember && !failed && (
         <div className="flex flex-col gap-5 pt-4 border-t border-ink-100 dark:border-ink-800">
           {atLimit && (
             <p role="status" className="text-xs text-amber-700 dark:text-amber-300">

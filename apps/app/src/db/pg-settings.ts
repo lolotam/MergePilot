@@ -91,7 +91,7 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
   // A skill id that is not a uuid names no skill (and would be a Postgres type error).
-  if (settings.skillId && !SKILL_ID_PATTERN.test(settings.skillId)) throw new UnknownSkillError(settings.skillId);
+  if (settings.skillId != null && !SKILL_ID_PATTERN.test(settings.skillId)) throw new UnknownSkillError(settings.skillId);
   try {
     await withLiveWorkspace(db, settings.workspaceId, (tx) => writePgSettings(tx, settings));
   } catch (error) {
@@ -128,6 +128,8 @@ export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings): P
   if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
   if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
   if (settings.skillId !== undefined) {
+    // The bot-name lock before the row, like deleting a skill (pg-skills.ts), so the two cannot deadlock.
+    await lockBotNames(tx, settings.workspaceId);
     values.skillId = settings.skillId;
     values.skillRemovedName = null;
   }

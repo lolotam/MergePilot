@@ -5,6 +5,7 @@ export const enSkills: Record<keyof typeof arSkills, string> = {
   skillsCardTitle: 'Review skills',
   skillsCardDesc:
     'A skill is a Markdown file of extra instructions for one bot. It is added on top of the core review prompt and never replaces it. Each bot picks one skill in its tab.',
+  skillsLoadFailed: 'The skills could not be loaded.',
   skillsEmpty: 'This workspace has no skills yet.',
   skillsColName: 'Name',
   skillsColSize: 'Size',

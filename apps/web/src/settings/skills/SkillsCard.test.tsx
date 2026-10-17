@@ -216,6 +216,18 @@ describe('SkillsCard (ADR-0034)', () => {
     expect(pre.querySelector('script, b')).toBeNull();
   });
 
+  it('reports a failed list with a retry, never as an empty workspace with upload controls', async () => {
+    vi.mocked(fetchApi).mockImplementation(async (path: string) => {
+      if (path.endsWith('/bots')) return BOTS;
+      throw new ApiClientError('Server error', 'internal', 500);
+    });
+    renderCard();
+    expect((await screen.findByRole('alert')).textContent).toContain('The skills could not be loaded.');
+    expect(screen.queryByText('This workspace has no skills yet.')).toBeNull();
+    expect(screen.queryByLabelText('Markdown file (.md or .markdown)')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined();
+  });
+
   it('gives members a read-only list: preview only, no upload, template, edit or delete', async () => {
     fakeSkillsServer([skill()]);
     renderCard(true);

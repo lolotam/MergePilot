@@ -64,7 +64,7 @@ export async function listPgReviewerBots(db: AppDb, workspaceId: string): Promis
  */
 export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: ReviewerBot): Promise<ReviewerBot> {
   if (!isExtraBotSlot(bot.slot)) throw new InvalidBotSlotError(bot.slot);
-  if (bot.skillId && !SKILL_ID_PATTERN.test(bot.skillId)) throw new UnknownSkillError(bot.skillId);
+  if (bot.skillId != null && !SKILL_ID_PATTERN.test(bot.skillId)) throw new UnknownSkillError(bot.skillId);
   const values = {
     name: bot.name,
     logo: bot.logo,

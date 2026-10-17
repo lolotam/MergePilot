@@ -3,6 +3,7 @@ export const arSkills = {
   skillsCardTitle: 'مهارات المراجعة',
   skillsCardDesc:
     'المهارة ملف Markdown فيه تعليمات زيادة لبوت معين. بتتضاف فوق تعليمات المراجعة الأساسية ومش بتلغيها. كل بوت يختار مهارة واحدة من تبويبه.',
+  skillsLoadFailed: 'مقدرناش نحمّل المهارات.',
   skillsEmpty: 'لسه مفيش مهارات في مساحة العمل دي.',
   skillsColName: 'الاسم',
   skillsColSize: 'الحجم',

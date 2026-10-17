@@ -116,7 +116,7 @@ export function deleteMemorySkill(
 
 /** The composite foreign key's check: `skillId` must be a skill of this workspace. */
 export function assertMemorySkill(skills: MemorySkills, workspaceId: string, skillId: string | null | undefined): void {
-  if (skillId && !getMemorySkill(skills, workspaceId, skillId)) throw new UnknownSkillError(skillId);
+  if (skillId != null && !getMemorySkill(skills, workspaceId, skillId)) throw new UnknownSkillError(skillId);
 }
 
 /** A bot or settings object as the stores read it back: unset skill fields left out. */

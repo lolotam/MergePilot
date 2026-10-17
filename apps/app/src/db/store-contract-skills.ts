@@ -117,6 +117,8 @@ export function defineReviewSkillContract(
       await expect(store.upsertReviewerBot(WS, bot({ skillId: foreign.id }))).rejects.toBeInstanceOf(UnknownSkillError);
       await expect(store.saveSettings(settings({ skillId: 'not-a-uuid' }))).rejects.toBeInstanceOf(UnknownSkillError);
       await expect(store.upsertReviewerBot(WS, bot({ skillId: 'not-a-uuid' }))).rejects.toBeInstanceOf(UnknownSkillError);
+      await expect(store.saveSettings(settings({ skillId: '' }))).rejects.toBeInstanceOf(UnknownSkillError);
+      await expect(store.upsertReviewerBot(WS, bot({ skillId: '' }))).rejects.toBeInstanceOf(UnknownSkillError);
 
       await store.saveSettings(settings({ skillId: own.id }));
       await store.upsertReviewerBot(WS, bot({ skillId: own.id }));

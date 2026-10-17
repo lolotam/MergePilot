@@ -341,7 +341,9 @@ async function planBots(
       model: input.model,
       effort: input.effort ?? null,
       fallback: input.fallback,
-      ...(skillId ? { skillId } : {}),
+      // Always set: a restore replaces the bots, and a bot the file leaves on Default (or whose skill
+      // is missing) must come back on Default, never keep a stored skill.
+      skillId,
     };
     if (sameBotName(bot.name, mainName) || bots.some((other) => sameBotName(other.name, bot.name))) {
       throw new RestoreProblem(409, 'bot_name_taken', 'Another bot in this workspace already has this name', `${field}.name`);
