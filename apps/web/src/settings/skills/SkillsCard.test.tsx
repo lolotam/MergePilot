@@ -151,7 +151,9 @@ describe('SkillsCard (ADR-0034)', () => {
     await user.clear(nameInput);
     await user.type(nameInput, 'Team rules');
     await user.upload(fileInput, new File(['# C'], 'c.md', { type: 'text/markdown' }));
-    await waitFor(() => expect(nameInput.value).toBe('Team rules'));
+    await user.upload(fileInput, new File(['# D'], 'd.md', { type: 'text/markdown' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Upload skill' })).toHaveProperty('disabled', false));
+    expect(nameInput.value).toBe('Team rules');
   });
 
   it('adds a template as a new skill with a free name', async () => {

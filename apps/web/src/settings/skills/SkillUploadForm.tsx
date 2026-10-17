@@ -28,8 +28,9 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
   // while it is still being read.
   const [reading, setReading] = useState(false);
   const latestPick = useRef(0);
-  // The name the last pick filled in, so a new pick may replace it (but never a typed one).
-  const autoName = useRef<string | null>(null);
+  // Whether the admin typed the name: a pick fills it from the file name otherwise, and a new pick
+  // replaces a name an earlier pick filled in.
+  const typedName = useRef(false);
 
   const handleFile = async (file: File | undefined) => {
     const pick = ++latestPick.current;
@@ -42,12 +43,8 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
     setReading(false);
     if (!read.ok) return setError(read.error);
     setContent(read.content);
-    // On the current name: keep one the admin typed (even while the file was read); replace one
-    // that was filled from an earlier pick.
-    const fromFile = nameFromFile(file.name, limits.maxNameLength);
-    const previousAuto = autoName.current;
-    autoName.current = fromFile;
-    setName((current) => (current.trim() && current !== previousAuto ? current : fromFile));
+    // Read now, not from this render: the admin may have typed a name while the file was read.
+    if (!typedName.current) setName(nameFromFile(file.name, limits.maxNameLength));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -60,6 +57,7 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
       await create.mutateAsync({ name: name.trim(), content });
       showToast(t('skillsUploaded'), 'success');
       setName('');
+      typedName.current = false;
       setContent(null);
       // A file picked during the upload is dropped with the reset, and its read is ignored.
       latestPick.current++;
@@ -87,6 +85,7 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
             disabled={disabled || create.isPending}
             onChange={(e) => {
               setName(e.target.value);
+              typedName.current = e.target.value.trim() !== '';
               setError(null);
             }}
             className={fieldClass}
