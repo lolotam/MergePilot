@@ -13,7 +13,7 @@ import {
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { skillFields } from './pg-settings.js';
-import { isConstraintViolation, SKILL_FOREIGN_KEYS } from './pg-skills.js';
+import { isConstraintViolation, SKILL_FOREIGN_KEYS, SKILL_ID_PATTERN } from './pg-skills.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
 import { lockBotNames, withLiveWorkspace } from './workspace-lock.js';
 
@@ -64,6 +64,7 @@ export async function listPgReviewerBots(db: AppDb, workspaceId: string): Promis
  */
 export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: ReviewerBot): Promise<ReviewerBot> {
   if (!isExtraBotSlot(bot.slot)) throw new InvalidBotSlotError(bot.slot);
+  if (bot.skillId && !SKILL_ID_PATTERN.test(bot.skillId)) throw new UnknownSkillError(bot.skillId);
   const values = {
     name: bot.name,
     logo: bot.logo,

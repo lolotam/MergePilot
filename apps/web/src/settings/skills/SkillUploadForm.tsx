@@ -40,7 +40,8 @@ export function SkillUploadForm({ workspaceId, limits, disabled }: SkillUploadFo
     setReading(false);
     if (!read.ok) return setError(read.error);
     setContent(read.content);
-    if (!name.trim()) setName(nameFromFile(file.name, limits.maxNameLength));
+    // On the current name: the admin may have typed one while the file was read.
+    setName((current) => (current.trim() ? current : nameFromFile(file.name, limits.maxNameLength)));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

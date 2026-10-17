@@ -47,7 +47,9 @@ describe('processReviewJob — review skills (ADR-0034)', () => {
     expect(main.length).toBeGreaterThan(0);
     expect(main.every((s) => s.system.endsWith('<<<REVIEW_SKILL:Security>>>\n- check every route for authorization\n<<<END REVIEW_SKILL:Security>>>'))).toBe(true);
     expect(reviewSystems(h, 'bot2-model').every((s) => s.system.includes('<<<REVIEW_SKILL:Cross-file>>>'))).toBe(true);
-    expect(reviewSystems(h, 'bot3-model').every((s) => !s.system.includes('REVIEW SKILL'))).toBe(true);
+    const fox = reviewSystems(h, 'bot3-model');
+    expect(fox.length).toBeGreaterThan(0);
+    expect(fox.every((s) => !s.system.includes('REVIEW_SKILL') && !s.system.includes('REVIEW SKILL'))).toBe(true);
 
     expect((await h.runs()).map((r) => [r.botSlot, r.skillName ?? null])).toEqual([[1, 'Security'], [2, 'Cross-file'], [3, null]]);
     const bodies = h.created.map((c) => c.body);

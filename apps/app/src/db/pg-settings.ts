@@ -12,7 +12,7 @@ import type {
 } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
-import { isConstraintViolation, SKILL_FOREIGN_KEYS } from './pg-skills.js';
+import { isConstraintViolation, SKILL_FOREIGN_KEYS, SKILL_ID_PATTERN } from './pg-skills.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
 import { lockBotNames, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
@@ -90,6 +90,8 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
  * `skillId` is not a skill of this workspace.
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
+  // A skill id that is not a uuid names no skill (and would be a Postgres type error).
+  if (settings.skillId && !SKILL_ID_PATTERN.test(settings.skillId)) throw new UnknownSkillError(settings.skillId);
   try {
     await withLiveWorkspace(db, settings.workspaceId, (tx) => writePgSettings(tx, settings));
   } catch (error) {
