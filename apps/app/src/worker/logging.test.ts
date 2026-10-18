@@ -215,7 +215,7 @@ describe('Worker structured logging', () => {
     expect(answerLine?.provider).toBe('anthropic');
     expect(answerLine?.attempts).toEqual([
       { chars: summaryOnly.length, finishReason: 'stop', preview: summaryOnly },
-      { chars: summaryOnly.length, finishReason: 'stop', preview: summaryOnly },
+      { chars: summaryOnly.length, finishReason: 'stop', preview: summaryOnly, acceptedAsEmpty: true },
     ]);
   });
 

@@ -209,7 +209,7 @@ export async function executeBatchedReview(
         answered++;
         if (outcome.parsed.summary.trim().length > 0) batchSummaries.push(outcome.parsed.summary.trim());
         batchFindings.push(...outcome.parsed.findings);
-        if (outcome.parsed.findingsMissing) incompleteReasons.push(`${label}: ${FINDINGS_MISSING_REASON}`);
+        if (outcome.parsed.findingsMissing && !outcome.parsed.acceptedAsEmpty) incompleteReasons.push(`${label}: ${FINDINGS_MISSING_REASON}`);
       } else {
         incompleteReasons.push(`${label}: ${outcome.parsed.error}`);
       }

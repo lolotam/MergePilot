@@ -27,7 +27,7 @@ describe('an answer without a findings list', () => {
     }
   });
 
-  it('publishes the summary but marks the review incomplete, never a silent clean review', async () => {
+  it('accepts a summary-only stop answer after the reminder', async () => {
     const result = await runReview({
       config: makeConfig(),
       pr: { title: 'T', body: 'B' },
@@ -40,8 +40,8 @@ describe('an answer without a findings list', () => {
     if (result.status === 'completed') {
       expect(result.summary).toBe('Found several issues.');
       expect(result.inline).toEqual([]);
-      expect(result.complete).toBe(false);
-      expect(result.result.incompleteReasons).toContain(FINDINGS_MISSING_REASON);
+      expect(result.complete).toBe(true);
+      expect(result.result.incompleteReasons).not.toContain(FINDINGS_MISSING_REASON);
     }
   });
 });

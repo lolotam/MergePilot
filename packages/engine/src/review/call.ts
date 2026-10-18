@@ -105,7 +105,7 @@ export function describePaths(paths: readonly string[], max = 10, maxLength = 60
   return paths.length > max ? `${shown} +${paths.length - max} more` : shown;
 }
 
-type ParsedAnswer = { ok: true; findingsMissing?: true } | { ok: false; code: string; error: string };
+type ParsedAnswer = { ok: true; summary?: string; findingsMissing?: true; acceptedAsEmpty?: true } | { ok: false; code: string; error: string };
 
 export interface EmptyRetryInput<P extends ParsedAnswer> {
   parsed: P;
@@ -186,7 +186,8 @@ export async function retryUnusableAnswer<P extends ParsedAnswer>(
 
 /**
  * The first answer is usable (a summary, its missing list disclosed), so the retry can only improve
- * it: an answer that still has no list is kept as the newer one, and a retry that fails, is skipped
+ * it: a summary-only stop answer is accepted as empty; other missing-list answers stay incomplete.
+ * A retry that fails, is skipped
  * or is unusable keeps the first answer, with a note. Its response is returned as `response` only
  * when its answer is the one kept, so a cut retry never reaches the truncation recovery.
  */
@@ -211,7 +212,9 @@ async function retryForFindingsList<P extends ParsedAnswer>(input: EmptyRetryInp
     if (!retried.ok) {
       return { parsed, rejected: response, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
     }
-    return { parsed: retried, response, usage: response.usage, thinkingOff: false };
+    const acceptedAsEmpty = retried.findingsMissing && response.finishReason === 'stop' &&
+      typeof retried.summary === 'string' && retried.summary.trim().length > 0;
+    return { parsed: acceptedAsEmpty ? { ...retried, acceptedAsEmpty: true } : retried, response, usage: response.usage, thinkingOff: false };
   } catch (err) {
     spend.record(promptTokens, requestedOutputTokens, undefined);
     return { parsed, note: `findings-list retry failed: ${describeCallError(err, input.knownSecrets)}`, thinkingOff: false };

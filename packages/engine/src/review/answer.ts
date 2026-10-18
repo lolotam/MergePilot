@@ -46,8 +46,8 @@ const ReviewAnswerLooseSchema = z.object({
 
 /**
  * Some models answer with a summary and leave the findings list out entirely. That answer is
- * kept (no findings) only when no candidate has a list, and the caller discloses it as
- * incomplete: it is never read as a silent "no findings".
+ * kept (no findings) only when no candidate has a list. Review callers may accept it as
+ * empty after a normally finished reminder retry; audit callers keep it incomplete.
  */
 const SummaryOnlyAnswerSchema = z.object({ summary: z.string().min(1) });
 
@@ -179,7 +179,7 @@ export function isTruncatedAnswer(finishReason: string | undefined, hasUnclosedO
 // ---------------------------------------------------------------------------
 
 export type ParseReviewAnswerResult =
-  | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number; findingsMissing?: true }
+  | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number; findingsMissing?: true; acceptedAsEmpty?: true }
   | { ok: false; error: string; code: ParseErrorCode };
 
 /**
