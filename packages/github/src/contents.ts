@@ -12,6 +12,23 @@ export interface FileContent {
   content: string;
 }
 
+/** Whether a GitHub API error is a 404 (the path or ref does not exist). */
+export function isNotFoundError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'status' in error && (error as { status: unknown }).status === 404;
+}
+
+/**
+ * The paths of the files a contents-API response lists for a directory (subdirectories, links and
+ * submodules are left out); null when the response is a single file, not a directory.
+ */
+export function directoryFilesOf(data: unknown): string[] | null {
+  if (!Array.isArray(data)) return null;
+  return data.flatMap((item: unknown) => {
+    const entry = item as { type?: unknown; path?: unknown };
+    return entry.type === 'file' && typeof entry.path === 'string' ? [entry.path] : [];
+  });
+}
+
 const MAX_FILE_BYTES = 100 * 1024;
 const TRUNCATION_NOTE = '\n\n[Truncated: file exceeds 100 KB]';
 

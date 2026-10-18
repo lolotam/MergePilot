@@ -157,6 +157,8 @@ Four templates live in `apps/web/src/settings/skills/templates/`, one per gap of
 | [`cross-file-consumers.md`](../../apps/web/src/settings/skills/templates/cross-file-consumers.md) | consumers and mirrors in other PR files (10) | MergePilot_Bot (gpt-6-astra) |
 | [`security.md`](../../apps/web/src/settings/skills/templates/security.md) | authorization, isolation, secrets, injection | mohamed_Bot (GLM 5.3) |
 
+`cross-file-consumers.md` and `security.md` were rewritten on 2026-10-18 (see the amendment at the end).
+
 They are **templates**, not built-in skills: the Review skills card offers "Add from template", which creates an ordinary, editable skill row in the workspace under a free name ("Security 2" when "Security" exists). Why not read-only built-ins in code:
 
 - a built-in's content hash would be in `configHash` (§5), so editing it in a release would make the next review of every PR in every workspace using it a full one;
@@ -185,3 +187,28 @@ All new dashboard text (the Skills page, upload and errors, the per-bot dropdown
 - **Skills from the repository** (`.mergepilot.yml` or a `skills/` folder). Rejected for v1: PR authors could change how the reviewer behaves. A later ADR can add owner-approved repository skills read from the base commit, like rules files.
 - **Several skills per bot.** Rejected for v1: one dropdown is simpler to reason about and to measure; an admin can merge two skills into one file.
 - **Block deleting a skill in use** (409, naming the bots). Proposed first; the owner chose the fallback to Default, made visible by the delete dialog and the per-bot note (§4).
+
+## Amendment (2026-10-18): where unpublished findings went, and two rewritten templates
+
+**Why.** The first skills evaluation (`MergePilot-review-comparison/weekly/2026-10-18-skills-eval.md`, 7 PRs, 29 skill runs) found that the bots table can show a bot with N findings while fewer of them are on the PR, with nothing saying why (MP#156: Hamza_Bot "1", nothing posted); that the Cross-file consumers bot's output fell from 1.50 to 0.34 findings per run while every bot missed a cross-file bug (PayPos#360: an edit lock not released when a `409 FEATURE_DISABLED` closes the editor); and that the Security bot found nothing on PRs without a security surface. Owner approval: MP-1.2 «(أ) أيوه».
+
+### Summary note: where the table's findings went (consensus mode)
+
+- The table's count for a bot is its findings after its own verification pass, Jev filter and finding selection (`rr.inline + rr.summaryOnly`). After the merge each of them is in exactly one cluster, and a cluster holds at most one finding per bot, so each finding has one fate (`botFindingsFates`, `packages/github/src/panel-findings-fate.ts`):
+  - published with the bot's own wording;
+  - published once, with the wording of another bot that found the same issue;
+  - below the minimum agreement;
+  - over the findings limit (`review.maxFindings`, applied after the duplicate check);
+  - already on the PR from an earlier review (dropped by the duplicate check against earlier comments).
+- `renderPanelSummary` adds one block after the "below agreement" and "over the findings limit" lists, with one line per bot whose own published count is below its table count, e.g. `- **Owl** (3 of 3): 1 presented in another bot's wording · 1 over the findings limit · 1 already posted by an earlier review` (Arabic: «ملاحظات محسوبة في الجدول لم تُنشر كتعليق خاص بالمراجع»). Nothing is added when every bot published all it reported.
+- **Rejected by verification** is not one of the fates: those findings are removed before the table counts them, and are already listed with the bot's name under «Rejected by verification». When the block is shown and some findings were rejected, it ends with one line saying they are not counted in the table and where they are listed.
+- Separate mode is unchanged.
+
+### Templates (§11)
+
+- `cross-file-consumers.md` is now an **extra pass after the normal review**: first the full core review, then, for every changed contract (including predicates, and locks or flags with their release paths), a search of the other `PATCH`, `PR_CONTEXT` and `REPOSITORY_CONTEXT` blocks for consumers and mirrors. It carries a short worked example modelled on PayPos#360 (two predicates on the same error disagree after one is widened, so the editor closes but the lock stays held). About 1,480 estimated tokens.
+- `security.md` is now **"Security and data safety"** («الأمان وسلامة البيانات»). The security checks are kept, and a data-integrity part is added: unbounded or unscoped deletes and updates; several money or stock writes without a transaction, or with an external call inside it; read-then-write without a lock or conditional update; retries and redeliveries that apply a change twice; lost updates and stale revisions overwriting newer data; migrations that drop, rename or rewrite stored data. Category `security` for the first part, `data-loss` (or `correctness`) for the second. About 1,565 estimated tokens.
+- The template id stays `security`. Templates are copied into a workspace (§11), so skills already added from them do not change: an admin pastes the new text into the existing skill (which makes that bot's next review full, §5) or adds the template again.
+- The four templates are now about 750–1,565 estimated tokens each, well under the 8,000 cap.
+
+Tests: `packages/github/src/panel-findings-fate.test.ts`, `apps/app/src/worker/process-review-consensus.test.ts`, `apps/web/src/settings/skills/SkillsCard.test.tsx`.

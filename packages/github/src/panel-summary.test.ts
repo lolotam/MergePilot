@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Finding } from '@mergepilot/engine';
 import { mergePanelFindings } from './consensus.js';
+import { botFindingsFates } from './panel-findings-fate.js';
 import { renderPanelSummary, type PanelBotRow } from './panel-summary.js';
 
 const BASE = 'https://mp.example.com';
@@ -35,6 +36,15 @@ async function merged() {
 }
 
 describe('renderPanelSummary (consensus, ADR-0017)', () => {
+  it('uses neutral wording for summary-only findings presented by another bot in both languages', async () => {
+    const panel = [1, 2].map((slot) => ({ slot, name: `Bot ${slot}`, inline: [], summaryOnly: [f({})] }));
+    const merge = await mergePanelFindings({ bots: panel, minAgreement: 2 });
+    const findingsFates = botFindingsFates(panel, { published: merge.kept, below: [], overLimit: [], alreadyPosted: [] });
+    const input = { bots, merge, findingsFates, minAgreement: 2, inlineCount: 0 };
+    expect(renderPanelSummary({ ...input, language: 'en' })).toContain("1 presented in another bot's wording");
+    expect(renderPanelSummary({ ...input, language: 'ar' })).toContain('1 اتعرضت بصياغة بوت تاني');
+  });
+
   it('has the panel header and one table row per bot with logo, name, model, status, findings and cost', async () => {
     const body = renderPanelSummary({ language: 'en', baseUrl: BASE, bots, merge: await merged(), minAgreement: 2, inlineCount: 1 });
     expect(body.startsWith('## Review panel')).toBe(true);
