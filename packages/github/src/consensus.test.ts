@@ -112,6 +112,163 @@ describe('mergePanelFindings (consensus, ADR-0017)', () => {
     expect(result.semantic?.unavailable).toBe('error');
   });
 
+  // PayPos.systems#361 (2026-10-18 03:36): two bots reported this on the same line with different
+  // titles; the judge's answer stayed below 0.8 and two comments were published.
+  const equalRevisionA = f({
+    path: 'apps/admin/src/orders/ui/session-saved-visit.tsx',
+    line: 52,
+    title: 'Equal-revision replays can replace authoritative snapshot figures',
+    body:
+      'After an uncertain save, a replacement snapshot can already contain that edit at revision 2. If the user then ' +
+      'replays the retained request, its revision-2 response passes this strict comparison. A narrow response hides ' +
+      'figures already confirmed by the snapshot; a full cached response replaces the session total, potentially ' +
+      "discarding subsequent changes to other lines. The edited line's revision need not increase when another line " +
+      'changes.\n\n<sub>Jev confidence: 0.55</sub>',
+    evidence: 'if ((session.lines.find((line) => line.id === lineId)?.revision ?? 0) > answered) {',
+  });
+  const equalRevisionB = f({
+    path: 'apps/admin/src/orders/ui/session-saved-visit.tsx',
+    line: 52,
+    title: 'Equal-revision replays overwrite fresher visit totals',
+    body:
+      'After an uncertain save, a refreshed snapshot may already include that edit plus changes to other lines. ' +
+      'Replaying the retained key returns the original response with the same edited-line revision but an older ' +
+      'session total. This strict comparison accepts it, and applySavedLineEdit replaces the refreshed total with the ' +
+      'old response total, making the displayed total inconsistent with the displayed lines.\n\n<sub>Jev confidence: 0.60</sub>',
+    evidence: 'if ((session.lines.find((line) => line.id === lineId)?.revision ?? 0) > answered) {',
+  });
+  // The same PR, lines 20 and 21 (03:22): two different issues that quote the same code line.
+  const staleReplay = f({
+    path: 'apps/admin/src/orders/ui/session-saved-visit.tsx',
+    line: 20,
+    title: 'Replay responses can overwrite newer snapshot figures',
+    body:
+      'An uncertain edit now survives a replacement snapshot. If that snapshot contains a newer line revision, ' +
+      'replaying the retained key can return the original, older successful response. The onSaved callback captures ' +
+      'the replacement snapshot, and saved applies the response unconditionally. Consequently, reconciliation is ' +
+      'skipped and older prices, revision, and visit total replace the newer displayed values.',
+    evidence: 'if (editBusy) return open.lineId;',
+  });
+  const hiddenRefusal = f({
+    path: 'apps/admin/src/orders/ui/session-saved-visit.tsx',
+    line: 21,
+    title: 'Busy-kept editor closes without showing a known refusal',
+    body:
+      'After a same-visit snapshot replacement, the editor stays open only because `editBusy` is true, and ' +
+      '`open.snapshot` still points to the old snapshot. If the replay then ends with a known refusal, the form sets ' +
+      'its root error and releases the lock; `openLineId` falls through to `open.snapshot === session`, which is ' +
+      'false, so the editor unmounts and the error is never visible.',
+    evidence: 'if (editBusy) return open.lineId;',
+  });
+  const panelOf = (one: Finding[], three: Finding[]) => [
+    bot(1, 'MergePilot_Bot', one),
+    bot(2, 'waleed_Bot', []),
+    bot(3, 'mohamed_Bot', three),
+    bot(4, 'Hamza_Bot', []),
+  ];
+
+  it('merges differently titled findings with the same claim on the same line without a judge (PayPos#361)', async () => {
+    const result = await mergePanelFindings({ bots: panelOf([equalRevisionA], [equalRevisionB]), minAgreement: 1 });
+    expect(result.kept).toHaveLength(1);
+    const cluster = result.kept[0]!;
+    expect(cluster.finding.title).toBe(equalRevisionA.title);
+    expect(foundByLabel(cluster, result.total, 'en')).toBe('Found by: MergePilot\\_Bot, mohamed\\_Bot (2/4)');
+    expect(result.semantic).toBeUndefined();
+  });
+
+  it('counts the merged cluster toward the minimum agreement and never asks the judge for it', async () => {
+    const { judge, decide } = mockJudge((request) => Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.3])));
+    const result = await mergePanelFindings({ bots: panelOf([equalRevisionA], [equalRevisionB]), minAgreement: 2, judge });
+    expect(result.kept.map((c) => c.foundBy.map((b) => b.slot))).toEqual([[1, 3]]);
+    expect(result.below).toEqual([]);
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it('keeps different issues on neighbouring lines apart, even when they quote the same code', async () => {
+    const result = await mergePanelFindings({ bots: panelOf([staleReplay], [hiddenRefusal]), minAgreement: 1 });
+    expect(result.kept.map((c) => c.finding.title).sort()).toEqual([hiddenRefusal.title, staleReplay.title].sort());
+  });
+
+  it('still merges by wording when the judge fails, and discloses the failed check', async () => {
+    const decide = vi.fn(async (_request: JudgeRequest) => {
+      throw new Error('quota');
+    });
+    const judge = { label: 'j', entries: [], decide, report: () => ({ attempts: [], inputTokens: 0, outputTokens: 0 }) };
+    const result = await mergePanelFindings({
+      bots: panelOf([equalRevisionA, staleReplay], [equalRevisionB, hiddenRefusal]),
+      minAgreement: 1,
+      judge: judge as unknown as Judge,
+    });
+    // Only the dissimilar neighbours (lines 20 and 21) are left to the judge.
+    expect(decide).toHaveBeenCalledOnce();
+    expect(Object.keys(decide.mock.calls[0]![0].questions)).toHaveLength(1);
+    expect(result.kept.map((c) => [c.finding.line, c.foundBy.length])).toEqual([[20, 1], [21, 1], [52, 2]]);
+    expect(result.semantic).toEqual({ checked: 0, merged: 0, unavailable: 'error' });
+  });
+
+  it('lets an exact title win over an earlier wording match for the same bot', async () => {
+    const shared = 'A replayed response replaces the refreshed session total after an uncertain save.';
+    const result = await mergePanelFindings({
+      bots: [
+        bot(1, 'Main', [
+          f({ line: 10, title: 'Replay overwrites the refreshed total', body: shared }),
+          f({ line: 12, title: 'Stale replay overwrites the session total', body: 'The editor closes before the refusal shows.' }),
+        ]),
+        bot(2, 'Owl', [f({ line: 11, title: 'Stale replay overwrites the session total', body: shared })]),
+      ],
+      minAgreement: 1,
+    });
+    expect(result.kept.map((c) => [c.finding.line, c.foundBy.map((b) => b.slot)])).toEqual([[10, [1]], [12, [1, 2]]]);
+  });
+
+  it('asks the judge only about pairs that could still join, and counts the joins it made', async () => {
+    const answerYes = () => mockJudge((request) => Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9])));
+    // Main's line-12 finding is near Owl's, but Owl is already in Main's line-10 cluster.
+    const blocked = answerYes();
+    const settled = await mergePanelFindings({
+      bots: [bot(1, 'Main', [f({ line: 10 }), f({ line: 12, title: 'Unclosed handle' })]), bot(2, 'Owl', [f({ line: 11 })])],
+      minAgreement: 1,
+      judge: blocked.judge,
+    });
+    expect(blocked.decide).not.toHaveBeenCalled();
+    expect(settled.semantic).toBeUndefined();
+    // Both of Main's findings are judged the same as Owl's; only one of them can join Owl.
+    const both = answerYes();
+    const result = await mergePanelFindings({
+      bots: [
+        bot(1, 'Main', [f({ line: 10, title: 'Possible null' }), f({ line: 12, title: 'Unchecked null' })]),
+        bot(2, 'Owl', [f({ line: 11, title: 'Missing null check' })]),
+      ],
+      minAgreement: 1,
+      judge: both.judge,
+    });
+    expect(result.semantic).toEqual({ checked: 2, merged: 1 });
+    expect(result.kept.map((c) => [c.finding.line, c.foundBy.map((b) => b.slot)])).toEqual([[10, [1, 2]], [12, [1]]]);
+  });
+
+  it('leaves Arabic claims to the judge', async () => {
+    const { judge, decide } = mockJudge((request) => Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9])));
+    const body = 'عند إعادة الطلب بعد حفظ غير مؤكد، الرد القديم يستبدل إجمالي الزيارة الأحدث في اللقطة.';
+    const result = await mergePanelFindings({
+      bots: [
+        bot(1, 'Main', [f({ title: 'إعادة الطلب تستبدل الإجمالي الأحدث', body })]),
+        bot(2, 'Owl', [f({ title: 'الرد القديم يكتب فوق إجمالي الزيارة', body })]),
+      ],
+      minAgreement: 1,
+      judge,
+    });
+    expect(Object.keys(decide.mock.calls[0]![0].questions)).toHaveLength(1);
+    expect(result.kept.map((c) => c.foundBy.length)).toEqual([2]);
+  });
+
+  it('never puts two findings of one bot in one cluster through a third bot', async () => {
+    const result = await mergePanelFindings({
+      bots: [bot(1, 'Main', [f({ line: 10 }), f({ line: 13 })]), bot(2, 'Owl', [f({ line: 11 })])],
+      minAgreement: 1,
+    });
+    expect(result.kept.map((c) => [c.finding.line, c.foundBy.map((b) => b.slot)])).toEqual([[10, [1, 2]], [13, [1]]]);
+  });
+
   it('drops clusters below the minimum agreement but always keeps critical and high', async () => {
     const result = await mergePanelFindings({
       bots: [

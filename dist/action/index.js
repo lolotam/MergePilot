@@ -195968,6 +195968,8 @@ function judgeBudgetLeft(config2, reviewCostUsd, judge) {
   return Math.max(0, config2.budget.perReviewUsd - spent);
 }
 
+var STOP_WORDS = new Set("the and but for nor than that this these those with from into are was were been being its can could may might must should would will not also only just very more most less least other another any each every some all both either neither one two after before when while where which who whom whose what why how there here their them they she you your our out over under again further once same now still yet already even ever about above below between through during without within down off does did has have had having because until per via whether instead rather then such".split(" "));
+
 // src/custom-base-url.ts
 function trustedCustomBaseUrl(env3) {
   const value = env3["INPUT_CUSTOM-BASE-URL"] || env3.INPUT_CUSTOM_BASE_URL || env3.CUSTOM_LLM_BASE_URL;

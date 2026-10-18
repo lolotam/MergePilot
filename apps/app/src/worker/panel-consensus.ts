@@ -1,4 +1,4 @@
-import { hasJudgeUse } from '@mergepilot/engine';
+import { describeAnsweredBy, hasJudgeUse } from '@mergepilot/engine';
 import {
   capConsensusClusters,
   dedupeJudgeOf,
@@ -74,6 +74,9 @@ export async function publishConsensus(
     knownSecrets,
     maxUsd: consensusJudge ? budget() : undefined,
   });
+  // Taken before the dedupe: each answered request replaces `answeredBy`, and the summary line is
+  // about the merge's own same-issue question only.
+  const mergeAnsweredBy = merge.semantic && merge.semantic.checked > 0 ? judge?.judge.report().answeredBy : undefined;
   const inlineOf = new Map(
     merge.kept.filter((c) => c.kind === 'inline').map((c) => [c, withFoundBy(c, merge.total, language)] as const),
   );
@@ -88,7 +91,12 @@ export async function publishConsensus(
     maxUsd: dedupeJudge ? budget() : undefined,
     botSlot: MAIN_BOT_SLOT,
   });
-  addJudgeUsage(holder.pending, judge?.judge.report());
+  const judgeReport = judge?.judge.report();
+  // The dedupe's request was the last one, so the final report names the entry that answered it.
+  // `checked` counts answered pairs: the check is one all-or-nothing request, and a failed one
+  // reports 0 with its `unavailable` code (`judgeSameIssue`).
+  const dedupeAnsweredBy = deduped.semantic && deduped.semantic.checked > 0 ? judgeReport?.answeredBy : undefined;
+  addJudgeUsage(holder.pending, judgeReport);
   // One published review: the findings limit is for the merged total, not each bot (ADR-0033). It
   // is applied to what survives the dedupe, so no slot goes to a finding already on the PR.
   const notPublished = new Set(deduped.kept);
@@ -122,6 +130,10 @@ export async function publishConsensus(
     scope: reviewScopeOf(files.selection),
     incompleteReasons,
     judgeUnavailable: merge.semantic?.unavailable,
+    // Which judge entry answered the merge's question, so a fallback that answered is disclosed (ADR-0015).
+    judgeAnsweredBy: mergeAnsweredBy ? describeAnsweredBy(mergeAnsweredBy) : undefined,
+    dedupeJudgeAnsweredBy: dedupeAnsweredBy ? describeAnsweredBy(dedupeAnsweredBy) : undefined,
+    dedupeJudgeUnavailable: deduped.semantic?.unavailable,
     verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),
