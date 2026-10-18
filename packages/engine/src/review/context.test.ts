@@ -33,6 +33,22 @@ describe('ContextPlan', () => {
     expect(plan.disclosure()).toEqual({ sent: ['src/a.ts', 'src/a.test.ts'], leftOut: ['src/dep.ts'] });
   });
 
+  it('sends build and CI wiring after the imports, and a changed manifest only once as the changed file', () => {
+    const offered = [
+      file('.github/workflows/ci.yml', 'build-config', 'run: pnpm test'),
+      file('package.json', 'build-config', '{ "scripts": {} }'),
+      file('src/dep.ts', 'import'),
+      file('package.json', 'changed-file', '{ "scripts": {} }', ['src/b.ts']),
+    ];
+    const plan = new ContextPlan(offered, options());
+
+    expect(plan.whole().map((f) => [f.path, f.reason])).toEqual([
+      ['package.json', 'changed-file for test'],
+      ['src/dep.ts', 'import for test'],
+      ['.github/workflows/ci.yml', 'build-config for test'],
+    ]);
+  });
+
   it('cuts a file over its cap at a line break and marks it truncated', () => {
     const long = Array.from({ length: 2000 }, (_, i) => `export const v${i} = ${i};`).join('\n');
     const plan = new ContextPlan([file('src/big.ts', 'import', long)], options({ contextTokens: 500 }));

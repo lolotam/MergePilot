@@ -16,13 +16,22 @@ import { estimateTokens } from './budget.js';
 import { renderContextFile, type ContextFile } from './prompt.js';
 
 /**
- * Why a file is context: the changed file's full version, its test/implementation, an import
- * (ADR-0029), or, on a follow-up review, another file the pull request changes (ADR-0030).
+ * Why a file is context: the changed file's full version, its test/implementation, an import, the
+ * build and CI wiring of a PR that changes scripts, tests or CI (ADR-0029), or, on a follow-up
+ * review, another file the pull request changes (ADR-0030).
  */
-export type ContextKind = 'changed-file' | 'test-pair' | 'import' | 'pr-change';
+export type ContextKind = 'changed-file' | 'test-pair' | 'import' | 'build-config' | 'pr-change';
 
-/** Priority a > c > b of ADR-0029: lower goes first. PR files are planned apart (ADR-0030). */
-const KIND_ORDER: Readonly<Record<ContextKind, number>> = { 'changed-file': 0, 'test-pair': 1, import: 2, 'pr-change': 3 };
+/**
+ * Priority a > c > b > e of ADR-0029: lower goes first. PR files are planned apart (ADR-0030).
+ */
+const KIND_ORDER: Readonly<Record<ContextKind, number>> = {
+  'changed-file': 0,
+  'test-pair': 1,
+  import: 2,
+  'build-config': 3,
+  'pr-change': 4,
+};
 
 /** One repository file offered as context, as the caller gathered it. */
 export interface RepositoryContextFile {

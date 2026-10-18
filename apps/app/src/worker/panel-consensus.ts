@@ -1,5 +1,6 @@
 import { describeAnsweredBy, hasJudgeUse } from '@mergepilot/engine';
 import {
+  botFindingsFates,
   capConsensusClusters,
   dedupeJudgeOf,
   deduplicateFindings,
@@ -10,6 +11,7 @@ import {
   renderPanelSummary,
   reviewScopeOf,
   withFoundBy,
+  type ConsensusCluster,
   type PanelBotRow,
 } from '@mergepilot/github';
 import { MAIN_BOT_SLOT } from '../core/types.js';
@@ -66,8 +68,9 @@ export async function publishConsensus(
   const consensusJudge = judge && hasJudgeUse(judge.uses, 'consensus') ? judge.judge : undefined;
   const dedupeJudge = dedupeJudgeOf(judge);
 
+  const botFindings = completed.map(({ br, rr }) => ({ slot: br.bot.slot, name: br.bot.name, inline: rr.inline, summaryOnly: rr.summaryOnly }));
   const merge = await mergePanelFindings({
-    bots: completed.map(({ br, rr }) => ({ slot: br.bot.slot, name: br.bot.name, inline: rr.inline, summaryOnly: rr.summaryOnly })),
+    bots: botFindings,
     minAgreement: settings.panelMinAgreement ?? 1,
     // The findings limit is applied below, after the clusters already published are dropped.
     judge: consensusJudge,
@@ -99,10 +102,18 @@ export async function publishConsensus(
   addJudgeUsage(holder.pending, judgeReport);
   // One published review: the findings limit is for the merged total, not each bot (ADR-0033). It
   // is applied to what survives the dedupe, so no slot goes to a finding already on the PR.
-  const notPublished = new Set(deduped.kept);
-  const survivors = merge.kept.filter((c) => c.kind === 'summaryOnly' || notPublished.has(inlineOf.get(c)!));
+  const notYetPosted = new Set(deduped.kept);
+  const isNew = (c: ConsensusCluster): boolean => c.kind === 'summaryOnly' || notYetPosted.has(inlineOf.get(c)!);
+  const survivors = merge.kept.filter(isNew);
   const capped = capConsensusClusters(survivors, ctx.mainConfig.effectiveConfig.review.maxFindings);
   const published = { ...merge, kept: capped.kept, overLimit: capped.overLimit };
+  // Where each bot's table count went, so a count above what it published is explained.
+  const findingsFates = botFindingsFates(botFindings, {
+    published: capped.kept,
+    below: merge.below,
+    overLimit: capped.overLimit,
+    alreadyPosted: merge.kept.filter((c) => !isNew(c)),
+  });
   const inline = capped.kept.flatMap((c) => (c.kind === 'inline' ? [inlineOf.get(c)!] : []));
 
   const rows: PanelBotRow[] = [
@@ -138,6 +149,7 @@ export async function publishConsensus(
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),
     outputLimits: completed.flatMap(({ br, rr }) => (rr.outputLimit ? [{ ...rr.outputLimit, bot: br.bot.name }] : [])),
+    findingsFates,
   });
 
   const capture = capturingReviewUrl(ctx.client);

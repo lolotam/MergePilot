@@ -34,7 +34,7 @@ export const arSkills = {
   skillsTemplateOwnerRules: 'قواعد صاحب المشروع',
   skillsTemplateContextOutsideDiff: 'السياق برّه التعديلات',
   skillsTemplateCrossFileConsumers: 'الملفات اللي بتستخدم التغيير',
-  skillsTemplateSecurity: 'الأمان',
+  skillsTemplateSecurity: 'الأمان وسلامة البيانات',
   skillsTemplateAdded: 'المهارة «{name}» اتضافت من القالب',
 
   // Row actions

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GitHubClient } from './client.js';
-import { readAtRef } from './read-cache.js';
+import { listAtRef, readAtRef } from './read-cache.js';
 
 describe('readAtRef', () => {
   it('shares one read per client, path and ref', async () => {
@@ -23,5 +23,20 @@ describe('readAtRef', () => {
     await expect(readAtRef(client, 'o', 'r', 'sha', 'a.ts')).rejects.toThrow('HTTP 502');
     await expect(readAtRef(client, 'o', 'r', 'sha', 'a.ts')).resolves.toBe('content');
     expect(calls).toBe(2);
+  });
+});
+
+describe('listAtRef', () => {
+  it('shares one listing per client, directory and ref', async () => {
+    let calls = 0;
+    const client = { listDirectoryFiles: async () => [`f${++calls}.yml`] } as unknown as GitHubClient;
+    expect(await listAtRef(client, 'o', 'r', 'sha', '.github/workflows')).toEqual(['f1.yml']);
+    expect(await listAtRef(client, 'o', 'r', 'sha', '.github/workflows')).toEqual(['f1.yml']);
+    expect(calls).toBe(1);
+  });
+
+  it('lists nothing when the client cannot list directories', async () => {
+    const client = { getFileContent: async () => null } as unknown as GitHubClient;
+    expect(await listAtRef(client, 'o', 'r', 'sha', '.github/workflows')).toBeNull();
   });
 });

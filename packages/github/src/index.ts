@@ -57,6 +57,8 @@ export {
 export {
   readFilesAtRef,
   capFileContent,
+  directoryFilesOf,
+  isNotFoundError,
   type FileContent,
   type ReadFilesAtRefParams,
 } from './contents.js';
@@ -137,3 +139,4 @@ export {
   type PanelBotFindings,
 } from './consensus.js';
 export { renderPanelSummary, type PanelBotRow, type PanelSummaryInput } from './panel-summary.js';
+export { botFindingsFates, type BotFindingsFate, type PanelClusterOutcome } from './panel-findings-fate.js';
