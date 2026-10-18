@@ -26,6 +26,8 @@ export interface PanelBotRow {
   summary?: string | undefined;
   /** Why a fallback model answered for this bot (`modelLabel` is then the fallback model). */
   fallback?: FallbackReason | undefined;
+  /** The name of the bot's review skill (ADR-0034); left out on Default. */
+  skill?: string | undefined;
 }
 
 export interface PanelSummaryInput {
@@ -55,6 +57,8 @@ export interface PanelSummaryInput {
 interface Labels {
   header: string;
   columns: string[];
+  /** The Skill column, added after Model only when a bot has a skill (ADR-0034). */
+  skillColumn: string;
   status: Record<PanelBotRow['status'], string>;
   agreement: (min: number, total: number) => string;
   judgeUnavailable: (code: string) => string;
@@ -70,6 +74,7 @@ interface Labels {
 const EN: Labels = {
   header: '## Review panel',
   columns: ['', 'Bot', 'Model', 'Status', 'Findings', 'Cost'],
+  skillColumn: 'Skill',
   status: { completed: '✅ completed', failed: '❌ failed', skipped: '⏭️ skipped' },
   agreement: (min, total) =>
     `> Kept: findings at least ${min} of ${total} bots agree on; critical and high are always kept.`,
@@ -86,6 +91,7 @@ const EN: Labels = {
 const AR: Labels = {
   header: '## لوحة المراجعين',
   columns: ['', 'المراجع', 'النموذج', 'الحالة', 'الملاحظات', 'التكلفة'],
+  skillColumn: 'المهارة',
   status: { completed: '✅ اكتملت', failed: '❌ فشلت', skipped: '⏭️ تم التخطي' },
   agreement: (min, total) =>
     `> المعروض: الملاحظات التي اتفق عليها ${min} من ${total} مراجعين على الأقل؛ الملاحظات الحرجة والعالية تُعرض دائمًا.`,
@@ -102,13 +108,17 @@ const AR: Labels = {
 const cell = (text: string): string => text.replace(/[|`\r\n]/g, ' ').trim();
 
 function renderTable(input: PanelSummaryInput, labels: Labels): string {
-  const head = `| ${labels.columns.join(' | ')} |`;
-  const rule = `|${labels.columns.map(() => '---').join('|')}|`;
+  // The Skill column appears only when a bot has a skill, so a panel without skills reads as before.
+  const withSkill = input.bots.some((bot) => bot.skill);
+  const columns = withSkill ? [...labels.columns.slice(0, 3), labels.skillColumn, ...labels.columns.slice(3)] : labels.columns;
+  const head = `| ${columns.join(' | ')} |`;
+  const rule = `|${columns.map(() => '---').join('|')}|`;
   const rows = input.bots.map((bot) => {
     const findings = typeof bot.findings === 'number' ? String(bot.findings) : '—';
     const cost = typeof bot.costUsd === 'number' ? `$${bot.costUsd.toFixed(4)}` : '—';
     const logo = renderBotLogo(input.baseUrl, bot.logo);
-    return `| ${logo} | **${escapeInline(bot.name)}** | \`${cell(bot.modelLabel)}\` | ${labels.status[bot.status]} | ${findings} | ${cost} |`;
+    const skill = withSkill ? ` ${bot.skill ? escapeInline(bot.skill) : '—'} |` : '';
+    return `| ${logo} | **${escapeInline(bot.name)}** | \`${cell(bot.modelLabel)}\` |${skill} ${labels.status[bot.status]} | ${findings} | ${cost} |`;
   });
   return [head, rule, ...rows].join('\n');
 }

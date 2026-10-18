@@ -7,12 +7,14 @@ import type { ModelPriceStore, PriceOverride, RunPricing } from './price-types.j
 import type { BotLogo, PanelMode, ReviewerBotStore } from './bot-types.js';
 import type { RepoColorKey, RunMaintenanceStore } from './run-types.js';
 import type { MaxFindingsChoice } from './findings-limit.js';
+import type { ReviewSkillStore } from './skill-types.js';
 
 export * from './backup-types.js';
 export * from './bot-types.js';
 export * from './run-types.js';
 export * from './findings-limit.js';
 export * from './price-types.js';
+export * from './skill-types.js';
 
 /** Workspace roles (ADR-0007). Order matters: each role includes everything below it. */
 export const ROLES = ['member', 'admin', 'owner'] as const;
@@ -112,6 +114,14 @@ export interface WorkspaceSettings {
   botLogo?: BotLogo | undefined;
   panelMode?: PanelMode | undefined;
   panelMinAgreement?: number | undefined;
+  /**
+   * The main bot's review skill (ADR-0034); null = Default. Stores leave it out while unset;
+   * undefined on save keeps the stored value, and any value (null included) clears
+   * `skillRemovedName`.
+   */
+  skillId?: string | null | undefined;
+  /** The name of the main bot's skill that was deleted (read only: set by deleteReviewSkill). */
+  skillRemovedName?: string | null | undefined;
 }
 
 /** The Jev judge of a workspace: the configured provider plus up to three explicit fallbacks. */
@@ -256,6 +266,8 @@ export interface ReviewRun {
   botSlot?: number | undefined;
   /** The bot's name when the run was created; null when not recorded. */
   botName?: string | null | undefined;
+  /** The bot's review skill's name when the run was created (ADR-0034); left out on Default. */
+  skillName?: string | null | undefined;
 }
 
 /** A run as the worker records it; the store assigns id and timestamps. */
@@ -315,7 +327,7 @@ export interface ListReviewRunsResult {
 }
 
 /** Data access. Every workspace-owned read/write takes the workspaceId it is scoped to. */
-export interface AppStore extends RunMaintenanceStore, ModelPriceStore, ReviewerBotStore, BackupRestoreStore {
+export interface AppStore extends RunMaintenanceStore, ModelPriceStore, ReviewerBotStore, BackupRestoreStore, ReviewSkillStore {
   /** Returns false when this delivery id was already recorded (duplicate webhook). */
   recordDelivery(deliveryId: string, event: string): Promise<boolean>;
 

@@ -11,6 +11,7 @@ import {
 import type { RunPricing } from '../core/price-types.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { buildBotConfig } from './bot-config.js';
+import { skillKeyOf } from './effective-config.js';
 import { reviewOnlyOutcome, runBotReview, type BotFiles, type ReviewOnlyOutcome } from './bot-review-run.js';
 import { executeReview } from './execute-review.js';
 import { judgeRunParts, workspaceJudge, type WorkspaceJudge } from './judge-setup.js';
@@ -56,7 +57,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     const builtConfig =
       slot === MAIN_BOT_SLOT
         ? ctx.mainConfig
-        : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store);
+        : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store, skillKeyOf([br.bot]));
     const providerIds = [choice.provider, ...fallbackList.map((fallback) => fallback.provider)];
     // Admitted free, the bot keeps that decision for its whole run (ADR-0033): its provider runs on
     // the subscription it was admitted with, whatever the default method is now.
@@ -154,6 +155,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       judge: judgeSetup.judge,
       ...(ctx.panelActive ? { botSlot: slot, prFiles: ctx.prFiles } : {}),
       ...(job.force ? { force: true } : {}),
+      ...(br.bot.skill ? { skill: { name: br.bot.skill.name, content: br.bot.skill.content } } : {}),
     };
 
     if (consensus) {
@@ -172,13 +174,15 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
 
     const reviewResult = await executeReview({
       ...params,
-      ...(ctx.panelActive
+      // A lone bot shows its identity line only to name its skill (ADR-0034).
+      ...(ctx.panelActive || br.bot.skill
         ? {
             identity: {
               name: br.bot.name,
               logo: br.bot.logo,
               modelLabel: `${choice.provider}:${choice.model}`,
               baseUrl: ctx.baseUrl,
+              ...(br.bot.skill ? { skill: br.bot.skill.name } : {}),
             },
           }
         : {}),

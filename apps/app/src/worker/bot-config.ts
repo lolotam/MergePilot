@@ -27,8 +27,10 @@ export async function buildBotConfig(
   fallbackList: Array<{ provider: ApiProvider; model: string; effort?: string }>,
   settings: Pick<WorkspaceSettings, 'language' | 'minSeverity' | 'maxFindings' | 'priceOverrides'>,
   store: Pick<ModelPriceStore, 'getModelPrice'>,
+  /** The skill part of the configHash (`skillKeyOf`, ADR-0034); undefined on Default. */
+  skillKey?: string | undefined,
 ): Promise<BotConfig> {
-  const built = effectiveConfigFor(repoConfigResult, choice, fallbackList, settings);
+  const built = effectiveConfigFor(repoConfigResult, choice, fallbackList, settings, skillKey);
   const pricing = await resolvePricing({ store, settings, repoPricing: built.repoPricing }, choice.provider, choice.model);
   return {
     effectiveConfig: { ...built.config, budget: { ...built.config.budget, pricing: pricing.pricing } },

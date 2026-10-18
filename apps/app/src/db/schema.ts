@@ -78,6 +78,10 @@ export const workspaceSettings = pgTable('workspace_settings', {
   judgeUses: text('judge_uses').array().notNull().default(sql`'{}'::text[]`),
   /** Migration 0013: findings per published review, 5-50 in steps of 5 (ADR-0033). */
   maxFindings: smallint('max_findings').notNull().default(5),
+  /** Migration 0014: the main bot's review skill (ADR-0034); null = Default. */
+  skillId: uuid('skill_id'),
+  /** Migration 0014: the name of the bot's skill that was deleted, shown until a skill is chosen again. */
+  skillRemovedName: text('skill_removed_name'),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),
@@ -198,6 +202,8 @@ export const reviewRuns = pgTable(
     /** Migration 0009: the reviewer-panel bot (1 = main) and its name when the run was created. */
     botSlot: smallint('bot_slot').notNull().default(1),
     botName: text('bot_name'),
+    /** Migration 0014: the review skill's name when the run was created (ADR-0034). */
+    skillName: text('skill_name'),
   },
   (table) => [
     index('idx_review_runs_workspace_id').on(table.workspaceId),
@@ -236,12 +242,40 @@ export const reviewerBots = pgTable(
     model: text('model').notNull(),
     effort: text('effort'),
     fallback: jsonb('fallback').notNull().default(sql`'[]'::jsonb`),
+    /** Migration 0014: the bot's review skill (ADR-0034); null = Default. */
+    skillId: uuid('skill_id'),
+    skillRemovedName: text('skill_removed_name'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [
     primaryKey({ columns: [table.workspaceId, table.slot] }),
     uniqueIndex('idx_reviewer_bots_workspace_name').on(table.workspaceId, sql`lower(${table.name})`),
+  ],
+);
+
+/**
+ * Migration 0014: review skills (ADR-0034). `workspace_id` references the organization with ON
+ * DELETE CASCADE, and the bots' composite foreign keys use ON DELETE SET NULL (skill_id); both are
+ * declared in the SQL migration only.
+ */
+export const reviewSkills = pgTable(
+  'review_skills',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    name: text('name').notNull(),
+    content: text('content').notNull(),
+    contentHash: text('content_hash').notNull(),
+    sizeTokens: integer('size_tokens').notNull(),
+    createdBy: text('created_by').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('review_skills_workspace_id_id_key').on(table.workspaceId, table.id),
+    uniqueIndex('idx_review_skills_workspace_name').on(table.workspaceId, sql`lower(${table.name})`),
   ],
 );
 

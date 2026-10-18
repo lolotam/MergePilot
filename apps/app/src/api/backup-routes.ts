@@ -1,8 +1,10 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getOrgAdapter } from 'better-auth/plugins/organization';
 import { requireRole } from '../auth/guard.js';
-import { BotNameTakenError, InvalidBotSlotError, WorkspaceDeletedError } from '../core/types.js';
-import { buildBackupFile } from './backup-export.js';
+import {
+  BotNameTakenError, InvalidBotSlotError, SkillLimitError, SkillNameTakenError, UnknownSkillError, WorkspaceDeletedError,
+} from '../core/types.js';
+import { BackupChangedError, buildBackupFile } from './backup-export.js';
 import { planRestore, RestoreProblem } from './backup-restore.js';
 import {
   BACKUP_MAX_BYTES,
@@ -20,10 +22,10 @@ function sendFieldError(reply: FastifyReply, status: number, code: string, messa
   return reply.status(status).send({ error: { code, message, ...(field ? { field } : {}) } });
 }
 
-/** A request over the 1 MB cap answers 413 in the dashboard's error shape. */
+/** A request over the BACKUP_MAX_BYTES cap answers 413 in the dashboard's error shape. */
 function tooLargeHandler(error: FastifyError, _request: FastifyRequest, reply: FastifyReply): FastifyReply {
   if (error.code === 'FST_ERR_CTP_BODY_TOO_LARGE' || error.statusCode === 413) {
-    return sendError(reply, 413, 'file_too_large', 'The backup file is larger than 1 MB');
+    return sendError(reply, 413, 'file_too_large', 'The backup file is larger than 8 MB');
   }
   throw error;
 }
@@ -55,11 +57,18 @@ export function registerBackupRoutes(app: FastifyInstance, deps: DashboardApiDep
       const org = await orgAdapter.findOrganizationById(workspaceId);
       if (!org) return sendError(reply, 404, 'not_found', 'Workspace not found');
 
-      const { file, filename, counts } = await buildBackupFile(
-        deps,
-        { id: workspaceId, name: org.name, slug: org.slug ?? workspaceId },
-        { includeKeys, passphrase, now: deps.now ? deps.now() : new Date() },
-      );
+      let built: Awaited<ReturnType<typeof buildBackupFile>>;
+      try {
+        built = await buildBackupFile(
+          deps,
+          { id: workspaceId, name: org.name, slug: org.slug ?? workspaceId },
+          { includeKeys, passphrase, now: deps.now ? deps.now() : new Date() },
+        );
+      } catch (error) {
+        if (error instanceof BackupChangedError) return sendError(reply, 409, 'backup_changed', error.message);
+        throw error;
+      }
+      const { file, filename, counts } = built;
       request.log.info({ event: 'backup.export', workspaceId, includeKeys, ...counts }, 'Settings backup exported');
       return reply
         .status(200)
@@ -106,6 +115,11 @@ export function registerBackupRoutes(app: FastifyInstance, deps: DashboardApiDep
         }
         if (err instanceof InvalidBotSlotError) return sendError(reply, 400, 'invalid_slot', 'Each extra bot needs its own slot 2-5');
         if (err instanceof WorkspaceDeletedError) return sendError(reply, 404, 'not_found', 'Workspace not found');
+        // The workspace's skills changed between the preview and the write (ADR-0034): nothing was written.
+        if (err instanceof SkillLimitError) return sendError(reply, 409, 'skill_limit', err.message);
+        if (err instanceof SkillNameTakenError || err instanceof UnknownSkillError) {
+          return sendError(reply, 409, 'skills_changed', 'The workspace skills changed during the restore; try again');
+        }
         throw err;
       }
       for (const c of plan.restore.credentials ?? []) invalidateModelsCache(workspaceId, c.provider);
@@ -117,6 +131,7 @@ export function registerBackupRoutes(app: FastifyInstance, deps: DashboardApiDep
           sections: preview.sections,
           settingsChanged: preview.settingsChanged,
           bots: preview.bots,
+          skills: preview.skills,
           credentials: preview.credentials.length,
         },
         'Settings backup restored',

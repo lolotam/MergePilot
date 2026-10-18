@@ -2,7 +2,7 @@
 export const enBackup = {
   backupCardTitle: 'Backup & restore',
   backupCardDesc:
-    'Download every setting, the reviewer bots and the API keys as one JSON file, and restore it here or into another workspace you own.',
+    'Download every setting, the reviewer bots, the review skills and the API keys as one JSON file, and restore it here or into another workspace you own.',
   backupKeysWarning:
     'The API keys in the file are encrypted with the passphrase you type. Keep the file and the passphrase safe and apart: without the passphrase the keys cannot be recovered, by you or by us.',
   backupExportTitle: 'Download a backup',
@@ -26,12 +26,15 @@ export const enBackup = {
   backupSectionSettings: 'Model settings',
   backupSectionBots: 'Reviewer bots (replace the current ones)',
   backupSectionCredentials: 'API keys',
+  backupSectionSkills: 'Review skills (updated by name)',
   backupPreview: 'Preview',
   backupPreviewing: 'Checking...',
   backupPreviewTitle: 'What will change',
   backupPreviewSettings: 'Settings fields that change: {fields}',
   backupPreviewNoSettings: 'No settings change.',
   backupPreviewBots: 'Extra reviewer bots after the restore: {count}',
+  backupPreviewSkills: 'Skills written: {count}',
+  backupPreviewSkillsMissing: 'Skills that will not exist; the bots naming them restore on Default: {names}',
   backupPreviewKeyAdd: 'add',
   backupPreviewKeyReplace: 'replace',
   backupPreviewKeysNotTested: 'Restored keys are not tested. Press "Test connection" next to each key afterwards.',
@@ -39,7 +42,7 @@ export const enBackup = {
   backupRestoreConfirmQuestion: 'Replace the selected settings of this workspace with the ones in the file?',
   backupRestoring: 'Restoring...',
   backupRestored: 'Settings restored',
-  backupFileTooLarge: 'The file is larger than 1 MB.',
+  backupFileTooLarge: 'The file is larger than 8 MB.',
   backupFileInvalid: 'This file is not valid JSON.',
   backupBadPassphrase: 'Wrong passphrase, or the file was changed.',
 };

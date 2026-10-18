@@ -27,6 +27,7 @@ export function effectiveConfigFor(
   choice: Pick<ModelChoice, 'provider' | 'model' | 'effort'>,
   fallbackList: Array<{ provider: ApiProvider; model: string; effort?: string }>,
   settings: Pick<WorkspaceSettings, 'language' | 'minSeverity' | 'maxFindings'>,
+  skillKey?: string | undefined,
 ): EffectiveConfig {
   const { provider, model, effort } = choice;
   if ('missing' in repoConfigResult) {
@@ -43,7 +44,7 @@ export function effectiveConfigFor(
         },
       }),
       rulesFiles: [],
-      configHash: configHashOf(JSON.stringify({ provider, model, language: settings.language }), settings.maxFindings),
+      configHash: configHashOf(JSON.stringify({ provider, model, language: settings.language }), settings.maxFindings, skillKey),
     };
   }
   if ('errors' in repoConfigResult) {
@@ -71,19 +72,34 @@ export function effectiveConfigFor(
       budget: { ...repoConfig.budget, pricing: undefined },
     },
     rulesFiles: repoConfigResult.rulesFiles,
-    configHash: configHashOf(repoConfigResult.configText, inheritedLimit),
+    configHash: configHashOf(repoConfigResult.configText, inheritedLimit, skillKey),
     ...(sameModel && repoConfig.budget.pricing ? { repoPricing: repoConfig.budget.pricing } : {}),
   };
 }
 
 /**
  * The short config hash of the review marker: a change makes the next review a full one. A
- * workspace findings limit the review inherits is part of it (ADR-0033), except the default 5, so
- * the hashes of reviews from before the setting existed stay the same.
+ * workspace findings limit the review inherits is part of it (ADR-0033), except the default 5, and
+ * so is the review skill (ADR-0034, `skillKey`), except Default: the hashes of reviews from before
+ * either setting existed stay the same.
  */
-function configHashOf(base: string, inheritedLimit: number | undefined): string {
+function configHashOf(base: string, inheritedLimit: number | undefined, skillKey: string | undefined): string {
   const inherited = inheritedLimit !== undefined && inheritedLimit !== DEFAULT_MAX_FINDINGS;
-  // A structured encoding, so no repository text can hash like an inherited limit.
-  const input = inherited ? JSON.stringify({ base, maxFindings: inheritedLimit }) : base;
+  // A structured encoding, so no repository text can hash like an inherited limit or a skill.
+  const input = inherited || skillKey
+    ? JSON.stringify({ base, ...(inherited ? { maxFindings: inheritedLimit } : {}), ...(skillKey ? { skill: skillKey } : {}) })
+    : base;
   return createHash('sha256').update(input).digest('hex').slice(0, 12);
+}
+
+/**
+ * The skill part of a marker's configHash (ADR-0034): the bot's own skill content hash, or in
+ * consensus mode, where the panel selects files once with slot 1's marker, the skills of every
+ * active bot by slot. Undefined when no bot concerned has a skill.
+ */
+export function skillKeyOf(bots: ReadonlyArray<{ slot: number; skill?: { contentHash: string } | undefined }>): string | undefined {
+  const withSkill = bots.filter((bot) => bot.skill).map((bot) => ({ slot: bot.slot, skill: bot.skill!.contentHash }));
+  if (withSkill.length === 0) return undefined;
+  if (bots.length === 1) return withSkill[0]!.skill;
+  return JSON.stringify(withSkill.sort((a, b) => a.slot - b.slot));
 }

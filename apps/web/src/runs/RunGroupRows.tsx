@@ -3,7 +3,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, ExternalLink } 
 import type { ReviewRun, RunGroup } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
 import { RunActionCell } from './RunActionCell.js';
-import { RunBotChip, showsRunBot } from './RunBotChip.js';
+import { RunBotChip, RunSkillName, showsRunBot } from './RunBotChip.js';
 import { RunModelBadge, RunProviderBadge, RunSeverityChips } from './RunBadges.js';
 import { RunDate, RunStatusBadge, RunTokens, isDeletable, RunCostCell } from './RunCells.js';
 import { RunDuration } from './RunDuration.js';
@@ -64,6 +64,7 @@ function RunDetailCells({ run, ctx, showBot }: { run: ReviewRun; ctx: RunRowsCon
           <RunProviderBadge provider={run.provider} />
           <RunModelBadge model={run.model} effort={run.effort} fallbackFrom={run.fallbackFrom} />
           {showBot ? <RunBotChip run={run} /> : null}
+          <RunSkillName run={run} />
         </div>
       </td>
       <td className={td}>

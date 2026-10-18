@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   BotNameTakenError,
   DEFAULT_BOT_NAME,
@@ -9,12 +9,19 @@ import {
   type StoredCredential,
   type StoredProviderKey,
   type WorkspaceRestore,
+  MAX_WORKSPACE_SKILLS,
+  SkillLimitError,
+  SkillNameTakenError,
+  UnknownSkillError,
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { writePgSettings } from './pg-settings.js';
 import { listPgProviderKeys, replacePgProviderKeys, writePgKeyCursor } from './pg-provider-keys.js';
 import { readParentCredential, writeProviderKeyChangeTx } from './pg-key-roster.js';
-import { providerCredentials, reviewerBots, workspaceSettings } from './schema.js';
+import {
+  countSkills, insertSkill, isConstraintViolation, isSkillNameConflict, lockSkills, SKILL_FOREIGN_KEYS, updateSkill,
+} from './pg-skills.js';
+import { providerCredentials, reviewerBots, reviewSkills, workspaceSettings } from './schema.js';
 import { lockBotNames, lockCredential, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
 // Settings restore (ADR-0018): settings, extra bots and keys in one transaction.
@@ -67,13 +74,66 @@ async function replacePgBots(tx: AppTx, workspaceId: string, bots: NonNullable<W
       model: bot.model,
       effort: bot.effort,
       fallback: bot.fallback,
+      skillId: bot.skillId ?? null,
     })),
   );
 }
 
+/**
+ * Upserts the restored skills by id (the plan reuses the id of a same-named skill, ADR-0034) under
+ * the skill lock, and re-checks the workspace limit: a skill created since the plan may push it over.
+ */
+async function writePgSkills(tx: AppTx, workspaceId: string, skills: NonNullable<WorkspaceRestore['skills']>): Promise<void> {
+  await lockSkills(tx, workspaceId);
+  for (const skill of skills) {
+    // Locked, so a delete or rename of this skill waits for the restore instead of landing in
+    // between. The plan matched the id by name: a skill renamed since then is another skill now.
+    const [existing] = await tx
+      .select({ id: reviewSkills.id, name: reviewSkills.name })
+      .from(reviewSkills)
+      .where(and(eq(reviewSkills.workspaceId, workspaceId), eq(reviewSkills.id, skill.id)))
+      .for('update');
+    if (existing && !sameSkillName(existing.name, skill.name)) throw new SkillNameTakenError(skill.name);
+    try {
+      if (existing) {
+        await updateSkill(tx, workspaceId, skill.id, {
+          name: skill.name,
+          content: { text: skill.content, hash: skill.contentHash, sizeTokens: skill.sizeTokens },
+          userId: skill.userId,
+        });
+      } else {
+        await insertSkill(tx, workspaceId, skill);
+      }
+    } catch (error) {
+      // Named after the skill that clashed: another skill took its name since the plan.
+      if (isSkillNameConflict(error)) throw new SkillNameTakenError(skill.name);
+      throw error;
+    }
+  }
+  if ((await countSkills(tx, workspaceId)) > MAX_WORKSPACE_SKILLS) throw new SkillLimitError();
+}
+
+const sameSkillName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** A restore racing a skill delete: a bot names a skill id that is gone. */
+function skillRaceError(error: unknown): Error | undefined {
+  if (isConstraintViolation(error, '23503', SKILL_FOREIGN_KEYS)) return new UnknownSkillError('restored');
+  return undefined;
+}
+
 export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore: WorkspaceRestore): Promise<void> {
+  try {
+    await writeRestore(db, workspaceId, restore);
+  } catch (error) {
+    throw skillRaceError(error) ?? error;
+  }
+}
+
+async function writeRestore(db: AppDb, workspaceId: string, restore: WorkspaceRestore): Promise<void> {
   await withLiveWorkspace(db, workspaceId, async (tx) => {
     await lockBotNames(tx, workspaceId);
+    // Skills first: the restored settings and bots may name them (ADR-0034).
+    if (restore.skills) await writePgSkills(tx, workspaceId, restore.skills);
     // Old extra bots go first, so the settings' bot name is checked against the restored ones only.
     if (restore.bots) await tx.delete(reviewerBots).where(eq(reviewerBots.workspaceId, workspaceId));
     if (restore.settings) await writePgSettings(tx, { ...restore.settings, workspaceId });

@@ -104,3 +104,7 @@ A "Backup & restore" card in Settings, shown to owners only:
   caller is not owner.
 - No migration: the restore uses the existing tables.
 - Restored keys may be stale or revoked; the first review or a "Test connection" shows it.
+
+## Amendment (2026-10-18): review skills
+
+ADR-0034 adds a `skills` section to the file and the restore (`BACKUP_SECTIONS`: settings, bots, credentials, skills). Settings and bots name their skill by `skillName`. The restore request cap rises from 1 MB to 8 MB (`BACKUP_MAX_BYTES`), so 50 skills at the 8,000-token cap fit.

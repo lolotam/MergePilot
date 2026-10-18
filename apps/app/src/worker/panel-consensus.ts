@@ -99,7 +99,10 @@ export async function publishConsensus(
 
   const rows: PanelBotRow[] = [
     ...runs.map((br) => row(br.bot, outcomes.find((o) => o.slot === br.bot.slot))),
-    ...noKey.map((bot) => ({ slot: bot.slot, name: bot.name, logo: bot.logo, modelLabel: `${bot.provider}:${bot.model}`, status: 'skipped' as const })),
+    ...noKey.map((bot) => ({
+      slot: bot.slot, name: bot.name, logo: bot.logo, modelLabel: `${bot.provider}:${bot.model}`, status: 'skipped' as const,
+      ...(bot.skill ? { skill: bot.skill.name } : {}),
+    })),
   ].sort((a, b) => a.slot - b.slot);
   // The panel's review is complete only when every bot that ran completed: a bot that failed
   // never looked at these changes, so the head must not count as reviewed for the whole panel.
@@ -161,6 +164,7 @@ function row(bot: PanelBot, outcome: BotOutcome | undefined): PanelBotRow {
     costUsd: finish?.costUsd ?? null,
     summary: outcome?.pending?.outcome.runResult?.status === 'completed' ? outcome.pending.outcome.runResult.summary : undefined,
     fallback: outcome?.pending?.outcome.fallback,
+    ...(bot.skill ? { skill: bot.skill.name } : {}),
   };
 }
 

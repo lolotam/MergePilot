@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BotLogo, BotsResponse, PanelMode, ReviewerBotDto, ReviewerBotInput } from '@mergepilot/app/contract';
 import { fetchApi } from './client.js';
+import { skillsQueryKey } from './skills.js';
 
 export type { BotLogo, BotsResponse, PanelMode, ReviewerBotDto, ReviewerBotInput };
 
@@ -48,6 +49,8 @@ export function useSaveBotMutation(workspaceId: string) {
     onSuccess: (res) => {
       if (res?.bot) queryClient.setQueryData<BotsResponse>(botsQueryKey(workspaceId), (prev) => withBot(prev, res.bot));
       void queryClient.invalidateQueries({ queryKey: botsQueryKey(workspaceId) });
+      // A bot's skill choice changes the skills' "used by" (ADR-0034).
+      void queryClient.invalidateQueries({ queryKey: skillsQueryKey(workspaceId) });
     },
   });
 }
@@ -61,6 +64,7 @@ export function useDeleteBotMutation(workspaceId: string) {
         prev?.bots ? { ...prev, bots: prev.bots.filter((b) => b.slot !== slot) } : prev,
       );
       void queryClient.invalidateQueries({ queryKey: botsQueryKey(workspaceId) });
+      void queryClient.invalidateQueries({ queryKey: skillsQueryKey(workspaceId) });
     },
   });
 }

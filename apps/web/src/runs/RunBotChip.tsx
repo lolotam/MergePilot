@@ -39,3 +39,19 @@ export function RunBotChip({ run }: { run: Pick<ReviewRun, 'botSlot' | 'botName'
     </span>
   );
 }
+
+/** The review skill a run used (ADR-0034 §7), as small muted text next to the bot chip; nothing on Default. */
+export function RunSkillName({ run }: { run: Pick<ReviewRun, 'skillName'> }) {
+  const { t } = useI18n();
+  if (!run.skillName) return null;
+  return (
+    <span
+      data-testid="run-skill-name"
+      dir="auto"
+      title={`${t('runSkillLabel')}: ${run.skillName}`}
+      className="max-w-[10rem] truncate text-[10.5px] text-ink-500 dark:text-ink-400"
+    >
+      {t('runSkillLabel')}: {run.skillName}
+    </span>
+  );
+}

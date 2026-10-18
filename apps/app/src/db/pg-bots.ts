@@ -9,8 +9,11 @@ import {
   type BotLogo,
   type FallbackSetting,
   type ReviewerBot,
+  UnknownSkillError,
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
+import { skillFields } from './pg-settings.js';
+import { isConstraintViolation, SKILL_FOREIGN_KEYS, SKILL_ID_PATTERN } from './pg-skills.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
 import { lockBotNames, withLiveWorkspace } from './workspace-lock.js';
 
@@ -28,6 +31,7 @@ function mapBotRow(row: typeof reviewerBots.$inferSelect): ReviewerBot {
     model: row.model,
     effort: row.effort ?? null,
     fallback: Array.isArray(row.fallback) ? (row.fallback as FallbackSetting[]) : [],
+    ...skillFields(row),
   };
 }
 
@@ -60,6 +64,7 @@ export async function listPgReviewerBots(db: AppDb, workspaceId: string): Promis
  */
 export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: ReviewerBot): Promise<ReviewerBot> {
   if (!isExtraBotSlot(bot.slot)) throw new InvalidBotSlotError(bot.slot);
+  if (bot.skillId != null && !SKILL_ID_PATTERN.test(bot.skillId)) throw new UnknownSkillError(bot.skillId);
   const values = {
     name: bot.name,
     logo: bot.logo,
@@ -68,6 +73,8 @@ export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: R
     model: bot.model,
     effort: bot.effort,
     fallback: bot.fallback,
+    // Left out (undefined), the update keeps the stored skill and note; a new row starts on Default.
+    ...(bot.skillId !== undefined ? { skillId: bot.skillId, skillRemovedName: bot.skillRemovedName ?? null } : {}),
     updatedAt: new Date(),
   };
   try {
@@ -94,6 +101,7 @@ export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: R
     });
   } catch (error) {
     if (isBotNameConflict(error)) throw new BotNameTakenError(bot.name);
+    if (bot.skillId && isConstraintViolation(error, '23503', SKILL_FOREIGN_KEYS)) throw new UnknownSkillError(bot.skillId);
     throw error;
   }
 }

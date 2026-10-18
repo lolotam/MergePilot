@@ -11,13 +11,14 @@ import {
   isExtraBotSlot,
   MAX_EXTRA_BOT_SLOT,
   MIN_EXTRA_BOT_SLOT,
+  UnknownSkillError,
   WorkspaceDeletedError,
   type ReviewerBot,
 } from '../core/types.js';
 import { ReviewerBotInputSchema, type BotsResponse } from './contract.js';
 import { sendError } from './helpers.js';
 import type { DashboardApiDeps } from './routes.js';
-import { unavailableProviderProblem, validateFallback } from './settings-validation.js';
+import { unavailableProviderProblem, unknownSkillProblem, validateFallback } from './settings-validation.js';
 import { subscriptionAvailability } from './subscription-routes.js';
 
 const SLOT_MESSAGE = `Bot slot must be ${MIN_EXTRA_BOT_SLOT}-${MAX_EXTRA_BOT_SLOT} (slot 1 is the main bot, set in the settings)`;
@@ -54,6 +55,8 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
           model: settings?.model ?? null,
           effort: settings?.effort ?? null,
           fallback: settings?.fallback ?? [],
+          ...(settings?.skillId ? { skillId: settings.skillId } : {}),
+          ...(settings?.skillRemovedName ? { skillRemovedName: settings.skillRemovedName } : {}),
         },
         bots,
         panel: {
@@ -79,6 +82,12 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
         return sendError(reply, 400, 'validation_error', parsed.error.issues[0]?.message ?? 'Invalid bot');
       }
       const input = parsed.data;
+      const previous = (await deps.store.listReviewerBots(workspaceId)).find((b) => b.slot === slot) ?? null;
+      // ADR-0034: a skill left out keeps the stored one (and its deleted-skill note); any choice,
+      // null (Default) included, clears the note.
+      // Left out, the store keeps the stored skill and its note inside the write, so a concurrent
+      // change is not overwritten by what this request read earlier.
+      const skillChoice = input.skillId !== undefined ? { skillId: input.skillId, skillRemovedName: null } : {};
       const bot: ReviewerBot = {
         slot,
         name: input.name,
@@ -88,10 +97,11 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
         model: input.model,
         effort: input.effort ?? null,
         fallback: input.fallback,
+        ...skillChoice,
       };
-      const previous = (await deps.store.listReviewerBots(workspaceId)).find((b) => b.slot === slot) ?? null;
       const problem = unavailableProviderProblem(bot, previous, subscriptionAvailability(deps))
-        ?? await validateFallback(deps.store, workspaceId, bot, bot.fallback);
+        ?? await validateFallback(deps.store, workspaceId, bot, bot.fallback)
+        ?? await unknownSkillProblem(deps.store, workspaceId, input.skillId);
       if (problem) return sendError(reply, 400, problem.code, problem.message);
 
       let saved: ReviewerBot;
@@ -102,6 +112,7 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
           return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
         }
         if (err instanceof InvalidBotSlotError) return sendError(reply, 400, 'invalid_slot', SLOT_MESSAGE);
+        if (err instanceof UnknownSkillError) return sendError(reply, 400, 'unknown_skill', err.message);
         if (err instanceof WorkspaceDeletedError) return sendError(reply, 404, 'not_found', 'Workspace not found');
         throw err;
       }

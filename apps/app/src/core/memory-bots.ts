@@ -9,6 +9,7 @@ import {
   sameBotName,
   type ReviewerBot,
 } from './bot-types.js';
+import { withSetSkillFields } from './memory-skills.js';
 import type { WorkspaceSettings } from './types.js';
 
 // In-memory twins of pg-bots.ts (the reviewer panel's extra bots, ADR-0017).
@@ -17,7 +18,7 @@ import type { WorkspaceSettings } from './types.js';
 export type MemoryBots = Map<string, ReviewerBot>;
 
 const key = (workspaceId: string, slot: number) => `${workspaceId}\u0000${slot}`;
-const copy = (bot: ReviewerBot): ReviewerBot => ({ ...bot, fallback: bot.fallback.map((f) => ({ ...f })) });
+const copy = (bot: ReviewerBot): ReviewerBot => withSetSkillFields({ ...bot, fallback: bot.fallback.map((f) => ({ ...f })) });
 
 export function listMemoryBots(bots: MemoryBots, workspaceId: string): ReviewerBot[] {
   return [...bots.entries()]

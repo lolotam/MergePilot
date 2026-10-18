@@ -32,6 +32,8 @@ export function useUpdateSettingsMutation(workspaceId: string) {
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
       // The main bot's name and logo are saved with the settings (ADR-0017).
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'bots'] });
+      // The main bot's skill choice changes the skills' "used by" (ADR-0034).
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'skills'] });
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');

@@ -21,6 +21,7 @@ import { WorkspaceGeneralCard } from '../components/WorkspaceGeneralCard.js';
 import { WorkspaceDangerZone } from '../components/WorkspaceDangerZone.js';
 import { BackupCard } from '../settings/BackupCard.js';
 import { ReviewerPanel } from '../settings/bots/ReviewerPanel.js';
+import { SkillsCard } from '../settings/skills/SkillsCard.js';
 import { RepoColorsCard } from '../settings/RepoColorsCard.js';
 import { RetentionCard } from '../settings/RetentionCard.js';
 import { JudgeCard } from '../settings/JudgeCard.js';
@@ -106,6 +107,9 @@ export function SettingsPage() {
         isSaving={updateSettingsMutation.isPending}
         keyedProviders={keyedProviders}
       />
+
+      {/* Markdown review skills; each bot tab picks one (ADR-0034) */}
+      <SkillsCard workspaceId={workspaceId} isMember={isMember} />
 
       <JudgeCard workspaceId={workspaceId} isMember={isMember} keyedProviders={savedKeys} />
       <PricesCard workspaceId={workspaceId} isMember={isMember} />

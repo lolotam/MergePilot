@@ -87,6 +87,7 @@ describe('Reviewer panel settings (bot tabs)', () => {
       model: 'main/model',
       effort: 'high',
       fallback: [{ provider: 'openrouter', model: 'fb/one', effort: null }],
+      skillId: null,
     });
   });
 

@@ -13,6 +13,7 @@ import { fieldClass, labelClass, ProviderSelect, useModelEfforts } from './provi
 import { SeveritySelect } from './SeveritySelect.js';
 import { BotIdentityFields } from './bots/BotIdentityFields.js';
 import { botNameError, MAIN_BOT_DEFAULT_LOGO, MAIN_BOT_DEFAULT_NAME } from './bots/BotLogo.js';
+import { SkillSelect } from './skills/SkillSelect.js';
 
 export interface ReviewSettingsCardProps {
   workspaceId: string;
@@ -25,7 +26,7 @@ export interface ReviewSettingsCardProps {
   keyedProviders?: readonly ApiProvider[] | undefined;
 }
 
-type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'heavy' | 'fallback', string>>;
+type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'heavy' | 'fallback' | 'skill', string>>;
 
 const NO_HEAVY: HeavyModelValue = { heavyProvider: null, heavyModel: null, heavyEffort: null, heavyThresholdLines: null };
 
@@ -56,6 +57,8 @@ export function ReviewSettingsCard({
   // The main bot's identity (ADR-0017), saved with the settings.
   const [botName, setBotName] = useState(MAIN_BOT_DEFAULT_NAME);
   const [botLogo, setBotLogo] = useState<BotLogo>(MAIN_BOT_DEFAULT_LOGO);
+  // The main bot's review skill (ADR-0034); null = Default.
+  const [skillId, setSkillId] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const efforts = useModelEfforts(workspaceId, provider, model);
   // The heavy model starts on the main provider when it has a key, else on the first keyed one.
@@ -98,6 +101,13 @@ export function ReviewSettingsCard({
     );
   }, [settings]);
 
+  // The skill follows the server on its own (ADR-0034): deleting a skill sets this bot to Default,
+  // and that refetch must not discard unsaved edits to the model or the other fields.
+  const savedSkillId = settings?.skillId ?? null;
+  useEffect(() => {
+    setSkillId(savedSkillId);
+  }, [savedSkillId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isMember) return;
@@ -133,10 +143,13 @@ export function ReviewSettingsCard({
         maxFindings,
         botName: botName.trim(),
         botLogo,
+        // Always sent: saving the form confirms the skill choice and clears a deleted-skill note.
+        skillId,
       });
     } catch (err) {
-      // A taken bot name is shown on the field; other errors were already shown as a toast.
+      // A taken bot name and an unknown skill are shown on their field; other errors were already shown as a toast.
       if (err instanceof ApiClientError && err.code === 'bot_name_taken') setErrors({ botName: t('botNameTaken') });
+      if (err instanceof ApiClientError && err.code === 'unknown_skill') setErrors({ skill: t('skillErrorUnknown') });
     }
   };
 
@@ -196,6 +209,20 @@ export function ReviewSettingsCard({
             </div>
 
             <EffortSelect id="settings-effort" efforts={efforts} value={effort} onChange={setEffort} disabled={isMember} />
+            <div>
+              <SkillSelect
+                id="settings-skill"
+                workspaceId={workspaceId}
+                value={skillId}
+                onChange={(next) => {
+                  setSkillId(next);
+                  if (errors.skill) setErrors(withoutError(errors, 'skill'));
+                }}
+                disabled={isMember}
+                removedName={settings?.skillId ? null : settings?.skillRemovedName}
+              />
+              {errors.skill && <p className="text-xs text-red-500 mt-1 ms-2">{errors.skill}</p>}
+            </div>
             <SeveritySelect value={minSeverity} onChange={setMinSeverity} disabled={isMember} />
             <MaxFindingsSelect value={maxFindings} onChange={setMaxFindings} disabled={isMember} />
 

@@ -251,7 +251,7 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
   const isArabic = input.language === 'ar';
   const sections: string[] = [];
 
-  if (input.identity) sections.push(renderBotIdentity(input.identity));
+  if (input.identity) sections.push(renderBotIdentity(input.identity, input.language === 'ar' ? 'ar' : 'en'));
   sections.push(renderHeader(input.outcome, isArabic));
 
   if (input.fallback) {

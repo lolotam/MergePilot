@@ -22,7 +22,7 @@ import { RunProviderBadge, RunModelBadge } from './RunBadges.js';
 import { RunFindingsList } from './RunFindingsList.js';
 import { RunDuration } from './RunDuration.js';
 import { RunCost } from './RunPriceSource.js';
-import { RunBotChip } from './RunBotChip.js';
+import { RunBotChip, RunSkillName } from './RunBotChip.js';
 import type { ReviewRun } from '../api/client.js';
 
 export default function RunDetailPage() {
@@ -154,6 +154,7 @@ export default function RunDetailPage() {
               fallbackFrom={run.fallbackFrom}
             />
             <RunBotChip run={run} />
+            <RunSkillName run={run} />
             {result?.fallbackFromMethod && result?.modelUsedMethod && result.fallbackFromMethod !== result.modelUsedMethod && (
               <p className="text-[10px] text-amber-800 dark:text-amber-200 leading-snug" data-testid="method-fallback-notice">
                 {result.modelUsedMethod === 'api-key' ? t('methodFallbackToApi') : t('methodFallbackToSubscription')}

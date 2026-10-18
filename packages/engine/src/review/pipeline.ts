@@ -41,6 +41,7 @@ import { anchorIndexOf, redactPatches } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, type CappedBatches } from './split.js';
 import { estimateReviewCostUsd, paidSwitchFits, SpendTracker } from './spend.js';
+import type { ReviewSkill } from './skill.js';
 import { runVerifyPass } from './verify-pass.js';
 import type { VerifyRejectedFinding } from './verify.js';
 
@@ -77,6 +78,11 @@ export interface RunReviewInput {
    */
   followUp?: FollowUp | undefined;
   rulesFiles: RulesFile[];
+  /**
+   * The bot's review skill (ADR-0034): the last section of every review call's system prompt,
+   * redacted with `knownSecrets`. It never reaches the verify pass or the Jev judge.
+   */
+  skill?: ReviewSkill | undefined;
   model: ReviewModel;
   /** Explicit fallback models (ADR-0008); defaults to `model.fallbacks`, else none. */
   fallbackModels?: readonly ReviewModel[] | undefined;
@@ -190,8 +196,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // Redact PR text
   const redactedPrTitle = redactSecrets(pr.title, knownSecrets).text;
   const redactedPrBody = redactSecrets(pr.body, knownSecrets).text;
-  // Every prompt of the review, batches included, carries the follow-up (ADR-0030).
-  const promptPr = promptPrOf(redactedPrTitle, redactedPrBody, followUp);
+  // Every prompt of the review, batches included, carries the follow-up (ADR-0030) and the skill
+  // (ADR-0034). The skill is workspace text, redacted like the rules files: its name too, since it
+  // is printed in the prompt's block markers.
+  const skill = input.skill && {
+    name: redactSecrets(input.skill.name, knownSecrets).text,
+    content: redactSecrets(input.skill.content, knownSecrets).text,
+  };
+  const promptPr = promptPrOf(redactedPrTitle, redactedPrBody, followUp, skill);
 
   // Redact rules files
   const redactedRulesFiles = rulesFiles.map((rf) => ({

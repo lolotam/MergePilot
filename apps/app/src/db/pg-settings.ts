@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { DEFAULT_JUDGE_THRESHOLD, isJudgeUse, legacyJudgeMode, normalizeJudgeUses } from '@mergepilot/engine';
-import { BotNameTakenError, sameBotName } from '../core/types.js';
+import { BotNameTakenError, sameBotName, UnknownSkillError } from '../core/types.js';
 import type {
   ApiProvider,
   BotLogo,
@@ -12,6 +12,7 @@ import type {
 } from '../core/types.js';
 import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
+import { isConstraintViolation, SKILL_FOREIGN_KEYS, SKILL_ID_PATTERN } from './pg-skills.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
 import { lockBotNames, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
@@ -50,6 +51,15 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
     botLogo: row.botLogo as BotLogo,
     panelMode: row.panelMode as PanelMode,
     panelMinAgreement: Number(row.panelMinAgreement),
+    ...skillFields(row),
+  };
+}
+
+/** The skill fields of a settings or bot row, left out while unset (ADR-0034). */
+export function skillFields(row: { skillId: string | null; skillRemovedName: string | null }): Pick<WorkspaceSettings, 'skillId' | 'skillRemovedName'> {
+  return {
+    ...(row.skillId ? { skillId: row.skillId } : {}),
+    ...(row.skillRemovedName ? { skillRemovedName: row.skillRemovedName } : {}),
   };
 }
 
@@ -74,10 +84,20 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
  * and the panel fields (`botName`, `botLogo`, `panelMode`, `panelMinAgreement`) left undefined keep
  * the stored value (a new row gets the column defaults: 5 findings, 30 days, no colors, no manual
  * prices, the "MergePilot" bot, separate reviews).
- * Throws BotNameTakenError when `botName` matches an extra bot's name.
+ * `skillId` left undefined keeps the stored skill; any value (null = Default) clears the
+ * deleted-skill note (ADR-0034).
+ * Throws BotNameTakenError when `botName` matches an extra bot's name, and UnknownSkillError when
+ * `skillId` is not a skill of this workspace.
  */
 export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
-  await withLiveWorkspace(db, settings.workspaceId, (tx) => writePgSettings(tx, settings));
+  // A skill id that is not a uuid names no skill (and would be a Postgres type error).
+  if (settings.skillId != null && !SKILL_ID_PATTERN.test(settings.skillId)) throw new UnknownSkillError(settings.skillId);
+  try {
+    await withLiveWorkspace(db, settings.workspaceId, (tx) => writePgSettings(tx, settings));
+  } catch (error) {
+    if (settings.skillId && isConstraintViolation(error, '23503', SKILL_FOREIGN_KEYS)) throw new UnknownSkillError(settings.skillId);
+    throw error;
+  }
 }
 
 /** The body of savePgSettings, inside the caller's live-workspace transaction (also used by a restore). */
@@ -107,6 +127,12 @@ export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings): P
   if (settings.botLogo !== undefined) values.botLogo = settings.botLogo;
   if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
   if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
+  if (settings.skillId !== undefined) {
+    // The bot-name lock before the row, like deleting a skill (pg-skills.ts), so the two cannot deadlock.
+    await lockBotNames(tx, settings.workspaceId);
+    values.skillId = settings.skillId;
+    values.skillRemovedName = null;
+  }
   const botName = settings.botName;
   if (botName !== undefined) {
     // A renamed main bot must differ from every extra bot's name, checked under the bot-name lock.

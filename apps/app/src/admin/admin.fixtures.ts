@@ -41,6 +41,8 @@ export async function createAdminTestDb(): Promise<AdminTestDb> {
     '0011_provider_api_keys.sql',
     '0012_provider_auth_preferences.sql',
     '0013_max_findings.sql',
+    '0014_postgres_15_required.sql',
+    '0014_review_skills.sql',
   ]) {
     await client.exec(readFileSync(join(migrationsDir, file), 'utf-8'));
   }

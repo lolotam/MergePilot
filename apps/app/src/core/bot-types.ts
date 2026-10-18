@@ -54,6 +54,14 @@ export interface ReviewerBot {
   model: string;
   effort: string | null;
   fallback: FallbackSetting[];
+  /** The bot's review skill (ADR-0034); null or undefined = Default. Stores leave it out while unset. */
+  skillId?: string | null | undefined;
+  /**
+   * The name of the bot's skill that was deleted (set by deleteReviewSkill); shown on the bot until
+   * a skill is chosen again. An upsert with `skillId` undefined keeps both stored fields; with a
+   * `skillId` it writes this value (null clears it).
+   */
+  skillRemovedName?: string | null | undefined;
 }
 
 /** Thrown by AppStore.upsertReviewerBot when another bot of the workspace already has this name. */
@@ -79,7 +87,8 @@ export interface ReviewerBotStore {
   /**
    * Creates or replaces the bot in `bot.slot`. Throws InvalidBotSlotError for a slot outside 2-5,
    * BotNameTakenError when the name (ignoring case) belongs to another extra bot or to the main
-   * bot, and WorkspaceDeletedError when the workspace is gone.
+   * bot, UnknownSkillError when `skillId` is not a skill of this workspace, and
+   * WorkspaceDeletedError when the workspace is gone.
    */
   upsertReviewerBot(workspaceId: string, bot: ReviewerBot): Promise<ReviewerBot>;
   /** Deletes the bot in this slot; returns whether it existed. */

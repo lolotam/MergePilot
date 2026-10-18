@@ -6,7 +6,7 @@ import { isSubscriptionOnlyProvider, SUBSCRIPTION_PREFIX, type FetchLike, type S
 import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
-import { BotNameTakenError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
+import { BotNameTakenError, UnknownSkillError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
 import { isKeyListProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
 import { registerProviderAuthRoutes } from './provider-auth-routes.js';
 import { KeyOrderError, SingleKeyProviderError, TooManyKeysError, type CredentialService } from '../credentials/service.js';
@@ -29,7 +29,10 @@ import { registerRunsRoutes } from './runs-routes.js';
 import type { RunStreamOptions } from './runs-events-routes.js';
 import { registerBackupRoutes } from './backup-routes.js';
 import { registerBotRoutes } from './bot-routes.js';
-import { botNameTakenByExtraBot, mergeSettings, unavailableProviderProblem, validateSettings } from './settings-validation.js';
+import {
+  botNameTakenByExtraBot, mergeSettings, unavailableProviderProblem, unknownSkillProblem, validateSettings, withoutSkillFields,
+} from './settings-validation.js';
+import { registerSkillRoutes } from './skill-routes.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
 import { registerSubscriptionRoutes, subscriptionAvailability } from './subscription-routes.js';
 import type { SubscriptionLoginFn } from '../credentials/subscription-login.js';
@@ -147,7 +150,8 @@ export function registerDashboardApi(
       const previous = await deps.store.getSettings(workspaceId);
       const merged = mergeSettings(workspaceId, previous, parsed.data);
       const problem = unavailableProviderProblem(merged, previous, subscriptionAvailability(deps))
-        ?? await validateSettings(deps.store, workspaceId, merged);
+        ?? await validateSettings(deps.store, workspaceId, merged)
+        ?? await unknownSkillProblem(deps.store, workspaceId, parsed.data.skillId);
       if (problem) return sendError(reply, 400, problem.code, problem.message);
       // The main bot's name must differ from every extra bot's (ADR-0017).
       if (parsed.data.botName !== undefined && (await botNameTakenByExtraBot(deps.store, workspaceId, parsed.data.botName))) {
@@ -155,12 +159,14 @@ export function registerDashboardApi(
       }
 
       try {
-        await deps.store.saveSettings(merged);
+        await deps.store.saveSettings(parsed.data.skillId === undefined ? withoutSkillFields(merged) : merged);
       } catch (error) {
         // A bot saved the same name between the check above and this write (the store re-checks it under a lock).
         if (error instanceof BotNameTakenError) {
           return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
         }
+        // The skill was deleted between the check above and this write.
+        if (error instanceof UnknownSkillError) return sendError(reply, 400, 'unknown_skill', error.message);
         throw error;
       }
       request.log.info(
@@ -376,6 +382,7 @@ export function registerDashboardApi(
   registerJudgeRoutes(app, deps);
   registerPricesRoutes(app, deps);
   registerBotRoutes(app, deps);
+  registerSkillRoutes(app, deps);
   registerBackupRoutes(app, deps);
   registerWorkspaceLifecycleRoutes(app, deps);
 }
