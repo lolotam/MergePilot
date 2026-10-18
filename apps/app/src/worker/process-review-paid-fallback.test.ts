@@ -19,9 +19,26 @@ const response = { text: JSON.stringify({ summary: 'LGTM', findings: [] }), fini
 
 afterEach(() => vi.clearAllMocks());
 
-async function setup(budget: number | null, extra = false, fail = false, sameProvider = false, paidPrimary = false, custom = false,
-  options: { monthlyCost?: number; perReviewUsd?: number; normalPaid?: boolean; fallbackFree?: boolean; afterAdmission?: 'keys' | 'api-key' | 'replaced'; paidAdmission?: boolean; redactionProbe?: boolean; skippedSubscriptionDefault?: boolean; skippedApiDefault?: boolean; redactionReadFailure?: 'roster' | 'parent' } = {},
+async function setup(budget: number | null,
+  options: {
+    extra?: boolean;
+    fail?: boolean;
+    sameProvider?: boolean;
+    paidPrimary?: boolean;
+    custom?: boolean;
+    monthlyCost?: number;
+    perReviewUsd?: number;
+    normalPaid?: boolean;
+    fallbackFree?: boolean;
+    afterAdmission?: 'keys' | 'api-key' | 'replaced';
+    paidAdmission?: boolean;
+    redactionProbe?: boolean;
+    skippedSubscriptionDefault?: boolean;
+    skippedApiDefault?: boolean;
+    redactionReadFailure?: 'roster' | 'parent';
+  } = {},
 ) {
+  const { extra = false, fail = false, sameProvider = false, paidPrimary = false, custom = false } = options;
   const configured = sameProvider ? [{ provider: 'anthropic' as const, model: 'other', effort: null }]
     : custom ? [...fallback, { provider: 'custom' as const, model: 'custom-model', effort: null }] : fallback;
   const h = await panelSetup({
@@ -92,7 +109,7 @@ async function setup(budget: number | null, extra = false, fail = false, samePro
 
 describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   it('redacts the API keys and subscription tokens of a skipped API-default dual provider', async () => {
-    const h = await setup(0.1, false, false, false, false, false, { skippedApiDefault: true, redactionProbe: true });
+    const h = await setup(0.1, { skippedApiDefault: true, redactionProbe: true });
     expect(h.result.status).toBe('completed');
     expect(h.called).toEqual(['anthropic:main-model']);
     expect(h.credentials.resolve.mock.calls.some((call) => call[1] === 'openai')).toBe(true);
@@ -108,7 +125,7 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it.each(['roster', 'parent'] as const)('does not fail the review when a redaction-only %s read fails', async (redactionReadFailure) => {
-    const h = await setup(10, false, false, false, false, false, { fallbackFree: true, redactionProbe: true, redactionReadFailure });
+    const h = await setup(10, { fallbackFree: true, redactionProbe: true, redactionReadFailure });
     expect(h.result.status).toBe('completed');
     expect(h.called).toEqual(['anthropic:main-model']);
     expect(factory.mock.calls[0]?.[2].keyRosters).toEqual({});
@@ -127,7 +144,7 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
     { extra: true, skippedSubscriptionDefault: false },
     { extra: false, skippedSubscriptionDefault: true },
   ])('redacts skipped paid roster keys without giving the model a roster (%j)', async (options) => {
-    const h = await setup(0.1, options.extra, false, false, false, false, { ...options, redactionProbe: true });
+    const h = await setup(0.1, { ...options, redactionProbe: true });
     expect(h.result.status).toBe('completed');
     expect(h.credentials.resolveKeyRoster.mock.calls.some((call) => call[1] === 'openai')).toBe(true);
     for (const call of factory.mock.calls) expect(call[2].keyRosters).toEqual({});
@@ -146,7 +163,7 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it.each(['keys', 'api-key'] as const)('pins a free fallback when it gains %s after admission', async (afterAdmission) => {
-    const h = await setup(10, false, true, false, false, false, { fallbackFree: true, afterAdmission, redactionProbe: true });
+    const h = await setup(10, { fail: true, fallbackFree: true, afterAdmission, redactionProbe: true });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([0]);
     expect(h.result.status).toBe('completed');
     expect((await h.runs())[0]?.costUsd).toBe(0);
@@ -166,7 +183,7 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it('never builds a paid fallback when its free subscription is replaced after admission', async () => {
-    const h = await setup(10, false, true, false, false, false, { fallbackFree: true, afterAdmission: 'replaced' });
+    const h = await setup(10, { fail: true, fallbackFree: true, afterAdmission: 'replaced' });
     expect(h.result.status).toBe('failed');
     expect(h.called).not.toContain('openai:gpt-5');
     expect(h.credentials.resolveKeyRoster).toHaveBeenCalled();
@@ -178,8 +195,7 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it('keeps following live fallback state for a paid-admitted bot', async () => {
-    const h = await setup(10, false, true, false, false, false,
-      { fallbackFree: true, afterAdmission: 'api-key', paidAdmission: true });
+    const h = await setup(10, { fail: true, fallbackFree: true, afterAdmission: 'api-key', paidAdmission: true });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([0.5]);
     expect(h.result.status).toBe('completed');
     expect(h.called).toContain('openai:gpt-5');
@@ -189,15 +205,14 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it('keeps ordinary paid admission unchanged at $9.50 of $10 with a $1 reservation', async () => {
-    const h = await setup(10, false, false, false, false, false,
-      { monthlyCost: 9.5, perReviewUsd: 1, normalPaid: true });
+    const h = await setup(10, { monthlyCost: 9.5, perReviewUsd: 1, normalPaid: true });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([1]);
     expect(h.result.status).toBe('completed');
     expect(h.called).toContain('openai:main-model');
   });
 
   it('admits free and discloses the skipped paid fallback at $9.50 of $10 with a $1 reservation', async () => {
-    const h = await setup(10, false, false, false, false, false, { monthlyCost: 9.5, perReviewUsd: 1 });
+    const h = await setup(10, { monthlyCost: 9.5, perReviewUsd: 1 });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([1, 0]);
     expect(h.result.status).toBe('completed');
     expect(h.called).not.toContain('openai:gpt-5');
@@ -206,14 +221,14 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it('uses the original predicate for the paid base on pass two even when its reservation exceeds the remainder', async () => {
-    const h = await setup(10, true, false, false, true, false, { monthlyCost: 9.5, perReviewUsd: 1 });
+    const h = await setup(10, { extra: true, paidPrimary: true, monthlyCost: 9.5, perReviewUsd: 1 });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([2, 1]);
     expect((await h.runs()).every((run) => run.status === 'completed')).toBe(true);
     expect((await h.runs())[0]?.detail).toContain(reason);
   });
 
   it.each([false, true])('reserves for the paid fallback before running (extra=%s)', async (extra) => {
-    const h = await setup(10, extra, true);
+    const h = await setup(10, { extra, fail: true });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([0.5]);
     expect(h.called).toContain('openai:gpt-5');
     const runs = await h.runs();
@@ -224,7 +239,7 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it.each([false, true])('retries free, skips paid providers and surfaces the subscription error (extra=%s)', async (extra) => {
-    const h = await setup(0.1, extra, true);
+    const h = await setup(0.1, { extra, fail: true });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([0.5, 0]);
     expect(h.called).not.toContain('openai:gpt-5');
     expect(h.credentials.resolveKeyRoster.mock.calls.some((call) => call[1] === 'openai')).toBe(true);
@@ -237,14 +252,14 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it('keeps the existing whole-review skip when the monthly budget is already reached', async () => {
-    const h = await setup(0.1, true, false, false, true, false, { monthlyCost: 0.1 });
+    const h = await setup(0.1, { extra: true, paidPrimary: true, monthlyCost: 0.1 });
     expect(h.result).toMatchObject({ status: 'skipped', detail: 'monthly budget reached' });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([1, 0.5]);
     expect(factory).not.toHaveBeenCalled();
   });
 
   it('keeps a fallback on its own provider free and available', async () => {
-    const h = await setup(0.1, false, true, true);
+    const h = await setup(0.1, { fail: true, sameProvider: true });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([0]);
     expect(h.called).toContain('anthropic:other');
     expect(h.credentials.resolveKeyRoster).toHaveBeenCalled();
@@ -252,13 +267,13 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
   });
 
   it('does not admit or exclude paid fallbacks without a monthly budget', async () => {
-    const h = await setup(null, false, true);
+    const h = await setup(null, { fail: true });
     expect(h.admit).not.toHaveBeenCalled();
     expect(h.called).toContain('openai:gpt-5');
   });
 
   it('excludes custom URL and model rosters while still resolving skipped credentials for redaction', async () => {
-    const h = await setup(0.1, true, false, false, false, true);
+    const h = await setup(0.1, { extra: true, custom: true });
     expect(h.credentialRead.mock.calls.some((call) => call[1] === 'custom')).toBe(false);
     expect(h.credentials.resolveKeyRoster.mock.calls.some((call) => call[1] === 'openai')).toBe(true);
     expect(factory.mock.calls[1]?.[2].keyRosters).toEqual({});
