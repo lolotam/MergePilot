@@ -157,6 +157,8 @@ Four templates live in `apps/web/src/settings/skills/templates/`, one per gap of
 | [`cross-file-consumers.md`](../../apps/web/src/settings/skills/templates/cross-file-consumers.md) | consumers and mirrors in other PR files (10) | MergePilot_Bot (gpt-6-astra) |
 | [`security.md`](../../apps/web/src/settings/skills/templates/security.md) | authorization, isolation, secrets, injection | mohamed_Bot (GLM 5.3) |
 
+`cross-file-consumers.md` and `security.md` were rewritten on 2026-10-18 (see the amendment at the end).
+
 They are **templates**, not built-in skills: the Review skills card offers "Add from template", which creates an ordinary, editable skill row in the workspace under a free name ("Security 2" when "Security" exists). Why not read-only built-ins in code:
 
 - a built-in's content hash would be in `configHash` (§5), so editing it in a release would make the next review of every PR in every workspace using it a full one;
