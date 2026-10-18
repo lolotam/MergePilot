@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MergePilotConfig } from '../config/schema.js';
 import { Secret } from '../credentials/secret.js';
 import type { AnyCredentialStore, CredentialInfo } from '../credentials/store.js';
@@ -75,6 +75,22 @@ async function build(ws: Workspace, cfg: MergePilotConfig) {
 const revealed = (secrets: readonly Secret[] | undefined) => (secrets ?? []).map((s) => s.reveal());
 
 describe('createReviewModel — dual-method chain (ADR-0027)', () => {
+  it('excludes configured fallbacks with a generic reason before reading their credentials', async () => {
+    const ws: Workspace = { defaults: { openai: 'subscription' }, subscriptions: { openai: envelope('openai') }, rosters: {} };
+    const store = workspaceStore(ws);
+    const info = vi.spyOn(store, 'info');
+    const resolve = vi.spyOn(store, 'resolve');
+    const model = await createReviewModel(config('openai', 'gpt-5', {
+      fallback: [{ provider: 'custom', model: 'one' }, { provider: 'custom', model: 'two' }, { provider: 'openai', model: 'gpt-4' }],
+    }), store, { cwd: '/tmp', skipFallback: (entry) => entry.provider === 'custom' ? 'excluded by caller' : undefined });
+    expect(model.skippedFallbacks).toEqual([
+      { label: 'custom:one', reason: 'excluded by caller' },
+      { label: 'custom:two', reason: 'excluded by caller' },
+    ]);
+    expect(info.mock.calls.some(([ref]) => ref.provider === 'custom')).toBe(false);
+    expect(resolve.mock.calls.some(([ref]) => ref.provider === 'custom')).toBe(false);
+    expect(model.fallbacks?.map((entry) => entry.label)).toEqual(['openai:gpt-4']);
+  });
   it('puts the rotating API keys right behind a subscription default, and redacts both methods', async () => {
     const ws: Workspace = { defaults: { openai: 'subscription' }, subscriptions: { openai: envelope('openai') }, rosters: { openai: keys('openai') } };
     const model = await build(ws, config('openai', 'gpt-5'));

@@ -45,12 +45,13 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
   let credStore: WorkspaceCredentialStore | undefined;
   const cursorWrites = new CursorWrites();
   try {
-    const fallbackList = fallbackChain(br.bot.fallback, choice);
+    const fallbackList = fallbackChain(slot === MAIN_BOT_SLOT ? settings.fallback ?? [] : br.bot.fallback, choice);
+    const allowedFallbacks = fallbackList.filter((entry) => !br.skipPaidFallbacks?.includes(entry.provider));
     const customBaseUrl = await customBaseUrlFor(
       deps.store,
       workspaceId,
       choice.provider,
-      fallbackList.map((f) => f.provider),
+      allowedFallbacks.map((f) => f.provider),
       deps.ssrfLookup,
     );
     // Slot 1's config (and its price) was built once by the shared steps; an extra bot prices its own model.
@@ -58,7 +59,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       slot === MAIN_BOT_SLOT
         ? ctx.mainConfig
         : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store, skillKeyOf([br.bot]));
-    const providerIds = [choice.provider, ...fallbackList.map((fallback) => fallback.provider)];
+    const providerIds = [choice.provider, ...allowedFallbacks.map((fallback) => fallback.provider)];
     // Admitted free, the bot keeps that decision for its whole run (ADR-0033): its provider runs on
     // the subscription it was admitted with, whatever the default method is now.
     const subscriptionOnly = br.admittedFree === true;
@@ -111,6 +112,9 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         keyRosters: rosters,
         onKeyRotation: makeRotationHandler(keyIds),
         dualMethods,
+        skipFallback: (entry) => br.skipPaidFallbacks?.includes(entry.provider)
+          ? 'skipped: the review was admitted free under the monthly budget'
+          : undefined,
         ...(customBaseUrl
           ? { customBaseUrl, customFetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup, ...REVIEW_FETCH_LIMITS }) }
           : {}),
@@ -286,7 +290,9 @@ function recordOf(
   } else if (status === 'skipped') {
     findingsCount = 0;
   }
-  const detail = review.detail ?? skippedNote ?? judgeNote ?? null;
+  const detail = br.skipPaidFallbacks?.length
+    ? [review.detail, skippedNote].filter(Boolean).join('; ') || judgeNote || null
+    : review.detail ?? skippedNote ?? judgeNote ?? null;
   const used = usedModel(
     choice,
     { ...ctx.settings, fallback: br.bot.fallback },

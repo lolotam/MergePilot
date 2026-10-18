@@ -239,21 +239,44 @@ async function sharedSteps(
     // holds its paid bots × the per-review budget until it finishes (first come, first served).
     // A subscription bot with no API keys costs nothing extra, so it holds nothing (ADR-0027).
     const admission = deps.budgetAdmission ?? processBudgetAdmission;
-    // Each bot on the provider it will run on: slot 1 may be on the heavy-duty provider.
-    const free = await Promise.all(
-      runs.map((br) => reviewUsesSubscriptionAdmission(deps.credentials, workspaceId, (br === main ? mainChoice : br.bot).provider)),
-    );
-    // The run keeps the decision (ADR-0033): a free bot stays on that subscription, whatever the
-    // default method or the API keys become before or during its run.
+    // Snapshot each provider once for both admission passes (ADR-0035).
+    const providers = new Map<string, Promise<boolean>>();
+    const isFree = (provider: string) => {
+      let free = providers.get(provider);
+      if (!free) {
+        free = reviewUsesSubscriptionAdmission(deps.credentials, workspaceId, provider);
+        providers.set(provider, free);
+      }
+      return free;
+    };
+    const plans = await Promise.all(runs.map(async (br) => {
+      const own = br === main ? mainChoice : br.bot;
+      const fallbacks = fallbackChain(br === main ? settings.fallback ?? [] : br.bot.fallback, own);
+      const ownFree = await isFree(own.provider);
+      const paidFallbacks = (await Promise.all(fallbacks.map(async ({ provider }) =>
+        provider !== own.provider && !(await isFree(provider)) ? provider : null,
+      ))).filter((provider) => provider !== null);
+      return { ownFree, paidFallbacks };
+    }));
+    const perReviewUsd = mainConfig.effectiveConfig.budget.perReviewUsd;
+    const base = plans.filter((plan) => !plan.ownFree).length * perReviewUsd;
+    const extra = plans.filter((plan) => plan.ownFree && plan.paidFallbacks.length > 0).length * perReviewUsd;
+    const reserve = async (amount: number, requireFit: boolean) =>
+      await admission.admit(workspaceId, amount, async (reservedUsd) => {
+        const spent = await deps.store.monthCostUsd(workspaceId, monthStart);
+        // Preserve ADR-0022 for ordinary paid bots; only the extra fallback reservation must fit.
+        return spent + reservedUsd < budget && (!requireFit || spent + reservedUsd + amount <= budget);
+      }) ?? undefined;
+    let free = plans.map((plan) => plan.ownFree && plan.paidFallbacks.length === 0);
+    releaseBudget = await reserve(base + extra, extra > 0);
+    if (!releaseBudget && extra > 0) {
+      free = plans.map((plan) => plan.ownFree);
+      releaseBudget = await reserve(base, false);
+    }
     runs.forEach((br, index) => {
       br.admittedFree = free[index] === true;
+      if (br.admittedFree) br.skipPaidFallbacks = plans[index]!.paidFallbacks;
     });
-    const paidBots = free.filter((sub) => !sub).length;
-    releaseBudget = await admission.admit(
-      workspaceId,
-      paidBots * mainConfig.effectiveConfig.budget.perReviewUsd,
-      async (reservedUsd) => (await deps.store.monthCostUsd(workspaceId, monthStart)) + reservedUsd < budget,
-    ) ?? undefined;
     if (!releaseBudget) {
       for (const br of runs) {
         const own = br === main ? mainChoice : br.bot;

@@ -22,6 +22,8 @@ export type { DualMethodConfig } from './dual-method.js';
 
 export interface CreateReviewModelOptions {
   cwd: string;
+  /** Return a disclosure reason to exclude a configured fallback before loading credentials. */
+  skipFallback?: ((entry: NonNullable<MergePilotConfig['fallback']>[number]) => string | undefined) | undefined;
   /**
    * Per dual-method provider (ADR-0027): both subscription and API keys are connected. The engine
    * inserts the other method immediately after each such provider in the fallback chain.
@@ -85,10 +87,16 @@ export async function resolveFallbacks(
   customFetch?: FetchLike,
   rotation?: Pick<RotationContext, 'rosters' | 'onKeyRotation'>,
   dualMethods?: Partial<Record<ApiProviderId, DualMethodConfig>> | undefined,
+  skipFallback?: CreateReviewModelOptions['skipFallback'],
 ): Promise<ResolvedFallbacks> {
   const resolved: ResolvedFallbacks = { models: [], secrets: [], skipped: [] };
   for (const entry of config.fallback ?? []) {
     const label = `${entry.provider}:${entry.model}`;
+    const reason = skipFallback?.(entry);
+    if (reason !== undefined) {
+      resolved.skipped.push({ label, reason });
+      continue;
+    }
     let key: Secret | undefined;
     try {
       key = await resolveKey(store, entry.provider);
@@ -192,7 +200,7 @@ export async function createReviewModel(
     });
     return Object.assign(
       runner,
-      attachments(token, await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch, rotation)),
+      attachments(token, await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch, rotation, undefined, opts.skipFallback)),
     );
   }
 
@@ -221,7 +229,7 @@ export async function createReviewModel(
   // The chain: [primary, primary's other method (ADR-0027), configured fallbacks (ADR-0008)...].
   const chain: ResolvedFallbacks = { models: [], secrets: [...primary.secrets], skipped: [] };
   if (dual) addOtherMethod(chain, await otherMethodEntry(spec, dual.defaultMethod, store, rotation));
-  const configured = await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch, rotation, opts.dualMethods);
+  const configured = await resolveFallbacks(config, store, opts.customBaseUrl, opts.customFetch, rotation, opts.dualMethods, opts.skipFallback);
   chain.models.push(...configured.models);
   chain.secrets.push(...configured.secrets);
   chain.skipped.push(...configured.skipped);
