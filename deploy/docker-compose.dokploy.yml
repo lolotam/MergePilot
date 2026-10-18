@@ -7,7 +7,7 @@
 
 # The release is pinned here (x-image) so shipping or rolling back is one edit of this file,
 # independent of the secrets kept in Dokploy's Environment tab.
-x-image: &image ghcr.io/lolotam/mergepilot:4c32dee68dcc08d4626995d755054c9bc3971cbc
+x-image: &image ghcr.io/lolotam/mergepilot:6629c8e6388dda1838a8fc36e0503ad2b59199a7@sha256:461e1d66f73331595d7d242a68625a5f1126b23546aee7e399443720a554d0b0
 
 x-app-env: &app-env
   NODE_ENV: production
