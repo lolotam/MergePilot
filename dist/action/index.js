@@ -139853,11 +139853,13 @@ function parseReviewAnswer(text, options) {
   let firstParseError = null;
   let matchedAnswer = null;
   let summaryOnly = null;
+  let otherCandidatesRejected = false;
   for (const candidate of candidates) {
     let parsed;
     try {
       parsed = parseJsonLenient(candidate);
     } catch (err) {
+      otherCandidatesRejected = true;
       if (!firstParseError) {
         firstParseError = err instanceof Error ? err.message : String(err);
       }
@@ -139869,14 +139871,23 @@ function parseReviewAnswer(text, options) {
       break;
     }
     const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
-    if (bare.success && summaryOnly === null && parsed.findings === void 0) {
-      summaryOnly = bare.data.summary;
-    } else if (!firstParseError) {
-      firstParseError = loose.error.message;
+    if (bare.success && parsed.findings === void 0) {
+      summaryOnly ??= bare.data.summary;
+    } else {
+      otherCandidatesRejected = true;
+      if (!firstParseError)
+        firstParseError = loose.error.message;
     }
   }
   if (!matchedAnswer && summaryOnly !== null) {
-    return { ok: true, summary: summaryOnly, findings: [], droppedInvalid: 0, findingsMissing: true };
+    return {
+      ok: true,
+      summary: summaryOnly,
+      findings: [],
+      droppedInvalid: 0,
+      findingsMissing: true,
+      ...otherCandidatesRejected ? { otherCandidatesRejected: true } : {}
+    };
   }
   if (!matchedAnswer) {
     const isTruncated = isTruncatedAnswer(options?.finishReason, hasUnclosedObject);
@@ -140420,7 +140431,7 @@ async function retryForFindingsList(input2) {
     if (!retried.ok) {
       return { parsed, rejected: response, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
     }
-    const acceptedAsEmpty = retried.findingsMissing && response.finishReason === "stop" && typeof retried.summary === "string" && retried.summary.trim().length > 0;
+    const acceptedAsEmpty = retried.findingsMissing && !retried.otherCandidatesRejected && response.finishReason === "stop" && typeof retried.summary === "string" && retried.summary.trim().length > 0;
     return { parsed: acceptedAsEmpty ? { ...retried, acceptedAsEmpty: true } : retried, response, usage: response.usage, thinkingOff: false };
   } catch (err) {
     spend.record(promptTokens, requestedOutputTokens2, void 0);

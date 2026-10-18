@@ -15,6 +15,22 @@ describe('an answer without a findings list', () => {
     });
   });
 
+  it.each([
+    '{"summary":"draft"}\n{"summary":"Issues found","findings":null}',
+    '{"summary":"draft"}\n{"summary": invalid}',
+  ])('keeps the first summary but records a rejected candidate: %s', (text) => {
+    expect(parseReviewAnswer(text, { finishReason: 'stop' })).toEqual({
+      ok: true, summary: 'draft', findings: [], droppedInvalid: 0,
+      findingsMissing: true, otherCandidatesRejected: true,
+    });
+  });
+
+  it('does not mark another valid summary-only candidate as rejected', () => {
+    expect(parseReviewAnswer('{"summary":"draft"}\n{"summary":"final"}')).toEqual({
+      ok: true, summary: 'draft', findings: [], droppedInvalid: 0, findingsMissing: true,
+    });
+  });
+
   it('prefers a candidate that has the list over an earlier summary-only object', () => {
     const text = 'Plan: {"summary":"draft"}\n{"summary":"Final.","findings":[]}';
     const result = parseReviewAnswer(text);

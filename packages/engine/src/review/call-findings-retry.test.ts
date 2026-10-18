@@ -172,6 +172,28 @@ describe('a review whose model leaves the findings list out', () => {
     }
   });
 
+  it.each([
+    '{"summary":"draft"}\n{"summary":"Issues found","findings":null}',
+    '{"summary":"Issues found","findings":null}\n{"summary":"draft"}',
+    '{"summary":"draft"}\n{"summary": invalid}',
+    '{"summary": invalid}\n{"summary":"draft"}',
+  ])('stays incomplete when the stop reminder contains a rejected candidate: %s', async (text) => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: SUMMARY_ONLY, finishReason: 'stop' })
+      .mockResolvedValueOnce({ text, finishReason: 'stop' });
+
+    const result = await review(generate);
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.complete).toBe(false);
+      expect(result.inline).toEqual([]);
+      expect(result.result.incompleteReasons).toContain(FINDINGS_MISSING_REASON);
+      expect(result.answerAttempts?.at(-1)).not.toHaveProperty('acceptedAsEmpty');
+    }
+  });
+
   it('keeps the unusable second answer in the previews too', async () => {
     const generate = vi.fn()
       .mockResolvedValueOnce({ text: SUMMARY_ONLY, finishReason: 'stop' })

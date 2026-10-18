@@ -191,9 +191,9 @@ API key it is priced like the JSON-only retry and runs only within `budget.perRe
 ## Amendment (2026-10-18): accept a normally finished summary-only reminder
 
 After the existing findings-list reminder, a valid summary-only object with a non-blank
-summary and `finishReason: "stop"` counts as a completed review with zero findings, in both
-single and batched reviews. The prompt puts `findings` first and explicitly forbids omitting
-it. The existing warn diagnostic keeps the answer previews, with `acceptedAsEmpty: true`
+summary and `finishReason: "stop"`, and no other JSON object in the answer was rejected,
+counts as a completed review with zero findings, in both single and batched reviews. The prompt
+puts `findings` first and explicitly forbids omitting it. The existing warn diagnostic keeps the answer previews, with `acceptedAsEmpty: true`
 on the accepted attempt. Skipped, failed, unusable or non-stop reminders remain incomplete;
 invalid JSON, empty summaries and present non-array findings are not accepted. Audit chunk
 handling remains unchanged: it does not use this review reminder acceptance rule.

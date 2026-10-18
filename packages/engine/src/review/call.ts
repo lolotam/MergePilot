@@ -105,7 +105,7 @@ export function describePaths(paths: readonly string[], max = 10, maxLength = 60
   return paths.length > max ? `${shown} +${paths.length - max} more` : shown;
 }
 
-type ParsedAnswer = { ok: true; summary?: string; findingsMissing?: true; acceptedAsEmpty?: true } | { ok: false; code: string; error: string };
+type ParsedAnswer = { ok: true; summary?: string; findingsMissing?: true; otherCandidatesRejected?: true; acceptedAsEmpty?: true } | { ok: false; code: string; error: string };
 
 export interface EmptyRetryInput<P extends ParsedAnswer> {
   parsed: P;
@@ -212,7 +212,7 @@ async function retryForFindingsList<P extends ParsedAnswer>(input: EmptyRetryInp
     if (!retried.ok) {
       return { parsed, rejected: response, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
     }
-    const acceptedAsEmpty = retried.findingsMissing && response.finishReason === 'stop' &&
+    const acceptedAsEmpty = retried.findingsMissing && !retried.otherCandidatesRejected && response.finishReason === 'stop' &&
       typeof retried.summary === 'string' && retried.summary.trim().length > 0;
     return { parsed: acceptedAsEmpty ? { ...retried, acceptedAsEmpty: true } : retried, response, usage: response.usage, thinkingOff: false };
   } catch (err) {
