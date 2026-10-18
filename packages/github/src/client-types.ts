@@ -183,6 +183,8 @@ export interface GitHubClient {
   listReviewsPage(params: ListReviewsPageParams): Promise<GitHubReview[]>;
   createReview(params: CreateReviewParams): Promise<GitHubCreatedReview>;
   getFileContent(params: GetFileContentParams): Promise<string | null>;
+  /** The files directly in a directory at `ref` (no subdirectories); null when it does not exist. */
+  listDirectoryFiles?(params: GetFileContentParams): Promise<string[] | null>;
   compareCommits(params: CompareCommitsParams): Promise<CompareCommitsResult | null>;
   createIssue?(params: CreateIssueParams): Promise<GitHubCreatedIssue>;
   listReviewCommentsPage?(params: ListReviewCommentsParams): Promise<GitHubReviewComment[]>;

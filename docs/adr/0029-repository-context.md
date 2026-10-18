@@ -56,3 +56,22 @@ The Codex comparison behind ADR-0028 found that 34 of the 116 Codex-only finding
 ## Amendment (2026-10-16): PR-aware incremental context
 
 Point 8 is now ADR-0030. On an incremental run the PR's other changed files are context too (`pr-change`, rendered as `PR_CONTEXT`), within `review.prContextTokens`, a share **of** each call's `review.contextTokens` cap: PR context goes first and repository context fills the rest, so a call's context still never exceeds the cap above.
+
+## Amendment (2026-10-18): build and CI wiring as context
+
+**Why.** The first skills evaluation (`MergePilot-review-comparison/weekly/2026-10-18-skills-eval.md`) found a Codex finding on PayPos#363 that every bot missed: the PR added test suites, but the root `package.json` scripts and `.github/workflows/ci.yml` decide which suites the gate runs, and neither file was in the context. Owner approval: MP-1.2 «(أ) أيوه».
+
+**Decision.** A fifth kind of context, `build-config` (priority **e**, after the imports: a > c > b > e).
+
+- **Trigger.** A reviewed file is *build wiring* (`isBuildWiringChange`) when it is a `package.json`, a file under `.github/workflows/`, a file in a `scripts/` directory, or a test (`isTestPath`: `*.test.*` / `*.spec.*` for JS/TS, `test_*.py`, `*_test.py`, `*_test.go`, or any file under `__tests__/`, `test/`, `tests/`, `e2e/`). A PR with no such file gets no `build-config` context and makes no extra read.
+- **What is looked up, for each such file** (`forPath` is that file, so a batch holding it gets the wiring):
+  - the root `package.json` (reason `root package manifest (scripts)`);
+  - the nearest workspace `package.json`, at most two directories deep (`apps/web/package.json`, then `apps/package.json`; reason `workspace package manifest (scripts)`); a speculative lookup, not disclosed when the read limit stops it;
+  - the workflows in `.github/workflows` (`*.yml`, `*.yaml`, in name order, at most `MAX_WORKFLOW_FILES` = 10; the rest are disclosed as left out) that run package scripts (`pnpm`, `npm`, `npx`, `yarn`, `bun` or `turbo`) or name one of the changed build-wiring files (reason `CI workflow that runs the scripts`). A workflow that does neither is read but not sent.
+- **Directory listing.** Workflow names differ per repository, so the gatherer lists `.github/workflows` once per review through a new optional client method, `GitHubClient.listDirectoryFiles` (contents API on a directory, files only; `null` when it does not exist), shared per client like reads (`listAtRef` in `read-cache.ts`). The listing counts as one read against `MAX_CONTEXT_READS`. A client without the method (test fakes) lists nothing, and the manifests are still looked up. §1.d still holds: there is no general directory listing, only this one fixed directory.
+- **Engine.** `ContextKind` gains `build-config`; the plan filters, redacts, cuts and fits it like any repository file and renders it as a `REPOSITORY_CONTEXT` block. It is planned last, so on a large PR it is the first context to be left out, and the summary's "left out" count shows it. A changed `package.json` or workflow is already a changed file (priority a) and is sent once.
+- **Budget.** Unchanged: `review.contextTokens` per call, `min(contextTokens, batchTokens)` per batch, priced up front. The extra cost is at most one listing and the manifest and workflow reads, shared by the bots of a panel.
+
+**Security.** Unchanged from §Security: head content is untrusted and never executed, sensitive and excluded paths are never read, content is redacted before any cut. Workflow files are read as text only; nothing in them is run, and a workflow cannot add paths to the lookup.
+
+Tests: `packages/github/src/review-context.test.ts` (build and CI wiring), `read-cache.test.ts` (`listAtRef`), `client.test.ts` (`listDirectoryFiles`), `packages/engine/src/review/context.test.ts` (order after imports, a changed manifest sent once).

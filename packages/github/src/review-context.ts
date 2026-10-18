@@ -1,8 +1,10 @@
 /**
  * Repository context for reviews (ADR-0029): for every reviewed file, the full version of the file
- * itself, its sibling test or implementation, and the local modules it imports, all read at the PR
- * HEAD through the per-client read cache. Head content is PR-controlled: the engine redacts it and
- * shows it as UNTRUSTED. Nothing here runs or installs the reviewed code; imports are found by text.
+ * itself, its sibling test or implementation, and the local modules it imports; when the PR changes
+ * scripts, tests or CI, also the package manifests and CI workflows that wire them up. All of it is
+ * read at the PR HEAD through the per-client read cache. Head content is PR-controlled: the engine
+ * redacts it and shows it as UNTRUSTED. Nothing here runs or installs the reviewed code; imports
+ * and workflows are matched by text.
  */
 import {
   classifyFile,
@@ -13,7 +15,7 @@ import {
   type RepositoryContextFile,
 } from '@mergepilot/engine';
 import type { GitHubClient } from './client.js';
-import { readAtRef } from './read-cache.js';
+import { listAtRef, readAtRef } from './read-cache.js';
 
 /** At most this many file reads per review; what is not looked up is disclosed. */
 export const MAX_CONTEXT_READS = 120;
@@ -37,6 +39,15 @@ const NON_CODE_EXTENSIONS = new Set(['css', 'scss', 'sass', 'less', 'json', 'svg
 const JS_SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"])(\.{1,2}\/[^'"\n]*)\1/g;
 /** `from .mod import x`, `from .. import x`. */
 const PY_RELATIVE_IMPORT_RE = /^\s*from\s+(\.+)([\w.]*)\s+import\s+([^\n#]+)/gm;
+
+/** Where GitHub Actions workflows live; listed once per review when the PR changes build wiring. */
+const WORKFLOWS_DIR = '.github/workflows';
+/** At most this many workflow files are looked up per review, in name order; the rest are disclosed. */
+export const MAX_WORKFLOW_FILES = 10;
+/** Directories whose files are tests whatever their name. */
+const TEST_DIRS = new Set(['__tests__', 'test', 'tests', 'e2e']);
+/** A workflow step that runs package scripts. */
+const PACKAGE_SCRIPT_RE = /\b(?:pnpm|npm|npx|yarn|bun|turbo)\b/;
 
 export interface ReviewedFile {
   path: string;
@@ -72,6 +83,8 @@ interface Lookup {
   forPath: string;
   /** Named in the summary when the read limit stops it (a speculative test lookup is not). */
   disclose: boolean;
+  /** Keeps a found file only when its content passes (a workflow that runs the changed scripts). */
+  accept?: (content: string) => boolean;
 }
 
 export const dirOf = (path: string): string => path.split('/').slice(0, -1).join('/');
@@ -261,6 +274,22 @@ class ContextReader {
     }
   }
 
+  /** The files of a directory; one read against the limit, none when the client cannot list. */
+  async list(dir: string): Promise<string[]> {
+    if (!this.client.listDirectoryFiles) return [];
+    if (this.reads >= MAX_CONTEXT_READS) {
+      this.leftOut.push(`${dir}/ (not looked up)`);
+      return [];
+    }
+    this.reads++;
+    try {
+      return (await listAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, dir)) ?? [];
+    } catch {
+      this.leftOut.push(`${dir}/ (could not be read)`);
+      return [];
+    }
+  }
+
   async run(lookups: readonly Lookup[]): Promise<void> {
     await inChunks(lookups, (lookup) => this.lookUp(lookup));
   }
@@ -281,7 +310,7 @@ class ContextReader {
       if (path === lookup.forPath) return;
       if (this.known.has(path)) {
         const content = this.known.get(path);
-        if (content) this.add(lookup, path, content);
+        if (content) this.addAccepted(lookup, path, content);
         return; // a reviewed file: its own entry (or its patch) already covers it
       }
       // A sensitive name (`./.env` → `.env.ts`, `.env/index.ts`) ends the lookup: no form of it is
@@ -296,10 +325,14 @@ class ContextReader {
       }
       if (outcome === 'failed') return;
       if (outcome.content !== null) {
-        this.add(lookup, path, outcome.content);
+        this.addAccepted(lookup, path, outcome.content);
         return;
       }
     }
+  }
+
+  private addAccepted(lookup: Lookup, path: string, content: string): void {
+    if (!lookup.accept || lookup.accept(content)) this.add(lookup, path, content);
   }
 
   add(lookup: Pick<Lookup, 'kind' | 'reason' | 'forPath'>, path: string, content: string): void {
@@ -307,9 +340,71 @@ class ContextReader {
   }
 }
 
+/** Whether a path is a test file: by name (`x.test.ts`, `test_x.py`, `x_test.go`) or directory. */
+export function isTestPath(path: string): boolean {
+  const segments = path.split('/');
+  const base = segments.pop() ?? '';
+  if (segments.some((segment) => TEST_DIRS.has(segment))) return true;
+  return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(base) || /^test_.*\.py$/.test(base) || /_test\.(?:py|go)$/.test(base);
+}
+
+/** Whether a changed file is build wiring: a package manifest, a CI workflow, a script or a test. */
+export function isBuildWiringChange(path: string): boolean {
+  const segments = path.split('/');
+  return (
+    segments[segments.length - 1] === 'package.json' ||
+    path.startsWith(`${WORKFLOWS_DIR}/`) ||
+    segments.slice(0, -1).includes('scripts') ||
+    isTestPath(path)
+  );
+}
+
+/**
+ * The manifest of the workspace a file is in, nearest first and at most two directories deep
+ * (`apps/web/package.json`, then `apps/package.json`); the root manifest is looked up apart.
+ */
+export function workspaceManifestCandidates(path: string): string[] {
+  if (path.startsWith('.github/')) return [];
+  const dirs = dirOf(path).split('/').filter(Boolean).slice(0, 2);
+  return dirs.map((_, i) => `${dirs.slice(0, dirs.length - i).join('/')}/package.json`);
+}
+
+/** Whether a workflow runs package scripts or names one of the changed files. */
+export function workflowRunsChanges(content: string, changedPaths: readonly string[]): boolean {
+  return PACKAGE_SCRIPT_RE.test(content) || changedPaths.some((path) => content.includes(path));
+}
+
+/**
+ * e: when the PR changes scripts, tests or CI, the root and workspace `package.json` and the
+ * workflows under `.github/workflows` that run package scripts or name a changed file, each looked
+ * up for every such changed file so a batch holding one of them gets it.
+ */
+async function buildWiringLookups(reader: ContextReader, reviewed: readonly ReviewedFile[]): Promise<Lookup[]> {
+  const triggers = reviewed.map((f) => f.path).filter(isBuildWiringChange);
+  if (triggers.length === 0) return [];
+  const listed = (await reader.list(WORKFLOWS_DIR)).filter((path) => /\.ya?ml$/i.test(path)).sort();
+  for (const path of listed.slice(MAX_WORKFLOW_FILES)) reader.leftOut.push(`${path} (not looked up)`);
+  const workflows = listed.slice(0, MAX_WORKFLOW_FILES);
+  const accept = (content: string): boolean => workflowRunsChanges(content, triggers);
+  const kind = 'build-config' as const;
+  return triggers.flatMap((forPath): Lookup[] => {
+    const workspace = workspaceManifestCandidates(forPath);
+    return [
+      { candidates: ['package.json'], kind, reason: 'root package manifest (scripts)', forPath, disclose: true },
+      ...(workspace.length > 0
+        ? [{ candidates: workspace, kind, reason: 'workspace package manifest (scripts)', forPath, disclose: false }]
+        : []),
+      ...workflows.map(
+        (path): Lookup => ({ candidates: [path], kind, reason: 'CI workflow that runs the scripts', forPath, disclose: true, accept }),
+      ),
+    ];
+  });
+}
+
 /**
  * Reads the repository context of the reviewed files at the PR head, in priority order: each
- * changed file's full version, then sibling tests/implementations, then local imports. An added
+ * changed file's full version, then sibling tests/implementations, then local imports, then the
+ * build and CI wiring of a PR that changes scripts, tests or CI. An added
  * file is not read (its patch is the whole file). The engine fits what is returned to
  * `review.contextTokens`; reads are capped at {@link MAX_CONTEXT_READS} and shared per client.
  */
@@ -338,6 +433,7 @@ export async function gatherRepositoryContext(client: GitHubClient, params: Gath
     importLookups(file.path, reader.known.get(file.path) ?? patchNewSide(file.patch ?? '')),
   );
   await reader.run([...pairs, ...imports]);
+  await reader.run(await buildWiringLookups(reader, reviewed));
   return { files: reader.found, leftOut: reader.leftOut };
 }
 

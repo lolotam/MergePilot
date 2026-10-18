@@ -158,16 +158,16 @@ describe('SkillsCard (ADR-0034)', () => {
 
   it('adds a template as a new skill with a free name', async () => {
     const user = userEvent.setup();
-    const server = fakeSkillsServer([skill({ name: 'security' })]);
+    const server = fakeSkillsServer([skill({ name: 'security and data safety' })]);
     renderCard();
-    await findRow('security');
-    await user.click(screen.getByRole('button', { name: 'Security' }));
+    await findRow('security and data safety');
+    await user.click(screen.getByRole('button', { name: 'Security and data safety' }));
 
     await waitFor(() => expect(server.writes()).toHaveLength(1));
     const security = SKILL_TEMPLATES.find((t) => t.id === 'security');
-    expect(security?.content).toMatch(/^# Security/);
-    // "Security" is taken (names are unique ignoring case), so the next free name.
-    expect(server.writes()[0]?.body).toEqual({ name: 'Security 2', content: security?.content });
+    expect(security?.content).toMatch(/^# Security and data safety/);
+    // The template's name is taken (names are unique ignoring case), so the next free name.
+    expect(server.writes()[0]?.body).toEqual({ name: 'Security and data safety 2', content: security?.content });
   });
 
   it('will not save an edit while the picked replacement file was refused', async () => {
