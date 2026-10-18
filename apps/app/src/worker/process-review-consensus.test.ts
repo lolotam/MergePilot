@@ -130,6 +130,69 @@ describe('processReviewJob — consensus mode', () => {
     expect(h.created[0]?.body).not.toContain('Below agreement');
   });
 
+  // PayPos.systems#361: the same claim reported with different titles by two of four bots.
+  const sameClaimFindings = {
+    'main-model': [{
+      ...finding('Equal-revision replays can replace authoritative snapshot figures'),
+      body: 'After an uncertain save, a replacement snapshot can already contain that edit. Replaying the retained request ' +
+        'passes this strict revision comparison, and the cached response replaces the session total and other lines.',
+    }],
+    'bot3-model': [{
+      ...finding('Equal-revision replays overwrite fresher visit totals'),
+      body: 'After an uncertain save, a refreshed snapshot may already include that edit plus changes to other lines. ' +
+        'Replaying the retained key passes this strict revision comparison and replaces the refreshed session total.',
+    }],
+    'bot2-model': [{
+      ...finding('Busy-kept editor closes without showing a known refusal'),
+      body: 'The editor stays open only while editBusy is true; when the lock drops, a refused save unmounts the form ' +
+        'and its error message is never visible.',
+    }],
+  };
+  const fourBots = [{ slot: 2, name: 'Owl' }, { slot: 3, name: 'Fox' }, { slot: 4, name: 'Star' }];
+  const consensusJudge = (fallback: JudgeSettings['fallback']): JudgeSettings => ({
+    enabled: true, provider: 'typesafe', model: 'jev-latest', uses: ['consensus'], threshold: 0.35, fallback,
+  });
+
+  it('publishes one comment for the same claim by wording, whatever the judge answers, and names the judge that answered', async () => {
+    const h = await panelSetup({
+      settings: { ...consensus(1), judge: consensusJudge([{ provider: 'vercel-gateway', model: 'typesafe-ai/jev' }]) },
+      bots: fourBots,
+      findings: sameClaimFindings,
+    });
+    const asked: number[] = [];
+    h.deps.judgeFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('typesafe.ai')) return new Response(JSON.stringify({ error: { message: 'bad key' } }), { status: 401 });
+      const ids = Object.keys((JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }).questions);
+      asked.push(ids.length);
+      const answers = Object.fromEntries(ids.map((id) => [id, { type: 'noul', noul: 0.3 }]));
+      return new Response(JSON.stringify({ answers, usage: { input_tokens: 10, output_tokens: 0 } }), { status: 200 });
+    });
+    await processReviewJob(h.job, h.deps);
+
+    // Only Owl's different issue goes to the judge (against each of the other two); its "no" splits nothing else.
+    expect(asked).toEqual([2]);
+    const bodies = h.created[0]!.comments.map((c) => c.body);
+    expect(bodies).toHaveLength(2);
+    expect(bodies.filter((b) => b.includes('_Found by: MergePilot, Fox (2/4)_'))).toHaveLength(1);
+    expect(bodies.filter((b) => b.includes('_Found by: Owl (1/4)_'))).toHaveLength(1);
+    expect(h.created[0]?.body).toContain('> Jev: `vercel-gateway:typesafe-ai/jev (fallback 1; typesafe failed: auth)`');
+  });
+
+  it('still publishes one comment for the same claim when every judge entry fails, and says so', async () => {
+    const h = await panelSetup({
+      settings: { ...consensus(1), judge: consensusJudge([]) },
+      bots: fourBots,
+      findings: sameClaimFindings,
+    });
+    h.deps.judgeFetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'down' } }), { status: 503 }));
+    await processReviewJob(h.job, h.deps);
+
+    const bodies = h.created[0]!.comments.map((c) => c.body);
+    expect(bodies.filter((b) => b.includes('_Found by: MergePilot, Fox (2/4)_'))).toHaveLength(1);
+    expect(bodies).toHaveLength(2);
+    expect(h.created[0]?.body).toContain('> ⚠️ Jev same-issue check unavailable: server — findings were merged by title and wording only');
+  });
+
   it('uses slot 1\'s marker as the incremental base for the whole panel', async () => {
     const h = await panelSetup({ settings: consensus(1), bots: [{ slot: 2 }] });
     await processReviewJob(h.job, h.deps);

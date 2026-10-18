@@ -1,4 +1,4 @@
-import { hasJudgeUse } from '@mergepilot/engine';
+import { describeAnsweredBy, hasJudgeUse } from '@mergepilot/engine';
 import {
   capConsensusClusters,
   dedupeJudgeOf,
@@ -88,7 +88,8 @@ export async function publishConsensus(
     maxUsd: dedupeJudge ? budget() : undefined,
     botSlot: MAIN_BOT_SLOT,
   });
-  addJudgeUsage(holder.pending, judge?.judge.report());
+  const judgeReport = judge?.judge.report();
+  addJudgeUsage(holder.pending, judgeReport);
   // One published review: the findings limit is for the merged total, not each bot (ADR-0033). It
   // is applied to what survives the dedupe, so no slot goes to a finding already on the PR.
   const notPublished = new Set(deduped.kept);
@@ -122,6 +123,8 @@ export async function publishConsensus(
     scope: reviewScopeOf(files.selection),
     incompleteReasons,
     judgeUnavailable: merge.semantic?.unavailable,
+    // Which judge entry answered the merge's checks, so a fallback that answered is disclosed (ADR-0015).
+    judgeAnsweredBy: judgeReport?.answeredBy ? describeAnsweredBy(judgeReport.answeredBy) : undefined,
     verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),

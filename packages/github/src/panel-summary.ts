@@ -44,6 +44,8 @@ export interface PanelSummaryInput {
   incompleteReasons?: string[] | undefined;
   /** Code when the judge's same-issue check for the merge was unavailable. */
   judgeUnavailable?: string | undefined;
+  /** "provider:model (fallback n; … failed: code)" of the judge entry that answered the merge's checks. */
+  judgeAnsweredBy?: string | undefined;
   /** Every bot's findings its verification pass rejected, each naming the bot (ADR-0028). */
   verifyRejected?: readonly VerifyRejectedItem[] | undefined;
   /** Nested rules files left out of the review (ADR-0028). */
@@ -78,7 +80,7 @@ const EN: Labels = {
   status: { completed: '✅ completed', failed: '❌ failed', skipped: '⏭️ skipped' },
   agreement: (min, total) =>
     `> Kept: findings at least ${min} of ${total} bots agree on; critical and high are always kept.`,
-  judgeUnavailable: (code) => `> ⚠️ Jev same-issue check unavailable: ${code} — findings were merged by title only`,
+  judgeUnavailable: (code) => `> ⚠️ Jev same-issue check unavailable: ${code} — findings were merged by title and wording only`,
   incomplete: '### ⚠️ Warning: Incomplete review',
   outside: '### Findings outside the diff',
   below: (n) => `Below agreement (${n})`,
@@ -95,7 +97,7 @@ const AR: Labels = {
   status: { completed: '✅ اكتملت', failed: '❌ فشلت', skipped: '⏭️ تم التخطي' },
   agreement: (min, total) =>
     `> المعروض: الملاحظات التي اتفق عليها ${min} من ${total} مراجعين على الأقل؛ الملاحظات الحرجة والعالية تُعرض دائمًا.`,
-  judgeUnavailable: (code) => `> ⚠️ فحص Jev لنفس المشكلة غير متاح: ${code} — تم الدمج بالعنوان فقط`,
+  judgeUnavailable: (code) => `> ⚠️ فحص Jev لنفس المشكلة غير متاح: ${code} — تم الدمج بالعنوان والصياغة فقط`,
   incomplete: '### ⚠️ تحذير: مراجعة غير مكتملة',
   outside: '### ملاحظات خارج التغييرات',
   below: (n) => `أقل من حد الاتفاق (${n})`,
@@ -150,6 +152,7 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
     if (bot.fallback && bot.status === 'completed') sections.push(`${renderFallbackNotice(bot.modelLabel, bot.fallback, isArabic)} — **${escapeInline(bot.name)}**`);
   }
   if (input.minAgreement > 1) sections.push(labels.agreement(input.minAgreement, merge.total));
+  if (input.judgeAnsweredBy) sections.push(`> Jev: \`${neutralize(input.judgeAnsweredBy)}\``);
   if (input.judgeUnavailable) sections.push(labels.judgeUnavailable(neutralize(input.judgeUnavailable)));
 
   const reasons = input.incompleteReasons ?? [];

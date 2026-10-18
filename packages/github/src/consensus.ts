@@ -7,14 +7,18 @@ import {
   type Secret,
 } from '@mergepilot/engine';
 import { escapeInline } from './bot-identity.js';
+import { sameClaim } from './claim-similarity.js';
 import { normalizeTitle } from './dedupe.js';
 
 /**
  * Consensus mode of the reviewer panel (ADR-0017): the findings of every bot that completed are
  * merged into clusters. A cluster is findings on the same path with start lines within ±3 and
- * either the same normalized title or, when a judge is supplied, a "same issue?" answer of 0.8 or
- * more. Each cluster keeps its most severe version and the bots that found it. Clusters found by
- * fewer than `minAgreement` bots are set aside, except critical and high ones, and returned so the
+ * either the same normalized title, the same claim by wording (`sameClaim`), or, when a judge is
+ * supplied, a "same issue?" answer of 0.8 or more. The wording rule needs no judge, so a judge that
+ * is off, over budget or unavailable never splits a duplicate the words already show. A cluster
+ * holds at most one finding per bot: a bot never agrees with itself, so two findings of one bot
+ * are never chained into one cluster. Each cluster keeps its most severe version and the bots
+ * that found it. Clusters found by fewer than `minAgreement` bots are set aside, except critical and high ones, and returned so the
  * summary can list them: nothing is dropped silently. The kept clusters are then capped at
  * `maxFindings`, the published review's findings limit (ADR-0033); the clusters over it are
  * returned for the summary too.
@@ -79,12 +83,17 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
     ...bot.summaryOnly.map((finding) => ({ slot: bot.slot, name: bot.name, kind: 'summaryOnly' as const, finding })),
   ]);
   const parent = entries.map((_, i) => i);
+  const slots = entries.map((e) => new Set([e.slot]));
   const find = (i: number): number => {
     while (parent[i] !== i) i = parent[i] = parent[parent[i]!]!;
     return i;
   };
   const union = (a: number, b: number): void => {
-    parent[find(a)] = find(b);
+    const ra = find(a);
+    const rb = find(b);
+    if (ra === rb || [...slots[ra]!].some((slot) => slots[rb]!.has(slot))) return;
+    parent[ra] = rb;
+    for (const slot of slots[ra]!) slots[rb]!.add(slot);
   };
 
   const pairs: SameIssuePair[] = [];
@@ -94,7 +103,7 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
       const ea = entries[a]!;
       const eb = entries[b]!;
       if (!nearby(ea, eb)) continue;
-      if (sameTitle(ea.finding, eb.finding)) {
+      if (sameTitle(ea.finding, eb.finding) || sameClaim(ea.finding, eb.finding)) {
         union(a, b);
       } else if (input.judge && pairs.length < MAX_CONSENSUS_PAIRS) {
         const key = `c${pairs.length + 1}`;

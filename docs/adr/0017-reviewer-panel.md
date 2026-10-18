@@ -102,7 +102,8 @@ name, logo, provider, model and fallback chain, like duplicating the bot. His an
 3. **Consensus mode:** the bots run without publishing. Then:
    - **Merge.** A cluster is findings on the same path, with start lines within ±3, and either
      the same normalized title or, when the Jev judge is on, a "same issue?" answer of 0.8 or more
-     from `judge.decide`.
+     from `judge.decide`. The amendment «Deterministic same-issue rule» below adds a wording rule
+     that needs no judge.
    - **Keep.** Each cluster keeps its highest-severity version and lists which bots found it (n/N).
    - **Drop.** Clusters found by fewer than `panelMinAgreement` bots are dropped, except critical
      and high. The summary's collapsible section lists them as "below agreement (n)", so nothing is
@@ -140,3 +141,78 @@ name, logo, provider, model and fallback chain, like duplicating the bot. His an
   `no key`, so the gap is visible on the runs page.
 - The runs list shows one row per bot per head. "Retry failed" still checks for any active run on
   the head before queuing, so it never starts a second job while a bot is running.
+
+## Amendment (2026-10-18): deterministic same-issue rule
+
+### Context
+
+On PayPos.systems#361 (review of 2026-10-18 03:36 UTC, 4 bots in consensus mode), two bots
+reported the same defect on the same line, `session-saved-visit.tsx:52`:
+
+- "Equal-revision replays can replace authoritative snapshot figures" (MergePilot_Bot);
+- "Equal-revision replays overwrite fresher visit totals" (mohamed_Bot).
+
+Two inline comments were published, each "1/4". The owner fixed both with one commit and gave both
+the same reply. The titles share 3 of 7 words, so the normalized-title check failed and the pair went
+to the Jev judge. It was the only nearby pair from different bots, and the worker log shows one
+one-question judge request on the main bot's run after every bot finished. The first two judge
+entries failed with `quota`, and `vercel-gateway:typesafe-ai/jev` answered. The summary showed no
+"unavailable" banner and the findings stayed apart, so its answer was below 0.8. The judge did not fail silently: when every entry fails, the
+summary already shows the "same-issue check unavailable" banner. The gap was that a different title
+left the merge to one judge answer, and to nothing when the judge is off or unavailable.
+
+### Decision
+
+1. **Wording rule.** Two findings from different bots are one cluster when all of these hold:
+   - same kind (inline or outside the diff) and same path;
+   - lines within ±3 (`CONSENSUS_LINE_WINDOW`);
+   - their claims match (`sameClaim` in `packages/github/src/claim-similarity.ts`).
+
+   The claim is compared like this:
+   - the claim is the title and body. The evidence is left out, because two different issues on one
+     line often quote the same code. The `<sub>…</sub>` Jev confidence line is left out too;
+   - words are lowercased and camelCase is split. Stop words, numbers and words under 3 letters are
+     dropped. The suffixes `ing`, `ed`, `es`, `s` and `e` are cut while 4 letters remain;
+   - the claims match when they share at least 4 words (`CLAIM_MIN_SHARED_WORDS`) and the Dice
+     coefficient of the two word sets is at least 0.35 (`CLAIM_SIMILARITY_THRESHOLD`).
+
+   The rule runs before the judge. The judge is asked only about nearby pairs that neither the title
+   nor the wording matched. It can add merges, and it never splits a pair the wording rule merged.
+2. **One finding per bot in a cluster.** Two findings of one bot are never chained into one cluster
+   through another bot's finding: a bot never agrees with itself, and its second finding would be
+   lost. Chains across different bots (A like B, B like C) still form one cluster.
+3. **Kept version.** A cluster still publishes one bot's whole finding: the most severe, ties going
+   to the lowest slot. No evidence from another bot is mixed into it, so the body, its evidence and
+   its Jev line stay one coherent comment. Every bot of the cluster counts toward
+   `panelMinAgreement` and the "Found by … (n/N)" label.
+4. **Disclosure.** The banner for an unavailable judge now says the findings were merged "by title
+   and wording only". The panel summary also names the judge entry that answered the merge's checks
+   (`> Jev: provider:model (fallback n; … failed: code)`), as a single bot's summary already does.
+
+### Calibration
+
+Dice scores of real pairs from different bots within 7 lines of each other (title and body,
+evidence left out; the last two pairs are outside ±3 and were scored only to test the threshold):
+
+| Pair | Same issue? | Dice | Shared words |
+|---|---|---|---|
+| PayPos#361 line 52: the two "Equal-revision replays" findings | yes | 0.48 | 16 |
+| PayPos#321 line 162: performers omitted from locked current-link reads / current links read without being locked | yes | 0.46 | 16 |
+| PayPos#361 lines 20/21: stale replay response / busy-kept editor hides a refusal (same evidence line) | no | 0.17 | 7 |
+| eyadex#78 lines 134/132: replay excludes finance fields / raw ZodError | no | 0.22 | 7 |
+| PayPos#321 lines 53/60: retention not wired into price edits / D-11 forces removing performers | no | 0.23 | 10 |
+| MergePilot#145 lines 13/20: 32-bit `databaseId` / pagination truncates at 10 pages | no | 0.18 | 8 |
+
+The threshold sits between the two groups. The sample is small, so the constants are named and a
+later tuning is a one-line change.
+
+### Consequences
+
+- The PayPos#361 pair is now one comment, "Found by: MergePilot_Bot, mohamed_Bot (2/4)", with or
+  without a judge.
+- Findings of one issue in different files (PayPos#254 P1/P2: the migration and the schema) stay
+  separate. This rule compares findings in one file.
+- Two different issues described with mostly the same words on neighbouring lines can merge. The
+  comment still names every bot of the cluster, and its body is one bot's own.
+- At most 50 nearby pairs are still sent to the judge (`MAX_CONSENSUS_PAIRS`). The wording rule now
+  merges the clear pairs before they count toward that cap.
