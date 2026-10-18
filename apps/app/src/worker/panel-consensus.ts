@@ -92,6 +92,8 @@ export async function publishConsensus(
     botSlot: MAIN_BOT_SLOT,
   });
   const judgeReport = judge?.judge.report();
+  // The dedupe's request was the last one, so the final report names the entry that answered it.
+  const dedupeAnsweredBy = deduped.semantic && deduped.semantic.checked > 0 ? judgeReport?.answeredBy : undefined;
   addJudgeUsage(holder.pending, judgeReport);
   // One published review: the findings limit is for the merged total, not each bot (ADR-0033). It
   // is applied to what survives the dedupe, so no slot goes to a finding already on the PR.
@@ -128,6 +130,7 @@ export async function publishConsensus(
     judgeUnavailable: merge.semantic?.unavailable,
     // Which judge entry answered the merge's question, so a fallback that answered is disclosed (ADR-0015).
     judgeAnsweredBy: mergeAnsweredBy ? describeAnsweredBy(mergeAnsweredBy) : undefined,
+    dedupeJudgeAnsweredBy: dedupeAnsweredBy ? describeAnsweredBy(dedupeAnsweredBy) : undefined,
     verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),

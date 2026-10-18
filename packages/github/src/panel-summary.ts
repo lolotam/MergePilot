@@ -46,6 +46,8 @@ export interface PanelSummaryInput {
   judgeUnavailable?: string | undefined;
   /** "provider:model (fallback n; … failed: code)" of the judge entry that answered the merge's checks. */
   judgeAnsweredBy?: string | undefined;
+  /** The same, for the check against earlier comments; set only when that check asked the judge. */
+  dedupeJudgeAnsweredBy?: string | undefined;
   /** Every bot's findings its verification pass rejected, each naming the bot (ADR-0028). */
   verifyRejected?: readonly VerifyRejectedItem[] | undefined;
   /** Nested rules files left out of the review (ADR-0028). */
@@ -64,6 +66,7 @@ interface Labels {
   status: Record<PanelBotRow['status'], string>;
   agreement: (min: number, total: number) => string;
   judgeUnavailable: (code: string) => string;
+  dedupeAnsweredBy: (entry: string) => string;
   incomplete: string;
   outside: string;
   below: (n: number) => string;
@@ -81,6 +84,7 @@ const EN: Labels = {
   agreement: (min, total) =>
     `> Kept: findings at least ${min} of ${total} bots agree on; critical and high are always kept.`,
   judgeUnavailable: (code) => `> ⚠️ Jev same-issue check unavailable: ${code} — findings were merged by title and wording only`,
+  dedupeAnsweredBy: (entry) => `> Jev (earlier comments): \`${entry}\``,
   incomplete: '### ⚠️ Warning: Incomplete review',
   outside: '### Findings outside the diff',
   below: (n) => `Below agreement (${n})`,
@@ -98,6 +102,7 @@ const AR: Labels = {
   agreement: (min, total) =>
     `> المعروض: الملاحظات التي اتفق عليها ${min} من ${total} مراجعين على الأقل؛ الملاحظات الحرجة والعالية تُعرض دائمًا.`,
   judgeUnavailable: (code) => `> ⚠️ فحص Jev لنفس المشكلة غير متاح: ${code} — تم الدمج بالعنوان والصياغة فقط`,
+  dedupeAnsweredBy: (entry) => `> Jev (التعليقات السابقة): \`${entry}\``,
   incomplete: '### ⚠️ تحذير: مراجعة غير مكتملة',
   outside: '### ملاحظات خارج التغييرات',
   below: (n) => `أقل من حد الاتفاق (${n})`,
@@ -153,6 +158,7 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   }
   if (input.minAgreement > 1) sections.push(labels.agreement(input.minAgreement, merge.total));
   if (input.judgeAnsweredBy) sections.push(`> Jev: \`${neutralize(input.judgeAnsweredBy)}\``);
+  if (input.dedupeJudgeAnsweredBy) sections.push(labels.dedupeAnsweredBy(neutralize(input.dedupeJudgeAnsweredBy)));
   if (input.judgeUnavailable) sections.push(labels.judgeUnavailable(neutralize(input.judgeUnavailable)));
 
   const reasons = input.incompleteReasons ?? [];

@@ -203,7 +203,11 @@ left the merge to one judge answer, and to nothing when the judge is off or unav
    and wording only". When the merge asked the judge and it answered, the panel summary also names
    the judge entry that answered (`> Jev: provider:model (fallback n; … failed: code)`), as a
    single bot's summary already does. This is read right after the merge, before the dedupe
-   against earlier comments makes its own judge request.
+   against earlier comments makes its own judge request. When that dedupe asked the judge and it
+   answered, its own line names the entry that answered it:
+   `> Jev (earlier comments): provider:model (…)` (Arabic: `> Jev (التعليقات السابقة): …`). So a
+   fallback that answered only the dedupe is disclosed too (ADR-0015). Each line appears only when
+   its check asked the judge.
 
 ### Calibration
 

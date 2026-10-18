@@ -194,29 +194,45 @@ describe('processReviewJob — consensus mode', () => {
     expect(h.created[0]?.body).toContain('> ⚠️ Jev same-issue check unavailable: server — findings were merged by title and wording only');
   });
 
-  it('names no judge for the merge when only the check against earlier comments asked it', async () => {
+  /** Consensus + dedupe judge whose primary fails, with an earlier slot-1 comment on the same line. */
+  async function judgedAgainstEarlierComment(owlTitle: string) {
     const earlier = { id: 'old', side: 'RIGHT' as const, ...finding('Unclosed file handle') } as Parameters<typeof renderFindingComment>[0];
+    const judge = { ...consensusJudge([{ provider: 'vercel-gateway', model: 'typesafe-ai/jev' }]), uses: ['consensus', 'dedupe'] } as JudgeSettings;
     const h = await panelSetup({
-      settings: { ...consensus(1), judge: { ...consensusJudge([]), uses: ['consensus', 'dedupe'] } },
+      settings: { ...consensus(1), judge },
       bots: [{ slot: 2, name: 'Owl' }],
-      findings: { 'main-model': [finding('Null dereference')], 'bot2-model': [finding('null dereference!')] },
+      findings: { 'main-model': [finding('Null dereference')], 'bot2-model': [finding(owlTitle)] },
       comments: [
         { id: 1, path: 'src/app.ts', line: 2, user: { login: PUBLISHER }, body: renderFindingComment(earlier, { language: 'en', suggestionsAsCode: false }) },
       ],
     });
     const asked: number[] = [];
-    h.deps.judgeFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+    h.deps.judgeFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('typesafe.ai')) return new Response(JSON.stringify({ error: { message: 'bad key' } }), { status: 401 });
       const ids = Object.keys((JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }).questions);
       asked.push(ids.length);
       const answers = Object.fromEntries(ids.map((id) => [id, { type: 'noul', noul: 0.1 }]));
       return new Response(JSON.stringify({ answers, usage: { input_tokens: 10, output_tokens: 0 } }), { status: 200 });
     });
     await processReviewJob(h.job, h.deps);
+    return { body: h.created[0]!.body, comments: h.created[0]!.comments, asked };
+  }
+  const fallbackLabel = 'vercel-gateway:typesafe-ai/jev (fallback 1; typesafe failed: auth)';
 
+  it('names the fallback that answered the check against earlier comments, and no merge judge when the merge asked none', async () => {
+    const { body, comments, asked } = await judgedAgainstEarlierComment('null dereference!');
     // The two titles merge without the judge; only the dedupe asks it, about the earlier comment.
     expect(asked).toEqual([1]);
-    expect(h.created[0]?.comments[0]?.body).toContain('_Found by: MergePilot, Owl (2/2)_');
-    expect(h.created[0]?.body).not.toContain('> Jev:');
+    expect(comments[0]?.body).toContain('_Found by: MergePilot, Owl (2/2)_');
+    expect(body).toContain(`> Jev (earlier comments): \`${fallbackLabel}\``);
+    expect(body).not.toContain('> Jev: ');
+  });
+
+  it('names the judge entry for the merge and for the earlier comments when both asked it', async () => {
+    const { body, asked } = await judgedAgainstEarlierComment('Missing null check');
+    expect(asked).toEqual([1, 2]);
+    expect(body).toContain(`> Jev: \`${fallbackLabel}\``);
+    expect(body).toContain(`> Jev (earlier comments): \`${fallbackLabel}\``);
   });
 
   it('uses slot 1\'s marker as the incremental base for the whole panel', async () => {
