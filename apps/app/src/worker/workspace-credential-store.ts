@@ -9,16 +9,16 @@ export class WorkspaceCredentialStore implements CredentialStore {
   private readonly extra: Secret[] = [];
 
   /**
-   * `subscriptionOnly`: the bot was admitted free on its subscription (ADR-0033), so every resolve
-   * for the primary provider (including the refresh before each call) returns that subscription,
+   * `subscriptionOnlyProviders`: the bot was admitted free (ADR-0033, ADR-0035), so every resolve
+   * for these providers (including the refresh before each call) returns their subscription,
    * never an API key the default may have switched to since.
    */
   constructor(
     private readonly workspaceId: string,
     private readonly credentials: ProcessReviewCredentials,
-    private readonly primaryProvider: ApiProvider,
+    primaryProvider: ApiProvider,
     primarySecret: Secret,
-    private readonly options: { subscriptionOnly?: boolean } = {},
+    private readonly options: { subscriptionOnlyProviders?: ReadonlySet<string> } = {},
   ) {
     this.secrets.set(primaryProvider, primarySecret);
   }
@@ -38,7 +38,7 @@ export class WorkspaceCredentialStore implements CredentialStore {
 
   async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
     const provider = ref.provider as ApiProvider;
-    if (this.options.subscriptionOnly && provider === this.primaryProvider) {
+    if (this.options.subscriptionOnlyProviders?.has(provider)) {
       const subscription = await admittedSubscription(this.credentials, this.workspaceId, provider);
       this.secrets.set(ref.provider, subscription);
       return subscription;

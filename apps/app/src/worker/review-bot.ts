@@ -19,6 +19,7 @@ import { customBaseUrlFor, fallbackChain, skippedFallbacksNote, usedModel, type 
 import type { BotOutcome, BotRun, PanelContext } from './panel-types.js';
 import { CursorWrites, loadRosters, rosterSecrets, rotationHandler, type KeyRotationDisclosure } from './key-roster.js';
 import { prepareRunResult } from './prepare-run-result.js';
+import { addRedactionCredentials } from './redaction-credentials.js';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewResult } from './types.js';
 import { apiEquivalentFields, apiEquivalentPrice, type ApiEquivalentPrice } from './api-equivalent.js';
@@ -45,12 +46,13 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
   let credStore: WorkspaceCredentialStore | undefined;
   const cursorWrites = new CursorWrites();
   try {
-    const fallbackList = fallbackChain(br.bot.fallback, choice);
+    const fallbackList = fallbackChain(slot === MAIN_BOT_SLOT ? settings.fallback ?? [] : br.bot.fallback, choice);
+    const allowedFallbacks = fallbackList.filter((entry) => !br.skipPaidFallbacks?.includes(entry.provider));
     const customBaseUrl = await customBaseUrlFor(
       deps.store,
       workspaceId,
       choice.provider,
-      fallbackList.map((f) => f.provider),
+      allowedFallbacks.map((f) => f.provider),
       deps.ssrfLookup,
     );
     // Slot 1's config (and its price) was built once by the shared steps; an extra bot prices its own model.
@@ -58,14 +60,15 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       slot === MAIN_BOT_SLOT
         ? ctx.mainConfig
         : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store, skillKeyOf([br.bot]));
-    const providerIds = [choice.provider, ...fallbackList.map((fallback) => fallback.provider)];
-    // Admitted free, the bot keeps that decision for its whole run (ADR-0033): its provider runs on
-    // the subscription it was admitted with, whatever the default method is now.
+    const providerIds = [choice.provider, ...allowedFallbacks.map((fallback) => fallback.provider)];
+    // Admitted free, every allowed provider stays on its subscription for the whole run
+    // (ADR-0033, ADR-0035), whatever the default method or API keys become.
     const subscriptionOnly = br.admittedFree === true;
+    const subscriptionOnlyProviders = new Set(subscriptionOnly ? providerIds : []);
     const dualMethods = withinAdmission(
       await dualMethodsForProviders(deps.credentials, workspaceId, providerIds, logger),
       br.admittedFree,
-      choice.provider,
+      subscriptionOnlyProviders,
     );
     const { effectiveConfig, rulesFiles, configHash, pricing: configuredPricing } = dualMethods[choice.provider as ApiProviderId]
       ? await apiPricedConfig(builtConfig, deps.store, settings, choice)
@@ -85,7 +88,9 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     } else {
       primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
     }
-    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnly });
+    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders });
+    await addRedactionCredentials(deps.credentials, workspaceId,
+      [...subscriptionOnlyProviders, ...(br.skipPaidFallbacks ?? [])], choice.provider, credStore);
     const rotationEvents: KeyRotationDisclosure[] = [];
     const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>
       rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds, cursorWrites);
@@ -103,7 +108,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
       // No key roster for a subscription-only provider: the engine would rotate over paid keys.
-      const rosterProviders = subscriptionOnly ? providerIds.filter((provider) => provider !== choice.provider) : providerIds;
+      const rosterProviders = providerIds.filter((provider) => !subscriptionOnlyProviders.has(provider));
       const { rosters, keyIds } = await loadRosters(deps.credentials, workspaceId, rosterProviders, choice.provider, logger, dualMethods);
       credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {
@@ -111,6 +116,9 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         keyRosters: rosters,
         onKeyRotation: makeRotationHandler(keyIds),
         dualMethods,
+        skipFallback: (entry) => br.skipPaidFallbacks?.includes(entry.provider)
+          ? 'skipped: the review was admitted free under the monthly budget'
+          : undefined,
         ...(customBaseUrl
           ? { customBaseUrl, customFetch: deps.customFetch ?? createSafeFetch({ lookup: deps.ssrfLookup, ...REVIEW_FETCH_LIMITS }) }
           : {}),
@@ -286,7 +294,9 @@ function recordOf(
   } else if (status === 'skipped') {
     findingsCount = 0;
   }
-  const detail = review.detail ?? skippedNote ?? judgeNote ?? null;
+  const detail = br.skipPaidFallbacks?.length
+    ? [review.detail, skippedNote].filter(Boolean).join('; ') || judgeNote || null
+    : review.detail ?? skippedNote ?? judgeNote ?? null;
   const used = usedModel(
     choice,
     { ...ctx.settings, fallback: br.bot.fallback },

@@ -189115,10 +189115,30 @@ async function resolveKey(store, provider) {
   }
   return store.resolve({ provider }, "review");
 }
-async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rotation, dualMethods) {
+async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rotation, dualMethods, skipFallback) {
   const resolved = { models: [], secrets: [], skipped: [] };
   for (const entry of config2.fallback ?? []) {
     const label = `${entry.provider}:${entry.model}`;
+    const reason = skipFallback?.(entry);
+    if (reason !== void 0) {
+      try {
+        const key2 = await resolveKey(store, entry.provider);
+        if (key2)
+          resolved.secrets.push(key2);
+      } catch {
+      }
+      const roster2 = rosterFor(rotation, entry.provider);
+      if (roster2)
+        resolved.secrets.push(...roster2.keys);
+      if (dualMethods?.[entry.provider]?.defaultMethod === "api-key") {
+        try {
+          resolved.secrets.push(await store.resolve({ provider: entry.provider, method: "subscription" }, "review"));
+        } catch {
+        }
+      }
+      resolved.skipped.push({ label, reason });
+      continue;
+    }
     let key;
     try {
       key = await resolveKey(store, entry.provider);
@@ -189199,7 +189219,7 @@ async function createReviewModel(config2, store, opts) {
       ...config2.model ? { model: config2.model } : {},
       ...opts.configDir ? { configDir: opts.configDir } : {}
     });
-    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch, rotation)));
+    return Object.assign(runner, attachments(token, await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch, rotation, void 0, opts.skipFallback)));
   }
   if (!isApiProviderId(config2.provider)) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
@@ -189220,7 +189240,7 @@ async function createReviewModel(config2, store, opts) {
   const chain = { models: [], secrets: [...primary.secrets], skipped: [] };
   if (dual)
     addOtherMethod(chain, await otherMethodEntry(spec, dual.defaultMethod, store, rotation));
-  const configured = await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch, rotation, opts.dualMethods);
+  const configured = await resolveFallbacks(config2, store, opts.customBaseUrl, opts.customFetch, rotation, opts.dualMethods, opts.skipFallback);
   chain.models.push(...configured.models);
   chain.secrets.push(...configured.secrets);
   chain.skipped.push(...configured.skipped);

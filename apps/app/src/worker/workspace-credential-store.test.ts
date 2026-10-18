@@ -146,7 +146,7 @@ describe('a bot admitted free on its subscription (ADR-0033)', () => {
   });
 
   it('keeps answering every resolve of its provider, refreshes included, with the subscription', async () => {
-    const store = new WorkspaceCredentialStore('ws', switched(envelope), 'anthropic', envelope, { subscriptionOnly: true });
+    const store = new WorkspaceCredentialStore('ws', switched(envelope), 'anthropic', envelope, { subscriptionOnlyProviders: new Set(['anthropic']) });
     const config: MergePilotConfig = {
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',
@@ -164,7 +164,7 @@ describe('a bot admitted free on its subscription (ADR-0033)', () => {
   });
 
   it('fails with an auth failure instead of sending the API key that replaced the subscription', async () => {
-    const store = new WorkspaceCredentialStore('ws', switched(key), 'anthropic', envelope, { subscriptionOnly: true });
+    const store = new WorkspaceCredentialStore('ws', switched(key), 'anthropic', envelope, { subscriptionOnlyProviders: new Set(['anthropic']) });
 
     const failure = await store.resolve({ provider: 'anthropic' }, 'review').catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(LlmFailure);
@@ -173,8 +173,54 @@ describe('a bot admitted free on its subscription (ADR-0033)', () => {
   });
 
   it('leaves other providers on their own effective method', async () => {
-    const store = new WorkspaceCredentialStore('ws', switched(envelope), 'anthropic', envelope, { subscriptionOnly: true });
+    const store = new WorkspaceCredentialStore('ws', switched(envelope), 'anthropic', envelope, { subscriptionOnlyProviders: new Set(['anthropic']) });
 
     expect(await store.resolve({ provider: 'openai' }, 'fallback')).toBe(key);
+  });
+});
+
+describe('a free fallback provider stays on its admitted subscription (ADR-0035)', () => {
+  const subscription = () => new Secret(encodeSubscription('openai', {
+    type: 'oauth', access: 'fallback-access', refresh: 'fallback-refresh', expires: Date.now() + 3_600_000,
+  }));
+
+  it('pins every resolve, including refreshes and explicit method requests, after an API-key default switch', async () => {
+    let parent = subscription();
+    const credentials = {
+      resolve: vi.fn(async () => parent),
+      getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
+      resolveKeyRoster: vi.fn(),
+    };
+    const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', new Secret('primary'), {
+      subscriptionOnlyProviders: new Set(['anthropic', 'openai']),
+    });
+    expect(await store.resolve({ provider: 'openai' }, 'review')).toBe(parent);
+    parent = subscription();
+    for (const method of [undefined, 'subscription', 'api-key'] as const) {
+      expect(await store.resolve({ provider: 'openai', ...(method ? { method } : {}) }, 'review')).toBe(parent);
+    }
+    expect(credentials.getEffectiveAuthMethod).not.toHaveBeenCalled();
+    expect(credentials.resolveKeyRoster).not.toHaveBeenCalled();
+    expect(store.getKnownSecrets()).toContain(parent);
+  });
+
+  it('fails with INVALID_CREDENTIAL if the fallback subscription is replaced mid-run, without using its cached envelope or the new key', async () => {
+    let parent = subscription();
+    const credentials = {
+      resolve: vi.fn(async () => parent),
+      getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
+      resolveKeyRoster: vi.fn(),
+    };
+    const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', new Secret('primary'), {
+      subscriptionOnlyProviders: new Set(['anthropic', 'openai']),
+    });
+    await store.resolve({ provider: 'openai' }, 'review');
+    parent = new Secret('replacement-key');
+    for (const method of [undefined, 'subscription', 'api-key'] as const) {
+      await expect(store.resolve({ provider: 'openai', ...(method ? { method } : {}) }, 'review'))
+        .rejects.toMatchObject({ code: 'INVALID_CREDENTIAL', provider: 'openai' });
+    }
+    expect(credentials.resolveKeyRoster).not.toHaveBeenCalled();
+    expect(store.getKnownSecrets()).not.toContain(parent);
   });
 });

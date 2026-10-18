@@ -51,15 +51,19 @@ describe('withinAdmission', () => {
   const dual = { openai: { defaultMethod: 'subscription' as const }, xai: { defaultMethod: 'api-key' as const } };
 
   it('drops the paid keys behind a subscription for a bot admitted as free', () => {
-    expect(withinAdmission(dual, true, 'anthropic')).toEqual({ xai: { defaultMethod: 'api-key' } });
+    expect(withinAdmission(dual, true, new Set(['anthropic']))).toEqual({ xai: { defaultMethod: 'api-key' } });
   });
 
   it("drops both methods of a free bot's own provider, though its default switched to API keys (ADR-0033)", () => {
-    expect(withinAdmission(dual, true, 'xai')).toEqual({});
+    expect(withinAdmission(dual, true, new Set(['xai']))).toEqual({});
+  });
+
+  it('drops a free fallback provider even after its default switches to API keys', () => {
+    expect(withinAdmission(dual, true, new Set(['anthropic', 'xai']))).toEqual({});
   });
 
   it('keeps every method for a bot that holds its budget', () => {
-    expect(withinAdmission(dual, false, 'xai')).toEqual(dual);
+    expect(withinAdmission(dual, false, new Set(['xai']))).toEqual(dual);
   });
 });
 

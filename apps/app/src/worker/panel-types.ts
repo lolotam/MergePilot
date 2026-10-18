@@ -45,6 +45,8 @@ export interface BotRun {
   startedAt: number;
   /** Admitted against the monthly budget as a free subscription bot, holding nothing (ADR-0022). */
   admittedFree?: boolean;
+  /** Paid fallback providers excluded by the second budget admission pass (ADR-0035). */
+  skipPaidFallbacks?: readonly string[];
 }
 
 /** What the shared steps produced; every bot reads it, none changes it. */

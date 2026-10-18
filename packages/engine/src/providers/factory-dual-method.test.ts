@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MergePilotConfig } from '../config/schema.js';
 import { Secret } from '../credentials/secret.js';
 import type { AnyCredentialStore, CredentialInfo } from '../credentials/store.js';
 import { encodeSubscription } from '../credentials/subscription.js';
+import { redactSecrets } from '../security/redact.js';
 import type { ReviewAuthMethod } from '../review/model.js';
 import { createReviewModel } from './factory.js';
 import type { KeyRoster } from './model-builders.js';
@@ -75,6 +76,92 @@ async function build(ws: Workspace, cfg: MergePilotConfig) {
 const revealed = (secrets: readonly Secret[] | undefined) => (secrets ?? []).map((s) => s.reveal());
 
 describe('createReviewModel — dual-method chain (ADR-0027)', () => {
+  it('keeps unavailable configured fallbacks skipped after checking their credentials', async () => {
+    const ws: Workspace = { defaults: { openai: 'subscription' }, subscriptions: { openai: envelope('openai') }, rosters: {} };
+    const store = workspaceStore(ws);
+    const info = vi.spyOn(store, 'info');
+    const resolve = vi.spyOn(store, 'resolve');
+    const model = await createReviewModel(config('openai', 'gpt-5', {
+      fallback: [{ provider: 'custom', model: 'one' }, { provider: 'custom', model: 'two' }, { provider: 'openai', model: 'gpt-4' }],
+    }), store, { cwd: '/tmp', skipFallback: (entry) => entry.provider === 'custom' ? 'excluded by caller' : undefined });
+    expect(model.skippedFallbacks).toEqual([
+      { label: 'custom:one', reason: 'excluded by caller' },
+      { label: 'custom:two', reason: 'excluded by caller' },
+    ]);
+    expect(info.mock.calls.some(([ref]) => ref.provider === 'custom')).toBe(true);
+    expect(resolve.mock.calls.some(([ref]) => ref.provider === 'custom')).toBe(false);
+    expect(model.fallbacks?.map((entry) => entry.label)).toEqual(['openai:gpt-4']);
+  });
+  it('keeps a skipped fallback key and every roster key for redaction without building its model', async () => {
+    const roster = keys('anthropic');
+    const key = new Secret('anthropic-skipped-single-key');
+    const ws: Workspace = { defaults: { openai: 'subscription', anthropic: 'api-key' },
+      subscriptions: { openai: envelope('openai') }, rosters: { anthropic: [key] } };
+    const model = await createReviewModel(config('openai', 'gpt-5', {
+      fallback: [{ provider: 'anthropic', model: 'claude-sonnet-5-5' }],
+    }), workspaceStore(ws), { cwd: '/tmp', keyRosters: { anthropic: { keys: roster, startIndex: 0 } }, skipFallback: () => 'excluded by caller' });
+    expect(model.fallbacks).toBeUndefined();
+    expect(model.secrets).toEqual(expect.arrayContaining([key, ...roster]));
+    expect(model.skippedFallbacks).toEqual([{ label: 'anthropic:claude-sonnet-5-5', reason: 'excluded by caller' }]);
+  });
+
+  it.each([false, true])('keeps a fallback skipped when its key cannot be resolved (roster=%s)', async (withRoster) => {
+    const roster = keys('anthropic');
+    const primary = envelope('openai');
+    const ws: Workspace = { defaults: { openai: 'subscription', anthropic: 'api-key' },
+      subscriptions: { openai: primary }, rosters: {} };
+    const store = workspaceStore(ws);
+    const resolve = store.resolve.bind(store);
+    vi.spyOn(store, 'resolve').mockImplementation(async (ref, purpose) => {
+      if (ref.provider === 'anthropic') throw new Error('unavailable');
+      return resolve(ref, purpose);
+    });
+    const model = await createReviewModel(config('openai', 'gpt-5', {
+      fallback: [{ provider: 'anthropic', model: 'claude-sonnet-5-5' }],
+    }), store, { cwd: '/tmp', skipFallback: () => 'excluded by caller',
+      ...(withRoster ? { keyRosters: { anthropic: { keys: roster, startIndex: 0 } } } : {}),
+    });
+    expect(model.fallbacks).toBeUndefined();
+    expect(model.secrets).toEqual(withRoster ? [primary, ...roster] : [primary]);
+    expect(model.skippedFallbacks).toEqual([{ label: 'anthropic:claude-sonnet-5-5', reason: 'excluded by caller' }]);
+  });
+
+  it.each([false, true])('redacts both methods of a skipped API-default dual provider without building models (key read fails=%s)', async (keyReadFails) => {
+    const apiKeys = keys('anthropic');
+    const sub = envelope('anthropic');
+    const ws: Workspace = { defaults: { openai: 'subscription', anthropic: 'api-key' },
+      subscriptions: { openai: envelope('openai'), anthropic: sub }, rosters: { anthropic: apiKeys } };
+    const store = workspaceStore(ws);
+    const resolve = store.resolve.bind(store);
+    vi.spyOn(store, 'resolve').mockImplementation(async (ref, purpose) => {
+      if (keyReadFails && ref.provider === 'anthropic' && ref.method !== 'subscription') throw new Error('unavailable');
+      return resolve(ref, purpose);
+    });
+    const model = await createReviewModel(config('openai', 'gpt-5', {
+      fallback: [{ provider: 'anthropic', model: 'claude-sonnet-5-5' }],
+    }), store, { cwd: '/tmp', keyRosters: rostersOf(ws), dualMethods: { anthropic: { defaultMethod: 'api-key' } },
+      skipFallback: () => 'excluded by caller' });
+    expect(model.fallbacks).toBeUndefined();
+    expect(model.secrets).toEqual(expect.arrayContaining([...apiKeys, sub]));
+    const prompt = redactSecrets('anthropic-access-token-test anthropic-refresh-token-test', [...model.secrets ?? []]).text;
+    expect(prompt).not.toContain('anthropic-access-token-test');
+    expect(prompt).not.toContain('anthropic-refresh-token-test');
+    expect(model.skippedFallbacks).toEqual([{ label: 'anthropic:claude-sonnet-5-5', reason: 'excluded by caller' }]);
+  });
+
+  it('keeps a skipped dual provider skipped when its subscription cannot be read', async () => {
+    const apiKeys = keys('anthropic');
+    const ws: Workspace = { defaults: { openai: 'subscription', anthropic: 'api-key' },
+      subscriptions: { openai: envelope('openai') }, rosters: { anthropic: apiKeys } };
+    const model = await createReviewModel(config('openai', 'gpt-5', {
+      fallback: [{ provider: 'anthropic', model: 'claude-sonnet-5-5' }],
+    }), workspaceStore(ws), { cwd: '/tmp', keyRosters: rostersOf(ws), dualMethods: { anthropic: { defaultMethod: 'api-key' } },
+      skipFallback: () => 'excluded by caller' });
+    expect(model.fallbacks).toBeUndefined();
+    expect(model.secrets).toEqual(expect.arrayContaining(apiKeys));
+    expect(model.skippedFallbacks).toEqual([{ label: 'anthropic:claude-sonnet-5-5', reason: 'excluded by caller' }]);
+  });
+
   it('puts the rotating API keys right behind a subscription default, and redacts both methods', async () => {
     const ws: Workspace = { defaults: { openai: 'subscription' }, subscriptions: { openai: envelope('openai') }, rosters: { openai: keys('openai') } };
     const model = await build(ws, config('openai', 'gpt-5'));
