@@ -103,6 +103,13 @@ export async function resolveFallbacks(
       }
       const roster = rosterFor(rotation, entry.provider);
       if (roster) resolved.secrets.push(...roster.keys);
+      if (dualMethods?.[entry.provider]?.defaultMethod === 'api-key') {
+        try {
+          resolved.secrets.push(await store.resolve({ provider: entry.provider, method: 'subscription' }, 'review'));
+        } catch {
+          // The unused method's credential is optional and must never build a model.
+        }
+      }
       resolved.skipped.push({ label, reason });
       continue;
     }

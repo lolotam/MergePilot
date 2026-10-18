@@ -189117,6 +189117,12 @@ async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rota
       const roster2 = rosterFor(rotation, entry.provider);
       if (roster2)
         resolved.secrets.push(...roster2.keys);
+      if (dualMethods?.[entry.provider]?.defaultMethod === "api-key") {
+        try {
+          resolved.secrets.push(await store.resolve({ provider: entry.provider, method: "subscription" }, "review"));
+        } catch {
+        }
+      }
       resolved.skipped.push({ label, reason });
       continue;
     }
