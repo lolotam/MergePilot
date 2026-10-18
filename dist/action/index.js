@@ -195638,20 +195638,27 @@ async function buildWiringLookups(reader, reviewed) {
   const triggers = reviewed.map((f3) => f3.path).filter(isBuildWiringChange);
   if (triggers.length === 0)
     return [];
+  const kind = "build-config";
+  const manifests = triggers.flatMap((forPath) => {
+    const workspace = workspaceManifestCandidates(forPath);
+    return [
+      { candidates: ["package.json"], kind, reason: "root package manifest (scripts)", forPath, disclose: true },
+      ...workspace.length > 0 ? [{ candidates: workspace, kind, reason: "workspace package manifest (scripts)", forPath, disclose: false }] : []
+    ];
+  });
+  await reader.run(manifests);
   const listed = (await reader.list(WORKFLOWS_DIR)).filter((path12) => /\.ya?ml$/i.test(path12)).sort();
   for (const path12 of listed.slice(MAX_WORKFLOW_FILES))
     reader.leftOut.push(`${path12} (not looked up)`);
   const workflows = listed.slice(0, MAX_WORKFLOW_FILES);
-  const accept = (content) => workflowRunsChanges(content, triggers);
-  const kind = "build-config";
-  return triggers.flatMap((forPath) => {
-    const workspace = workspaceManifestCandidates(forPath);
-    return [
-      { candidates: ["package.json"], kind, reason: "root package manifest (scripts)", forPath, disclose: true },
-      ...workspace.length > 0 ? [{ candidates: workspace, kind, reason: "workspace package manifest (scripts)", forPath, disclose: false }] : [],
-      ...workflows.map((path12) => ({ candidates: [path12], kind, reason: "CI workflow that runs the scripts", forPath, disclose: true, accept }))
-    ];
-  });
+  return triggers.flatMap((forPath) => workflows.map((path12) => ({
+    candidates: [path12],
+    kind,
+    reason: "CI workflow that runs the scripts",
+    forPath,
+    disclose: true,
+    accept: (content) => workflowRunsChanges(content, [forPath])
+  })));
 }
 async function gatherRepositoryContext(client, params) {
   if (params.contextTokens <= 0)

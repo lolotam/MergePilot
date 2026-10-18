@@ -68,10 +68,11 @@ describe('renderPanelSummary — where the table findings went', () => {
     expect(en).toContain("> ℹ️ Findings counted in the table but not published as the bot's own comment:");
     expect(en).toContain('> - **Pilot** (1 of 2): 1 below agreement');
     expect(en).toContain(
-      "> - **Owl** (3 of 3): 1 merged into another bot's comment on the same issue · 1 over the findings limit · 1 already posted by an earlier review",
+      "> - **Owl** (3 of 3): 1 presented in another bot's wording · 1 over the findings limit · 1 already posted by an earlier review",
     );
 
     const ar = renderPanelSummary({ ...input, language: 'ar' });
+    expect(ar).toContain('1 اتعرضت بصياغة بوت تاني');
     expect(ar).toContain('> - **Fox** (2 من 2): 1 فوق الحد الأقصى للملاحظات · 1 منشورة من مراجعة سابقة');
   });
 

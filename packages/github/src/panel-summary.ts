@@ -107,7 +107,7 @@ const EN: Labels = {
   fatesHeader: "> ℹ️ Findings counted in the table but not published as the bot's own comment:",
   fateOf: (notOwn, reported) => `${notOwn} of ${reported}`,
   fateParts: {
-    mergedIntoOther: (n) => `${n} merged into another bot's comment on the same issue`,
+    mergedIntoOther: (n) => `${n} presented in another bot's wording`,
     below: (n) => `${n} below agreement`,
     overLimit: (n) => `${n} over the findings limit`,
     alreadyPosted: (n) => `${n} already posted by an earlier review`,
@@ -135,7 +135,7 @@ const AR: Labels = {
   fatesHeader: '> ℹ️ ملاحظات محسوبة في الجدول لم تُنشر كتعليق خاص بالمراجع:',
   fateOf: (notOwn, reported) => `${notOwn} من ${reported}`,
   fateParts: {
-    mergedIntoOther: (n) => `${n} دُمجت في تعليق مراجع آخر عن نفس المشكلة`,
+    mergedIntoOther: (n) => `${n} اتعرضت بصياغة بوت تاني`,
     below: (n) => `${n} أقل من حد الاتفاق`,
     overLimit: (n) => `${n} فوق الحد الأقصى للملاحظات`,
     alreadyPosted: (n) => `${n} منشورة من مراجعة سابقة`,

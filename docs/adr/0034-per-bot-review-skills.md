@@ -200,7 +200,7 @@ All new dashboard text (the Skills page, upload and errors, the per-bot dropdown
   - below the minimum agreement;
   - over the findings limit (`review.maxFindings`, applied after the duplicate check);
   - already on the PR from an earlier review (dropped by the duplicate check against earlier comments).
-- `renderPanelSummary` adds one block after the "below agreement" and "over the findings limit" lists, with one line per bot whose own published count is below its table count, e.g. `- **Owl** (3 of 3): 1 merged into another bot's comment on the same issue · 1 over the findings limit · 1 already posted by an earlier review` (Arabic: «ملاحظات محسوبة في الجدول لم تُنشر كتعليق خاص بالمراجع»). Nothing is added when every bot published all it reported.
+- `renderPanelSummary` adds one block after the "below agreement" and "over the findings limit" lists, with one line per bot whose own published count is below its table count, e.g. `- **Owl** (3 of 3): 1 presented in another bot's wording · 1 over the findings limit · 1 already posted by an earlier review` (Arabic: «ملاحظات محسوبة في الجدول لم تُنشر كتعليق خاص بالمراجع»). Nothing is added when every bot published all it reported.
 - **Rejected by verification** is not one of the fates: those findings are removed before the table counts them, and are already listed with the bot's name under «Rejected by verification». When the block is shown and some findings were rejected, it ends with one line saying they are not counted in the table and where they are listed.
 - Separate mode is unchanged.
 

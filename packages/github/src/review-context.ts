@@ -382,23 +382,27 @@ export function workflowRunsChanges(content: string, changedPaths: readonly stri
 async function buildWiringLookups(reader: ContextReader, reviewed: readonly ReviewedFile[]): Promise<Lookup[]> {
   const triggers = reviewed.map((f) => f.path).filter(isBuildWiringChange);
   if (triggers.length === 0) return [];
-  const listed = (await reader.list(WORKFLOWS_DIR)).filter((path) => /\.ya?ml$/i.test(path)).sort();
-  for (const path of listed.slice(MAX_WORKFLOW_FILES)) reader.leftOut.push(`${path} (not looked up)`);
-  const workflows = listed.slice(0, MAX_WORKFLOW_FILES);
-  const accept = (content: string): boolean => workflowRunsChanges(content, triggers);
   const kind = 'build-config' as const;
-  return triggers.flatMap((forPath): Lookup[] => {
+  const manifests = triggers.flatMap((forPath): Lookup[] => {
     const workspace = workspaceManifestCandidates(forPath);
     return [
       { candidates: ['package.json'], kind, reason: 'root package manifest (scripts)', forPath, disclose: true },
       ...(workspace.length > 0
         ? [{ candidates: workspace, kind, reason: 'workspace package manifest (scripts)', forPath, disclose: false }]
         : []),
-      ...workflows.map(
-        (path): Lookup => ({ candidates: [path], kind, reason: 'CI workflow that runs the scripts', forPath, disclose: true, accept }),
-      ),
     ];
   });
+  // Manifests take priority over the directory listing as well as workflow content reads.
+  await reader.run(manifests);
+  const listed = (await reader.list(WORKFLOWS_DIR)).filter((path) => /\.ya?ml$/i.test(path)).sort();
+  for (const path of listed.slice(MAX_WORKFLOW_FILES)) reader.leftOut.push(`${path} (not looked up)`);
+  const workflows = listed.slice(0, MAX_WORKFLOW_FILES);
+  return triggers.flatMap((forPath) => workflows.map(
+    (path): Lookup => ({
+      candidates: [path], kind, reason: 'CI workflow that runs the scripts', forPath, disclose: true,
+      accept: (content) => workflowRunsChanges(content, [forPath]),
+    }),
+  ));
 }
 
 /**

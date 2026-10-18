@@ -212,7 +212,7 @@ describe('processReviewJob — consensus mode', () => {
     const body = h.created[0]!.body;
     expect(body).toContain('> - **MergePilot** (1 of 2): 1 already posted by an earlier review');
     expect(body).toContain(
-      "> - **Owl** (3 of 3): 1 merged into another bot's comment on the same issue · 1 below agreement · 1 already posted by an earlier review",
+      "> - **Owl** (3 of 3): 1 presented in another bot's wording · 1 below agreement · 1 already posted by an earlier review",
     );
   });
 
