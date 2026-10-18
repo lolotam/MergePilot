@@ -139853,11 +139853,13 @@ function parseReviewAnswer(text, options) {
   let firstParseError = null;
   let matchedAnswer = null;
   let summaryOnly = null;
+  let otherCandidatesRejected = false;
   for (const candidate of candidates) {
     let parsed;
     try {
       parsed = parseJsonLenient(candidate);
     } catch (err) {
+      otherCandidatesRejected = true;
       if (!firstParseError) {
         firstParseError = err instanceof Error ? err.message : String(err);
       }
@@ -139869,14 +139871,23 @@ function parseReviewAnswer(text, options) {
       break;
     }
     const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
-    if (bare.success && summaryOnly === null && parsed.findings === void 0) {
-      summaryOnly = bare.data.summary;
-    } else if (!firstParseError) {
-      firstParseError = loose.error.message;
+    if (bare.success && parsed.findings === void 0) {
+      summaryOnly ??= bare.data.summary;
+    } else {
+      otherCandidatesRejected = true;
+      if (!firstParseError)
+        firstParseError = loose.error.message;
     }
   }
   if (!matchedAnswer && summaryOnly !== null) {
-    return { ok: true, summary: summaryOnly, findings: [], droppedInvalid: 0, findingsMissing: true };
+    return {
+      ok: true,
+      summary: summaryOnly,
+      findings: [],
+      droppedInvalid: 0,
+      findingsMissing: true,
+      ...otherCandidatesRejected ? { otherCandidatesRejected: true } : {}
+    };
   }
   if (!matchedAnswer) {
     const isTruncated = isTruncatedAnswer(options?.finishReason, hasUnclosedObject);
@@ -140420,7 +140431,8 @@ async function retryForFindingsList(input2) {
     if (!retried.ok) {
       return { parsed, rejected: response, usage: response.usage, note: `findings-list retry unusable: ${retried.code}`, thinkingOff: false };
     }
-    return { parsed: retried, response, usage: response.usage, thinkingOff: false };
+    const acceptedAsEmpty = retried.findingsMissing && !retried.otherCandidatesRejected && response.finishReason === "stop" && typeof retried.summary === "string" && retried.summary.trim().length > 0;
+    return { parsed: acceptedAsEmpty ? { ...retried, acceptedAsEmpty: true } : retried, response, usage: response.usage, thinkingOff: false };
   } catch (err) {
     spend.record(promptTokens, requestedOutputTokens2, void 0);
     return { parsed, note: `findings-list retry failed: ${describeCallError(err, input2.knownSecrets)}`, thinkingOff: false };
@@ -140605,7 +140617,6 @@ function matchingPathInstructions(pathInstructions, filePaths) {
 }
 var OUTPUT_CONTRACT = `Respond with exactly one JSON object matching this schema (no prose before or after): the whole reply starts with "{" and ends with "}", with no markdown fence around it.
 {
-  "summary": "<string \u2014 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>",
   "findings": [
     {
       "path": "<string \u2014 the path of a changed file (a PATCH block), exactly as printed>",
@@ -140620,8 +140631,10 @@ var OUTPUT_CONTRACT = `Respond with exactly one JSON object matching this schema
       "ruleRef": "<string \u2014 e.g. 'CLAUDE.md \xA75' when a REVIEW_CRITERIA rule applies \u2014 optional>",
       "confidence": <number in [0,1] \u2014 see CONFIDENCE below>
     }
-  ]
+  ],
+  "summary": "<string \u2014 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>"
 }
+If you found nothing to report, return "findings": [] \u2014 never omit the key.
 Keys and the severity, category and side values are spelled exactly as above, whatever language the text fields use.`;
 var WHAT_YOU_SEE = `WHAT YOU SEE: the pull request's title and description, the owner's rules, sometimes library docs, the diff of every changed file of this pull request (or of this batch of it): the changed lines with a few lines of context, each printed with its line number (new-file numbers for added and context lines, old-file numbers for removed lines), and sometimes REPOSITORY_CONTEXT blocks: read-only files of the repository at the head commit, numbered the same way. You never see the program running.`;
 var METHOD = `METHOD: first work out what the change is trying to do. Then, for every hunk, look for:
@@ -141057,7 +141070,7 @@ async function executeBatchedReview(input2) {
         if (outcome.parsed.summary.trim().length > 0)
           batchSummaries.push(outcome.parsed.summary.trim());
         batchFindings.push(...outcome.parsed.findings);
-        if (outcome.parsed.findingsMissing)
+        if (outcome.parsed.findingsMissing && !outcome.parsed.acceptedAsEmpty)
           incompleteReasons.push(`${label}: ${FINDINGS_MISSING_REASON}`);
       } else {
         incompleteReasons.push(`${label}: ${outcome.parsed.error}`);
@@ -141512,8 +141525,8 @@ async function runSinglePass(ctx) {
     findings: parsed.findings,
     droppedInvalid: parsed.droppedInvalid,
     totalUsage: recovery.totalUsage,
-    incompleteReasons: parsed.findingsMissing ? [...notes, ...recovery.incompleteReasons, FINDINGS_MISSING_REASON] : [...notes, ...recovery.incompleteReasons],
-    ...parsed.findingsMissing ? { answerAttempts: attempts() } : {}
+    incompleteReasons: parsed.findingsMissing && !parsed.acceptedAsEmpty ? [...notes, ...recovery.incompleteReasons, FINDINGS_MISSING_REASON] : [...notes, ...recovery.incompleteReasons],
+    ...parsed.findingsMissing ? { answerAttempts: attempts().map((attempt, index, all) => parsed.acceptedAsEmpty && index === all.length - 1 ? { ...attempt, acceptedAsEmpty: true } : attempt) } : {}
   };
 }
 async function runBatchedPass(ctx, batches) {

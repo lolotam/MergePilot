@@ -37,6 +37,8 @@ describe('buildReviewPrompt', () => {
     // Subscription backends get no response schema, and an Arabic review may translate enum
     // values: the prompt is the only thing holding the answer to what answer.ts accepts.
     const { system } = buildReviewPrompt({ ...MINIMAL_INPUT, language });
+    expect(system).toContain('If you found nothing to report, return "findings": [] — never omit the key.');
+    expect(system.indexOf('  "findings":')).toBeLessThan(system.indexOf('  "summary":'));
     expect(system).toContain('starts with "{" and ends with "}"');
     expect(system).toContain('spelled exactly as above, whatever language the text fields use');
   });

@@ -247,8 +247,8 @@ describe('runReview - USD budget and pricing', () => {
     const generateMock = vi.fn();
     const model: ReviewModel = { label: 'fake:spy', generate: generateMock };
     const budget = {
-      // Review call alone ≈ $0.45–0.49 at $100/MTok; with verification ≈ $0.69–0.78.
-      perReviewUsd: 0.6,
+      // Covers the review prompt and output at $100/MTok, but not verification too.
+      perReviewUsd: 0.65,
       maxInputTokens: 200000,
       pricing: { inputPerMTok: 100, outputPerMTok: 100 },
     };

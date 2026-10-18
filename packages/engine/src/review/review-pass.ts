@@ -67,6 +67,7 @@ export type ReviewPassResult =
 
 /** What one answer without the JSON asked for looked like; for the operator's logs only. */
 export interface AnswerAttempt {
+  acceptedAsEmpty?: true;
   chars: number;
   finishReason: string;
   outputTokens?: number;
@@ -176,10 +177,11 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     findings: parsed.findings,
     droppedInvalid: parsed.droppedInvalid,
     totalUsage: recovery.totalUsage,
-    incompleteReasons: parsed.findingsMissing
+    incompleteReasons: parsed.findingsMissing && !parsed.acceptedAsEmpty
       ? [...notes, ...recovery.incompleteReasons, FINDINGS_MISSING_REASON]
       : [...notes, ...recovery.incompleteReasons],
-    ...(parsed.findingsMissing ? { answerAttempts: attempts() } : {}),
+    ...(parsed.findingsMissing ? { answerAttempts: attempts().map((attempt, index, all) =>
+      parsed.acceptedAsEmpty && index === all.length - 1 ? { ...attempt, acceptedAsEmpty: true } : attempt) } : {}),
   };
 }
 
