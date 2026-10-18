@@ -166,7 +166,7 @@ left the merge to one judge answer, and to nothing when the judge is off or unav
 1. **Wording rule.** Two findings from different bots are one cluster when all of these hold:
    - same kind (inline or outside the diff) and same path;
    - lines within ±3 (`CONSENSUS_LINE_WINDOW`);
-   - their claims match (`sameClaim` in `packages/github/src/claim-similarity.ts`).
+   - their claims match (`sameClaimScore` in `packages/github/src/claim-similarity.ts`).
 
    The claim is compared like this:
    - the claim is the title and body. The evidence is left out, because two different issues on one
@@ -176,18 +176,34 @@ left the merge to one judge answer, and to nothing when the judge is off or unav
    - the claims match when they share at least 4 words (`CLAIM_MIN_SHARED_WORDS`) and the Dice
      coefficient of the two word sets is at least 0.35 (`CLAIM_SIMILARITY_THRESHOLD`).
 
-   The rule runs before the judge. The judge is asked only about nearby pairs that neither the title
-   nor the wording matched. It can add merges, and it never splits a pair the wording rule merged.
-2. **One finding per bot in a cluster.** Two findings of one bot are never chained into one cluster
+   The rule decides only what it was calibrated on. Otherwise the pair goes to the judge:
+   - **Script.** At least 80% of each claim's letters must be Latin (`CLAIM_MIN_LATIN_SHARE`). The
+     stop words and suffixes are English, so in an Arabic finding the particles (على، هذا، التي…)
+     would count as content words. Arabic findings merge by the same title or by the judge.
+   - **Polarity.** The two titles must agree on negation: `not`, `no`, `never`, `cannot`, `none`,
+     `nothing`, `neither`, `nor` or a contracted `n't`. "Must not overwrite" and "must overwrite"
+     never merge by wording. Only the titles are checked, because long bodies on both sides of a
+     real duplicate often use "not" (PayPos#361: "need not increase"). "Without" is not a
+     negation here: titles use it for a missing step (PayPos#321: "read without being locked").
+2. **Order.** Matches are applied from the strongest to the weakest: every same-title pair first,
+   then wording matches from the highest score down, then the judge's answers. A wording match
+   therefore never takes a bot's place in a cluster that an exact title would have earned. The
+   judge is asked only about pairs that neither rule matched and that could still join: a pair
+   already in one cluster, or whose clusters share a bot, is not sent. Those pairs no longer spend
+   the 50-pair cap or the judge's budget. `semantic.merged` counts the joins actually made. The
+   judge can add merges, and it never splits a pair the title or wording rule merged.
+3. **One finding per bot in a cluster.** Two findings of one bot are never chained into one cluster
    through another bot's finding: a bot never agrees with itself, and its second finding would be
    lost. Chains across different bots (A like B, B like C) still form one cluster.
-3. **Kept version.** A cluster still publishes one bot's whole finding: the most severe, ties going
+4. **Kept version.** A cluster still publishes one bot's whole finding: the most severe, ties going
    to the lowest slot. No evidence from another bot is mixed into it, so the body, its evidence and
    its Jev line stay one coherent comment. Every bot of the cluster counts toward
    `panelMinAgreement` and the "Found by … (n/N)" label.
-4. **Disclosure.** The banner for an unavailable judge now says the findings were merged "by title
-   and wording only". The panel summary also names the judge entry that answered the merge's checks
-   (`> Jev: provider:model (fallback n; … failed: code)`), as a single bot's summary already does.
+5. **Disclosure.** The banner for an unavailable judge now says the findings were merged "by title
+   and wording only". When the merge asked the judge and it answered, the panel summary also names
+   the judge entry that answered (`> Jev: provider:model (fallback n; … failed: code)`), as a
+   single bot's summary already does. This is read right after the merge, before the dedupe
+   against earlier comments makes its own judge request.
 
 ### Calibration
 
@@ -214,5 +230,8 @@ later tuning is a one-line change.
   separate. This rule compares findings in one file.
 - Two different issues described with mostly the same words on neighbouring lines can merge. The
   comment still names every bot of the cluster, and its body is one bot's own.
+- Arabic findings with different titles still depend on the judge. When the judge is off or
+  unavailable, they stay separate.
 - At most 50 nearby pairs are still sent to the judge (`MAX_CONSENSUS_PAIRS`). The wording rule now
-  merges the clear pairs before they count toward that cap.
+  merges the clear pairs before they count toward that cap, and pairs that can no longer join are
+  not sent.

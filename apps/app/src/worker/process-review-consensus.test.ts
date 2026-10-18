@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { renderFindingComment } from '@mergepilot/github';
 import type { JudgeSettings } from '../core/types.js';
-import { BASE_URL, finding, HEAD, panelSetup } from './panel.fixtures.js';
+import { BASE_URL, finding, HEAD, panelSetup, PUBLISHER } from './panel.fixtures.js';
 import { processReviewJob } from './process-review.js';
 
 // The reviewer panel in consensus mode (ADR-0017): the bots review without publishing, then one
@@ -191,6 +192,31 @@ describe('processReviewJob — consensus mode', () => {
     expect(bodies.filter((b) => b.includes('_Found by: MergePilot, Fox (2/4)_'))).toHaveLength(1);
     expect(bodies).toHaveLength(2);
     expect(h.created[0]?.body).toContain('> ⚠️ Jev same-issue check unavailable: server — findings were merged by title and wording only');
+  });
+
+  it('names no judge for the merge when only the check against earlier comments asked it', async () => {
+    const earlier = { id: 'old', side: 'RIGHT' as const, ...finding('Unclosed file handle') } as Parameters<typeof renderFindingComment>[0];
+    const h = await panelSetup({
+      settings: { ...consensus(1), judge: { ...consensusJudge([]), uses: ['consensus', 'dedupe'] } },
+      bots: [{ slot: 2, name: 'Owl' }],
+      findings: { 'main-model': [finding('Null dereference')], 'bot2-model': [finding('null dereference!')] },
+      comments: [
+        { id: 1, path: 'src/app.ts', line: 2, user: { login: PUBLISHER }, body: renderFindingComment(earlier, { language: 'en', suggestionsAsCode: false }) },
+      ],
+    });
+    const asked: number[] = [];
+    h.deps.judgeFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const ids = Object.keys((JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }).questions);
+      asked.push(ids.length);
+      const answers = Object.fromEntries(ids.map((id) => [id, { type: 'noul', noul: 0.1 }]));
+      return new Response(JSON.stringify({ answers, usage: { input_tokens: 10, output_tokens: 0 } }), { status: 200 });
+    });
+    await processReviewJob(h.job, h.deps);
+
+    // The two titles merge without the judge; only the dedupe asks it, about the earlier comment.
+    expect(asked).toEqual([1]);
+    expect(h.created[0]?.comments[0]?.body).toContain('_Found by: MergePilot, Owl (2/2)_');
+    expect(h.created[0]?.body).not.toContain('> Jev:');
   });
 
   it('uses slot 1\'s marker as the incremental base for the whole panel', async () => {

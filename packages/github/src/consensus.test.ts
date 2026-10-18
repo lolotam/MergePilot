@@ -206,6 +206,61 @@ describe('mergePanelFindings (consensus, ADR-0017)', () => {
     expect(result.semantic).toEqual({ checked: 0, merged: 0, unavailable: 'error' });
   });
 
+  it('lets an exact title win over an earlier wording match for the same bot', async () => {
+    const shared = 'A replayed response replaces the refreshed session total after an uncertain save.';
+    const result = await mergePanelFindings({
+      bots: [
+        bot(1, 'Main', [
+          f({ line: 10, title: 'Replay overwrites the refreshed total', body: shared }),
+          f({ line: 12, title: 'Stale replay overwrites the session total', body: 'The editor closes before the refusal shows.' }),
+        ]),
+        bot(2, 'Owl', [f({ line: 11, title: 'Stale replay overwrites the session total', body: shared })]),
+      ],
+      minAgreement: 1,
+    });
+    expect(result.kept.map((c) => [c.finding.line, c.foundBy.map((b) => b.slot)])).toEqual([[10, [1]], [12, [1, 2]]]);
+  });
+
+  it('asks the judge only about pairs that could still join, and counts the joins it made', async () => {
+    const answerYes = () => mockJudge((request) => Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9])));
+    // Main's line-12 finding is near Owl's, but Owl is already in Main's line-10 cluster.
+    const blocked = answerYes();
+    const settled = await mergePanelFindings({
+      bots: [bot(1, 'Main', [f({ line: 10 }), f({ line: 12, title: 'Unclosed handle' })]), bot(2, 'Owl', [f({ line: 11 })])],
+      minAgreement: 1,
+      judge: blocked.judge,
+    });
+    expect(blocked.decide).not.toHaveBeenCalled();
+    expect(settled.semantic).toBeUndefined();
+    // Both of Main's findings are judged the same as Owl's; only one of them can join Owl.
+    const both = answerYes();
+    const result = await mergePanelFindings({
+      bots: [
+        bot(1, 'Main', [f({ line: 10, title: 'Possible null' }), f({ line: 12, title: 'Unchecked null' })]),
+        bot(2, 'Owl', [f({ line: 11, title: 'Missing null check' })]),
+      ],
+      minAgreement: 1,
+      judge: both.judge,
+    });
+    expect(result.semantic).toEqual({ checked: 2, merged: 1 });
+    expect(result.kept.map((c) => [c.finding.line, c.foundBy.map((b) => b.slot)])).toEqual([[10, [1, 2]], [12, [1]]]);
+  });
+
+  it('leaves Arabic claims to the judge', async () => {
+    const { judge, decide } = mockJudge((request) => Object.fromEntries(Object.keys(request.questions).map((id) => [id, 0.9])));
+    const body = 'عند إعادة الطلب بعد حفظ غير مؤكد، الرد القديم يستبدل إجمالي الزيارة الأحدث في اللقطة.';
+    const result = await mergePanelFindings({
+      bots: [
+        bot(1, 'Main', [f({ title: 'إعادة الطلب تستبدل الإجمالي الأحدث', body })]),
+        bot(2, 'Owl', [f({ title: 'الرد القديم يكتب فوق إجمالي الزيارة', body })]),
+      ],
+      minAgreement: 1,
+      judge,
+    });
+    expect(Object.keys(decide.mock.calls[0]![0].questions)).toHaveLength(1);
+    expect(result.kept.map((c) => c.foundBy.length)).toEqual([2]);
+  });
+
   it('never puts two findings of one bot in one cluster through a third bot', async () => {
     const result = await mergePanelFindings({
       bots: [bot(1, 'Main', [f({ line: 10 }), f({ line: 13 })]), bot(2, 'Owl', [f({ line: 11 })])],

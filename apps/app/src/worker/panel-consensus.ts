@@ -74,6 +74,9 @@ export async function publishConsensus(
     knownSecrets,
     maxUsd: consensusJudge ? budget() : undefined,
   });
+  // Taken before the dedupe: each answered request replaces `answeredBy`, and the summary line is
+  // about the merge's own same-issue question only.
+  const mergeAnsweredBy = merge.semantic && merge.semantic.checked > 0 ? judge?.judge.report().answeredBy : undefined;
   const inlineOf = new Map(
     merge.kept.filter((c) => c.kind === 'inline').map((c) => [c, withFoundBy(c, merge.total, language)] as const),
   );
@@ -123,8 +126,8 @@ export async function publishConsensus(
     scope: reviewScopeOf(files.selection),
     incompleteReasons,
     judgeUnavailable: merge.semantic?.unavailable,
-    // Which judge entry answered the merge's checks, so a fallback that answered is disclosed (ADR-0015).
-    judgeAnsweredBy: judgeReport?.answeredBy ? describeAnsweredBy(judgeReport.answeredBy) : undefined,
+    // Which judge entry answered the merge's question, so a fallback that answered is disclosed (ADR-0015).
+    judgeAnsweredBy: mergeAnsweredBy ? describeAnsweredBy(mergeAnsweredBy) : undefined,
     verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),

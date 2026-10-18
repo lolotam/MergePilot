@@ -7,19 +7,20 @@ import {
   type Secret,
 } from '@mergepilot/engine';
 import { escapeInline } from './bot-identity.js';
-import { sameClaim } from './claim-similarity.js';
+import { sameClaimScore } from './claim-similarity.js';
 import { normalizeTitle } from './dedupe.js';
 
 /**
  * Consensus mode of the reviewer panel (ADR-0017): the findings of every bot that completed are
  * merged into clusters. A cluster is findings on the same path with start lines within ±3 and
- * either the same normalized title, the same claim by wording (`sameClaim`), or, when a judge is
- * supplied, a "same issue?" answer of 0.8 or more. The wording rule needs no judge, so a judge that
- * is off, over budget or unavailable never splits a duplicate the words already show. A cluster
- * holds at most one finding per bot: a bot never agrees with itself, so two findings of one bot
- * are never chained into one cluster. Each cluster keeps its most severe version and the bots
- * that found it. Clusters found by fewer than `minAgreement` bots are set aside, except critical and high ones, and returned so the
- * summary can list them: nothing is dropped silently. The kept clusters are then capped at
+ * either the same normalized title, the same claim by wording (`sameClaimScore`), or, when a judge
+ * is supplied, a "same issue?" answer of 0.8 or more, applied in that order. The wording rule needs
+ * no judge, so a judge that is off, over budget or unavailable never splits a duplicate the words
+ * already show. A cluster holds at most one finding per bot: a bot never agrees with itself, so two
+ * findings of one bot are never chained into one cluster. Each cluster keeps its most severe
+ * version and the bots that found it. Clusters found by fewer than `minAgreement` bots are set
+ * aside, except critical and high ones, and returned so the summary can list them: nothing is
+ * dropped silently. The kept clusters are then capped at
  * `maxFindings`, the published review's findings limit (ADR-0033); the clusters over it are
  * returned for the summary too.
  */
@@ -82,67 +83,19 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
     ...bot.inline.map((finding) => ({ slot: bot.slot, name: bot.name, kind: 'inline' as const, finding })),
     ...bot.summaryOnly.map((finding) => ({ slot: bot.slot, name: bot.name, kind: 'summaryOnly' as const, finding })),
   ]);
-  const parent = entries.map((_, i) => i);
-  const slots = entries.map((e) => new Set([e.slot]));
-  const find = (i: number): number => {
-    while (parent[i] !== i) i = parent[i] = parent[parent[i]!]!;
-    return i;
-  };
-  const union = (a: number, b: number): void => {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra === rb || [...slots[ra]!].some((slot) => slots[rb]!.has(slot))) return;
-    parent[ra] = rb;
-    for (const slot of slots[ra]!) slots[rb]!.add(slot);
-  };
-
-  const pairs: SameIssuePair[] = [];
-  const pairIndex = new Map<string, [number, number]>();
-  for (let a = 0; a < entries.length; a++) {
-    for (let b = a + 1; b < entries.length; b++) {
-      const ea = entries[a]!;
-      const eb = entries[b]!;
-      if (!nearby(ea, eb)) continue;
-      if (sameTitle(ea.finding, eb.finding) || sameClaim(ea.finding, eb.finding)) {
-        union(a, b);
-      } else if (input.judge && pairs.length < MAX_CONSENSUS_PAIRS) {
-        const key = `c${pairs.length + 1}`;
-        pairIndex.set(key, [a, b]);
-        pairs.push({
-          key,
-          newComment: { path: ea.finding.path, line: ea.finding.line, title: ea.finding.title, body: ea.finding.body },
-          existingComment: {
-            path: eb.finding.path,
-            line: eb.finding.line,
-            body: `${eb.finding.title}\n\n${eb.finding.body}`,
-          },
-        });
-      }
-    }
-  }
-
-  let semantic: MergePanelResult['semantic'];
-  if (input.judge && pairs.length > 0) {
-    const outcome = await judgeSameIssue({
-      judge: input.judge,
-      pairs,
-      knownSecrets: input.knownSecrets ?? [],
-      maxUsd: input.maxUsd,
-    });
-    for (const key of outcome.duplicates) {
-      const pair = pairIndex.get(key);
-      if (pair) union(pair[0], pair[1]);
-    }
-    semantic = {
-      checked: outcome.checked,
-      merged: outcome.duplicates.size,
-      ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}),
-    };
-  }
+  const clusters = new BotClusters(entries.map((e) => e.slot));
+  // Strongest evidence first, so a weaker match never takes a bot's place in a cluster that an
+  // exact title would have earned: the same title, then the wording rule by score, then the judge.
+  const { byTitle, byClaim, undecided } = candidatePairs(entries);
+  for (const [a, b] of byTitle) clusters.join(a, b);
+  for (const { a, b } of byClaim.sort((x, y) => y.score - x.score)) clusters.join(a, b);
+  const semantic = input.judge
+    ? await joinByJudge(entries, clusters, undecided, { ...input, judge: input.judge })
+    : undefined;
 
   const groups = new Map<number, Entry[]>();
   entries.forEach((entry, i) => {
-    const root = find(i);
+    const root = clusters.root(i);
     groups.set(root, [...(groups.get(root) ?? []), entry]);
   });
 
@@ -174,6 +127,101 @@ export function capConsensusClusters(
   );
   const chosen = new Set(ranked.slice(0, max));
   return { kept: clusters.filter((c) => chosen.has(c)), overLimit: clusters.filter((c) => !chosen.has(c)) };
+}
+
+/** Union-find over the entries in which a cluster never holds two findings of one bot. */
+class BotClusters {
+  private readonly parent: number[];
+  private readonly slots: Array<Set<number>>;
+
+  constructor(entrySlots: readonly number[]) {
+    this.parent = entrySlots.map((_, i) => i);
+    this.slots = entrySlots.map((slot) => new Set([slot]));
+  }
+
+  root(i: number): number {
+    while (this.parent[i] !== i) i = this.parent[i] = this.parent[this.parent[i]!]!;
+    return i;
+  }
+
+  /** Whether the two entries are in different clusters that have no bot in common. */
+  canJoin(a: number, b: number): boolean {
+    const ra = this.root(a);
+    const rb = this.root(b);
+    return ra !== rb && ![...this.slots[ra]!].some((slot) => this.slots[rb]!.has(slot));
+  }
+
+  /** Joins the two entries' clusters when `canJoin` allows it; returns whether it did. */
+  join(a: number, b: number): boolean {
+    if (!this.canJoin(a, b)) return false;
+    const ra = this.root(a);
+    const rb = this.root(b);
+    this.parent[ra] = rb;
+    for (const slot of this.slots[ra]!) this.slots[rb]!.add(slot);
+    return true;
+  }
+}
+
+type EntryPair = [number, number];
+
+/** Nearby pairs of different bots' findings, by what matched them. */
+function candidatePairs(entries: readonly Entry[]): {
+  byTitle: EntryPair[];
+  byClaim: Array<{ a: number; b: number; score: number }>;
+  undecided: EntryPair[];
+} {
+  const byTitle: EntryPair[] = [];
+  const byClaim: Array<{ a: number; b: number; score: number }> = [];
+  const undecided: EntryPair[] = [];
+  for (let a = 0; a < entries.length; a++) {
+    for (let b = a + 1; b < entries.length; b++) {
+      const fa = entries[a]!.finding;
+      const fb = entries[b]!.finding;
+      if (!nearby(entries[a]!, entries[b]!)) continue;
+      if (sameTitle(fa, fb)) {
+        byTitle.push([a, b]);
+        continue;
+      }
+      const score = sameClaimScore(fa, fb);
+      if (score === undefined) undecided.push([a, b]);
+      else byClaim.push({ a, b, score });
+    }
+  }
+  return { byTitle, byClaim, undecided };
+}
+
+/**
+ * Asks the judge, in one request, about the undecided pairs that could still join: a pair already
+ * in one cluster, or whose clusters share a bot, is not asked. `merged` counts the joins made.
+ */
+async function joinByJudge(
+  entries: readonly Entry[],
+  clusters: BotClusters,
+  undecided: readonly EntryPair[],
+  input: MergePanelInput & { judge: Judge },
+): Promise<MergePanelResult['semantic']> {
+  const asked = undecided.filter(([a, b]) => clusters.canJoin(a, b)).slice(0, MAX_CONSENSUS_PAIRS);
+  if (asked.length === 0) return undefined;
+  const pairs: SameIssuePair[] = asked.map(([a, b], i) => {
+    const fa = entries[a]!.finding;
+    const fb = entries[b]!.finding;
+    return {
+      key: `c${i + 1}`,
+      newComment: { path: fa.path, line: fa.line, title: fa.title, body: fa.body },
+      existingComment: { path: fb.path, line: fb.line, body: `${fb.title}\n\n${fb.body}` },
+    };
+  });
+  const outcome = await judgeSameIssue({
+    judge: input.judge,
+    pairs,
+    knownSecrets: input.knownSecrets ?? [],
+    maxUsd: input.maxUsd,
+  });
+  let merged = 0;
+  asked.forEach(([a, b], i) => {
+    if (outcome.duplicates.has(`c${i + 1}`) && clusters.join(a, b)) merged++;
+  });
+  return { checked: outcome.checked, merged, ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}) };
 }
 
 function nearby(a: Entry, b: Entry): boolean {
