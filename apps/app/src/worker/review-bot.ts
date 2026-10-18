@@ -60,13 +60,14 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         ? ctx.mainConfig
         : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store, skillKeyOf([br.bot]));
     const providerIds = [choice.provider, ...allowedFallbacks.map((fallback) => fallback.provider)];
-    // Admitted free, the bot keeps that decision for its whole run (ADR-0033): its provider runs on
-    // the subscription it was admitted with, whatever the default method is now.
+    // Admitted free, every allowed provider stays on its subscription for the whole run
+    // (ADR-0033, ADR-0035), whatever the default method or API keys become.
     const subscriptionOnly = br.admittedFree === true;
+    const subscriptionOnlyProviders = new Set(subscriptionOnly ? providerIds : []);
     const dualMethods = withinAdmission(
       await dualMethodsForProviders(deps.credentials, workspaceId, providerIds, logger),
       br.admittedFree,
-      choice.provider,
+      subscriptionOnlyProviders,
     );
     const { effectiveConfig, rulesFiles, configHash, pricing: configuredPricing } = dualMethods[choice.provider as ApiProviderId]
       ? await apiPricedConfig(builtConfig, deps.store, settings, choice)
@@ -86,7 +87,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     } else {
       primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
     }
-    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnly });
+    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders });
     const rotationEvents: KeyRotationDisclosure[] = [];
     const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>
       rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds, cursorWrites);
@@ -104,7 +105,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
       // No key roster for a subscription-only provider: the engine would rotate over paid keys.
-      const rosterProviders = subscriptionOnly ? providerIds.filter((provider) => provider !== choice.provider) : providerIds;
+      const rosterProviders = providerIds.filter((provider) => !subscriptionOnlyProviders.has(provider));
       const { rosters, keyIds } = await loadRosters(deps.credentials, workspaceId, rosterProviders, choice.provider, logger, dualMethods);
       credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {

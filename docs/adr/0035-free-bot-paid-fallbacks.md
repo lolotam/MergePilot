@@ -57,4 +57,5 @@ Both passes use the existing per-workspace serialized queue. Pass two takes a ne
 - A subscription failure remains the bot's error unless an allowed free fallback answers.
 - Existing accounting is preserved: API calls consume the per-review spend limit; method-only fallback costs remain known; configured model fallback costs remain unknown under ADR-0008, retaining tokens and disclosure. No invented dollar price is recorded.
 - Eligibility is read once per provider for both passes. Paid admissions follow live state; free primaries keep ADR-0033's subscription pin.
+- Every allowed fallback provider of a free-admitted bot is also pinned to its subscription for the whole run: later API keys or default changes cannot make it paid, and a replaced subscription fails with `INVALID_CREDENTIAL` instead of using a key.
 - Without a monthly budget there is no admission and nothing changes.

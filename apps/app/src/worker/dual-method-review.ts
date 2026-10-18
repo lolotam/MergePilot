@@ -61,13 +61,13 @@ export async function dualMethodsForProviders(
 
 /**
  * A bot admitted as free (ADR-0022) holds no budget, so no key path may stand behind it in this
- * run (ADR-0033): its own provider loses both methods' entries, whatever the default is now, and
+ * run (ADR-0033, ADR-0035): every pinned provider loses both methods' entries, whatever its default, and
  * keys connected after its admission do not become a paid fallback behind any subscription.
  */
-export function withinAdmission(dualMethods: DualMethods, admittedFree: boolean | undefined, primaryProvider: string): DualMethods {
+export function withinAdmission(dualMethods: DualMethods, admittedFree: boolean | undefined, subscriptionOnlyProviders: ReadonlySet<string>): DualMethods {
   if (!admittedFree) return dualMethods;
   return Object.fromEntries(
-    Object.entries(dualMethods).filter(([provider, dual]) => provider !== primaryProvider && dual?.defaultMethod !== 'subscription'),
+    Object.entries(dualMethods).filter(([provider, dual]) => !subscriptionOnlyProviders.has(provider) && dual?.defaultMethod !== 'subscription'),
   );
 }
 
