@@ -36,7 +36,7 @@ export const enSkills: Record<keyof typeof arSkills, string> = {
   skillsTemplateOwnerRules: 'Owner rules',
   skillsTemplateContextOutsideDiff: 'Context outside the diff',
   skillsTemplateCrossFileConsumers: 'Cross-file consumers',
-  skillsTemplateSecurity: 'Security',
+  skillsTemplateSecurity: 'Security and data safety',
   skillsTemplateAdded: 'Skill "{name}" added from the template',
 
   // Row actions

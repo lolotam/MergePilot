@@ -1,6 +1,7 @@
 import { escapeInline, renderBotLogo } from './bot-identity.js';
 import { foundByLabel, type ConsensusCluster, type MergePanelResult } from './consensus.js';
 import type { FallbackReason } from './fallback-reason.js';
+import type { BotFindingsFate } from './panel-findings-fate.js';
 import { renderFallbackNotice, renderScopeLine, type ReviewScope } from './summary.js';
 import type { ContextDisclosure, OutputLimitDisclosure } from '@mergepilot/engine';
 import {
@@ -58,6 +59,8 @@ export interface PanelSummaryInput {
   context?: ContextDisclosure | undefined;
   /** The bots whose model's output limit clamped their answer budget (ADR-0033). */
   outputLimits?: ReadonlyArray<OutputLimitDisclosure & { bot: string }> | undefined;
+  /** Where each completed bot's findings went, to explain a table count above what it published. */
+  findingsFates?: readonly BotFindingsFate[] | undefined;
 }
 
 interface Labels {
@@ -75,9 +78,16 @@ interface Labels {
   below: (n: number) => string;
   overLimit: (n: number) => string;
   summaries: string;
+  fatesHeader: string;
+  fateOf: (notOwn: number, reported: number) => string;
+  fateParts: Record<FatePart, (n: number) => string>;
+  fatesVerifyNote: string;
   counts: (inline: number, outside: number) => string;
   disclaimer: string;
 }
+
+type FatePart = 'mergedIntoOther' | 'below' | 'overLimit' | 'alreadyPosted';
+const FATE_PARTS: readonly FatePart[] = ['mergedIntoOther', 'below', 'overLimit', 'alreadyPosted'];
 
 const EN: Labels = {
   header: '## Review panel',
@@ -94,6 +104,15 @@ const EN: Labels = {
   below: (n) => `Below agreement (${n})`,
   overLimit: (n) => `Over the findings limit (${n})`,
   summaries: 'Bot summaries',
+  fatesHeader: "> ℹ️ Findings counted in the table but not published as the bot's own comment:",
+  fateOf: (notOwn, reported) => `${notOwn} of ${reported}`,
+  fateParts: {
+    mergedIntoOther: (n) => `${n} presented in another bot's wording`,
+    below: (n) => `${n} below agreement`,
+    overLimit: (n) => `${n} over the findings limit`,
+    alreadyPosted: (n) => `${n} already posted by an earlier review`,
+  },
+  fatesVerifyNote: '> Findings rejected by verification are not counted in the table; they are listed under «Rejected by verification».',
   counts: (inline, outside) => `Inline comments: ${inline} · Outside diff: ${outside}`,
   disclaimer: 'MergePilot only comments and never approves or blocks merging.',
 };
@@ -113,6 +132,15 @@ const AR: Labels = {
   below: (n) => `أقل من حد الاتفاق (${n})`,
   overLimit: (n) => `فوق الحد الأقصى للملاحظات (${n})`,
   summaries: 'ملخصات المراجعين',
+  fatesHeader: '> ℹ️ ملاحظات محسوبة في الجدول لم تُنشر كتعليق خاص بالمراجع:',
+  fateOf: (notOwn, reported) => `${notOwn} من ${reported}`,
+  fateParts: {
+    mergedIntoOther: (n) => `${n} اتعرضت بصياغة بوت تاني`,
+    below: (n) => `${n} أقل من حد الاتفاق`,
+    overLimit: (n) => `${n} فوق الحد الأقصى للملاحظات`,
+    alreadyPosted: (n) => `${n} منشورة من مراجعة سابقة`,
+  },
+  fatesVerifyNote: '> الملاحظات التي رفضها التحقق لا تُحسب في الجدول؛ تجدها تحت «رفضها التحقق».',
   counts: (inline, outside) => `تعليقات مضمنة: ${inline} · خارج التغييرات: ${outside}`,
   disclaimer: '`MergePilot` يكتفي بالتعليق فقط ولا يوافق على الدمج أو يمنعه.',
 };
@@ -138,6 +166,22 @@ function renderTable(input: PanelSummaryInput, labels: Labels): string {
 function clusterLine(cluster: ConsensusCluster, total: number, language: 'ar' | 'en'): string {
   const f = cluster.finding;
   return `**${f.severity}** · \`${neutralize(f.path)}:${f.line}\` — ${neutralize(f.title.trim())} · _${foundByLabel(cluster, total, language)}_`;
+}
+
+/**
+ * One line per bot whose table count is above what it published as its own comment, saying where
+ * the rest went (ADR-0034 amendment); undefined when every bot published all it reported.
+ */
+function renderFindingsFates(input: PanelSummaryInput, labels: Labels): string | undefined {
+  const lines = (input.findingsFates ?? []).flatMap((fate) => {
+    const notOwn = fate.reported - fate.own;
+    if (notOwn <= 0) return [];
+    const parts = FATE_PARTS.filter((part) => fate[part] > 0).map((part) => labels.fateParts[part](fate[part]));
+    return [`> - **${escapeInline(fate.name)}** (${labels.fateOf(notOwn, fate.reported)}): ${parts.join(' · ')}`];
+  });
+  if (lines.length === 0) return undefined;
+  const verifyNote = (input.verifyRejected ?? []).length > 0 ? [labels.fatesVerifyNote] : [];
+  return [labels.fatesHeader, ...lines, ...verifyNote].join('\n');
 }
 
 function details(summary: string, body: string): string {
@@ -189,6 +233,8 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
     sections.push(details(labels.overLimit(merge.overLimit.length), items.join('\n')));
   }
 
+  const fates = renderFindingsFates(input, labels);
+  if (fates) sections.push(fates);
   const rejected = renderVerifyRejected(input.verifyRejected ?? [], isArabic);
   if (rejected) sections.push(rejected);
   const rulesLeftOut = renderRulesLeftOut(input.rulesLeftOut ?? [], isArabic);

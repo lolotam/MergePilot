@@ -25,7 +25,7 @@ import type {
   ListReviewThreadsParams,
   RemoveLabelParams,
 } from '@mergepilot/github';
-import { fetchReviewThreads } from '@mergepilot/github';
+import { directoryFilesOf, fetchReviewThreads, isNotFoundError } from '@mergepilot/github';
 
 export interface OctokitLike {
   /** GraphQL, for review thread state (ADR-0030); absent on test fakes. */
@@ -195,14 +195,22 @@ export function wrapOctokit(octokit: OctokitLike): GitHubClient {
         }
         return item.content;
       } catch (error: unknown) {
-        if (
-          typeof error === 'object' &&
-          error !== null &&
-          'status' in error &&
-          (error as { status: unknown }).status === 404
-        ) {
-          return null;
-        }
+        if (isNotFoundError(error)) return null;
+        throw error;
+      }
+    },
+
+    async listDirectoryFiles(params: GetFileContentParams): Promise<string[] | null> {
+      try {
+        const response = await octokit.rest.repos.getContent({
+          owner: params.owner,
+          repo: params.repo,
+          path: params.path,
+          ref: params.ref,
+        });
+        return directoryFilesOf(response.data);
+      } catch (error: unknown) {
+        if (isNotFoundError(error)) return null;
         throw error;
       }
     },

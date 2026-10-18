@@ -194,6 +194,28 @@ describe('processReviewJob — consensus mode', () => {
     expect(h.created[0]?.body).toContain('> ⚠️ Jev same-issue check unavailable: server — findings were merged by title and wording only');
   });
 
+  it('explains a table count that was not published: merged into another bot, below agreement, or already posted', async () => {
+    const earlier = { id: 'old', side: 'RIGHT' as const, ...finding('Unclosed file handle') } as Parameters<typeof renderFindingComment>[0];
+    const h = await panelSetup({
+      settings: consensus(2),
+      bots: [{ slot: 2, name: 'Owl' }],
+      findings: {
+        'main-model': [finding('Null dereference'), finding('Unclosed file handle')],
+        'bot2-model': [finding('null dereference!'), finding('Unclosed file handle'), finding('Style nit')],
+      },
+      comments: [
+        { id: 1, path: 'src/app.ts', line: 2, user: { login: PUBLISHER }, body: renderFindingComment(earlier, { language: 'en', suggestionsAsCode: false }) },
+      ],
+    });
+    await processReviewJob(h.job, h.deps);
+
+    const body = h.created[0]!.body;
+    expect(body).toContain('> - **MergePilot** (1 of 2): 1 already posted by an earlier review');
+    expect(body).toContain(
+      "> - **Owl** (3 of 3): 1 presented in another bot's wording · 1 below agreement · 1 already posted by an earlier review",
+    );
+  });
+
   /** Consensus + dedupe judge whose primary fails, with an earlier slot-1 comment on the same line. */
   async function judgedAgainstEarlierComment(owlTitle: string, fallbackAnswers = Infinity) {
     const earlier = { id: 'old', side: 'RIGHT' as const, ...finding('Unclosed file handle') } as Parameters<typeof renderFindingComment>[0];

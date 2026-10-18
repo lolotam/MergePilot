@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { GitHubClient } from './client.js';
 import {
   gatherRepositoryContext,
+  isBuildWiringChange,
   localImportSpecifiers,
   MAX_CONTEXT_READS,
+  MAX_WORKFLOW_FILES,
+  workflowRunsChanges,
+  workspaceManifestCandidates,
   pairCandidates,
   pythonImportCandidates,
   resolveImportCandidates,
@@ -84,7 +88,12 @@ describe('pairCandidates', () => {
   });
 });
 
-function fakeClient(files: Record<string, string>, fail: string[] = []): { client: GitHubClient; reads: Array<{ path: string; ref: string }> } {
+/** A client reading `files` at the head; with `dirs`, it can also list those directories. */
+function fakeClient(
+  files: Record<string, string>,
+  fail: string[] = [],
+  dirs?: Record<string, string[]>,
+): { client: GitHubClient; reads: Array<{ path: string; ref: string }> } {
   const reads: Array<{ path: string; ref: string }> = [];
   const client = {
     getFileContent: async ({ path, ref }: { path: string; ref: string }) => {
@@ -92,6 +101,7 @@ function fakeClient(files: Record<string, string>, fail: string[] = []): { clien
       if (fail.includes(path)) throw new Error('HTTP 502');
       return ref === 'head-sha' ? (files[path] ?? null) : 'BASE VERSION';
     },
+    ...(dirs ? { listDirectoryFiles: async ({ path }: { path: string }) => dirs[path] ?? null } : {}),
   } as unknown as GitHubClient;
   return { client, reads };
 }
@@ -213,6 +223,127 @@ describe('gatherRepositoryContext', () => {
     const result = await gatherRepositoryContext(client, params([modified('src/api.ts')], { contextTokens: 0 }));
     expect(result).toEqual({ files: [], leftOut: [] });
     expect(reads).toEqual([]);
+  });
+});
+
+// ADR-0029 amendment: a PR that changes scripts, tests or CI also gets the package manifests and the
+// workflows that run them (PayPos#363: the root package.json and ci.yml decided which suites ran).
+describe('build and CI wiring', () => {
+  it('recognises package manifests, workflows, scripts and tests as build wiring', () => {
+    for (const path of ['package.json', 'apps/web/package.json', '.github/workflows/ci.yml', 'scripts/release/run.ts', 'src/lock.test.ts', 'app/tests/conftest.py', 'pkg/store_test.go']) {
+      expect(isBuildWiringChange(path), path).toBe(true);
+    }
+    for (const path of ['src/lock.ts', 'docs/testing.md', 'src/contest.ts', 'app/views.py']) {
+      expect(isBuildWiringChange(path), path).toBe(false);
+    }
+  });
+
+  it('looks for the nearest workspace manifest at most two directories deep', () => {
+    expect(workspaceManifestCandidates('apps/admin/src/orders/x.spec.tsx')).toEqual(['apps/admin/package.json', 'apps/package.json']);
+    expect(workspaceManifestCandidates('scripts/check.sh')).toEqual(['scripts/package.json']);
+    expect(workspaceManifestCandidates('package.json')).toEqual([]);
+    expect(workspaceManifestCandidates('.github/workflows/ci.yml')).toEqual([]);
+  });
+
+  it('keeps a workflow only when it runs package scripts or names a changed file', () => {
+    expect(workflowRunsChanges('steps:\n  - run: pnpm check', ['src/a.test.ts'])).toBe(true);
+    expect(workflowRunsChanges('steps:\n  - run: ./scripts/gate.sh', ['scripts/gate.sh'])).toBe(true);
+    expect(workflowRunsChanges('steps:\n  - uses: actions/labeler@v5', ['src/a.test.ts'])).toBe(false);
+  });
+
+  it('sends the root and workspace manifests and the workflows that run the changed tests', async () => {
+    const { client, reads } = fakeClient(
+      {
+        'apps/admin/src/x.spec.tsx': 'it("works", () => {});',
+        'package.json': '{ "scripts": { "test": "vitest run" } }',
+        'apps/admin/package.json': '{ "scripts": { "test": "vitest run src" } }',
+        '.github/workflows/ci.yml': 'jobs:\n  test:\n    steps:\n      - run: pnpm test',
+        '.github/workflows/labeler.yml': 'jobs:\n  label:\n    steps:\n      - uses: actions/labeler@v5',
+      },
+      [],
+      { '.github/workflows': ['.github/workflows/labeler.yml', '.github/workflows/ci.yml', '.github/workflows/README.md'] },
+    );
+    const result = await gatherRepositoryContext(client, params([modified('apps/admin/src/x.spec.tsx')]));
+
+    expect(result.files.filter((f) => f.kind === 'build-config').map((f) => [f.path, f.reason, f.forPaths])).toEqual([
+      ['package.json', 'root package manifest (scripts)', ['apps/admin/src/x.spec.tsx']],
+      ['apps/admin/package.json', 'workspace package manifest (scripts)', ['apps/admin/src/x.spec.tsx']],
+      ['.github/workflows/ci.yml', 'CI workflow that runs the scripts', ['apps/admin/src/x.spec.tsx']],
+    ]);
+    expect(reads.map((r) => r.path)).not.toContain('.github/workflows/README.md');
+    expect(reads.every((r) => r.ref === 'head-sha')).toBe(true);
+  });
+
+  it('reads manifests before listing workflows when only two reads remain', async () => {
+    const imports = Array.from({ length: MAX_CONTEXT_READS - 4 }, (_, i) => `import './m${i}.ts';`).join('\n');
+    const { client, reads } = fakeClient({
+      'apps/admin/x.test.ts': imports,
+      'package.json': '{}',
+      'apps/admin/package.json': '{}',
+    }, [], { '.github/workflows': ['.github/workflows/ci.yml'] });
+    const result = await gatherRepositoryContext(client, params([modified('apps/admin/x.test.ts')]));
+    expect(reads).toHaveLength(MAX_CONTEXT_READS);
+    expect(result.files.filter((f) => f.kind === 'build-config').map((f) => f.path)).toEqual([
+      'package.json', 'apps/admin/package.json',
+    ]);
+    expect(result.leftOut).toContain('.github/workflows/ (not looked up)');
+  });
+
+  it('reads each distinct manifest and workflow once across many triggers without exhausting the budget', async () => {
+    const paths = Array.from({ length: MAX_CONTEXT_READS }, (_, i) => `tests/case${i}.sh`);
+    const { client, reads } = fakeClient({
+      'package.json': '{}',
+      'tests/package.json': '{}',
+      '.github/workflows/ci.yml': 'run: pnpm test',
+    }, [], { '.github/workflows': ['.github/workflows/ci.yml'] });
+    const result = await gatherRepositoryContext(client, params(paths.map((path) => ({
+      path, status: 'added', patch: '@@ -0,0 +1 @@\n+echo test', changes: 1,
+    }))));
+    expect(reads.map((r) => r.path).sort()).toEqual([
+      '.github/workflows/ci.yml', 'package.json', 'tests/package.json',
+    ]);
+    for (const path of ['package.json', 'tests/package.json', '.github/workflows/ci.yml']) {
+      expect(result.files.filter((f) => f.path === path).flatMap((f) => f.forPaths)).toEqual(paths);
+    }
+    expect(result.leftOut).toEqual([]);
+  });
+
+  it('associates workflows with each relevant path rather than every trigger', async () => {
+    const { client } = fakeClient({
+      '.github/workflows/deploy.yml': 'run: ./scripts/deploy.sh',
+      '.github/workflows/ci.yml': 'run: pnpm check',
+    }, [], { '.github/workflows': ['.github/workflows/deploy.yml', '.github/workflows/ci.yml'] });
+    const paths = ['scripts/deploy.sh', 'tests/smoke.sh', 'package.json'];
+    const result = await gatherRepositoryContext(client, params(paths.map((path) => ({
+      path, status: 'added', patch: '@@ -0,0 +1 @@\n+content', changes: 1,
+    }))));
+    expect(result.files.filter((f) => f.path === '.github/workflows/deploy.yml').flatMap((f) => f.forPaths)).toEqual(['scripts/deploy.sh']);
+    expect(result.files.filter((f) => f.path === '.github/workflows/ci.yml').flatMap((f) => f.forPaths)).toEqual(paths);
+  });
+
+  it('adds no build wiring to a PR that changes no script, test or CI file', async () => {
+    const { client, reads } = fakeClient({ 'src/api.ts': 'export const a = 1;', 'package.json': '{}' }, [], {
+      '.github/workflows': ['.github/workflows/ci.yml'],
+    });
+    const result = await gatherRepositoryContext(client, params([modified('src/api.ts')]));
+
+    expect(result.files.some((f) => f.kind === 'build-config')).toBe(false);
+    expect(reads.map((r) => r.path)).not.toContain('package.json');
+  });
+
+  it('discloses workflows past the per-review limit', async () => {
+    const names = Array.from({ length: MAX_WORKFLOW_FILES + 2 }, (_, i) => `.github/workflows/w${String(i).padStart(2, '0')}.yml`);
+    const { client } = fakeClient({ 'src/a.test.ts': 'x' }, [], { '.github/workflows': names });
+    const result = await gatherRepositoryContext(client, params([modified('src/a.test.ts')]));
+
+    expect(result.leftOut).toEqual(names.slice(MAX_WORKFLOW_FILES).map((n) => `${n} (not looked up)`));
+  });
+
+  it('still sends the manifests when the client cannot list directories', async () => {
+    const { client } = fakeClient({ 'src/a.test.ts': 'x', 'package.json': '{}' });
+    const result = await gatherRepositoryContext(client, params([modified('src/a.test.ts')]));
+
+    expect(result.files.filter((f) => f.kind === 'build-config').map((f) => f.path)).toEqual(['package.json']);
   });
 });
 

@@ -141076,7 +141076,13 @@ async function executeBatchedReview(input2) {
   return { merged, totalUsage, incompleteReasons };
 }
 
-var KIND_ORDER = { "changed-file": 0, "test-pair": 1, import: 2, "pr-change": 3 };
+var KIND_ORDER = {
+  "changed-file": 0,
+  "test-pair": 1,
+  import: 2,
+  "build-config": 3,
+  "pr-change": 4
+};
 var CONTEXT_FILE_MAX_TOKENS = 8e3;
 var BLOCK_OVERHEAD_TOKENS = 30;
 var blockKey = (file2) => `${file2.source ?? "repository"}:${file2.path}`;
@@ -193771,6 +193777,40 @@ var Octokit2 = Octokit.plugin(requestLog, legacyRestEndpointMethods, paginateRes
   }
 );
 
+function isNotFoundError(error62) {
+  return typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404;
+}
+function directoryFilesOf(data) {
+  if (!Array.isArray(data))
+    return null;
+  return data.flatMap((item) => {
+    const entry = item;
+    return entry.type === "file" && typeof entry.path === "string" ? [entry.path] : [];
+  });
+}
+var MAX_FILE_BYTES = 100 * 1024;
+var TRUNCATION_NOTE = "\n\n[Truncated: file exceeds 100 KB]";
+function capFileContent(content) {
+  const buf = Buffer.from(content, "utf8");
+  if (buf.byteLength <= MAX_FILE_BYTES) {
+    return content;
+  }
+  return buf.subarray(0, MAX_FILE_BYTES).toString("utf8") + TRUNCATION_NOTE;
+}
+async function readFilesAtRef(client, { owner, repo, ref, paths }) {
+  const results = [];
+  for (const path12 of paths) {
+    const rawContent = await client.getFileContent({ owner, repo, path: path12, ref });
+    if (rawContent !== null) {
+      results.push({
+        path: path12,
+        content: capFileContent(rawContent)
+      });
+    }
+  }
+  return results;
+}
+
 var REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
@@ -193924,9 +193964,23 @@ function createOctokitClient(token) {
           }
           return item.content;
         } catch (error62) {
-          if (typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404) {
+          if (isNotFoundError(error62))
             return null;
-          }
+          sanitizeError(error62, token);
+        }
+      },
+      async listDirectoryFiles(params) {
+        try {
+          const response = await octokit.rest.repos.getContent({
+            owner: params.owner,
+            repo: params.repo,
+            path: params.path,
+            ref: params.ref
+          });
+          return directoryFilesOf(response.data);
+        } catch (error62) {
+          if (isNotFoundError(error62))
+            return null;
           sanitizeError(error62, token);
         }
       },
@@ -194483,29 +194537,6 @@ ${marker}` : marker;
     status: "published",
     reviewId: createdReview.id
   };
-}
-
-var MAX_FILE_BYTES = 100 * 1024;
-var TRUNCATION_NOTE = "\n\n[Truncated: file exceeds 100 KB]";
-function capFileContent(content) {
-  const buf = Buffer.from(content, "utf8");
-  if (buf.byteLength <= MAX_FILE_BYTES) {
-    return content;
-  }
-  return buf.subarray(0, MAX_FILE_BYTES).toString("utf8") + TRUNCATION_NOTE;
-}
-async function readFilesAtRef(client, { owner, repo, ref, paths }) {
-  const results = [];
-  for (const path12 of paths) {
-    const rawContent = await client.getFileContent({ owner, repo, path: path12, ref });
-    if (rawContent !== null) {
-      results.push({
-        path: path12,
-        content: capFileContent(rawContent)
-      });
-    }
-  }
-  return results;
 }
 
 function changesOf(lines) {
@@ -195269,24 +195300,33 @@ function withJudgeUsage(costUsd2, usage, report) {
 }
 
 var readCache = /* @__PURE__ */ new WeakMap();
-function readAtRef(client, owner, repo, ref, path12) {
-  let cache2 = readCache.get(client);
+var listCache = /* @__PURE__ */ new WeakMap();
+function shared(caches, client, key, start) {
+  let cache2 = caches.get(client);
   if (!cache2) {
     cache2 = /* @__PURE__ */ new Map();
-    readCache.set(client, cache2);
+    caches.set(client, cache2);
   }
-  const key = `${owner}/${repo}@${ref}:${path12}`;
-  let read = cache2.get(key);
-  if (!read) {
-    const pending = client.getFileContent({ owner, repo, path: path12, ref });
+  let request2 = cache2.get(key);
+  if (!request2) {
+    const pending = start();
     pending.catch(() => {
       if (cache2?.get(key) === pending)
         cache2.delete(key);
     });
-    read = pending;
-    cache2.set(key, read);
+    request2 = pending;
+    cache2.set(key, request2);
   }
-  return read;
+  return request2;
+}
+function readAtRef(client, owner, repo, ref, path12) {
+  return shared(readCache, client, `${owner}/${repo}@${ref}:${path12}`, () => client.getFileContent({ owner, repo, path: path12, ref }));
+}
+function listAtRef(client, owner, repo, ref, path12) {
+  const list = client.listDirectoryFiles?.bind(client);
+  if (!list)
+    return Promise.resolve(null);
+  return shared(listCache, client, `${owner}/${repo}@${ref}:${path12}`, () => list({ owner, repo, path: path12, ref }));
 }
 
 var NESTED_RULES_NAMES = ["AGENTS.md", "CLAUDE.md"];
@@ -195364,6 +195404,10 @@ var EXTENSIONLESS_SUFFIXES = [".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index
 var NON_CODE_EXTENSIONS = /* @__PURE__ */ new Set(["css", "scss", "sass", "less", "json", "svg", "png", "jpg", "jpeg", "gif", "md", "html", "txt", "yml", "yaml", "wasm"]);
 var JS_SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"])(\.{1,2}\/[^'"\n]*)\1/g;
 var PY_RELATIVE_IMPORT_RE = /^\s*from\s+(\.+)([\w.]*)\s+import\s+([^\n#]+)/gm;
+var WORKFLOWS_DIR = ".github/workflows";
+var MAX_WORKFLOW_FILES = 10;
+var TEST_DIRS = /* @__PURE__ */ new Set(["__tests__", "test", "tests", "e2e"]);
+var PACKAGE_SCRIPT_RE = /\b(?:pnpm|npm|npx|yarn|bun|turbo)\b/;
 var dirOf2 = (path12) => path12.split("/").slice(0, -1).join("/");
 var extOf = (path12) => {
   const base = path12.split("/").pop() ?? "";
@@ -195507,6 +195551,22 @@ var ContextReader = class {
       return "failed";
     }
   }
+  /** The files of a directory; one read against the limit, none when the client cannot list. */
+  async list(dir) {
+    if (!this.client.listDirectoryFiles)
+      return [];
+    if (this.reads >= MAX_CONTEXT_READS) {
+      this.leftOut.push(`${dir}/ (not looked up)`);
+      return [];
+    }
+    this.reads++;
+    try {
+      return await listAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, dir) ?? [];
+    } catch {
+      this.leftOut.push(`${dir}/ (could not be read)`);
+      return [];
+    }
+  }
   async run(lookups) {
     await inChunks(lookups, (lookup) => this.lookUp(lookup));
   }
@@ -195527,7 +195587,7 @@ var ContextReader = class {
       if (this.known.has(path12)) {
         const content = this.known.get(path12);
         if (content)
-          this.add(lookup, path12, content);
+          this.addAccepted(lookup, path12, content);
         return;
       }
       if (isSensitivePath(path12) || isSensitivePath(lookup.candidates[0] ?? path12))
@@ -195543,15 +195603,65 @@ var ContextReader = class {
       if (outcome === "failed")
         return;
       if (outcome.content !== null) {
-        this.add(lookup, path12, outcome.content);
+        this.addAccepted(lookup, path12, outcome.content);
         return;
       }
     }
+  }
+  addAccepted(lookup, path12, content) {
+    if (!lookup.accept || lookup.accept(content))
+      this.add(lookup, path12, content);
   }
   add(lookup, path12, content) {
     this.found.push({ path: path12, content, reason: lookup.reason, kind: lookup.kind, forPaths: [lookup.forPath] });
   }
 };
+function isTestPath(path12) {
+  const segments = path12.split("/");
+  const base = segments.pop() ?? "";
+  if (segments.some((segment) => TEST_DIRS.has(segment)))
+    return true;
+  return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(base) || /^test_.*\.py$/.test(base) || /_test\.(?:py|go)$/.test(base);
+}
+function isBuildWiringChange(path12) {
+  const segments = path12.split("/");
+  return segments[segments.length - 1] === "package.json" || path12.startsWith(`${WORKFLOWS_DIR}/`) || segments.slice(0, -1).includes("scripts") || isTestPath(path12);
+}
+function workspaceManifestCandidates(path12) {
+  if (path12.startsWith(".github/"))
+    return [];
+  const dirs = dirOf2(path12).split("/").filter(Boolean).slice(0, 2);
+  return dirs.map((_, i2) => `${dirs.slice(0, dirs.length - i2).join("/")}/package.json`);
+}
+function workflowRunsChanges(content, changedPaths) {
+  return PACKAGE_SCRIPT_RE.test(content) || changedPaths.some((path12) => content.includes(path12));
+}
+async function buildWiringLookups(reader, reviewed) {
+  const triggers = reviewed.map((f3) => f3.path).filter(isBuildWiringChange);
+  if (triggers.length === 0)
+    return [];
+  const kind = "build-config";
+  const manifests = triggers.flatMap((forPath) => {
+    const workspace = workspaceManifestCandidates(forPath);
+    return [
+      { candidates: ["package.json"], kind, reason: "root package manifest (scripts)", forPath, disclose: true },
+      ...workspace.length > 0 ? [{ candidates: workspace, kind, reason: "workspace package manifest (scripts)", forPath, disclose: false }] : []
+    ];
+  });
+  await reader.run(manifests);
+  const listed = (await reader.list(WORKFLOWS_DIR)).filter((path12) => /\.ya?ml$/i.test(path12)).sort();
+  for (const path12 of listed.slice(MAX_WORKFLOW_FILES))
+    reader.leftOut.push(`${path12} (not looked up)`);
+  const workflows = listed.slice(0, MAX_WORKFLOW_FILES);
+  return triggers.flatMap((forPath) => workflows.map((path12) => ({
+    candidates: [path12],
+    kind,
+    reason: "CI workflow that runs the scripts",
+    forPath,
+    disclose: true,
+    accept: (content) => workflowRunsChanges(content, [forPath])
+  })));
+}
 async function gatherRepositoryContext(client, params) {
   if (params.contextTokens <= 0)
     return { files: [], leftOut: [] };
@@ -195566,6 +195676,7 @@ async function gatherRepositoryContext(client, params) {
   });
   const imports = reviewed.flatMap((file2) => importLookups(file2.path, reader.known.get(file2.path) ?? patchNewSide(file2.patch ?? "")));
   await reader.run([...pairs, ...imports]);
+  await reader.run(await buildWiringLookups(reader, reviewed));
   return { files: reader.found, leftOut: reader.leftOut };
 }
 function contextDisclosureOf(engine, gathererLeftOut, openFindings) {

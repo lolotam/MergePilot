@@ -233,6 +233,25 @@ describe('createOctokitClient', () => {
     expect(result).toBeNull();
   });
 
+  it('lists only the files of a directory, and null for a missing one or a file', async () => {
+    mockGetContent.mockResolvedValueOnce({
+      data: [
+        { path: '.github/workflows/ci.yml', type: 'file' },
+        { path: '.github/workflows/shared', type: 'dir' },
+      ],
+    });
+    const client = createOctokitClient(secretToken);
+    const params = { owner: 'org', repo: 'repo', path: '.github/workflows', ref: 'head' };
+    expect(await client.listDirectoryFiles!(params)).toEqual(['.github/workflows/ci.yml']);
+
+    const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+    mockGetContent.mockRejectedValueOnce(notFound);
+    expect(await client.listDirectoryFiles!(params)).toBeNull();
+
+    mockGetContent.mockResolvedValueOnce({ data: { type: 'file', content: '' } });
+    expect(await client.listDirectoryFiles!(params)).toBeNull();
+  });
+
   it('returns null when getFileContent points to a directory', async () => {
     mockGetContent.mockResolvedValueOnce({
       data: [

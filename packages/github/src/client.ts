@@ -28,6 +28,7 @@ import type {
   ListReviewThreadsParams,
   RemoveLabelParams,
 } from './client-types.js';
+import { directoryFilesOf, isNotFoundError } from './contents.js';
 import { fetchReviewThreads } from './review-threads.js';
 
 export * from './client-types.js';
@@ -153,14 +154,22 @@ export function createOctokitClient(token: string): GitHubClient {
           }
           return item.content;
         } catch (error: unknown) {
-          if (
-            typeof error === 'object' &&
-            error !== null &&
-            'status' in error &&
-            (error as { status: unknown }).status === 404
-          ) {
-            return null;
-          }
+          if (isNotFoundError(error)) return null;
+          sanitizeError(error, token);
+        }
+      },
+
+      async listDirectoryFiles(params: GetFileContentParams): Promise<string[] | null> {
+        try {
+          const response = await octokit.rest.repos.getContent({
+            owner: params.owner,
+            repo: params.repo,
+            path: params.path,
+            ref: params.ref,
+          });
+          return directoryFilesOf(response.data);
+        } catch (error: unknown) {
+          if (isNotFoundError(error)) return null;
           sanitizeError(error, token);
         }
       },
