@@ -207,7 +207,9 @@ left the merge to one judge answer, and to nothing when the judge is off or unav
    answered, its own line names the entry that answered it:
    `> Jev (earlier comments): provider:model (…)` (Arabic: `> Jev (التعليقات السابقة): …`). So a
    fallback that answered only the dedupe is disclosed too (ADR-0015). Each line appears only when
-   its check asked the judge.
+   its check got an answer. When every judge entry failed on the dedupe, the summary shows the
+   single-bot banner instead: `> ⚠️ Jev duplicate check unavailable: code` (Arabic:
+   `> ⚠️ فحص التكرار بالمعنى (Jev) غير متاح: code`).
 
 ### Calibration
 

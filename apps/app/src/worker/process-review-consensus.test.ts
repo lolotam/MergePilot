@@ -195,7 +195,7 @@ describe('processReviewJob — consensus mode', () => {
   });
 
   /** Consensus + dedupe judge whose primary fails, with an earlier slot-1 comment on the same line. */
-  async function judgedAgainstEarlierComment(owlTitle: string) {
+  async function judgedAgainstEarlierComment(owlTitle: string, fallbackAnswers = Infinity) {
     const earlier = { id: 'old', side: 'RIGHT' as const, ...finding('Unclosed file handle') } as Parameters<typeof renderFindingComment>[0];
     const judge = { ...consensusJudge([{ provider: 'vercel-gateway', model: 'typesafe-ai/jev' }]), uses: ['consensus', 'dedupe'] } as JudgeSettings;
     const h = await panelSetup({
@@ -209,6 +209,7 @@ describe('processReviewJob — consensus mode', () => {
     const asked: number[] = [];
     h.deps.judgeFetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes('typesafe.ai')) return new Response(JSON.stringify({ error: { message: 'bad key' } }), { status: 401 });
+      if (asked.length >= fallbackAnswers) return new Response(JSON.stringify({ error: { message: 'down' } }), { status: 503 });
       const ids = Object.keys((JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }).questions);
       asked.push(ids.length);
       const answers = Object.fromEntries(ids.map((id) => [id, { type: 'noul', noul: 0.1 }]));
@@ -233,6 +234,20 @@ describe('processReviewJob — consensus mode', () => {
     expect(asked).toEqual([1, 2]);
     expect(body).toContain(`> Jev: \`${fallbackLabel}\``);
     expect(body).toContain(`> Jev (earlier comments): \`${fallbackLabel}\``);
+  });
+
+  it('says the check against earlier comments was unavailable when every judge entry failed on it', async () => {
+    const { body } = await judgedAgainstEarlierComment('null dereference!', 0);
+    expect(body).toContain('> ⚠️ Jev duplicate check unavailable: server');
+    expect(body).not.toContain('> Jev');
+  });
+
+  it('names the merge judge and flags the failed check against earlier comments', async () => {
+    const { body, asked } = await judgedAgainstEarlierComment('Missing null check', 1);
+    expect(asked).toEqual([1]);
+    expect(body).toContain(`> Jev: \`${fallbackLabel}\``);
+    expect(body).toContain('> ⚠️ Jev duplicate check unavailable: server');
+    expect(body).not.toContain('> Jev (earlier comments)');
   });
 
   it('uses slot 1\'s marker as the incremental base for the whole panel', async () => {

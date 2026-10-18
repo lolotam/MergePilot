@@ -48,6 +48,8 @@ export interface PanelSummaryInput {
   judgeAnsweredBy?: string | undefined;
   /** The same, for the check against earlier comments; set only when that check asked the judge. */
   dedupeJudgeAnsweredBy?: string | undefined;
+  /** Code when every judge entry failed on the check against earlier comments. */
+  dedupeJudgeUnavailable?: string | undefined;
   /** Every bot's findings its verification pass rejected, each naming the bot (ADR-0028). */
   verifyRejected?: readonly VerifyRejectedItem[] | undefined;
   /** Nested rules files left out of the review (ADR-0028). */
@@ -67,6 +69,7 @@ interface Labels {
   agreement: (min: number, total: number) => string;
   judgeUnavailable: (code: string) => string;
   dedupeAnsweredBy: (entry: string) => string;
+  dedupeUnavailable: (code: string) => string;
   incomplete: string;
   outside: string;
   below: (n: number) => string;
@@ -85,6 +88,7 @@ const EN: Labels = {
     `> Kept: findings at least ${min} of ${total} bots agree on; critical and high are always kept.`,
   judgeUnavailable: (code) => `> ⚠️ Jev same-issue check unavailable: ${code} — findings were merged by title and wording only`,
   dedupeAnsweredBy: (entry) => `> Jev (earlier comments): \`${entry}\``,
+  dedupeUnavailable: (code) => `> ⚠️ Jev duplicate check unavailable: ${code}`,
   incomplete: '### ⚠️ Warning: Incomplete review',
   outside: '### Findings outside the diff',
   below: (n) => `Below agreement (${n})`,
@@ -103,6 +107,7 @@ const AR: Labels = {
     `> المعروض: الملاحظات التي اتفق عليها ${min} من ${total} مراجعين على الأقل؛ الملاحظات الحرجة والعالية تُعرض دائمًا.`,
   judgeUnavailable: (code) => `> ⚠️ فحص Jev لنفس المشكلة غير متاح: ${code} — تم الدمج بالعنوان والصياغة فقط`,
   dedupeAnsweredBy: (entry) => `> Jev (التعليقات السابقة): \`${entry}\``,
+  dedupeUnavailable: (code) => `> ⚠️ فحص التكرار بالمعنى (Jev) غير متاح: ${code}`,
   incomplete: '### ⚠️ تحذير: مراجعة غير مكتملة',
   outside: '### ملاحظات خارج التغييرات',
   below: (n) => `أقل من حد الاتفاق (${n})`,
@@ -159,6 +164,7 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   if (input.minAgreement > 1) sections.push(labels.agreement(input.minAgreement, merge.total));
   if (input.judgeAnsweredBy) sections.push(`> Jev: \`${neutralize(input.judgeAnsweredBy)}\``);
   if (input.dedupeJudgeAnsweredBy) sections.push(labels.dedupeAnsweredBy(neutralize(input.dedupeJudgeAnsweredBy)));
+  if (input.dedupeJudgeUnavailable) sections.push(labels.dedupeUnavailable(neutralize(input.dedupeJudgeUnavailable)));
   if (input.judgeUnavailable) sections.push(labels.judgeUnavailable(neutralize(input.judgeUnavailable)));
 
   const reasons = input.incompleteReasons ?? [];
