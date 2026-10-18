@@ -197,7 +197,7 @@ evidence left out; the last two pairs are outside ±3 and were scored only to te
 | Pair | Same issue? | Dice | Shared words |
 |---|---|---|---|
 | PayPos#361 line 52: the two "Equal-revision replays" findings | yes | 0.48 | 16 |
-| PayPos#321 line 162: performers omitted from locked current-link reads / current links read without being locked | yes | 0.46 | 16 |
+| PayPos#321 line 162 (P4/P5 in the review-comparison duplicate list): performers omitted from locked current-link reads / current links read without being locked | yes | 0.46 | 16 |
 | PayPos#361 lines 20/21: stale replay response / busy-kept editor hides a refusal (same evidence line) | no | 0.17 | 7 |
 | eyadex#78 lines 134/132: replay excludes finance fields / raw ZodError | no | 0.22 | 7 |
 | PayPos#321 lines 53/60: retention not wired into price edits / D-11 forces removing performers | no | 0.23 | 10 |
