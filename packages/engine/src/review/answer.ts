@@ -46,8 +46,8 @@ const ReviewAnswerLooseSchema = z.object({
 
 /**
  * Some models answer with a summary and leave the findings list out entirely. That answer is
- * kept (no findings) only when no candidate has a list, and the caller discloses it as
- * incomplete: it is never read as a silent "no findings".
+ * kept (no findings) only when no candidate has a list. Review callers may accept it as
+ * empty after a normally finished reminder retry; audit callers keep it incomplete.
  */
 const SummaryOnlyAnswerSchema = z.object({ summary: z.string().min(1) });
 
@@ -179,7 +179,7 @@ export function isTruncatedAnswer(finishReason: string | undefined, hasUnclosedO
 // ---------------------------------------------------------------------------
 
 export type ParseReviewAnswerResult =
-  | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number; findingsMissing?: true }
+  | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number; findingsMissing?: true; otherCandidatesRejected?: true; acceptedAsEmpty?: true }
   | { ok: false; error: string; code: ParseErrorCode };
 
 /**
@@ -205,12 +205,14 @@ export function parseReviewAnswer(
   let firstParseError: string | null = null;
   let matchedAnswer: z.infer<typeof ReviewAnswerLooseSchema> | null = null;
   let summaryOnly: string | null = null;
+  let otherCandidatesRejected = false;
 
   for (const candidate of candidates) {
     let parsed: unknown;
     try {
       parsed = parseJsonLenient(candidate);
     } catch (err) {
+      otherCandidatesRejected = true;
       if (!firstParseError) {
         firstParseError = err instanceof Error ? err.message : String(err);
       }
@@ -224,15 +226,19 @@ export function parseReviewAnswer(
     }
     const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
     // Only a truly absent key: `findings: null`, `0` or `""` is a present non-list, so invalid-json.
-    if (bare.success && summaryOnly === null && (parsed as Record<string, unknown>).findings === undefined) {
-      summaryOnly = bare.data.summary;
-    } else if (!firstParseError) {
-      firstParseError = loose.error.message;
+    if (bare.success && (parsed as Record<string, unknown>).findings === undefined) {
+      summaryOnly ??= bare.data.summary;
+    } else {
+      otherCandidatesRejected = true;
+      if (!firstParseError) firstParseError = loose.error.message;
     }
   }
 
   if (!matchedAnswer && summaryOnly !== null) {
-    return { ok: true, summary: summaryOnly, findings: [], droppedInvalid: 0, findingsMissing: true };
+    return {
+      ok: true, summary: summaryOnly, findings: [], droppedInvalid: 0, findingsMissing: true,
+      ...(otherCandidatesRejected ? { otherCandidatesRejected: true } : {}),
+    };
   }
 
   if (!matchedAnswer) {

@@ -5,6 +5,7 @@ import { FINDINGS_LIST_REMINDER, remindMissingFindingsList, retryUnusableAnswer 
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { makeConfig, SIMPLE_PATCH } from './pipeline.fixtures.js';
 import { runReview } from './pipeline.js';
+import { executeBatchedReview } from './batch-run.js';
 import { SpendTracker } from './spend.js';
 
 // Regression: lolotam/eyadex#81 (2026-10-17 18:44 UTC), claude-opus-5-5 on the subscription, with
@@ -47,14 +48,26 @@ describe('retryUnusableAnswer — an answer without a findings list', () => {
     expect(result.note).toBeUndefined();
   });
 
-  it('keeps the list missing, still disclosed, when the second answer leaves it out too, without a third call', async () => {
+  it('accepts the missing list as empty, still logged, when the second answer leaves it out too, without a third call', async () => {
     const model = modelReturning(SUMMARY_ONLY);
 
     const result = await retry(model);
 
     expect(model.generate).toHaveBeenCalledTimes(1);
-    expect(result.parsed).toMatchObject({ ok: true, findingsMissing: true });
+    expect(result.parsed).toMatchObject({ ok: true, findingsMissing: true, acceptedAsEmpty: true });
     expect(result.response?.text).toBe(SUMMARY_ONLY);
+  });
+
+  it.each(['max-tokens', 'length', 'error', 'end_turn', ''])('does not accept a summary-only %s reminder as empty', async (finishReason) => {
+    const generate = vi.fn().mockResolvedValue({ text: SUMMARY_ONLY, finishReason });
+    const result = await retry({ label: 'fake', generate });
+    expect(result.parsed).toMatchObject({ ok: true, findingsMissing: true });
+    expect(result.parsed).not.toHaveProperty('acceptedAsEmpty');
+  });
+
+  it.each(['', '   '])('does not accept an empty summary (%j)', async (summary) => {
+    const result = await retry(modelReturning(JSON.stringify({ summary })));
+    expect(result.parsed).not.toHaveProperty('acceptedAsEmpty');
   });
 
   it('keeps the first answer when the second is not usable, and never hands it to the truncation recovery', async () => {
@@ -124,7 +137,7 @@ describe('a review whose model leaves the findings list out', () => {
     expect(result).toMatchObject({ status: 'completed', complete: true, summary: 'Docs-only PR; no blocking defects found.' });
   });
 
-  it('stays incomplete and keeps a redacted preview of each answer for the logs when the list never comes', async () => {
+  it('completes and keeps a redacted preview of each answer for the logs when the list never comes', async () => {
     const generate = vi.fn().mockResolvedValue({ text: SUMMARY_ONLY, finishReason: 'stop', usage: { inputTokens: 4, outputTokens: 2149 } });
 
     const result = await review(generate);
@@ -132,13 +145,52 @@ describe('a review whose model leaves the findings list out', () => {
     expect(generate).toHaveBeenCalledTimes(2);
     expect(result.status).toBe('completed');
     if (result.status === 'completed') {
-      expect(result.complete).toBe(false);
-      expect(result.result.incompleteReasons).toContain(FINDINGS_MISSING_REASON);
+      expect(result.complete).toBe(true);
+      expect(result.result.incompleteReasons).not.toContain(FINDINGS_MISSING_REASON);
       const attempt = {
         chars: SUMMARY_ONLY.length, finishReason: 'stop', outputTokens: 2149,
         preview: SUMMARY_ONLY.slice(0, 200), tail: SUMMARY_ONLY.slice(-200),
       };
-      expect(result.answerAttempts).toEqual([attempt, attempt]);
+      expect(result.answerAttempts).toEqual([attempt, { ...attempt, acceptedAsEmpty: true }]);
+    }
+  });
+
+  it.each([
+    ['max-tokens', 'No defects.'],
+    ['error', 'No defects.'],
+    ['stop', ''],
+    ['stop', '   '],
+  ])('stays incomplete after a %s reminder with summary %j', async (finishReason, summary) => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: SUMMARY_ONLY, finishReason: 'stop' })
+      .mockResolvedValue({ text: JSON.stringify({ summary }), finishReason });
+    const result = await review(generate);
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.complete).toBe(false);
+      expect(result.result.incompleteReasons).toContain(FINDINGS_MISSING_REASON);
+    }
+  });
+
+  it.each([
+    '{"summary":"draft"}\n{"summary":"Issues found","findings":null}',
+    '{"summary":"Issues found","findings":null}\n{"summary":"draft"}',
+    '{"summary":"draft"}\n{"summary": invalid}',
+    '{"summary": invalid}\n{"summary":"draft"}',
+  ])('stays incomplete when the stop reminder contains a rejected candidate: %s', async (text) => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: SUMMARY_ONLY, finishReason: 'stop' })
+      .mockResolvedValueOnce({ text, finishReason: 'stop' });
+
+    const result = await review(generate);
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.complete).toBe(false);
+      expect(result.inline).toEqual([]);
+      expect(result.result.incompleteReasons).toContain(FINDINGS_MISSING_REASON);
+      expect(result.answerAttempts?.at(-1)).not.toHaveProperty('acceptedAsEmpty');
     }
   });
 
@@ -189,7 +241,7 @@ describe('a truncated review whose retries leave the findings list out', () => {
     expect(generate).toHaveBeenCalledTimes(3);
     expect(result.status).toBe('completed');
     if (result.status === 'completed') {
-      expect(result.result.incompleteReasons).toContain(FINDINGS_MISSING_REASON);
+      expect(result.result.incompleteReasons).not.toContain(FINDINGS_MISSING_REASON);
       expect(result.answerAttempts?.map((a) => a.preview)).toEqual(
         ['{"summary": "cut', SUMMARY_ONLY.slice(0, 200), SUMMARY_ONLY.slice(0, 200)],
       );
@@ -227,5 +279,26 @@ describe('a batch whose truncation retry leaves the findings list out', () => {
     if (result.status === 'completed') {
       expect(result.result.incompleteReasons.join(' ')).not.toContain(FINDINGS_MISSING_REASON);
     }
+  });
+});
+
+describe('summary-only reminder completeness in batches', () => {
+  it.each([
+    ['stop', 'No defects.', true],
+    ['max-tokens', 'No defects.', false],
+    ['error', 'No defects.', false],
+    ['stop', '   ', false],
+  ] as const)('%s with summary %j has complete=%s', async (finishReason, summary, complete) => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: SUMMARY_ONLY, finishReason: 'stop' })
+      .mockResolvedValue({ text: JSON.stringify({ summary }), finishReason });
+    const result = await executeBatchedReview({
+      batches: [[{ path: 'src/a.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }]],
+      config: makeConfig(), pr: { title: 'T', body: 'B' }, rulesFiles: [],
+      model: { label: 'fake', generate }, maxOutputTokens: 100, retryOutputTokens: 100,
+      reviewOutputTokens: 100, spend: new SpendTracker(undefined, 1),
+    });
+    expect(result.merged?.findings).toEqual([]);
+    expect(result.incompleteReasons.some((reason) => reason.includes(FINDINGS_MISSING_REASON))).toBe(!complete);
   });
 });

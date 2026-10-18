@@ -192,7 +192,6 @@ const OUTPUT_CONTRACT = `\
 Respond with exactly one JSON object matching this schema (no prose before or after): the whole \
 reply starts with "{" and ends with "}", with no markdown fence around it.
 {
-  "summary": "<string — 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>",
   "findings": [
     {
       "path": "<string — the path of a changed file (a PATCH block), exactly as printed>",
@@ -207,8 +206,10 @@ reply starts with "{" and ends with "}", with no markdown fence around it.
       "ruleRef": "<string — e.g. 'CLAUDE.md §5' when a REVIEW_CRITERIA rule applies — optional>",
       "confidence": <number in [0,1] — see CONFIDENCE below>
     }
-  ]
+  ],
+  "summary": "<string — 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>"
 }
+If you found nothing to report, return "findings": [] — never omit the key.
 Keys and the severity, category and side values are spelled exactly as above, whatever language the text fields use.`;
 
 const WHAT_YOU_SEE = `\
