@@ -11,6 +11,7 @@ vi.mock('@mergepilot/engine', async (original) => {
 
 const factory = vi.mocked(createReviewModel);
 const reason = 'skipped: the review was admitted free under the monthly budget';
+const redactionKeys = [new Secret('workspace-roster-first-value'), new Secret('workspace-roster-second-value')];
 const fallback = [{ provider: 'openai' as const, model: 'gpt-5', effort: null }];
 const response = { text: JSON.stringify({ summary: 'LGTM', findings: [] }), finishReason: 'stop' as const,
   usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 } };
@@ -18,7 +19,7 @@ const response = { text: JSON.stringify({ summary: 'LGTM', findings: [] }), fini
 afterEach(() => vi.clearAllMocks());
 
 async function setup(budget: number | null, extra = false, fail = false, sameProvider = false, paidPrimary = false, custom = false,
-  options: { monthlyCost?: number; perReviewUsd?: number; normalPaid?: boolean; fallbackFree?: boolean; afterAdmission?: 'keys' | 'api-key' | 'replaced'; paidAdmission?: boolean } = {},
+  options: { monthlyCost?: number; perReviewUsd?: number; normalPaid?: boolean; fallbackFree?: boolean; afterAdmission?: 'keys' | 'api-key' | 'replaced'; paidAdmission?: boolean; redactionProbe?: boolean; skippedSubscriptionDefault?: boolean } = {},
 ) {
   const configured = sameProvider ? [{ provider: 'anthropic' as const, model: 'other', effort: null }]
     : custom ? [...fallback, { provider: 'custom' as const, model: 'custom-model', effort: null }] : fallback;
@@ -29,8 +30,12 @@ async function setup(budget: number | null, extra = false, fail = false, samePro
     ...(options.perReviewUsd !== undefined ? { repoFiles: { '.mergepilot.yml': `budget:\n  perReviewUsd: ${options.perReviewUsd}\n` } } : {}),
     bots: extra ? [{ slot: 2, provider: paidPrimary ? 'openai' : 'anthropic', fallback: configured }] : [],
   });
+  if (options.redactionProbe) {
+    const getPullRequest = h.client.getPullRequest;
+    h.client.getPullRequest = async (params) => ({ ...await getPullRequest(params), body: 'redaction probe ' + redactionKeys.map((key) => key.reveal()).join(' ') });
+  }
   let admissionComplete = false;
-  const subscribed = (provider: string) => provider === 'anthropic' || (provider === 'openai' && options.fallbackFree);
+  const subscribed = (provider: string) => provider === 'anthropic' || (provider === 'openai' && (options.fallbackFree || options.skippedSubscriptionDefault));
   const switched = (provider: string) => provider === 'openai' && admissionComplete && options.afterAdmission;
   const effective = (provider: string) => switched(provider) && options.afterAdmission !== 'keys'
     ? 'api-key' as const : subscribed(provider) ? 'subscription' as const : 'api-key' as const;
@@ -40,18 +45,20 @@ async function setup(budget: number | null, extra = false, fail = false, samePro
       : new Secret('test-key')),
     getDualAuthState: vi.fn(async (_ws: string, provider: string) => ({
       hasSubscription: !!subscribed(provider) && !(switched(provider) && options.afterAdmission === 'replaced'),
-      hasApiKeys: !subscribed(provider) || !!switched(provider) || (provider === 'anthropic' && options.paidAdmission === true),
+      hasApiKeys: !subscribed(provider) || !!switched(provider) || (provider === 'openai' && options.skippedSubscriptionDefault === true) || (provider === 'anthropic' && options.paidAdmission === true),
       preference: null, effective: effective(provider),
     })),
     getEffectiveAuthMethod: vi.fn(async (_ws: string, provider: string) => effective(provider)),
-    resolveKeyRoster: vi.fn(async (_ws: string, _provider: string) => ({ secrets: [new Secret('test-key')], keyIds: ['key'], startIndex: 0 })),
+    resolveKeyRoster: vi.fn(async (_ws: string, _provider: string) => ({ secrets: options.redactionProbe ? redactionKeys : [new Secret('test-key')], keyIds: options.redactionProbe ? ['key1', 'key2'] : ['key'], startIndex: 0 })),
   };
   const actual = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
   const called: string[] = [];
+  const prompts: Array<{ model: string; prompt: string }> = [];
   factory.mockImplementation(async (...args) => {
     const model = await actual.createReviewModel(...args);
     const wire = (entry: ReviewModel, primary: boolean) => {
-      entry.generate = vi.fn(async () => {
+      entry.generate = vi.fn(async (request: { user: string; system: string }) => {
+        prompts.push({ model: entry.label, prompt: request.system + request.user });
         called.push(entry.label);
         if (primary && fail) throw new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: 'anthropic', message: 'subscription rejected' });
         return response;
@@ -71,10 +78,33 @@ async function setup(budget: number | null, extra = false, fail = false, samePro
   const credentialRead = vi.spyOn(h.store, 'getCredential');
   const { createModelForProvider: _seam, ...deps } = h.deps;
   const result = await processReviewJob(h.job, { ...deps, credentials, budgetAdmission: admission });
-  return { ...h, credentials, credentialRead, admit, result, called, held: admission.heldUsd(WS) };
+  return { ...h, credentials, credentialRead, admit, result, called, prompts, held: admission.heldUsd(WS) };
 }
 
 describe('free bots with paid configured fallbacks (ADR-0035)', () => {
+  it.each([
+    { extra: false, skippedSubscriptionDefault: false },
+    { extra: true, skippedSubscriptionDefault: false },
+    { extra: false, skippedSubscriptionDefault: true },
+  ])('redacts skipped paid roster keys without giving the model a roster (%j)', async (options) => {
+    const h = await setup(0.1, options.extra, false, false, false, false, { ...options, redactionProbe: true });
+    expect(h.result.status).toBe('completed');
+    expect(h.credentials.resolveKeyRoster.mock.calls.some((call) => call[1] === 'openai')).toBe(true);
+    for (const call of factory.mock.calls) expect(call[2].keyRosters).toEqual({});
+    expect(h.called).not.toContain('openai:gpt-5');
+    const prompts = h.prompts.filter((entry) => entry.model === (options.extra ? 'anthropic:bot2-model' : 'anthropic:main-model')).map((entry) => entry.prompt);
+    expect(prompts.length).toBeGreaterThan(0);
+    expect(prompts.join(' ')).toContain('redaction probe');
+    for (const key of redactionKeys) {
+      for (const prompt of prompts) expect(prompt).not.toContain(key.reveal());
+    }
+    // Only the first API key can reach the factory through the store; the full roster is worker-only.
+    const model = await factory.mock.results[options.extra ? 1 : 0]!.value;
+    expect(model.secrets).not.toContain(redactionKeys[1]);
+    expect(model.fallbacks).toBeUndefined();
+    expect(model.skippedFallbacks).toEqual([{ label: 'openai:gpt-5', reason }]);
+  });
+
   it.each(['keys', 'api-key'] as const)('pins a free fallback when it gains %s after admission', async (afterAdmission) => {
     const h = await setup(10, false, true, false, false, false, { fallbackFree: true, afterAdmission });
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([0]);
@@ -148,7 +178,8 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
     const h = await setup(0.1, extra, true);
     expect(h.admit.mock.calls.map((call) => call[1])).toEqual([0.5, 0]);
     expect(h.called).not.toContain('openai:gpt-5');
-    expect(h.credentials.resolveKeyRoster).not.toHaveBeenCalled();
+    expect(h.credentials.resolveKeyRoster.mock.calls.some((call) => call[1] === 'openai')).toBe(true);
+    expect(factory.mock.calls[extra ? 1 : 0]?.[2].keyRosters).toEqual({});
     const model = await factory.mock.results[extra ? 1 : 0]!.value;
     expect(model.skippedFallbacks).toEqual([{ label: 'openai:gpt-5', reason }]);
     expect((await h.runs()).find((run) => run.botSlot === (extra ? 2 : 1))).toMatchObject({ status: 'failed', detail: expect.stringContaining('subscription rejected') });
@@ -176,11 +207,11 @@ describe('free bots with paid configured fallbacks (ADR-0035)', () => {
     expect(h.called).toContain('openai:gpt-5');
   });
 
-  it('excludes custom URL and key roster loading and snapshots each provider once', async () => {
+  it('excludes custom URL and model rosters while still resolving skipped credentials for redaction', async () => {
     const h = await setup(0.1, true, false, false, false, true);
     expect(h.credentialRead.mock.calls.some((call) => call[1] === 'custom')).toBe(false);
-    expect(h.credentials.resolveKeyRoster).not.toHaveBeenCalled();
-    expect(h.credentials.resolve.mock.calls.some((call) => call[1] === 'custom')).toBe(false);
+    expect(h.credentials.resolveKeyRoster.mock.calls.some((call) => call[1] === 'openai')).toBe(true);
+    expect(factory.mock.calls[1]?.[2].keyRosters).toEqual({});
     const models = await Promise.all(factory.mock.results.map((call) => call.value));
     expect(models[1]?.skippedFallbacks).toEqual([
       { label: 'openai:gpt-5', reason }, { label: 'custom:custom-model', reason },

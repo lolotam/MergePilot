@@ -189108,6 +189108,15 @@ async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rota
     const label = `${entry.provider}:${entry.model}`;
     const reason = skipFallback?.(entry);
     if (reason !== void 0) {
+      try {
+        const key2 = await resolveKey(store, entry.provider);
+        if (key2)
+          resolved.secrets.push(key2);
+      } catch {
+      }
+      const roster2 = rosterFor(rotation, entry.provider);
+      if (roster2)
+        resolved.secrets.push(...roster2.keys);
       resolved.skipped.push({ label, reason });
       continue;
     }

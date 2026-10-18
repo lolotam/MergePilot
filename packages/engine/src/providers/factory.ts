@@ -22,7 +22,7 @@ export type { DualMethodConfig } from './dual-method.js';
 
 export interface CreateReviewModelOptions {
   cwd: string;
-  /** Return a disclosure reason to exclude a configured fallback before loading credentials. */
+  /** Return a disclosure reason to exclude a configured fallback from model construction. */
   skipFallback?: ((entry: NonNullable<MergePilotConfig['fallback']>[number]) => string | undefined) | undefined;
   /**
    * Per dual-method provider (ADR-0027): both subscription and API keys are connected. The engine
@@ -94,6 +94,15 @@ export async function resolveFallbacks(
     const label = `${entry.provider}:${entry.model}`;
     const reason = skipFallback?.(entry);
     if (reason !== undefined) {
+      // Skipped models still contribute credentials to prompt redaction.
+      try {
+        const key = await resolveKey(store, entry.provider);
+        if (key) resolved.secrets.push(key);
+      } catch {
+        // An unavailable skipped credential must not stop the primary review.
+      }
+      const roster = rosterFor(rotation, entry.provider);
+      if (roster) resolved.secrets.push(...roster.keys);
       resolved.skipped.push({ label, reason });
       continue;
     }

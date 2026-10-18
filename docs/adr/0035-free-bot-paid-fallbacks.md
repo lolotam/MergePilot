@@ -36,7 +36,7 @@ A top-up during the run is not offered: ADR-0033 already rejected a second admis
 
 Snapshot admission eligibility once per provider across the review. First reserve `perReviewUsd` for each bot whose own provider or any configured fallback on another provider is paid. Those paid admissions have `admittedFree=false` and follow live state (ADR-0033).
 
-If this does not fit, retry with subscription-only primary bots admitted free, reserving only for the paid-primary bots. Free bots skip their paid fallback providers from the snapshot. Own-provider fallbacks stay pinned to the subscription (ADR-0033). Each skipped entry is disclosed with `skipped: the review was admitted free under the monthly budget`. A generic skip predicate in the engine excludes these entries before credentials are loaded; the worker also excludes their rosters and custom base URL.
+If this does not fit, retry with subscription-only primary bots admitted free, reserving only for the paid-primary bots. Free bots skip their paid fallback providers from the snapshot. Own-provider fallbacks stay pinned to the subscription (ADR-0033). Each skipped entry is disclosed with `skipped: the review was admitted free under the monthly budget`. A generic skip predicate in the engine excludes these entries from model construction; their credentials and key rosters are still loaded for redaction only. The worker never passes those rosters to the model factory and does not load their custom base URL.
 
 Admission keeps ADR-0022's original predicate for ordinary paid bots. Define:
 

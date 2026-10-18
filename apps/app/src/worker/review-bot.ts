@@ -88,6 +88,12 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
     }
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders });
+    if (br.skipPaidFallbacks?.length) {
+      // All skipped providers' keys are for redaction only, even behind subscription defaults.
+      const { rosters } = await loadRosters(deps.credentials, workspaceId, br.skipPaidFallbacks, choice.provider, logger,
+        Object.fromEntries(br.skipPaidFallbacks.map((provider) => [provider, {}])));
+      credStore.addKnownSecrets(rosterSecrets(rosters));
+    }
     const rotationEvents: KeyRotationDisclosure[] = [];
     const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>
       rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds, cursorWrites);
