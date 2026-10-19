@@ -61,6 +61,10 @@ export const arSettings = {
   severityCritical: 'حرجة (Critical)',
 
   // حد الملاحظات (ADR-0033)
+  perReviewLabel: 'حد الصرف لكل مراجعة (USD)',
+  perReviewHint: 'بيحدد أقصى صرف لبوت واحد في مراجعة واحدة بمفاتيح API؛ مراجعات الاشتراكات مش بتتأثر. مع ميزانية شهرية، كل بوت مدفوع بيحجز المبلغ ده قبل التشغيل. قيمة budget.perReviewUsd في ملف .mergepilot.yml في المستودع ليها الأولوية.',
+  perReviewInvalid: 'اكتب مبلغ من 0.50 لحد 1000 دولار بالسنت الكامل.',
+  perReviewAboveMonthly: 'حد الصرف لكل مراجعة لازم ما يزيدش عن الميزانية الشهرية.',
   maxFindingsLabel: 'أقصى عدد للملاحظات في مراجعة الـ PR الواحدة',
   maxFindingsHint:
     'أكبر عدد من الملاحظات تكتبه مراجعة واحدة على الـ Pull Request. إذا حدّد ملف .mergepilot.yml في المستودع review.maxFindings، فسيُستخدم الرقم الموجود فيه.',

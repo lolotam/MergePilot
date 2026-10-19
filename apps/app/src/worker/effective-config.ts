@@ -20,13 +20,13 @@ export interface EffectiveConfig {
  * repository content (ADR-0008 amendment). The price is resolved later (ADR-0016), so
  * `budget.pricing` is left empty here. The workspace's findings limit applies when the repo file
  * leaves `review.maxFindings` out: `loadRepoConfig` fills it then, and a file's own value wins
- * (ADR-0033).
+ * (ADR-0033). The same precedence applies to budget.perReviewUsd (ADR-0036).
  */
 export function effectiveConfigFor(
   repoConfigResult: LoadRepoConfigResult,
   choice: Pick<ModelChoice, 'provider' | 'model' | 'effort'>,
   fallbackList: Array<{ provider: ApiProvider; model: string; effort?: string }>,
-  settings: Pick<WorkspaceSettings, 'language' | 'minSeverity' | 'maxFindings'>,
+  settings: Pick<WorkspaceSettings, 'language' | 'minSeverity' | 'maxFindings' | 'perReviewUsd'>,
   skillKey?: string | undefined,
 ): EffectiveConfig {
   const { provider, model, effort } = choice;
@@ -37,6 +37,7 @@ export function effectiveConfigFor(
         model,
         ...(effort ? { effort } : {}),
         fallback: fallbackList,
+        budget: { perReviewUsd: settings.perReviewUsd ?? 0.5 },
         language: settings.language,
         review: {
           minSeverity: settings.minSeverity ?? 'medium',
@@ -44,7 +45,7 @@ export function effectiveConfigFor(
         },
       }),
       rulesFiles: [],
-      configHash: configHashOf(JSON.stringify({ provider, model, language: settings.language }), settings.maxFindings, skillKey),
+      configHash: configHashOf(JSON.stringify({ provider, model, language: settings.language }), settings.maxFindings, skillKey, settings.perReviewUsd),
     };
   }
   if ('errors' in repoConfigResult) {
@@ -72,7 +73,7 @@ export function effectiveConfigFor(
       budget: { ...repoConfig.budget, pricing: undefined },
     },
     rulesFiles: repoConfigResult.rulesFiles,
-    configHash: configHashOf(repoConfigResult.configText, inheritedLimit, skillKey),
+    configHash: configHashOf(repoConfigResult.configText, inheritedLimit, skillKey, defaulted.includes('perReviewUsd') ? repoConfig.budget.perReviewUsd : undefined),
     ...(sameModel && repoConfig.budget.pricing ? { repoPricing: repoConfig.budget.pricing } : {}),
   };
 }
@@ -81,13 +82,15 @@ export function effectiveConfigFor(
  * The short config hash of the review marker: a change makes the next review a full one. A
  * workspace findings limit the review inherits is part of it (ADR-0033), except the default 5, and
  * so is the review skill (ADR-0034, `skillKey`), except Default: the hashes of reviews from before
- * either setting existed stay the same.
+ * these settings existed stay the same. The inherited per-review cap follows the same rule,
+ * except its default $0.50 (ADR-0036).
  */
-function configHashOf(base: string, inheritedLimit: number | undefined, skillKey: string | undefined): string {
+function configHashOf(base: string, inheritedLimit: number | undefined, skillKey: string | undefined, perReviewUsd: number | undefined): string {
   const inherited = inheritedLimit !== undefined && inheritedLimit !== DEFAULT_MAX_FINDINGS;
   // A structured encoding, so no repository text can hash like an inherited limit or a skill.
-  const input = inherited || skillKey
-    ? JSON.stringify({ base, ...(inherited ? { maxFindings: inheritedLimit } : {}), ...(skillKey ? { skill: skillKey } : {}) })
+  const inheritedBudget = perReviewUsd !== undefined && perReviewUsd !== 0.5;
+  const input = inherited || skillKey || inheritedBudget
+    ? JSON.stringify({ base, ...(inherited ? { maxFindings: inheritedLimit } : {}), ...(skillKey ? { skill: skillKey } : {}), ...(inheritedBudget ? { perReviewUsd } : {}) })
     : base;
   return createHash('sha256').update(input).digest('hex').slice(0, 12);
 }

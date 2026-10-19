@@ -83,6 +83,8 @@ export interface WorkspaceSettings {
   model: string;
   language: 'ar' | 'en';
   monthlyBudgetUsd: number | null;
+  /** Workspace default for budget.perReviewUsd; a repository value wins (ADR-0036). */
+  perReviewUsd?: number | undefined;
   effort?: string | null | undefined;
   heavyProvider?: ApiProvider | null | undefined;
   heavyModel?: string | null | undefined;

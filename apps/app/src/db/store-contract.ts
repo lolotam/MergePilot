@@ -185,6 +185,11 @@ export function describeStoreContract(
         expect(reloaded?.minSeverity).toBe('medium');
         expect(reloaded?.judge).toBeNull();
 
+        expect(reloaded?.perReviewUsd).toBe(0.5);
+        await store.saveSettings({ ...updated, perReviewUsd: 3.21 });
+        await store.saveSettings({ ...updated, perReviewUsd: undefined });
+        expect((await store.getSettings('ws-settings-test'))?.perReviewUsd).toBe(3.21);
+
         // The findings limit (ADR-0033): 5 until saved, kept when left out.
         expect(reloaded?.maxFindings).toBe(5);
         await store.saveSettings({ ...updated, maxFindings: 35 });

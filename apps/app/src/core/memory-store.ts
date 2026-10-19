@@ -122,6 +122,7 @@ export class MemoryStore implements AppStore {
       fallback: s.fallback ?? [],
       minSeverity: s.minSeverity ?? 'medium',
       maxFindings: s.maxFindings ?? DEFAULT_WORKSPACE_MAX_FINDINGS,
+      perReviewUsd: s.perReviewUsd ?? 0.5,
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
       judge: s.judge ? { ...s.judge, uses: [...s.judge.uses], fallback: [...s.judge.fallback] } : null,
@@ -144,6 +145,7 @@ export class MemoryStore implements AppStore {
     this.settings.set(settings.workspaceId, {
       ...settings,
       maxFindings: settings.maxFindings ?? stored?.maxFindings,
+      perReviewUsd: settings.perReviewUsd ?? stored?.perReviewUsd,
       runRetentionDays:
         settings.runRetentionDays !== undefined
           ? settings.runRetentionDays

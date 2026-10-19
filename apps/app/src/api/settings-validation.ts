@@ -33,6 +33,7 @@ export function mergeSettings(
     minSeverity: keep(update.minSeverity, current?.minSeverity) ?? 'medium',
     // Undefined keeps the stored value; the stores fill the default (5).
     maxFindings: update.maxFindings ?? current?.maxFindings,
+    perReviewUsd: update.perReviewUsd ?? current?.perReviewUsd ?? 0.5,
     // Undefined keeps the stored value; a workspace without settings starts at the 30-day default.
     runRetentionDays:
       update.runRetentionDays !== undefined
@@ -90,6 +91,9 @@ export async function validateSettings(
   workspaceId: string,
   settings: Settings | WorkspaceSettings,
 ): Promise<SettingsProblem | null> {
+  if (settings.monthlyBudgetUsd != null && (settings.perReviewUsd ?? 0.5) > settings.monthlyBudgetUsd) {
+    return { code: 'validation_error', message: 'perReviewUsd must not exceed monthlyBudgetUsd' };
+  }
   const keyProblem = keyChecker(store, workspaceId);
   const { heavyProvider, heavyModel, heavyEffort } = settings;
   if (Boolean(heavyProvider) !== Boolean(heavyModel?.trim())) {

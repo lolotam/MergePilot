@@ -10,6 +10,8 @@ import { MaxFindingsSelect } from './MaxFindingsSelect.js';
 import { ModelSelect } from './ModelSelect.js';
 import { ReviewSettingsCard } from './ReviewSettingsCard.js';
 import { SeveritySelect } from './SeveritySelect.js';
+import { arSettings } from '../i18n/settings-ar.js';
+import { enSettings } from '../i18n/settings-en.js';
 import { renderSettings } from './settings.fixtures.js';
 
 vi.mock('../api/client.js', async (importOriginal) => {
@@ -222,4 +224,80 @@ describe('J2 settings components', () => {
     expect(await screen.findByText(/Choose the heavy-duty model/)).toBeDefined();
     expect(onSave).not.toHaveBeenCalled();
   });
+  it.each(['en', 'ar'] as const)('shows and saves the per-review cap with its localized hint (%s)', async (language) => {
+    const onSave = vi.fn(async () => undefined);
+    const strings = language === 'ar' ? arSettings : enSettings;
+    renderSettings(<ReviewSettingsCard workspaceId="ws-1"
+      settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'ar', fallback: [], minSeverity: 'medium', perReviewUsd: 3 }}
+      isLoading={false} isMember={false} onSave={onSave} isSaving={false} />, language);
+    const input = screen.getByRole('spinbutton', { name: strings.perReviewLabel }) as HTMLInputElement;
+    expect(input.value).toBe('3');
+    expect(input.min).toBe('0.5');
+    expect(input.max).toBe('1000');
+    expect(input.step).toBe('0.5');
+    expect(screen.getByText(strings.perReviewHint)).toBeTruthy();
+    await user.clear(input);
+    await user.type(input, '3.21');
+    await user.click(input.closest('form')!.querySelector('button[type=submit]')!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ perReviewUsd: 3.21 }));
+  });
+
+  it.each([0.5, 1.15, 4.35, 10, 999.99, 1000, 1.15 + Number.EPSILON, 1.150000001])('accepts whole-cent spending caps with floating-point tolerance (%s)', async (value) => {
+    const onSave = vi.fn(async () => undefined);
+    renderSettings(<ReviewSettingsCard workspaceId="ws-1"
+      settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'en', fallback: [], minSeverity: 'medium' }}
+      isLoading={false} isMember={false} onSave={onSave} isSaving={false} />, 'en');
+    const input = screen.getByRole('spinbutton', { name: enSettings.perReviewLabel });
+    await user.clear(input);
+    await user.type(input, String(value));
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ perReviewUsd: value }));
+    expect(screen.queryByText(enSettings.perReviewInvalid)).toBeNull();
+  });
+
+  it.each(['', '0.49', '0.511', '1.001', '1.1500001', '1000.01', 'NaN'])('refuses invalid spending caps (%s)', async (value) => {
+    const onSave = vi.fn(async () => undefined);
+    renderSettings(<ReviewSettingsCard workspaceId="ws-1"
+      settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'en', fallback: [], minSeverity: 'medium' }}
+      isLoading={false} isMember={false} onSave={onSave} isSaving={false} />, 'en');
+    const input = screen.getByRole('spinbutton', { name: enSettings.perReviewLabel }) as HTMLInputElement;
+    expect(input.value).toBe('0.5');
+    await user.clear(input);
+    if (value) await user.type(input, value);
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(screen.getByText(enSettings.perReviewInvalid)).toBeTruthy();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('checks the monthly relation when either field changes and accepts equality', async () => {
+    const onSave = vi.fn(async () => undefined);
+    renderSettings(<ReviewSettingsCard workspaceId="ws-1"
+      settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'en', fallback: [], minSeverity: 'medium', perReviewUsd: 3, monthlyBudgetUsd: 10 }}
+      isLoading={false} isMember={false} onSave={onSave} isSaving={false} />, 'en');
+    const perReview = screen.getByRole('spinbutton', { name: enSettings.perReviewLabel });
+    const monthly = document.getElementById('settings-budget')!;
+    const save = screen.getByRole('button', { name: 'Save settings' });
+    await user.clear(monthly);
+    await user.type(monthly, '2');
+    await user.click(save);
+    expect(screen.getByText(enSettings.perReviewAboveMonthly)).toBeTruthy();
+    expect(onSave).not.toHaveBeenCalled();
+    await user.clear(perReview);
+    await user.type(perReview, '2');
+    await user.click(save);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ perReviewUsd: 2, monthlyBudgetUsd: 2 }));
+    onSave.mockClear();
+    await user.clear(perReview);
+    await user.type(perReview, '3');
+    await user.click(save);
+    expect(screen.getByText(enSettings.perReviewAboveMonthly)).toBeTruthy();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('disables the per-review cap for members', () => {
+    renderSettings(<ReviewSettingsCard workspaceId="ws-1" settings={null}
+      isLoading={false} isMember onSave={vi.fn()} isSaving={false} />, 'en');
+    expect((screen.getByRole('spinbutton', { name: enSettings.perReviewLabel }) as HTMLInputElement).disabled).toBe(true);
+  });
+
 });

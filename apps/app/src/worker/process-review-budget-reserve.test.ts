@@ -46,4 +46,16 @@ describe('processReviewJob — monthly budget with reviews running in parallel',
     await processReviewJob(h2.job, deps);
     expect(subAdmit.mock.calls[0]?.[1]).toBe(0);
   });
+  it.each([undefined, 'budget:\n  perReviewUsd: 2\n'])('reserves the effective cap for each paid bot (repo override: %s)', async (file) => {
+    const admission = new BudgetAdmission();
+    const admit = vi.spyOn(admission, 'admit');
+    const h = await panelSetup({
+      settings: { monthlyBudgetUsd: 10, perReviewUsd: 3 }, bots: [{ slot: 2 }],
+      ...(file ? { repoFiles: { '.mergepilot.yml': file } } : {}),
+    });
+    expect((await processReviewJob(h.job, { ...h.deps, budgetAdmission: admission })).status).toBe('completed');
+    expect(admit.mock.calls[0]?.[1]).toBe(file ? 4 : 6);
+    expect(admission.heldUsd(WS)).toBe(0);
+  });
+
 });

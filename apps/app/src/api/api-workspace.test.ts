@@ -155,6 +155,7 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
         model: 'claude-3-5-sonnet-latest',
         language: 'ar',
         monthlyBudgetUsd: 150,
+        perReviewUsd: 0.5,
         effort: null,
         heavyProvider: null,
         heavyModel: null,

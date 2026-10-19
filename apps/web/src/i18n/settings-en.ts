@@ -61,6 +61,10 @@ export const enSettings = {
   severityCritical: 'Critical',
 
   // Findings limit (ADR-0033)
+  perReviewLabel: 'Per-review spending limit (USD)',
+  perReviewHint: 'Caps what one bot may spend on one review with API keys; subscription reviews are not affected. With a monthly budget, each paid bot reserves this amount before it runs. The repository file .mergepilot.yml budget.perReviewUsd overrides it.',
+  perReviewInvalid: 'Enter an amount from $0.50 to $1000 in whole cents.',
+  perReviewAboveMonthly: 'The per-review spending limit must not exceed the monthly budget.',
   maxFindingsLabel: 'Maximum review comments per PR review',
   maxFindingsHint:
     'The most findings one review writes on a pull request. A repository whose .mergepilot.yml sets review.maxFindings uses its own value.',

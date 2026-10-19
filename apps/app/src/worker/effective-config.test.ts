@@ -93,3 +93,39 @@ describe('skillKeyOf', () => {
     expect(skillKeyOf([{ slot: 1 }, { slot: 2 }])).toBeUndefined();
   });
 });
+
+
+describe('workspace per-review spending cap (ADR-0036)', () => {
+  const resolve = (text: string | undefined, perReviewUsd?: number, maxFindings: MaxFindingsChoice = 5, skillKey?: string) => {
+    let repo: LoadRepoConfigResult = { missing: true };
+    if (text !== undefined) {
+      const parsed = parseConfig(text, { defaults: { ...CHOICE, perReviewUsd, maxFindings } });
+      if (!parsed.ok) throw new Error(parsed.errors.join('\n'));
+      repo = { configText: text, config: parsed.config, rulesFiles: [], defaulted: parsed.defaulted };
+    }
+    return effectiveConfigFor(repo, CHOICE, [], { language: 'en', perReviewUsd, maxFindings }, skillKey);
+  };
+
+  it.each([undefined, 'review:\n  minSeverity: high\n', 'budget:\n  maxInputTokens: 5000\n'])(
+    'inherits the cap when omitted (%s), preserving old hashes only at the default', (text) => {
+      const before = resolve(text);
+      expect(resolve(text, 0.5).configHash).toBe(before.configHash);
+      expect(resolve(text, 3).config.budget.perReviewUsd).toBe(3);
+      expect(resolve(text, 3).configHash).not.toBe(before.configHash);
+      expect(resolve(text, 4).configHash).not.toBe(resolve(text, 3).configHash);
+      expect(resolve(text, 3, 20).configHash).not.toBe(resolve(text, 3).configHash);
+      expect(resolve(text, 3, 20, 'skill').configHash).not.toBe(resolve(text, 3, 20).configHash);
+    },
+  );
+
+  it('preserves the value and hash when the file names its own cap, even below the dashboard minimum', () => {
+    const text = 'budget:\n  perReviewUsd: 0.2\n';
+    expect(resolve(text, 3).config.budget.perReviewUsd).toBe(0.2);
+    expect(resolve(text, 3).configHash).toBe(resolve(text, 10).configHash);
+  });
+
+  it('still accepts repository pricing when only the spending cap was inherited', () => {
+    const text = 'provider: openai\nmodel: gpt-x\nbudget:\n  pricing:\n    inputPerMTok: 1\n    outputPerMTok: 2\n';
+    expect(resolve(text, 3).repoPricing).toMatchObject({ inputPerMTok: 1, outputPerMTok: 2 });
+  });
+});
