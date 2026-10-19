@@ -136913,7 +136913,19 @@ function credentialSecretValues(value) {
     const subscription = decodeSubscription(value);
     return subscription ? [value, subscription.credential.access, subscription.credential.refresh] : [value];
   } catch {
-    return [value];
+    return [value, ...malformedEnvelopeTokens(value)];
+  }
+}
+function malformedEnvelopeTokens(value) {
+  try {
+    const parsed = JSON.parse(value.slice(SUBSCRIPTION_PREFIX.length));
+    const credential = parsed?.credential;
+    if (!credential || typeof credential !== "object")
+      return [];
+    const { access: access3, refresh } = credential;
+    return [access3, refresh].filter((token) => typeof token === "string" && token.length > 0);
+  } catch {
+    return [];
   }
 }
 
@@ -189292,7 +189304,8 @@ async function createReviewModel(config2, store, opts) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
   }
   const provider = config2.provider;
-  const apiKey = provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
+  const primaryFailure = opts.primarySubscriptionFailure;
+  const apiKey = primaryFailure ? void 0 : provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
   if (!config2.model) {
     throw new Error(`Model is required for provider: ${config2.provider}`);
   }
@@ -189300,7 +189313,17 @@ async function createReviewModel(config2, store, opts) {
   const roster = rosterFor(rotation, provider);
   const spec = { provider, model: config2.model, effort: config2.effort };
   const dual = opts.dualMethods?.[provider];
-  const primary = dual ? await buildMethodModel(spec, dual.defaultMethod, store, rotation) : {
+  const primary = primaryFailure ? {
+    model: {
+      label: `${provider}:${config2.model}`,
+      authMethod: "subscription",
+      includedInSubscription: true,
+      async generate() {
+        throw primaryFailure;
+      }
+    },
+    secrets: []
+  } : dual ? await buildMethodModel(spec, dual.defaultMethod, store, rotation) : {
     model: roster ? rotatingReviewModel(provider, config2.model, config2.effort, roster, rotation, resolveSecret) : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config2.model, config2.effort),
     secrets: roster ? [...roster.keys] : []
   };

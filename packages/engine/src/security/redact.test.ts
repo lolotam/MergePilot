@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Secret } from '../credentials/secret.js';
+import { SUBSCRIPTION_PREFIX } from '../credentials/subscription.js';
 import { redactSecrets } from './redact.js';
 
 describe('redactSecrets', () => {
@@ -190,5 +191,15 @@ describe('redactSecrets', () => {
     const result = redactSecrets(input);
     expect(result.text).toBe(input);
     expect(result.found).toHaveLength(0);
+  });
+
+  it('redacts each token of a subscription envelope that fails validation', () => {
+    const access = 'plainAccessTokenValue0001';
+    const refresh = 'plainRefreshTokenValue0002';
+    const malformed = SUBSCRIPTION_PREFIX + JSON.stringify({ provider: 'not-a-provider', credential: { type: 'oauth', access, refresh, expires: -1 } });
+    const result = redactSecrets(`access=${access} refresh=${refresh}`, [new Secret(malformed)]);
+
+    expect(result.text).not.toContain(access);
+    expect(result.text).not.toContain(refresh);
   });
 });
