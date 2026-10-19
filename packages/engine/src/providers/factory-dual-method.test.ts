@@ -3,6 +3,7 @@ import type { MergePilotConfig } from '../config/schema.js';
 import { Secret } from '../credentials/secret.js';
 import type { AnyCredentialStore, CredentialInfo } from '../credentials/store.js';
 import { encodeSubscription } from '../credentials/subscription.js';
+import { LlmFailure } from '../llm/failure.js';
 import { redactSecrets } from '../security/redact.js';
 import type { ReviewAuthMethod } from '../review/model.js';
 import { createReviewModel } from './factory.js';
@@ -76,6 +77,25 @@ async function build(ws: Workspace, cfg: MergePilotConfig) {
 const revealed = (secrets: readonly Secret[] | undefined) => (secrets ?? []).map((s) => s.reveal());
 
 describe('createReviewModel — dual-method chain (ADR-0027)', () => {
+  it('defers an unavailable primary subscription to its first call without resolving it again', async () => {
+    const ws: Workspace = { defaults: { anthropic: 'subscription', openai: 'api-key' },
+      subscriptions: {}, rosters: { anthropic: keys('anthropic'), openai: keys('openai') } };
+    const store = workspaceStore(ws);
+    const resolve = vi.spyOn(store, 'resolve');
+    const failure = new LlmFailure({ provider: 'anthropic', code: 'INVALID_CREDENTIAL', message: 'Subscription token refresh failed; sign in again' });
+    const model = await createReviewModel(config('anthropic', 'claude-3-5-sonnet', {
+      fallback: [{ provider: 'openai', model: 'gpt-5' }],
+    }), store, { cwd: '/tmp', primarySubscriptionFailure: failure,
+      dualMethods: { anthropic: { defaultMethod: 'subscription' } }, keyRosters: rostersOf(ws) });
+
+    expect(model).toMatchObject({ label: 'anthropic:claude-3-5-sonnet', authMethod: 'subscription', includedInSubscription: true });
+    await expect(model.generate({ system: '', user: '', maxOutputTokens: 100 })).rejects.toBe(failure);
+    expect(model.fallbacks?.map((entry) => entry.label)).toEqual(['anthropic:claude-3-5-sonnet', 'openai:gpt-5']);
+    expect(model.fallbacks?.[0]?.fallbackTriggers).toEqual(['quota', 'rate-limit']);
+    expect(resolve.mock.calls.some(([ref]) => ref.provider === 'anthropic')).toBe(false);
+    expect(model.secrets).toEqual(expect.arrayContaining([...ws.rosters.anthropic!, ...ws.rosters.openai!]));
+  });
+
   it('keeps unavailable configured fallbacks skipped after checking their credentials', async () => {
     const ws: Workspace = { defaults: { openai: 'subscription' }, subscriptions: { openai: envelope('openai') }, rosters: {} };
     const store = workspaceStore(ws);

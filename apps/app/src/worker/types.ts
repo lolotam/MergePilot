@@ -12,6 +12,8 @@ import type { DualAuthState } from '../credentials/dual-auth.js';
 
 export interface ProcessReviewCredentials {
   resolve(workspaceId: string, provider: KeyProvider): Promise<Secret>;
+  /** Readable stored values, including expired tokens, without another refresh attempt. */
+  resolveForRedaction?(workspaceId: string, provider: KeyProvider): Promise<Secret | null>;
   getEffectiveAuthMethod?(workspaceId: string, provider: string): Promise<'subscription' | 'api-key' | null>;
   /** Dual-method providers (ADR-0027): subscription + API keys together. */
   getDualAuthState?(workspaceId: string, provider: KeyProvider): Promise<DualAuthState | null>;

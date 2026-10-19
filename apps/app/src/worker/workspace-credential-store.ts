@@ -1,4 +1,4 @@
-import { decodeSubscription, type CredentialInfo, type CredentialRef, type CredentialStore, type RequestPurpose, type Secret } from '@mergepilot/engine';
+import { decodeSubscription, type CredentialInfo, type CredentialRef, type CredentialStore, type LlmFailure, type RequestPurpose, type Secret } from '@mergepilot/engine';
 import type { ApiProvider } from '../core/types.js';
 import { admittedSubscription } from './dual-method-review.js';
 import type { ProcessReviewCredentials } from './types.js';
@@ -16,11 +16,11 @@ export class WorkspaceCredentialStore implements CredentialStore {
   constructor(
     private readonly workspaceId: string,
     private readonly credentials: ProcessReviewCredentials,
-    primaryProvider: ApiProvider,
-    primarySecret: Secret,
-    private readonly options: { subscriptionOnlyProviders?: ReadonlySet<string> } = {},
+    private readonly primaryProvider: ApiProvider,
+    primarySecret: Secret | undefined,
+    private readonly options: { subscriptionOnlyProviders?: ReadonlySet<string>; primaryFailure?: LlmFailure | undefined } = {},
   ) {
-    this.secrets.set(primaryProvider, primarySecret);
+    if (primarySecret) this.secrets.set(primaryProvider, primarySecret);
   }
 
   /** Adds a key resolved elsewhere (the judge's), so it is redacted like the review keys. */
@@ -38,6 +38,7 @@ export class WorkspaceCredentialStore implements CredentialStore {
 
   async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
     const provider = ref.provider as ApiProvider;
+    if (provider === this.primaryProvider && this.options.primaryFailure) throw this.options.primaryFailure;
     if (this.options.subscriptionOnlyProviders?.has(provider)) {
       const subscription = await admittedSubscription(this.credentials, this.workspaceId, provider);
       this.secrets.set(ref.provider, subscription);

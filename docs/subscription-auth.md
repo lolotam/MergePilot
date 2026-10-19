@@ -36,6 +36,8 @@ Subscription model calls report token usage but have **$0 incremental API cost**
 
 Credential-inclusive backups passphrase-encrypt the entire subscription envelope. A restored account can require a new login if its refresh token has subsequently rotated or been revoked.
 
+When the primary subscription's refresh is refused, or its stored credential is missing or unreadable, the review treats it as an authentication failure and tries only the bot's explicitly configured, budget-allowed model fallbacks. The PR summary and run record disclose the switch just like a model-call authentication failure. Without an allowed fallback, the run keeps the sign-in error. A retryable refresh failure still fails transiently without entering this fallback path. The failed credential is not refreshed again in that run; any readable stored tokens remain available only for redaction. Each terminal primary credential failure emits one `credential.primary_unavailable` warning with workspace, run, provider and reason, without credential values.
+
 ## Login lifecycle and deployment
 
 Only workspace admins and owners can start, complete, or cancel a login. Attempts are bound to the initiating user and workspace, expire after 15 minutes, and are cancelled when the dialog closes. Device codes and authorization codes are transient; authorization codes are never written to the database. Saving requires an authenticated completion request, so a finished provider login alone cannot write credentials after workspace access has been revoked.

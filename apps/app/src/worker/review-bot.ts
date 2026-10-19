@@ -1,4 +1,4 @@
-import { createReviewModel, redactSecrets, type ApiProviderId, type ReviewModel, type Secret, type TokenUsage } from '@mergepilot/engine';
+import { createReviewModel, isSubscriptionProvider, LlmFailure, redactSecrets, SubscriptionRefreshError, type ApiProviderId, type ReviewModel, type Secret, type TokenUsage } from '@mergepilot/engine';
 import type { SemanticDedupeResult } from '@mergepilot/github';
 import {
   MAIN_BOT_SLOT,
@@ -9,6 +9,7 @@ import {
   type ReviewRunStatus,
 } from '../core/types.js';
 import type { RunPricing } from '../core/price-types.js';
+import { UnavailableCredentialError } from '../credentials/subscription-resolution.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { buildBotConfig } from './bot-config.js';
 import { skillKeyOf } from './effective-config.js';
@@ -39,6 +40,19 @@ export function botChoice(ctx: PanelContext, br: BotRun): ModelChoice {
  * run; with `consensus` it only reviews, and the panel publishes and finishes the run later.
  * Never throws: a failure is recorded on this bot's run only.
  */
+/**
+ * Why a subscription primary cannot be used in this run, when the cause will not clear by retrying:
+ * a refused refresh or a missing or unreadable stored credential. Its first call then fails as an
+ * auth failure, so the configured fallbacks run. The message is rebuilt from the reason, so text an
+ * upstream layer appended to the error (possibly a token) never reaches the run or the review.
+ */
+function terminalSubscriptionFailure(error: unknown, provider: string): { reason: string; message: string } | undefined {
+  if (!isSubscriptionProvider(provider)) return undefined;
+  if (error instanceof UnavailableCredentialError) return { reason: error.reason, message: new UnavailableCredentialError(error.reason).message };
+  if (error instanceof SubscriptionRefreshError && !error.transient) return { reason: error.reason, message: new SubscriptionRefreshError(error.reason).message };
+  return undefined;
+}
+
 export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles): Promise<BotOutcome> {
   const { deps, job, workspaceId, settings, logger } = ctx;
   const slot = br.bot.slot;
@@ -75,22 +89,41 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       : builtConfig;
 
     const effectiveAuth = await deps.credentials.getEffectiveAuthMethod?.(workspaceId, choice.provider as ApiProvider);
-    let primarySecret: Secret;
-    if (subscriptionOnly) {
-      primarySecret = await admittedSubscription(deps.credentials, workspaceId, choice.provider);
-    } else if (effectiveAuth === 'api-key' && deps.credentials.resolveKeyRoster) {
-      const roster = await deps.credentials.resolveKeyRoster(workspaceId, choice.provider as ApiProvider);
-      if (!roster || roster.secrets.length === 0) {
-        throw new Error(`No API key roster is available for provider "${choice.provider}"`);
+    let primarySecret: Secret | undefined;
+    let primaryFailure: LlmFailure | undefined;
+    try {
+      if (subscriptionOnly) {
+        primarySecret = await admittedSubscription(deps.credentials, workspaceId, choice.provider);
+      } else if (effectiveAuth === 'api-key' && deps.credentials.resolveKeyRoster) {
+        const roster = await deps.credentials.resolveKeyRoster(workspaceId, choice.provider as ApiProvider);
+        if (!roster || roster.secrets.length === 0) {
+          throw new Error(`No API key roster is available for provider "${choice.provider}"`);
+        }
+        const start = roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;
+        primarySecret = roster.secrets[start]!;
+      } else {
+        primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
       }
-      const start = roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;
-      primarySecret = roster.secrets[start]!;
-    } else {
-      primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
+    } catch (error) {
+      // An API-key primary keeps today's error; only its subscription can be refused a refresh.
+      if (!subscriptionOnly && effectiveAuth === 'api-key') throw error;
+      const terminal = terminalSubscriptionFailure(error, choice.provider);
+      if (!terminal) throw error;
+      primaryFailure = new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: choice.provider, message: terminal.message });
+      logger.warn({ event: 'credential.primary_unavailable', workspaceId, runId: br.run.id, provider: choice.provider, reason: terminal.reason },
+        'Primary subscription credential is unavailable; configured model fallbacks remain eligible');
     }
-    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders });
+    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders, primaryFailure });
+    if (primaryFailure) {
+      try {
+        const stored = await deps.credentials.resolveForRedaction?.(workspaceId, choice.provider as ApiProvider);
+        if (stored) credStore.addKnownSecrets([stored]);
+      } catch {
+        // An unreadable credential has no value available for redaction.
+      }
+    }
     await addRedactionCredentials(deps.credentials, workspaceId,
-      [...subscriptionOnlyProviders, ...(br.skipPaidFallbacks ?? [])], choice.provider, credStore);
+      [...subscriptionOnlyProviders, ...(br.skipPaidFallbacks ?? []), ...(primaryFailure ? [choice.provider] : [])], choice.provider, credStore);
     const rotationEvents: KeyRotationDisclosure[] = [];
     const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>
       rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds, cursorWrites);
@@ -104,15 +137,17 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     credStore.addKnownSecrets(judgeSetup.secrets);
 
     let model: ReviewModel;
-    if (deps.createModelForProvider) {
+    if (deps.createModelForProvider && primarySecret) {
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
       // No key roster for a subscription-only provider: the engine would rotate over paid keys.
-      const rosterProviders = providerIds.filter((provider) => !subscriptionOnlyProviders.has(provider));
+      const rosterProviders = providerIds.filter((provider) => !subscriptionOnlyProviders.has(provider) &&
+        !(primaryFailure && provider === choice.provider && !dualMethods[provider as ApiProviderId]));
       const { rosters, keyIds } = await loadRosters(deps.credentials, workspaceId, rosterProviders, choice.provider, logger, dualMethods);
       credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {
         cwd: process.cwd(),
+        primarySubscriptionFailure: primaryFailure,
         keyRosters: rosters,
         onKeyRotation: makeRotationHandler(keyIds),
         dualMethods,

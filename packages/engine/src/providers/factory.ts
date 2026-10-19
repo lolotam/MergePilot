@@ -22,6 +22,8 @@ export type { DualMethodConfig } from './dual-method.js';
 
 export interface CreateReviewModelOptions {
   cwd: string;
+  /** A terminal subscription resolution failure, raised on the first call so configured fallbacks can run. */
+  primarySubscriptionFailure?: LlmFailure | undefined;
   /** Return a disclosure reason to exclude a configured fallback from model construction. */
   skipFallback?: ((entry: NonNullable<MergePilotConfig['fallback']>[number]) => string | undefined) | undefined;
   /**
@@ -224,8 +226,9 @@ export async function createReviewModel(
     throw new Error(`Unsupported provider: ${String(config.provider)}`);
   }
   const provider = config.provider;
+  const primaryFailure = opts.primarySubscriptionFailure;
   const apiKey =
-    provider === 'custom' ? await resolveKey(store, provider) : await store.resolve({ provider }, 'review');
+    primaryFailure ? undefined : provider === 'custom' ? await resolveKey(store, provider) : await store.resolve({ provider }, 'review');
   // `config.baseUrl` is deliberately NOT read: it comes from the repository (ADR-0008 amendment).
   if (!config.model) {
     throw new Error(`Model is required for provider: ${config.provider}`);
@@ -234,7 +237,17 @@ export async function createReviewModel(
   const roster = rosterFor(rotation, provider);
   const spec = { provider, model: config.model, effort: config.effort };
   const dual = opts.dualMethods?.[provider];
-  const primary: MethodModel = dual
+  const primary: MethodModel = primaryFailure
+    ? {
+        model: {
+          label: `${provider}:${config.model}`,
+          authMethod: 'subscription',
+          includedInSubscription: true,
+          async generate() { throw primaryFailure; },
+        },
+        secrets: [],
+      }
+    : dual
     ? await buildMethodModel(spec, dual.defaultMethod, store, rotation)
     : {
         model: roster
