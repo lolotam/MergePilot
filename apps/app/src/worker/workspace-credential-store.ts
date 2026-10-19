@@ -57,7 +57,7 @@ export class WorkspaceCredentialStore implements CredentialStore {
       return subscription;
     }
     if (ref.method === 'subscription') {
-      if (this.otherMethodFailure) throw this.otherMethodFailure;
+      if (provider === this.primaryProvider && this.otherMethodFailure) throw this.otherMethodFailure;
       // The other method of a dual provider (ADR-0027): the parent envelope, refreshed when it is
       // about to expire, whatever the effective default is. Kept apart from the default's key so
       // both are redacted.

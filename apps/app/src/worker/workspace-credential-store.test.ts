@@ -78,6 +78,19 @@ describe('WorkspaceCredentialStore', () => {
     expect(onPrimaryUnavailable).not.toHaveBeenCalled();
   });
 
+  it('keeps a subscription of another provider usable after the other method of the primary was refused', async () => {
+    const openaiSubscription = new Secret('openai-subscription-envelope');
+    const resolve = vi.fn(async (_ws: string, provider: string) => {
+      if (provider === 'anthropic') throw new SubscriptionRefreshError('sign-in');
+      return openaiSubscription;
+    });
+    const credentials: ProcessReviewCredentials = { resolve, getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const) };
+    const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', new Secret('primary-api-key-value'));
+
+    await expect(store.resolve({ provider: 'anthropic', method: 'subscription' }, 'review')).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
+    await expect(store.resolve({ provider: 'openai', method: 'subscription' }, 'fallback')).resolves.toBe(openaiSubscription);
+  });
+
   it('refuses an api-key fallback without keys instead of using the subscription', async () => {
     const resolve = vi.fn(async () => new Secret('subscription-envelope-must-not-be-used'));
     const credentials: ProcessReviewCredentials = {
