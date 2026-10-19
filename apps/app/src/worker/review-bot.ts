@@ -1,4 +1,4 @@
-import { createReviewModel, isSubscriptionProvider, LlmFailure, redactSecrets, SubscriptionRefreshError, type ApiProviderId, type ReviewModel, type Secret, type TokenUsage } from '@mergepilot/engine';
+import { createReviewModel, LlmFailure, redactSecrets, type ApiProviderId, type ReviewModel, type Secret, type TokenUsage } from '@mergepilot/engine';
 import type { SemanticDedupeResult } from '@mergepilot/github';
 import {
   MAIN_BOT_SLOT,
@@ -9,7 +9,7 @@ import {
   type ReviewRunStatus,
 } from '../core/types.js';
 import type { RunPricing } from '../core/price-types.js';
-import { UnavailableCredentialError } from '../credentials/subscription-resolution.js';
+import { terminalSubscriptionFailure } from '../credentials/subscription-resolution.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { buildBotConfig } from './bot-config.js';
 import { skillKeyOf } from './effective-config.js';
@@ -40,19 +40,6 @@ export function botChoice(ctx: PanelContext, br: BotRun): ModelChoice {
  * run; with `consensus` it only reviews, and the panel publishes and finishes the run later.
  * Never throws: a failure is recorded on this bot's run only.
  */
-/**
- * Why a subscription primary cannot be used in this run, when the cause will not clear by retrying:
- * a refused refresh or a missing or unreadable stored credential. Its first call then fails as an
- * auth failure, so the configured fallbacks run. The message is rebuilt from the reason, so text an
- * upstream layer appended to the error (possibly a token) never reaches the run or the review.
- */
-function terminalSubscriptionFailure(error: unknown, provider: string): { reason: string; message: string } | undefined {
-  if (!isSubscriptionProvider(provider)) return undefined;
-  if (error instanceof UnavailableCredentialError) return { reason: error.reason, message: new UnavailableCredentialError(error.reason).message };
-  if (error instanceof SubscriptionRefreshError && !error.transient) return { reason: error.reason, message: new SubscriptionRefreshError(error.reason).message };
-  return undefined;
-}
-
 export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles): Promise<BotOutcome> {
   const { deps, job, workspaceId, settings, logger } = ctx;
   const slot = br.bot.slot;
@@ -89,6 +76,13 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       : builtConfig;
 
     const effectiveAuth = await deps.credentials.getEffectiveAuthMethod?.(workspaceId, choice.provider as ApiProvider);
+    const unavailableSubscriptions = new Set<string>();
+    const onPrimaryUnavailable = (reason: string) => {
+      if (unavailableSubscriptions.has(choice.provider)) return;
+      unavailableSubscriptions.add(choice.provider);
+      logger.warn({ event: 'credential.primary_unavailable', workspaceId, runId: br.run.id, provider: choice.provider, reason },
+        'Primary subscription credential is unavailable; configured model fallbacks remain eligible');
+    };
     let primarySecret: Secret | undefined;
     let primaryFailure: LlmFailure | undefined;
     try {
@@ -110,10 +104,9 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       const terminal = terminalSubscriptionFailure(error, choice.provider);
       if (!terminal) throw error;
       primaryFailure = new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: choice.provider, message: terminal.message });
-      logger.warn({ event: 'credential.primary_unavailable', workspaceId, runId: br.run.id, provider: choice.provider, reason: terminal.reason },
-        'Primary subscription credential is unavailable; configured model fallbacks remain eligible');
+      onPrimaryUnavailable(terminal.reason);
     }
-    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders, primaryFailure });
+    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders, primaryFailure, onPrimaryUnavailable });
     if (primaryFailure) {
       try {
         const stored = await deps.credentials.resolveForRedaction?.(workspaceId, choice.provider as ApiProvider);
@@ -133,6 +126,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       fetch: deps.judgeFetch,
       priceLookup: ctx.judgePrices,
       makeRotationHandler,
+      unavailableSubscriptions,
     });
     credStore.addKnownSecrets(judgeSetup.secrets);
 

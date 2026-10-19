@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import pino from 'pino';
 import { refreshSubscription, SubscriptionRefreshError, type ReviewModel, type SubscriptionProvider } from '@mergepilot/engine';
 import { CredentialService } from '../credentials/service.js';
+import type { JudgeSettings } from '../core/types.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { BudgetAdmission } from './budget-admission.js';
 import { createHarness, keyFor, WORKSPACE_ID } from './model-settings.fixtures.js';
@@ -56,7 +57,10 @@ beforeEach(() => {
   vi.mocked(refreshSubscription).mockRejectedValue(new SubscriptionRefreshError('sign-in'));
   vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Unexpected external request'); }));
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 async function review(options: {
   fallback?: boolean;
@@ -67,6 +71,8 @@ async function review(options: {
   provider?: SubscriptionProvider;
   unavailable?: 'missing' | 'undecodable' | 'undecryptable';
   quota?: boolean;
+  judgePlacement?: 'primary' | 'fallback';
+  constructionRefresh?: 2 | 3;
 } = {}) {
   const provider = options.provider ?? 'anthropic';
   const model = { anthropic: 'claude-3-5-sonnet', openai: 'gpt-primary', xai: 'grok-4', 'google-antigravity': 'claude-sonnet-4-5' }[provider];
@@ -80,8 +86,9 @@ async function review(options: {
   } });
   const vault = new EnvelopeVault(Buffer.alloc(32, 29).toString('base64'));
   const credentials = new CredentialService({ store: h.store, vault });
+  const expires = Date.now() + 120_000;
   await credentials.saveSubscription(WORKSPACE_ID, provider, {
-    type: 'oauth', access, refresh, expires: options.quota ? Date.now() + 3_600_000 : 0,
+    type: 'oauth', access, refresh, expires: options.constructionRefresh ? expires : options.quota ? Date.now() + 3_600_000 : 0,
   }, 'owner');
   if (options.freeFallback) {
     await credentials.saveSubscription(WORKSPACE_ID, 'openai', {
@@ -106,6 +113,26 @@ async function review(options: {
       slot: 2, name: 'Extra', logo: 'owl', active: true, provider, model, effort: null, fallback: configured,
     });
   }
+  if (options.judgePlacement) {
+    const settings = (await h.store.getSettings(WORKSPACE_ID))!;
+    // Subscription providers are not currently offered for judges; exercise setup with a stored entry.
+    const judge = {
+      enabled: true, provider: options.judgePlacement === 'primary' ? provider : 'typesafe', model: 'jev-latest',
+      uses: [], threshold: 0.5,
+      fallback: options.judgePlacement === 'fallback' ? [{ provider, model: 'jev-latest' }] : [],
+    } as unknown as JudgeSettings;
+    await h.store.saveSettings({ ...settings, judge });
+  }
+  let primaryResolves = 0;
+  if (options.constructionRefresh) {
+    const resolve = credentials.resolve.bind(credentials);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    vi.spyOn(credentials, 'resolve').mockImplementation(async (workspaceId, entryProvider) => {
+      if (entryProvider === provider && ++primaryResolves === options.constructionRefresh) clock.mockReturnValue(expires + 1);
+      return resolve(workspaceId, entryProvider);
+    });
+  }
   const lines: Array<Record<string, unknown>> = [];
   const logs: string[] = [];
   const logger = pino({ level: 'info' }, { write: (line: string) => lines.push(JSON.parse(line) as Record<string, unknown>) });
@@ -117,7 +144,7 @@ async function review(options: {
   const result = await processReviewJob(h.job, { ...deps, credentials, logger, log: (line) => logs.push(line), budgetAdmission: admission });
   const runs = await h.store.listReviewRuns(WORKSPACE_ID);
   const run = runs.find((entry) => entry.botSlot === (options.extra ? 2 : 1));
-  return { ...h, result, run, runs, lines, logs, admit, primaryLabel: `${provider}:${model}`, fallback };
+  return { ...h, result, run, runs, lines, logs, admit, primaryResolves, primaryLabel: `${provider}:${model}`, fallback };
 }
 
 function warning(h: Awaited<ReturnType<typeof review>>, reason: string) {
@@ -127,6 +154,49 @@ function warning(h: Awaited<ReturnType<typeof review>>, reason: string) {
 }
 
 describe('processReviewJob — an unavailable subscription enters the configured fallback chain', () => {
+  it.each(['primary', 'fallback'] as const)('does not repeat a refused primary refresh for the judge %s', async (judgePlacement) => {
+    const h = await review({ judgePlacement });
+    expect(h.run).toMatchObject({ status: 'completed', provider: 'openai', fallbackFrom: PRIMARY });
+    expect(h.reviews[0]?.body).toContain('auth');
+    expect(refreshSubscription).toHaveBeenCalledTimes(1);
+    warning(h, 'sign-in');
+  });
+
+  it.each([
+    { dual: false, constructionRefresh: 2 as const },
+    { dual: true, constructionRefresh: 2 as const },
+    { dual: true, constructionRefresh: 3 as const },
+  ])('falls back after refresh is refused on construction resolve $constructionRefresh with dual methods $dual', async (options) => {
+    const failure = new SubscriptionRefreshError('sign-in');
+    failure.message += ` ${access} ${refresh}`;
+    vi.mocked(refreshSubscription).mockRejectedValue(failure);
+    const h = await review(options);
+    expect(h.run).toMatchObject({ status: 'completed', provider: 'openai', model: 'gpt-5', fallbackFrom: PRIMARY, costUsd: null });
+    expect(h.reviews[0]?.body).toContain(PRIMARY);
+    expect(h.reviews[0]?.body).toContain('auth');
+    expect(h.reviews[0]?.body).toContain('Subscription token refresh failed; sign in again');
+    expect(calls.requests.map((entry) => entry.label)).toEqual(['openai:gpt-5']);
+    expect(refreshSubscription).toHaveBeenCalledTimes(1);
+    expect(h.primaryResolves).toBe(options.constructionRefresh);
+    warning(h, 'sign-in');
+    const visible = JSON.stringify({ runs: h.runs, reviews: h.reviews, lines: h.lines, logs: h.logs, requests: calls.requests });
+    expect(visible).not.toContain(access);
+    expect(visible).not.toContain(refresh);
+  });
+
+  it.each([
+    { dual: false, constructionRefresh: 2 as const },
+    { dual: true, constructionRefresh: 3 as const },
+  ])('keeps construction-time unreachable refresh transient with dual methods $dual', async (options) => {
+    vi.mocked(refreshSubscription).mockRejectedValue(new SubscriptionRefreshError('unreachable'));
+    const h = await review(options);
+    expect(h.run).toMatchObject({ status: 'failed', detail: 'Subscription token refresh could not reach the provider; try again', fallbackFrom: null });
+    expect(calls.requests).toHaveLength(0);
+    expect(refreshSubscription).toHaveBeenCalledTimes(1);
+    expect(h.primaryResolves).toBe(options.constructionRefresh);
+    expect(h.lines.filter((line) => line.event === 'credential.primary_unavailable')).toHaveLength(0);
+  });
+
   it.each(['anthropic', 'openai', 'xai', 'google-antigravity'] as const)('continues from %s after refused refresh and discloses ordinary auth fallback', async (provider) => {
     const h = await review({ provider });
     expect(h.run).toMatchObject({ status: 'completed', provider: h.fallback.provider, model: h.fallback.model, fallbackFrom: h.primaryLabel, costUsd: null });

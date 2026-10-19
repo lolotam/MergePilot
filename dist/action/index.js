@@ -189304,8 +189304,6 @@ async function createReviewModel(config2, store, opts) {
     throw new Error(`Unsupported provider: ${String(config2.provider)}`);
   }
   const provider = config2.provider;
-  const primaryFailure = opts.primarySubscriptionFailure;
-  const apiKey = primaryFailure ? void 0 : provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
   if (!config2.model) {
     throw new Error(`Model is required for provider: ${config2.provider}`);
   }
@@ -189313,20 +189311,34 @@ async function createReviewModel(config2, store, opts) {
   const roster = rosterFor(rotation, provider);
   const spec = { provider, model: config2.model, effort: config2.effort };
   const dual = opts.dualMethods?.[provider];
-  const primary = primaryFailure ? {
+  const unavailableSubscription = (failure2) => ({
     model: {
       label: `${provider}:${config2.model}`,
       authMethod: "subscription",
       includedInSubscription: true,
       async generate() {
-        throw primaryFailure;
+        throw failure2;
       }
     },
     secrets: []
-  } : dual ? await buildMethodModel(spec, dual.defaultMethod, store, rotation) : {
-    model: roster ? rotatingReviewModel(provider, config2.model, config2.effort, roster, rotation, resolveSecret) : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config2.model, config2.effort),
-    secrets: roster ? [...roster.keys] : []
-  };
+  });
+  let apiKey;
+  let primary;
+  try {
+    if (opts.primarySubscriptionFailure) {
+      primary = unavailableSubscription(opts.primarySubscriptionFailure);
+    } else {
+      apiKey = provider === "custom" ? await resolveKey(store, provider) : await store.resolve({ provider }, "review");
+      primary = dual ? await buildMethodModel(spec, dual.defaultMethod, store, rotation) : {
+        model: roster ? rotatingReviewModel(provider, config2.model, config2.effort, roster, rotation, resolveSecret) : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config2.model, config2.effort),
+        secrets: roster ? [...roster.keys] : []
+      };
+    }
+  } catch (error62) {
+    if (!isSubscriptionProvider(provider) || !(error62 instanceof LlmFailure) || failureKind(error62.code) !== "auth")
+      throw error62;
+    primary = unavailableSubscription(error62);
+  }
   const chain = { models: [], secrets: [...primary.secrets], skipped: [] };
   if (dual)
     addOtherMethod(chain, await otherMethodEntry(spec, dual.defaultMethod, store, rotation));

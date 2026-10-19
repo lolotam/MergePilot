@@ -1,7 +1,8 @@
 import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import { credentialEnvName, type AnyCredentialStore } from '../credentials/store.js';
-import { LlmFailure } from '../llm/failure.js';
+import { isSubscriptionProvider } from '../credentials/subscription.js';
+import { failureKind, LlmFailure } from '../llm/failure.js';
 import type { ReviewModel, SkippedFallback } from '../review/model.js';
 import { ClaudeCodeRunner } from './claude-code/runner.js';
 import { buildMethodModel, otherMethodEntry, type DualMethodConfig, type MethodModel, type OtherMethod } from './dual-method.js';
@@ -226,9 +227,6 @@ export async function createReviewModel(
     throw new Error(`Unsupported provider: ${String(config.provider)}`);
   }
   const provider = config.provider;
-  const primaryFailure = opts.primarySubscriptionFailure;
-  const apiKey =
-    primaryFailure ? undefined : provider === 'custom' ? await resolveKey(store, provider) : await store.resolve({ provider }, 'review');
   // `config.baseUrl` is deliberately NOT read: it comes from the repository (ADR-0008 amendment).
   if (!config.model) {
     throw new Error(`Model is required for provider: ${config.provider}`);
@@ -237,24 +235,37 @@ export async function createReviewModel(
   const roster = rosterFor(rotation, provider);
   const spec = { provider, model: config.model, effort: config.effort };
   const dual = opts.dualMethods?.[provider];
-  const primary: MethodModel = primaryFailure
-    ? {
-        model: {
-          label: `${provider}:${config.model}`,
-          authMethod: 'subscription',
-          includedInSubscription: true,
-          async generate() { throw primaryFailure; },
-        },
-        secrets: [],
-      }
-    : dual
-    ? await buildMethodModel(spec, dual.defaultMethod, store, rotation)
-    : {
-        model: roster
-          ? rotatingReviewModel(provider, config.model, config.effort, roster, rotation, resolveSecret)
-          : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config.model, config.effort),
-        secrets: roster ? [...roster.keys] : [],
-      };
+  const unavailableSubscription = (failure: LlmFailure): MethodModel => ({
+    model: {
+      label: `${provider}:${config.model}`,
+      authMethod: 'subscription',
+      includedInSubscription: true,
+      async generate() { throw failure; },
+    },
+    secrets: [],
+  });
+  let apiKey: Secret | undefined;
+  let primary: MethodModel;
+  try {
+    if (opts.primarySubscriptionFailure) {
+      primary = unavailableSubscription(opts.primarySubscriptionFailure);
+    } else {
+      apiKey = provider === 'custom' ? await resolveKey(store, provider) : await store.resolve({ provider }, 'review');
+      primary = dual
+        ? await buildMethodModel(spec, dual.defaultMethod, store, rotation)
+        : {
+            model: roster
+              ? rotatingReviewModel(provider, config.model, config.effort, roster, rotation, resolveSecret)
+              : withRetries(createAdapter(provider, apiKey, opts.customBaseUrl, opts.customFetch, resolveSecret), config.model, config.effort),
+            secrets: roster ? [...roster.keys] : [],
+          };
+    }
+  } catch (error) {
+    // Only a subscription the credential store could not refresh is deferred to the first call; a
+    // missing API key (or any other construction failure) still fails the review here.
+    if (!isSubscriptionProvider(provider) || !(error instanceof LlmFailure) || failureKind(error.code) !== 'auth') throw error;
+    primary = unavailableSubscription(error);
+  }
   // The chain: [primary, primary's other method (ADR-0027), configured fallbacks (ADR-0008)...].
   const chain: ResolvedFallbacks = { models: [], secrets: [...primary.secrets], skipped: [] };
   if (dual) addOtherMethod(chain, await otherMethodEntry(spec, dual.defaultMethod, store, rotation));

@@ -77,6 +77,34 @@ async function build(ws: Workspace, cfg: MergePilotConfig) {
 const revealed = (secrets: readonly Secret[] | undefined) => (secrets ?? []).map((s) => s.reveal());
 
 describe('createReviewModel — dual-method chain (ADR-0027)', () => {
+  it.each(['default', 'subscription'] as const)('defers an auth failure resolving the primary %s during construction', async (stage) => {
+    const ws: Workspace = { defaults: { anthropic: 'subscription', openai: 'api-key' },
+      subscriptions: { anthropic: envelope('anthropic') }, rosters: { anthropic: keys('anthropic'), openai: keys('openai') } };
+    const store = workspaceStore(ws);
+    const original = store.resolve.bind(store);
+    const failure = new LlmFailure({ provider: 'anthropic', code: 'INVALID_CREDENTIAL', message: 'Subscription token refresh failed; sign in again' });
+    vi.spyOn(store, 'resolve').mockImplementation(async (ref, purpose) => {
+      if (ref.provider === 'anthropic' && (stage === 'default' || ref.method === 'subscription')) throw failure;
+      return original(ref, purpose);
+    });
+    const model = await createReviewModel(config('anthropic', 'claude-3-5-sonnet', {
+      fallback: [{ provider: 'openai', model: 'gpt-5' }],
+    }), store, { cwd: '/tmp', dualMethods: { anthropic: { defaultMethod: 'subscription' } }, keyRosters: rostersOf(ws) });
+
+    expect(model).toMatchObject({ authMethod: 'subscription', includedInSubscription: true });
+    await expect(model.generate({ system: '', user: '', maxOutputTokens: 100 })).rejects.toBe(failure);
+    expect(model.fallbacks?.map((entry) => entry.label)).toEqual(['anthropic:claude-3-5-sonnet', 'openai:gpt-5']);
+    expect(model.fallbacks?.[0]?.fallbackTriggers).toEqual(['quota', 'rate-limit']);
+  });
+
+  it.each([new Error('stored credential unavailable'), new LlmFailure({ provider: 'anthropic', code: 'NETWORK', message: 'provider unreachable' })])(
+    'propagates a non-auth construction failure: %s', async (failure) => {
+      const store = workspaceStore({ defaults: {}, subscriptions: {}, rosters: {} });
+      vi.spyOn(store, 'resolve').mockRejectedValue(failure);
+      await expect(createReviewModel(config('anthropic', 'claude-3-5-sonnet'), store, { cwd: '/tmp' })).rejects.toBe(failure);
+    },
+  );
+
   it('defers an unavailable primary subscription to its first call without resolving it again', async () => {
     const ws: Workspace = { defaults: { anthropic: 'subscription', openai: 'api-key' },
       subscriptions: {}, rosters: { anthropic: keys('anthropic'), openai: keys('openai') } };

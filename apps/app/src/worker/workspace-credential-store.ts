@@ -1,5 +1,6 @@
-import { decodeSubscription, type CredentialInfo, type CredentialRef, type CredentialStore, type LlmFailure, type RequestPurpose, type Secret } from '@mergepilot/engine';
+import { decodeSubscription, LlmFailure, type CredentialInfo, type CredentialRef, type CredentialStore, type RequestPurpose, type Secret } from '@mergepilot/engine';
 import type { ApiProvider } from '../core/types.js';
+import { terminalSubscriptionFailure } from '../credentials/subscription-resolution.js';
 import { admittedSubscription } from './dual-method-review.js';
 import type { ProcessReviewCredentials } from './types.js';
 
@@ -7,6 +8,7 @@ import type { ProcessReviewCredentials } from './types.js';
 export class WorkspaceCredentialStore implements CredentialStore {
   private readonly secrets = new Map<string, Secret>();
   private readonly extra: Secret[] = [];
+  private primaryFailure: LlmFailure | undefined;
 
   /**
    * `subscriptionOnlyProviders`: the bot was admitted free (ADR-0033, ADR-0035), so every resolve
@@ -18,9 +20,14 @@ export class WorkspaceCredentialStore implements CredentialStore {
     private readonly credentials: ProcessReviewCredentials,
     private readonly primaryProvider: ApiProvider,
     primarySecret: Secret | undefined,
-    private readonly options: { subscriptionOnlyProviders?: ReadonlySet<string>; primaryFailure?: LlmFailure | undefined } = {},
+    private readonly options: {
+      subscriptionOnlyProviders?: ReadonlySet<string>;
+      primaryFailure?: LlmFailure | undefined;
+      onPrimaryUnavailable?: ((reason: string) => void) | undefined;
+    } = {},
   ) {
     if (primarySecret) this.secrets.set(primaryProvider, primarySecret);
+    this.primaryFailure = options.primaryFailure;
   }
 
   /** Adds a key resolved elsewhere (the judge's), so it is redacted like the review keys. */
@@ -38,9 +45,12 @@ export class WorkspaceCredentialStore implements CredentialStore {
 
   async resolve(ref: CredentialRef, _purpose: RequestPurpose): Promise<Secret> {
     const provider = ref.provider as ApiProvider;
-    if (provider === this.primaryProvider && this.options.primaryFailure) throw this.options.primaryFailure;
+    if (provider === this.primaryProvider && this.primaryFailure) {
+      const existing = this.secrets.get(provider);
+      if (ref.method === 'subscription' || !existing || decodeSubscription(existing.reveal(), provider)) throw this.primaryFailure;
+    }
     if (this.options.subscriptionOnlyProviders?.has(provider)) {
-      const subscription = await admittedSubscription(this.credentials, this.workspaceId, provider);
+      const subscription = await this.resolveSubscription(provider, () => admittedSubscription(this.credentials, this.workspaceId, provider));
       this.secrets.set(ref.provider, subscription);
       return subscription;
     }
@@ -48,7 +58,7 @@ export class WorkspaceCredentialStore implements CredentialStore {
       // The other method of a dual provider (ADR-0027): the parent envelope, refreshed when it is
       // about to expire, whatever the effective default is. Kept apart from the default's key so
       // both are redacted.
-      const subscription = await this.credentials.resolve(this.workspaceId, provider);
+      const subscription = await this.resolveSubscription(provider, () => this.credentials.resolve(this.workspaceId, provider));
       this.secrets.set(`${ref.provider}:subscription`, subscription);
       return subscription;
     }
@@ -64,8 +74,22 @@ export class WorkspaceCredentialStore implements CredentialStore {
       this.secrets.set(ref.provider, secret);
       return secret;
     }
-    const resolved = await this.credentials.resolve(this.workspaceId, provider);
+    const resolved = await this.resolveSubscription(provider, () => this.credentials.resolve(this.workspaceId, provider));
     this.secrets.set(ref.provider, resolved);
     return resolved;
+  }
+
+  private async resolveSubscription(provider: ApiProvider, resolve: () => Promise<Secret>): Promise<Secret> {
+    try {
+      return await resolve();
+    } catch (error) {
+      const terminal = provider === this.primaryProvider ? terminalSubscriptionFailure(error, provider) : undefined;
+      if (!terminal) throw error;
+      if (!this.primaryFailure) {
+        this.primaryFailure = new LlmFailure({ code: 'INVALID_CREDENTIAL', provider, message: terminal.message });
+        this.options.onPrimaryUnavailable?.(terminal.reason);
+      }
+      throw this.primaryFailure;
+    }
   }
 }

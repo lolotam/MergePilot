@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createReviewModel, encodeSubscription, LlmFailure, Secret, type MergePilotConfig } from '@mergepilot/engine';
+import { createReviewModel, encodeSubscription, LlmFailure, Secret, SubscriptionRefreshError, type MergePilotConfig } from '@mergepilot/engine';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewCredentials } from './types.js';
 import { loadRosters } from './key-roster.js';
@@ -10,6 +10,35 @@ function loggerStub(): Logger {
 }
 
 describe('WorkspaceCredentialStore', () => {
+  it.each(['default', 'subscription', 'subscription-only'] as const)('remembers a terminal primary %s failure and rebuilds its message without tokens', async (path) => {
+    const access = ['primary', 'access', 'sensitive'].join('-');
+    const refresh = ['primary', 'refresh', 'sensitive'].join('-');
+    const primary = new Secret(encodeSubscription('anthropic', { type: 'oauth', access, refresh, expires: 0 }));
+    const error = new SubscriptionRefreshError('sign-in');
+    error.message += ` ${access} ${refresh}`;
+    const credentials: ProcessReviewCredentials = {
+      resolve: vi.fn(async () => { throw error; }),
+      getEffectiveAuthMethod: vi.fn(async () => 'subscription'),
+    };
+    const onPrimaryUnavailable = vi.fn();
+    const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', primary, {
+      onPrimaryUnavailable,
+      ...(path === 'subscription-only' ? { subscriptionOnlyProviders: new Set(['anthropic']) } : {}),
+    });
+    const ref = { provider: 'anthropic', ...(path === 'subscription' ? { method: 'subscription' as const } : {}) };
+
+    const failure = await store.resolve(ref, 'review').catch((caught: unknown) => caught);
+    expect(failure).toBeInstanceOf(LlmFailure);
+    expect(failure).toMatchObject({ code: 'INVALID_CREDENTIAL', provider: 'anthropic', message: 'Subscription token refresh failed; sign in again' });
+    await expect(store.resolve(ref, 'review')).rejects.toBe(failure);
+    await expect(store.resolve({ provider: 'anthropic' }, 'review')).rejects.toBe(failure);
+    expect(credentials.resolve).toHaveBeenCalledOnce();
+    expect(onPrimaryUnavailable).toHaveBeenCalledExactlyOnceWith('sign-in');
+    expect(store.getKnownSecrets()).toContain(primary);
+    expect(JSON.stringify(failure)).not.toContain(access);
+    expect(JSON.stringify(failure)).not.toContain(refresh);
+  });
+
   it('resolves api-key fallbacks from the roster instead of refreshing an expired subscription', async () => {
     const rosterSecret = new Secret(['sk', 'fallback', 'roster', 'key', '01'].join('-'));
     const resolve = vi.fn(async () => {
@@ -28,6 +57,22 @@ describe('WorkspaceCredentialStore', () => {
     const resolved = await store.resolve({ provider: 'openai' }, 'fallback');
     expect(resolved.reveal()).toBe(rosterSecret.reveal());
     expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('keeps the API-key default usable after its other subscription method becomes unavailable', async () => {
+    const primaryKey = new Secret('primary-api-key-value');
+    const credentials: ProcessReviewCredentials = {
+      resolve: vi.fn(async () => { throw new SubscriptionRefreshError('sign-in'); }),
+      getEffectiveAuthMethod: vi.fn(async () => 'api-key'),
+    };
+    const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', primaryKey);
+    const ref = { provider: 'anthropic', method: 'subscription' as const };
+    const failure = await store.resolve(ref, 'review').catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({ code: 'INVALID_CREDENTIAL' });
+    await expect(store.resolve(ref, 'review')).rejects.toBe(failure);
+    await expect(store.resolve({ provider: 'anthropic' }, 'review')).resolves.toBe(primaryKey);
+    expect(credentials.resolve).toHaveBeenCalledOnce();
   });
 
   it('refuses an api-key fallback without keys instead of using the subscription', async () => {
