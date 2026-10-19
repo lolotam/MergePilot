@@ -2,7 +2,7 @@
  * Repository context for reviews (ADR-0029): files outside the diff that the caller read at the PR
  * head. Here they are filtered by the review's own skip rules, secret-redacted, cut to a per-file
  * cap, and fitted to each review call's token cap in priority order: the full version of a changed
- * file, then its sibling test or implementation, then the local modules it imports. A plan records
+ * file, then its sibling test or implementation, then cited files and local imports. A plan records
  * what was sent across every call, so the summary can say how many files went and how many did not.
  *
  * Pure engine code: the content arrives through `RunReviewInput.contextFiles`.
@@ -16,21 +16,22 @@ import { estimateTokens } from './budget.js';
 import { renderContextFile, type ContextFile } from './prompt.js';
 
 /**
- * Why a file is context: the changed file's full version, its test/implementation, an import, the
+ * Why a file is context: the changed file's full version, its test/implementation, a citation, an import, the
  * build and CI wiring of a PR that changes scripts, tests or CI (ADR-0029), or, on a follow-up
  * review, another file the pull request changes (ADR-0030).
  */
-export type ContextKind = 'changed-file' | 'test-pair' | 'import' | 'build-config' | 'pr-change';
+export type ContextKind = 'changed-file' | 'test-pair' | 'cited' | 'import' | 'build-config' | 'pr-change';
 
 /**
- * Priority a > c > b > e of ADR-0029: lower goes first. PR files are planned apart (ADR-0030).
+ * ADR-0029 priority: changed > test > cited > import > build. PR files are planned apart (ADR-0030).
  */
 const KIND_ORDER: Readonly<Record<ContextKind, number>> = {
   'changed-file': 0,
   'test-pair': 1,
-  import: 2,
-  'build-config': 3,
-  'pr-change': 4,
+  cited: 2,
+  import: 3,
+  'build-config': 4,
+  'pr-change': 5,
 };
 
 /** One repository file offered as context, as the caller gathered it. */
@@ -70,6 +71,14 @@ export interface ContextDisclosure extends ContextPaths {
 
 /** A single context file never takes more than this many estimated tokens; longer ones are cut. */
 export const CONTEXT_FILE_MAX_TOKENS = 8_000;
+export const MAX_SCALED_CONTEXT_TOKENS = 400_000;
+
+/** Opt-in whole-PR scaling; a zero context budget still disables context. */
+export function scaledContextTokens(contextTokens: number, perFile: number, reviewedFileCount: number): number {
+  return contextTokens > 0 && perFile > 0
+    ? Math.min(contextTokens + perFile * reviewedFileCount, MAX_SCALED_CONTEXT_TOKENS)
+    : contextTokens;
+}
 
 /** The UNTRUSTED fence and label around each block, counted with its content. */
 const BLOCK_OVERHEAD_TOKENS = 30;
@@ -88,10 +97,12 @@ export interface ContextPlanOptions {
   knownSecrets: Secret[];
   /** The files this review covers (after the review's own classification). */
   reviewedPaths: readonly string[];
-  /** `review.contextTokens`: the cap of the whole-PR call; 0 sends nothing. */
+  /** `review.contextTokens`: the base cap; whole-PR scaling is opt-in. 0 sends nothing. */
   contextTokens: number;
-  /** `review.batchTokens`: a batch gets at most `min(contextTokens, batchTokens)`. */
+  /** Diff batch cap, also the default context cap when `batchContextTokens` is absent. */
   batchTokens: number;
+  batchContextTokens?: number | undefined;
+  contextTokensPerFile?: number | undefined;
   /**
    * `review.prContextTokens` on a follow-up review: the share of each call's cap that `pr-change`
    * files may take; repository context fills the rest. 0 or absent: no PR context (ADR-0030).
@@ -196,16 +207,17 @@ const shownOf = (file: PreparedContextFile): ContextFile => ({
 export class ContextPlan {
   private readonly files: PreparedContextFile[];
   private readonly prFiles: PreparedContextFile[];
+  private batchContext: { files: PreparedContextFile[]; prFiles: PreparedContextFile[] } | undefined;
   private readonly sent = new Map<string, ContextFile>();
   /** Context skipped because the file's own patch was in the call: shown, so never left out. */
   private readonly shownAsPatch = new Set<string>();
 
   constructor(
-    offered: readonly RepositoryContextFile[],
+    private readonly offered: readonly RepositoryContextFile[],
     private readonly opts: ContextPlanOptions,
   ) {
     const on = opts.contextTokens > 0;
-    this.files = on ? prepareRepository(offered, opts) : [];
+    this.files = on ? prepareRepository(offered, { ...opts, contextTokens: this.wholeCap() }) : [];
     this.prFiles = on ? preparePullRequest(offered, opts) : [];
   }
 
@@ -214,12 +226,21 @@ export class ContextPlan {
    * context first (files related to `paths` first) within the PR share; repository files fill the rest.
    */
   select(paths: readonly string[], maxTokens: number): ContextFile[] {
+    return this.selectPrepared(paths, maxTokens, this.files, this.prFiles);
+  }
+
+  private selectPrepared(
+    paths: readonly string[],
+    maxTokens: number,
+    files: readonly PreparedContextFile[],
+    prFiles: readonly PreparedContextFile[],
+  ): ContextFile[] {
     const wanted = new Set(paths);
     const related = (file: PreparedContextFile): boolean => file.forPaths.some((p) => wanted.has(p));
     const chosen: ContextFile[] = [];
-    let prLeft = Math.min(this.opts.prContextTokens ?? 0, maxTokens);
+    let prLeft = Math.min(this.opts.prContextTokens ?? 0, this.opts.contextTokens, maxTokens);
     let left = maxTokens;
-    for (const file of [...this.prFiles.filter(related), ...this.prFiles.filter((f) => !related(f))]) {
+    for (const file of [...prFiles.filter(related), ...prFiles.filter((f) => !related(f))]) {
       if (file.tokens > prLeft) continue;
       // As for repository context: a patch of which not one changed or context line fit (only its
       // hunk header, or nothing) is left out instead of being counted as sent.
@@ -228,7 +249,7 @@ export class ContextPlan {
       prLeft -= file.tokens;
       left -= file.tokens;
     }
-    for (const file of this.files) {
+    for (const file of files) {
       if (file.tokens > left || !related(file)) continue;
       // Not even its first line fit the per-file cap (a one-line or minified file): sending an
       // empty block would count it as sent; it stays left out instead.
@@ -245,19 +266,36 @@ export class ContextPlan {
   }
 
   /** The context of the whole-PR call (not yet recorded: the call may be replaced by batches). */
-  whole(): ContextFile[] {
-    return this.select(this.opts.reviewedPaths, this.opts.contextTokens);
+  whole(maxTokens = Infinity): ContextFile[] {
+    return this.select(this.opts.reviewedPaths, Math.min(this.wholeCap(), maxTokens));
   }
 
-  /** Records files as sent to the model. */
+  private wholeCap(): number {
+    return scaledContextTokens(this.opts.contextTokens, this.opts.contextTokensPerFile ?? 0, this.opts.reviewedPaths.length);
+  }
+
+  /** Records files as sent, retaining the longest version for verification after batch recovery. */
   markSent(files: readonly ContextFile[]): void {
-    for (const file of files) this.sent.set(blockKey(file), file);
+    for (const file of files) {
+      const key = blockKey(file);
+      const previous = this.sent.get(key);
+      if (!previous || file.content.length > previous.content.length || (previous.truncated && !file.truncated)) {
+        this.sent.set(key, file);
+      }
+    }
   }
 
   /** The context of one batch, from its own files' context, recorded as sent. */
   readonly forBatch = (batch: ReadonlyArray<{ path: string }>): ContextFile[] => {
-    const cap = Math.min(this.opts.contextTokens, this.opts.batchTokens);
-    const files = this.select(batch.map((f) => f.path), cap);
+    const cap = Math.min(this.opts.contextTokens, this.opts.batchContextTokens ?? this.opts.batchTokens);
+    if (!this.batchContext) {
+      const batchOpts = { ...this.opts, contextTokens: cap };
+      this.batchContext = {
+        files: cap > 0 ? prepareRepository(this.offered, batchOpts) : [],
+        prFiles: cap > 0 ? preparePullRequest(this.offered, batchOpts) : [],
+      };
+    }
+    const files = this.selectPrepared(batch.map((f) => f.path), cap, this.batchContext.files, this.batchContext.prFiles);
     this.markSent(files);
     return files;
   };

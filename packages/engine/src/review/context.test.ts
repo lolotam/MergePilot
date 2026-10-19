@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { estimateTokens } from './budget.js';
-import { ContextPlan, type ContextPlanOptions, type RepositoryContextFile } from './context.js';
+import { ContextPlan, MAX_SCALED_CONTEXT_TOKENS, scaledContextTokens, type ContextPlanOptions, type RepositoryContextFile } from './context.js';
 import { buildReviewPrompt, CONTEXT_TRUNCATED_MARKER, renderContextFile } from './prompt.js';
 
 // ADR-0029: repository context is filtered, redacted, capped per file and fitted per call in
@@ -15,6 +15,98 @@ function options(overrides: Partial<ContextPlanOptions> = {}): ContextPlanOption
 }
 
 describe('ContextPlan', () => {
+  const tokens = (files: ReturnType<ContextPlan['whole']>) =>
+    files.reduce((sum, f) => sum + estimateTokens(renderContextFile(f)) + 30, 0);
+
+  it.each([
+    { contextTokens: 1_000, contextTokensPerFile: 2_000, batchTokens: 1_000 },
+    { batchContextTokens: 500 },
+    { batchTokens: 500 },
+  ])('cuts repository files to the batch cap without changing the whole-PR version: %o', (limits) => {
+    const content = 'export const value = 1;\n'.repeat(300);
+    const opts = options(limits);
+    const cap = Math.min(opts.contextTokens, opts.batchContextTokens ?? opts.batchTokens);
+    const plan = new ContextPlan([file('src/ref.ts', 'cited', content, ['src/a.ts', 'src/b.ts'])], opts);
+    const whole = plan.whole();
+    expect(whole).toHaveLength(1);
+    expect(whole[0]?.content).toBe(content);
+    expect(whole[0]?.truncated).not.toBe(true);
+
+    const batch = plan.forBatch([{ path: 'src/a.ts' }]);
+    expect(batch).toHaveLength(1);
+    expect(batch[0]?.truncated).toBe(true);
+    expect(batch[0]?.content.length).toBeGreaterThan(0);
+    expect(content.startsWith(batch[0]!.content)).toBe(true);
+    expect(tokens(batch)).toBeLessThanOrEqual(cap);
+    expect(plan.forBatch([{ path: 'src/b.ts' }])).toEqual(batch);
+    expect(plan.whole()).toEqual(whole);
+    expect(plan.disclosure()).toEqual({ sent: ['src/ref.ts'], leftOut: [] });
+  });
+
+  it.each([true, false])('keeps the longest sent version for verification, whole first: %s', (wholeFirst) => {
+    const plan = new ContextPlan([file('src/ref.ts', 'cited', 'const value = 1;\n'.repeat(300))], options({ batchContextTokens: 500 }));
+    const whole = plan.whole();
+    if (wholeFirst) plan.markSent(whole);
+    const batch = plan.forBatch([{ path: 'src/a.ts' }]);
+    if (!wholeFirst) plan.markSent(whole);
+    expect(batch).toHaveLength(1);
+    expect(batch[0]?.truncated).toBe(true);
+    expect(plan.sentFiles()).toEqual(whole);
+    expect(plan.disclosure()).toEqual({ sent: ['src/ref.ts'], leftOut: [] });
+  });
+
+  it('decouples the batch context cap and preserves the old cap when unset', () => {
+    const offered = [file('src/ref.ts', 'cited', 'const x = 1;\n'.repeat(100))];
+    const defaultCap = new ContextPlan(offered, options({ batchTokens: 100 })).forBatch([{ path: 'src/a.ts' }]);
+    expect(defaultCap).toHaveLength(1);
+    expect(defaultCap[0]?.truncated).toBe(true);
+    expect(tokens(defaultCap)).toBeLessThanOrEqual(100);
+    expect(new ContextPlan(offered, options({ batchTokens: 100, batchContextTokens: 2_000 })).forBatch([{ path: 'src/a.ts' }])).toHaveLength(1);
+    const capped = new ContextPlan(offered, options({ contextTokens: 100, batchContextTokens: 2_000 })).forBatch([{ path: 'src/a.ts' }]);
+    expect(capped).toHaveLength(1);
+    expect(capped[0]?.truncated).toBe(true);
+    expect(tokens(capped)).toBeLessThanOrEqual(100);
+    expect(new ContextPlan(offered, options({ batchContextTokens: 0 })).forBatch([{ path: 'src/a.ts' }])).toEqual([]);
+  });
+
+  it('scales only the whole-PR budget, capped at 400000, and keeps zero disabled', () => {
+    const offered = Array.from({ length: 80 }, (_, i) => file(`src/ref${i}.ts`, 'cited', 'const x = 1;\n'.repeat(1500)));
+    const plan = new ContextPlan(offered, options({ contextTokens: 1_000, contextTokensPerFile: 1_000_000 }));
+    const tokens = (files: ReturnType<ContextPlan['whole']>) => files.reduce((sum, f) => sum + estimateTokens(renderContextFile(f)) + 30, 0);
+    expect(tokens(plan.whole())).toBeGreaterThan(390_000);
+    expect(tokens(plan.whole())).toBeLessThanOrEqual(MAX_SCALED_CONTEXT_TOKENS);
+    expect(tokens(plan.forBatch([{ path: 'src/a.ts' }]))).toBeLessThanOrEqual(1_000);
+    expect(scaledContextTokens(1_000, 500, 3)).toBe(2_500);
+    expect(scaledContextTokens(1_000, 0, 3)).toBe(1_000);
+    expect(scaledContextTokens(0, 500, 3)).toBe(0);
+  });
+
+  it('ranks cited files before imports and redacts their contents', () => {
+    const token = 'gh' + 'p_' + 'a'.repeat(36);
+    const plan = new ContextPlan([
+      file('src/import.ts', 'import'), file('docs/ref.md', 'cited', `token ${token}`),
+      file('src/a.test.ts', 'test-pair'), file('src/a.ts', 'changed-file'),
+    ], options());
+    const shown = plan.whole();
+    expect(shown.map((f) => f.path)).toEqual(['src/a.ts', 'src/a.test.ts', 'docs/ref.md', 'src/import.ts']);
+    expect(shown[2]!.content).not.toContain(token);
+    expect(shown[2]!.content).toContain('[REDACTED:github]');
+    plan.markSent(shown);
+    expect(plan.disclosure()?.sent).toContain('docs/ref.md');
+  });
+
+  it('caps the incremental PR share by the configured batch cap and base context budget', () => {
+    const offered = [file('src/earlier.ts', 'pr-change', '+const x = 1;\n'.repeat(100), [])];
+    const batchCapped = new ContextPlan(offered, options({ batchTokens: 100, prContextTokens: 3_000 })).forBatch([{ path: 'src/a.ts' }]);
+    expect(batchCapped).toHaveLength(1);
+    expect(batchCapped[0]?.truncated).toBe(true);
+    expect(tokens(batchCapped)).toBeLessThanOrEqual(100);
+    expect(new ContextPlan(offered, options({ batchTokens: 100, batchContextTokens: 2_000, prContextTokens: 3_000 })).forBatch([{ path: 'src/a.ts' }])).toHaveLength(1);
+    const capped = new ContextPlan(offered, options({ batchContextTokens: 2_000, prContextTokens: 100 })).forBatch([{ path: 'src/a.ts' }]);
+    expect(capped).toHaveLength(1);
+    expect(capped[0]?.truncated).toBe(true);
+    expect(tokens(capped)).toBeLessThanOrEqual(100);
+  });
   it('sends the changed file, then its test, then its imports, and counts what did not fit', () => {
     const body = 'const value = 1;\n'.repeat(20);
     const offered = [

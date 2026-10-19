@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { GitHubClient } from './client.js';
+import { fakeClient, modified, params } from './review-context.fixtures.js';
 import {
   gatherRepositoryContext,
   isBuildWiringChange,
@@ -11,7 +11,6 @@ import {
   pairCandidates,
   pythonImportCandidates,
   resolveImportCandidates,
-  type GatherContextParams,
 } from './review-context.js';
 import { mergeContextDisclosures, renderContextNote } from './review-notes.js';
 
@@ -88,31 +87,62 @@ describe('pairCandidates', () => {
   });
 });
 
-/** A client reading `files` at the head; with `dirs`, it can also list those directories. */
-function fakeClient(
-  files: Record<string, string>,
-  fail: string[] = [],
-  dirs?: Record<string, string[]>,
-): { client: GitHubClient; reads: Array<{ path: string; ref: string }> } {
-  const reads: Array<{ path: string; ref: string }> = [];
-  const client = {
-    getFileContent: async ({ path, ref }: { path: string; ref: string }) => {
-      reads.push({ path, ref });
-      if (fail.includes(path)) throw new Error('HTTP 502');
-      return ref === 'head-sha' ? (files[path] ?? null) : 'BASE VERSION';
-    },
-    ...(dirs ? { listDirectoryFiles: async ({ path }: { path: string }) => dirs[path] ?? null } : {}),
-  } as unknown as GitHubClient;
-  return { client, reads };
-}
-
-function params(files: GatherContextParams['files'], overrides: Partial<GatherContextParams> = {}): GatherContextParams {
-  return { owner: 'o', repo: 'r', headSha: 'head-sha', files, exclude: [], contextTokens: 30_000, ...overrides };
-}
-
-const modified = (path: string) => ({ path, status: 'modified', patch: '@@ -1 +1 @@\n-a\n+b', changes: 2 });
-
 describe('gatherRepositoryContext', () => {
+  it.each([
+    { count: 10, contextReads: 3, contextTokensPerFile: 0, expected: 3 },
+    { count: 40, contextReads: 3, contextTokensPerFile: 1, expected: 160 },
+    { count: 140, contextReads: 120, contextTokensPerFile: 1, expected: 500 },
+  ])('respects and scales the shared read cap: %o', async ({ count, contextReads, contextTokensPerFile, expected }) => {
+    const paths = Array.from({ length: count }, (_, i) => `src/f${i}.ts`);
+    const { client, reads } = fakeClient(Object.fromEntries(paths.map((p) => [p, 'export const x = 1;'])));
+    await gatherRepositoryContext(client, params(paths.map(modified), { contextReads, contextTokensPerFile }));
+    expect(reads).toHaveLength(expected);
+  });
+
+  it('reads explicit paths and ADR ids from added lines before imports, listing ADRs once', async () => {
+    const { client, reads } = fakeClient({
+      'src/a.ts': "import './dep.js'; // docs/head-only.md",
+      'src/a.test.ts': 'test', 'src/dep.ts': 'dep', 'docs/ref.md': 'reference',
+      'docs/adr/0029-repository-context.md': 'ADR',
+    }, [], { 'docs/adr': ['docs/adr/0029-repository-context.md'] });
+    let listings = 0;
+    const list = client.listDirectoryFiles!;
+    client.listDirectoryFiles = async (...args) => { listings++; return list(...args); };
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('src/a.ts'),
+      patch: '@@ -1,2 +1,2 @@\n-docs/removed.md\n docs/unchanged.md\n+docs/ref.md ADR-0029 ADR 0029',
+    }]));
+    expect(result.files.map((f) => f.kind)).toEqual(['changed-file', 'test-pair', 'cited', 'cited', 'cited', 'import']);
+    expect(result.files.find((f) => f.path === 'docs/ref.md')?.reason).toBe('cited by src/a.ts');
+    expect(listings).toBe(1);
+    expect(reads.some((r) => /removed|unchanged|head-only/.test(r.path))).toBe(false);
+    expect(reads.findIndex((r) => r.path === 'docs/ref.md')).toBeLessThan(reads.findIndex((r) => r.path === 'src/dep.ts'));
+  });
+
+  it('filters cited paths and caps distinct cited lookups at 20, disclosing overflow and read limits', async () => {
+    const paths = Array.from({ length: 22 }, (_, i) => `docs/ref${i}.md`);
+    const { client, reads } = fakeClient(Object.fromEntries(paths.map((p) => [p, 'reference'])));
+    const changed = { ...modified('notes.md'), status: 'added', patch: `@@ -0,0 +1 @@\n+${paths.join(' ')} .env.local private/secret.ts dist/a.js pnpm-lock.yaml assets/logo.png ../escape.ts` };
+    const result = await gatherRepositoryContext(client, params([changed], { exclude: ['private/**'] }));
+    expect(reads.map((r) => r.path)).toEqual(paths.slice(0, 20));
+    expect(result.leftOut).toEqual(paths.slice(20).map((p) => `${p} (cited lookup limit)`));
+    const limited = fakeClient({ 'docs/ref.md': 'reference' });
+    const notRead = await gatherRepositoryContext(limited.client, params([
+      { ...modified('notes.md'), patch: '@@ -1 +1 @@\n+docs/ref.md' },
+    ], { contextReads: 1 }));
+    expect(notRead.leftOut).toContain('docs/ref.md (not looked up)');
+  });
+
+  it('supports route paths, scoped and Unicode names, and added lines starting with ++', async () => {
+    const paths = ['apps/web/(app)/page.tsx', 'app/users/[id]/page.tsx', 'packages/@scope/foo.ts', 'docs/دليل.md'];
+    const { client } = fakeClient(Object.fromEntries(paths.map((p) => [p, 'reference'])));
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added',
+      patch: `--- a/notes.md\n+++ b/notes.md\n@@ -0,0 +1,3 @@\n+++ [link](${paths[0]})\n+\`${paths[1]}\`\n+${paths.slice(2).join(' ')}`,
+    }]));
+    expect(result.files.map((f) => f.path)).toEqual(paths);
+  });
+
   it('reads the full file, its test and its imports at the head commit', async () => {
     const { client, reads } = fakeClient({
       'src/api.ts': "import { lock } from './lock.js';\nimport { z } from 'zod';",

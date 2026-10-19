@@ -1,6 +1,6 @@
 /**
  * Repository context for reviews (ADR-0029): for every reviewed file, the full version of the file
- * itself, its sibling test or implementation, and the local modules it imports; when the PR changes
+ * itself, its sibling test or implementation, cited files and local imports; when the PR changes
  * scripts, tests or CI, also the package manifests and CI workflows that wire them up. All of it is
  * read at the PR HEAD through the per-client read cache. Head content is PR-controlled: the engine
  * redacts it and shows it as UNTRUSTED. Nothing here runs or installs the reviewed code; imports
@@ -15,10 +15,12 @@ import {
   type RepositoryContextFile,
 } from '@mergepilot/engine';
 import type { GitHubClient } from './client.js';
+import { isCitedPath } from './cited-path.js';
 import { listAtRef, readAtRef } from './read-cache.js';
 
-/** At most this many file reads per review; what is not looked up is disclosed. */
+/** Default file-read cap per review; configurable with `review.contextReads`. */
 export const MAX_CONTEXT_READS = 120;
+const MAX_CITED_LOOKUPS = 20;
 
 /** Reads run this many at a time, to stay clear of GitHub's secondary rate limits. */
 const READ_CONCURRENCY = 8;
@@ -67,6 +69,8 @@ export interface GatherContextParams {
   exclude: string[];
   /** `review.contextTokens`; 0 reads nothing. */
   contextTokens: number;
+  contextReads?: number | undefined;
+  contextTokensPerFile?: number | undefined;
 }
 
 export interface GatheredContext {
@@ -225,6 +229,55 @@ function importLookups(path: string, content: string): Lookup[] {
   }));
 }
 
+/** Explicit repository paths and ADR ids on added lines only, never PR metadata or head text. */
+async function citedLookups(reader: ContextReader, reviewed: readonly ReviewedFile[], exclude: string[]): Promise<Lookup[]> {
+  const lookups: Lookup[] = [];
+  const selected = new Set<string>();
+  const omitted = new Set<string>();
+  let adrs: string[] | undefined;
+  let rootFiles: Set<string> | undefined;
+  for (const file of reviewed) {
+    let inHunk = false;
+    const added = (file.patch ?? '').split('\n').filter((line) => {
+      if (line.startsWith('@@ ')) inHunk = true;
+      return inHunk && line.startsWith('+');
+    }).map((line) => line.slice(1)).join('\n');
+    const references = added.matchAll(/\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])/gu);
+    for (const match of references) {
+      let candidates: string[];
+      if (match[1]) {
+        if (adrs === undefined) adrs = (await reader.list('docs/adr')).sort();
+        candidates = adrs.filter((path) => path.startsWith(`docs/adr/${match[1]}-`) && path.endsWith('.md'));
+      } else {
+        if (added[match.index + match[0].length] === '(') continue;
+        let path = match[2]!.split('](').pop()!;
+        // Markdown's opening link punctuation is not part of a path; route groups stay intact.
+        for (const [open, close] of [['(', ')'], ['[', ']']] as const) {
+          while (path.startsWith(open) && path.split(open).length > path.split(close).length) path = path.slice(1);
+        }
+        candidates = isCitedPath(path) ? [path] : [];
+      }
+      for (const path of candidates) {
+        if (!isContextPathAllowed(path, { exclude, isSensitivePath })) continue;
+        if (!selected.has(path) && selected.size >= MAX_CITED_LOOKUPS) {
+          if (!omitted.has(path) && (path.includes('/') || rootFiles?.has(path))) {
+            omitted.add(path);
+            reader.leftOut.push(`${path} (cited lookup limit)`);
+          }
+          continue;
+        }
+        if (!path.includes('/')) {
+          rootFiles ??= new Set(await reader.list(''));
+          if (!rootFiles.has(path)) continue;
+        }
+        selected.add(path);
+        lookups.push({ candidates: [path], kind: 'cited', reason: `cited by ${file.path}`, forPath: file.path, disclose: true });
+      }
+    }
+  }
+  return lookups;
+}
+
 /** Runs `fn` over the items, {@link READ_CONCURRENCY} at a time. */
 async function inChunks<T>(items: readonly T[], fn: (item: T) => Promise<void>): Promise<void> {
   for (let i = 0; i < items.length; i += READ_CONCURRENCY) {
@@ -250,6 +303,7 @@ class ContextReader {
     private readonly params: GatherContextParams,
     /** Reviewed files with their head content: a lookup that lands on one needs no read. */
     readonly known: Map<string, string | null>,
+    private readonly maxReads: number,
   ) {}
 
   /** A path several reviewed files import is read, and counted against the limit, once. */
@@ -263,7 +317,7 @@ class ContextReader {
   }
 
   private async readOnce(path: string): Promise<ReadOutcome> {
-    if (this.reads >= MAX_CONTEXT_READS) return 'limit';
+    if (this.reads >= this.maxReads) return 'limit';
     this.reads++;
     try {
       return { content: await readAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, path) };
@@ -277,15 +331,16 @@ class ContextReader {
   /** The files of a directory; one read against the limit, none when the client cannot list. */
   async list(dir: string): Promise<string[]> {
     if (!this.client.listDirectoryFiles) return [];
-    if (this.reads >= MAX_CONTEXT_READS) {
-      this.leftOut.push(`${dir}/ (not looked up)`);
+    const label = dir ? `${dir}/` : '(repository root)';
+    if (this.reads >= this.maxReads) {
+      this.leftOut.push(`${label} (not looked up)`);
       return [];
     }
     this.reads++;
     try {
       return (await listAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, dir)) ?? [];
     } catch {
-      this.leftOut.push(`${dir}/ (could not be read)`);
+      this.leftOut.push(`${label} (could not be read)`);
       return [];
     }
   }
@@ -407,10 +462,10 @@ async function buildWiringLookups(reader: ContextReader, reviewed: readonly Revi
 
 /**
  * Reads the repository context of the reviewed files at the PR head, in priority order: each
- * changed file's full version, then sibling tests/implementations, then local imports, then the
+ * changed file's full version, then sibling tests/implementations, citations, local imports and the
  * build and CI wiring of a PR that changes scripts, tests or CI. An added
  * file is not read (its patch is the whole file). The engine fits what is returned to
- * `review.contextTokens`; reads are capped at {@link MAX_CONTEXT_READS} and shared per client.
+ * `review.contextTokens`; reads use the configured, optionally scaled cap and are shared per client.
  */
 export async function gatherRepositoryContext(client: GitHubClient, params: GatherContextParams): Promise<GatheredContext> {
   if (params.contextTokens <= 0) return { files: [], leftOut: [] };
@@ -420,7 +475,11 @@ export async function gatherRepositoryContext(client: GitHubClient, params: Gath
   // An added file is never read: its patch is the whole file. That content still serves as the
   // import context of a reviewed file in another batch (the engine skips it within its own batch).
   const added = reviewed.filter((f) => f.status === 'added').map((f): [string, string] => [f.path, patchNewSide(f.patch ?? '')]);
-  const reader = new ContextReader(client, params, new Map<string, string | null>(added));
+  const configuredReads = params.contextReads ?? MAX_CONTEXT_READS;
+  const maxReads = (params.contextTokensPerFile ?? 0) > 0
+    ? Math.min(Math.max(configuredReads, 4 * reviewed.length), 500)
+    : configuredReads;
+  const reader = new ContextReader(client, params, new Map<string, string | null>(added), maxReads);
   // a: the full version of each changed file that context may hold (not vendor, out/, lockfiles…),
   // so such files do not use up the read limit before the engine would drop them anyway.
   const readable = reviewed.filter(
@@ -436,7 +495,9 @@ export async function gatherRepositoryContext(client: GitHubClient, params: Gath
   const imports = reviewed.flatMap((file) =>
     importLookups(file.path, reader.known.get(file.path) ?? patchNewSide(file.patch ?? '')),
   );
-  await reader.run([...pairs, ...imports]);
+  await reader.run(pairs);
+  await reader.run(await citedLookups(reader, reviewed, params.exclude));
+  await reader.run(imports);
   await reader.run(await buildWiringLookups(reader, reviewed));
   return { files: reader.found, leftOut: reader.leftOut };
 }

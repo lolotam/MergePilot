@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { AuditSchema, MergePilotConfigSchema } from './schema.js';
 
+describe('repository context limits', () => {
+  const parse = (review = {}) => MergePilotConfigSchema.parse({ provider: 'anthropic', model: 'm', review }).review;
+  it('keeps the existing caps unless scaling or a batch override is configured', () => {
+    expect(parse()).toMatchObject({ contextTokens: 30_000, contextReads: 120, contextTokensPerFile: 0, batchTokens: 24_000 });
+    expect(parse().batchContextTokens).toBeUndefined();
+    expect(parse({ contextReads: 1, batchContextTokens: 0, contextTokensPerFile: 0 }).contextReads).toBe(1);
+    expect(parse({ contextReads: 500, batchContextTokens: 120_000, contextTokensPerFile: 4_000 }).contextReads).toBe(500);
+  });
+  it.each([
+    { contextReads: 0 }, { contextReads: 501 }, { contextReads: 1.5 },
+    { batchContextTokens: -1 }, { batchContextTokens: 1.5 },
+    { contextTokensPerFile: -1 }, { contextTokensPerFile: 1.5 },
+  ])('rejects invalid limits %o', (review) => {
+    expect(() => parse(review)).toThrow();
+  });
+});
+
 describe('AuditSchema', () => {
   it('applies defaults correctly', () => {
     const parsed = AuditSchema.parse({});

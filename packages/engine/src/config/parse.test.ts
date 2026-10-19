@@ -26,6 +26,8 @@ describe('parseConfig', () => {
           rulesFiles: ['CLAUDE.md', 'AGENTS.md'],
           maxRulesTokens: 12_000,
           contextTokens: 30_000,
+          contextReads: 120,
+          contextTokensPerFile: 0,
           prContextTokens: 15_000,
           pathInstructions: [],
           verify: true,

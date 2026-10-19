@@ -93,10 +93,16 @@ const ReviewSettingsSchema = z.strictObject({
   maxRulesTokens: z.number().int().positive().default(DEFAULT_MAX_RULES_TOKENS),
   /**
    * Estimated tokens of repository context (files outside the diff, read at the PR head) per review
-   * call: the whole-PR call gets up to this much; each batch up to `min(contextTokens, batchTokens)`
+   * call: the whole-PR call can scale; batches use `min(contextTokens, batchContextTokens ?? batchTokens)`
    * from its own files. 0 turns it off. What is left out is counted in the summary (ADR-0029).
    */
   contextTokens: z.number().int().min(0).default(DEFAULT_CONTEXT_TOKENS),
+  /** Shared head-file lookup and directory-listing limit. */
+  contextReads: z.number().int().min(1).max(500).default(120),
+  /** Context per batch, independent of its diff size; absent preserves the diff batch cap. */
+  batchContextTokens: z.number().int().min(0).optional(),
+  /** Extra whole-PR context tokens per reviewed file; positive also scales the read cap. */
+  contextTokensPerFile: z.number().int().min(0).default(0),
   /**
    * On a follow-up (incremental) review, the share of each call's `contextTokens` that goes to the
    * pull request's other changed files (their PR diff, as PR_CONTEXT); repository context fills the
@@ -114,7 +120,7 @@ const ReviewSettingsSchema = z.strictObject({
       maxLibraries: z.number().int().min(0).max(20).default(5),
     })
     .prefault({}),
-  /** Above this estimated prompt size the single whole-PR call is skipped: the PR goes straight to batches. */
+  /** Above this prompt size without context, use batches; context fills only the room left below it. */
   maxPromptTokens: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.maxPromptTokens),
   /** Diff tokens per batch; a single file bigger than this is its own batch, its patch truncated. */
   batchTokens: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.batchTokens),

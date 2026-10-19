@@ -45,6 +45,9 @@ import type { ReviewSkill } from './skill.js';
 import { runVerifyPass } from './verify-pass.js';
 import type { VerifyRejectedFinding } from './verify.js';
 
+/** Room for context fences and token-estimate rounding at the whole-PR prompt boundary. */
+const WHOLE_CONTEXT_SAFETY_TOKENS = 128;
+
 // ── Input types ──
 
 export interface PrFile {
@@ -221,13 +224,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     reviewedPaths: redactedReviewableFiles.map((f) => f.path),
     contextTokens: reviewCfg.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
     batchTokens: limits.batchTokens,
+    batchContextTokens: reviewCfg.batchContextTokens,
+    contextTokensPerFile: reviewCfg.contextTokensPerFile,
     // The rest of the PR is context on a follow-up review only (ADR-0030).
     prContextTokens: followUp ? (reviewCfg.prContextTokens ?? DEFAULT_PR_CONTEXT_TOKENS) : 0,
   });
-  const wholeContext = context.whole();
 
   // ── Step c: build prompt + budget check ───────────────────────────────
-  const prompt = buildReviewPrompt({
+  const promptInput = {
     language: config.language,
     maxFindings: reviewCfg.maxFindings,
     pr: promptPr,
@@ -235,11 +239,23 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     pathInstructions: reviewCfg.pathInstructions,
     files: redactedReviewableFiles,
     ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
-    ...(wholeContext.length > 0 ? { contextFiles: wholeContext } : {}),
-  });
+  };
+  const withoutContext = buildReviewPrompt(promptInput);
+  const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
+  const wholePromptLimit = Math.min(limits.maxPromptTokens, budgetCfg.maxInputTokens);
+  const contextRoom = Math.max(0, wholePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS);
+  const wholeContext = context.whole(contextRoom);
+  let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;
+  let promptTokens = estimateTokens(prompt.system + prompt.user);
+  // Long path labels can outgrow the estimated block overhead. Drop the lowest-priority files,
+  // never split a review just to accommodate context, and disclose exactly what remains.
+  while (promptTokens > wholePromptLimit && wholeContext.length > 0) {
+    wholeContext.pop();
+    prompt = buildReviewPrompt({ ...promptInput, contextFiles: wholeContext });
+    promptTokens = estimateTokens(prompt.system + prompt.user);
+  }
 
-  // Context counts in the size guard, maxInputTokens and the cost estimate (ADR-0013 consistency).
-  const promptTokens = estimateTokens(prompt.system + prompt.user);
+  // Token and cost budgets count only the context retained in the prompt.
   const budgetResult = checkBudget({
     promptTokens,
     maxInputTokens: budgetCfg.maxInputTokens,
@@ -251,7 +267,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   // Size guard (ADR-0013): a prompt too big for one reliable call goes straight to capped batches.
   let plan: CappedBatches | undefined;
-  if (promptTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0) {
+  if (withoutContextTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0) {
     plan = batchFilesByTokenCap(redactedReviewableFiles, limits.batchTokens);
     for (const path of plan.truncatedPaths) {
       incompleteReasons.push(`${path}: patch truncated to fit review.batchTokens`);
@@ -275,6 +291,11 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       })
     : [promptTokens];
 
+  for (const callTokens of callPromptTokens) {
+    const callBudget = checkBudget({ promptTokens: callTokens, maxInputTokens: budgetCfg.maxInputTokens });
+    if (!callBudget.ok) return { status: 'skipped-budget', reason: callBudget.reason };
+  }
+
   // Each call may return up to maxFindings findings, so its answer budget grows with them (ADR-0033).
   const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
   // Price the output limit each call really requests: answer budget + effort's thinking headroom
@@ -284,13 +305,16 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const verifyOutputTokens = model.outputTokensFor(verifyOutputTokensFor(reviewCfg.maxFindings * callPromptTokens.length));
   const initialPricing = currentPricing();
   if (initialPricing) {
-    // Worst case for the verification call: it shows each file at most once (capped at
-    // review.batchTokens), so its code is a subset of the whole-PR prompt, context included.
+    // Verification may use context from every batch, even when the whole-PR call had no room.
+    // Price that union with the diff as a conservative bound on the verifier's capped code.
+    const verifyContextPrompt = plan && reviewCfg.verify
+      ? buildReviewPrompt({ ...promptInput, contextFiles: context.sentFiles() })
+      : prompt;
     const estimatedCostUsd = estimateReviewCostUsd(
       {
         callPromptTokens,
         reviewOutputTokens,
-        verifyPromptTokens: reviewCfg.verify ? promptTokens : undefined,
+        verifyPromptTokens: reviewCfg.verify ? estimateTokens(verifyContextPrompt.system + verifyContextPrompt.user) : undefined,
         verifyOutputTokens,
       },
       initialPricing,

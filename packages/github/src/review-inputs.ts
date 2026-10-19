@@ -86,6 +86,8 @@ export async function gatherReviewInputs(client: GitHubClient, params: ReviewInp
       files: params.files,
       exclude: config.review.exclude,
       contextTokens,
+      contextReads: config.review.contextReads,
+      contextTokensPerFile: config.review.contextTokensPerFile,
     }),
     followUp
       ? gatherOpenFindings(client, {
