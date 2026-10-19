@@ -4,3 +4,5 @@ language: ar
 review:
   contextTokens: 120000
   prContextTokens: 40000
+  maxPromptTokens: 180000
+  batchTokens: 48000
