@@ -1,2 +1,6 @@
 provider: claude-code
 language: ar
+
+review:
+  contextTokens: 120000
+  prContextTokens: 40000
