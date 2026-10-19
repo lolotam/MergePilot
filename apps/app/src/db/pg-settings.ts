@@ -34,6 +34,7 @@ export async function getPgSettings(db: AppDb, workspaceId: string): Promise<Wor
     fallback: Array.isArray(row.fallback) ? (row.fallback as WorkspaceSettings['fallback']) : [],
     minSeverity: (row.minSeverity as WorkspaceSettings['minSeverity']) ?? 'medium',
     maxFindings: row.maxFindings as MaxFindingsChoice,
+    perReviewUsd: Number(row.perReviewUsd),
     runRetentionDays: row.runRetentionDays !== null ? Number(row.runRetentionDays) : null,
     repoColors: (row.repoColors ?? {}) as WorkspaceSettings['repoColors'],
     judge: row.judgeProvider
@@ -118,6 +119,7 @@ export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings): P
     minSeverity: settings.minSeverity ?? 'medium',
     updatedAt: new Date(),
   };
+  if (settings.perReviewUsd !== undefined) values.perReviewUsd = String(settings.perReviewUsd);
   if (settings.maxFindings !== undefined) values.maxFindings = settings.maxFindings;
   if (settings.runRetentionDays !== undefined) values.runRetentionDays = settings.runRetentionDays;
   if (settings.repoColors !== undefined) values.repoColors = settings.repoColors;

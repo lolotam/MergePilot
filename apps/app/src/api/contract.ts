@@ -42,6 +42,9 @@ export const MaxFindingsSchema = z.literal([...MAX_FINDINGS_CHOICES], {
   message: `maxFindings must be one of: ${MAX_FINDINGS_CHOICES.join(', ')}`,
 });
 
+/** Workspace per-bot API spending cap in whole cents (ADR-0036). */
+export const PerReviewUsdSchema = z.number().min(0.5).max(1000).multipleOf(0.01);
+
 export const ErrorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 });
@@ -81,6 +84,8 @@ export const SettingsSchema = z.object({
    * `.mergepilot.yml` `review.maxFindings` overrides it (ADR-0033). Left out on PUT keeps it (5 by default).
    */
   maxFindings: MaxFindingsSchema.optional(),
+  /** Repository budget.perReviewUsd overrides this default; omitted on PUT keeps it. */
+  perReviewUsd: PerReviewUsdSchema.optional(),
   /** Days to keep review runs; null = forever. Left out on PUT keeps the stored value (30 by default). */
   runRetentionDays: RunRetentionDaysSchema.optional(),
   /** `owner/repo` -> palette key for the runs table; left out on PUT keeps the stored map. */

@@ -219,7 +219,7 @@ async function sharedSteps(
     owner,
     repo,
     baseSha: job.baseSha,
-    defaults: { provider: mainChoice.provider, model: mainChoice.model, maxFindings: settings.maxFindings },
+    defaults: { provider: mainChoice.provider, model: mainChoice.model, maxFindings: settings.maxFindings, perReviewUsd: settings.perReviewUsd },
   });
   // Slot 1's config, priced for its model (the heavy-duty one when chosen; ADR-0016).
   const mainConfig = await buildBotConfig(

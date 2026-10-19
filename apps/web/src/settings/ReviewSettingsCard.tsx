@@ -26,7 +26,7 @@ export interface ReviewSettingsCardProps {
   keyedProviders?: readonly ApiProvider[] | undefined;
 }
 
-type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'heavy' | 'fallback' | 'skill', string>>;
+type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'perReview' | 'heavy' | 'fallback' | 'skill', string>>;
 
 const NO_HEAVY: HeavyModelValue = { heavyProvider: null, heavyModel: null, heavyEffort: null, heavyThresholdLines: null };
 
@@ -54,6 +54,7 @@ export function ReviewSettingsCard({
   const [maxFindings, setMaxFindings] = useState<MaxFindings>(DEFAULT_MAX_FINDINGS);
   const [language, setLanguage] = useState<'ar' | 'en'>('ar');
   const [monthlyBudget, setMonthlyBudget] = useState('');
+  const [perReview, setPerReview] = useState('0.5');
   // The main bot's identity (ADR-0017), saved with the settings.
   const [botName, setBotName] = useState(MAIN_BOT_DEFAULT_NAME);
   const [botLogo, setBotLogo] = useState<BotLogo>(MAIN_BOT_DEFAULT_LOGO);
@@ -73,7 +74,7 @@ export function ReviewSettingsCard({
     const key = JSON.stringify([
       settings.botName, settings.botLogo, settings.provider, settings.model, settings.effort, settings.heavyProvider,
       settings.heavyModel, settings.heavyEffort, settings.heavyThresholdLines, settings.fallback, settings.minSeverity,
-      settings.maxFindings, settings.language, settings.monthlyBudgetUsd,
+      settings.maxFindings, settings.language, settings.monthlyBudgetUsd, settings.perReviewUsd,
     ]);
     if (key === shownKey.current) return;
     shownKey.current = key;
@@ -96,6 +97,7 @@ export function ReviewSettingsCard({
     setMinSeverity(settings.minSeverity ?? 'medium');
     setMaxFindings(settings.maxFindings ?? DEFAULT_MAX_FINDINGS);
     setLanguage(settings.language);
+    setPerReview(String(settings.perReviewUsd ?? 0.5));
     setMonthlyBudget(
       settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined ? String(settings.monthlyBudgetUsd) : '',
     );
@@ -121,6 +123,13 @@ export function ReviewSettingsCard({
       if (Number.isNaN(num) || num <= 0) next.budget = t('budgetMustBePositive');
       else parsedBudget = num;
     }
+    const parsedPerReview = Number(perReview);
+    if (!perReview.trim() || !Number.isFinite(parsedPerReview) || parsedPerReview < 0.5 || parsedPerReview > 1000
+      || Number(parsedPerReview.toFixed(2)) !== parsedPerReview) {
+      next.perReview = t('perReviewInvalid');
+    } else if (parsedBudget !== null && parsedPerReview > parsedBudget) {
+      next.perReview = t('perReviewAboveMonthly');
+    }
     if (heavy.heavyProvider && !heavy.heavyModel?.trim()) next.heavy = t('heavyModelRequired');
     if (fallback.some((f) => !f.model.trim())) next.fallback = t('fallbackModelRequired');
     setErrors(next);
@@ -133,6 +142,7 @@ export function ReviewSettingsCard({
         model: model.trim(),
         language,
         monthlyBudgetUsd: parsedBudget,
+        perReviewUsd: parsedPerReview,
         effort,
         heavyProvider: heavyOn ? heavy.heavyProvider : null,
         heavyModel: heavyOn ? (heavy.heavyModel?.trim() ?? null) : null,
@@ -226,7 +236,7 @@ export function ReviewSettingsCard({
             <SeveritySelect value={minSeverity} onChange={setMinSeverity} disabled={isMember} />
             <MaxFindingsSelect value={maxFindings} onChange={setMaxFindings} disabled={isMember} />
 
-            <div>
+            <div className="md:col-span-2">
               <label htmlFor="settings-language" className={labelClass}>
                 {t('languageLabel')}
               </label>
@@ -260,6 +270,29 @@ export function ReviewSettingsCard({
                 className={errors.budget ? `${fieldClass} border-red-500 focus:ring-red-500` : fieldClass}
               />
               {errors.budget && <p className="text-xs text-red-500 mt-1 ms-2">{errors.budget}</p>}
+            </div>
+            <div>
+              <label htmlFor="settings-per-review" className={labelClass}>
+                {t('perReviewLabel')}
+              </label>
+              <input
+                id="settings-per-review"
+                type="number"
+                min={0.5}
+                max={1000}
+                step={0.5}
+                disabled={isMember}
+                value={perReview}
+                onChange={(e) => {
+                  setPerReview(e.target.value);
+                  if (errors.perReview) setErrors(withoutError(errors, 'perReview'));
+                }}
+                aria-describedby="settings-per-review-hint"
+                aria-invalid={Boolean(errors.perReview)}
+                className={errors.perReview ? `${fieldClass} border-red-500 focus:ring-red-500` : fieldClass}
+              />
+              <p id="settings-per-review-hint" className="text-[11px] text-ink-500 dark:text-ink-400 ms-1">{t('perReviewHint')}</p>
+              {errors.perReview && <p className="text-xs text-red-500 mt-1 ms-2">{errors.perReview}</p>}
             </div>
           </div>
 

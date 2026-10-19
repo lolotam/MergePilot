@@ -48,6 +48,8 @@ export const workspaceSettings = pgTable('workspace_settings', {
   model: text('model').notNull(),
   language: text('language').notNull(),
   monthlyBudgetUsd: numeric('monthly_budget_usd', { precision: 12, scale: 4 }),
+  /** Migration 0015: per-bot API spending limit, $0.50?$1000 (ADR-0036). */
+  perReviewUsd: numeric('per_review_usd', { precision: 10, scale: 2 }).notNull().default('0.50'),
   effort: text('effort'),
   heavyProvider: text('heavy_provider'),
   heavyModel: text('heavy_model'),

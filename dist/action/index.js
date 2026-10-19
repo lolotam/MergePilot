@@ -139424,6 +139424,16 @@ function withDefaultMaxFindings(data, maxFindings) {
     return data;
   return { ...data, review: { ...review, maxFindings } };
 }
+function withDefaultPerReviewUsd(data, perReviewUsd) {
+  if (perReviewUsd === void 0)
+    return data;
+  const budget = data.budget;
+  if (budget === void 0)
+    return { ...data, budget: { perReviewUsd } };
+  if (typeof budget !== "object" || budget === null || Array.isArray(budget) || "perReviewUsd" in budget)
+    return data;
+  return { ...data, budget: { ...budget, perReviewUsd } };
+}
 function valueAt(data, path12) {
   let current = data;
   for (const key of path12) {
@@ -139457,13 +139467,15 @@ function parseConfig(yamlText, options = {}) {
   if (options.defaults?.model !== void 0 && !("model" in data))
     filled.model = options.defaults.model;
   const withLimit = withDefaultMaxFindings(data, options.defaults?.maxFindings);
-  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...withLimit });
+  const withBudget = withDefaultPerReviewUsd(withLimit, options.defaults?.perReviewUsd);
+  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...withBudget });
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((issue2) => formatIssue(issue2, data)) };
   }
   const defaulted = [
     ...Object.keys(filled),
-    ...withLimit !== data ? ["maxFindings"] : []
+    ...withLimit !== data ? ["maxFindings"] : [],
+    ...withBudget !== withLimit ? ["perReviewUsd"] : []
   ];
   return { ok: true, config: parsed.data, ...defaulted.length > 0 ? { defaulted } : {} };
 }

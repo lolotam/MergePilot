@@ -2,8 +2,8 @@ import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { MergePilotConfigSchema, type MergePilotConfig } from './schema.js';
 
-/** `maxFindings` stands for `review.maxFindings`. */
-export type DefaultedKey = 'provider' | 'model' | 'maxFindings';
+/** Nested defaults: `review.maxFindings` and `budget.perReviewUsd`. */
+export type DefaultedKey = 'provider' | 'model' | 'maxFindings' | 'perReviewUsd';
 
 /** `defaulted` lists the keys filled from `options.defaults` (absent when none was). */
 export type ConfigResult =
@@ -25,6 +25,8 @@ export interface ParseConfigOptions {
          * dashboard choice, and a file that names its own value keeps it (ADR-0033).
          */
         maxFindings?: number | undefined;
+        /** Workspace budget.perReviewUsd when the file leaves it out (ADR-0036). */
+        perReviewUsd?: number | undefined;
       }
     | undefined;
 }
@@ -37,6 +39,15 @@ function withDefaultMaxFindings(data: object, maxFindings: number | undefined): 
   // A review value that is not a mapping is left for the schema to reject.
   if (typeof review !== 'object' || review === null || Array.isArray(review) || 'maxFindings' in review) return data;
   return { ...data, review: { ...review, maxFindings } };
+}
+
+/** Preserve invalid budget mappings and explicit values for schema validation. */
+function withDefaultPerReviewUsd(data: object, perReviewUsd: number | undefined): object {
+  if (perReviewUsd === undefined) return data;
+  const budget: unknown = (data as { budget?: unknown }).budget;
+  if (budget === undefined) return { ...data, budget: { perReviewUsd } };
+  if (typeof budget !== 'object' || budget === null || Array.isArray(budget) || 'perReviewUsd' in budget) return data;
+  return { ...data, budget: { ...budget, perReviewUsd } };
 }
 
 function valueAt(data: unknown, path: readonly PropertyKey[]): unknown {
@@ -78,13 +89,15 @@ export function parseConfig(yamlText: string, options: ParseConfigOptions = {}):
   if (options.defaults && !('provider' in data)) filled.provider = options.defaults.provider;
   if (options.defaults?.model !== undefined && !('model' in data)) filled.model = options.defaults.model;
   const withLimit = withDefaultMaxFindings(data, options.defaults?.maxFindings);
-  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...withLimit });
+  const withBudget = withDefaultPerReviewUsd(withLimit, options.defaults?.perReviewUsd);
+  const parsed = MergePilotConfigSchema.safeParse({ ...filled, ...withBudget });
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((issue) => formatIssue(issue, data)) };
   }
   const defaulted: DefaultedKey[] = [
     ...(Object.keys(filled) as DefaultedKey[]),
     ...(withLimit !== data ? ['maxFindings' as const] : []),
+    ...(withBudget !== withLimit ? ['perReviewUsd' as const] : []),
   ];
   return { ok: true, config: parsed.data, ...(defaulted.length > 0 ? { defaulted } : {}) };
 }

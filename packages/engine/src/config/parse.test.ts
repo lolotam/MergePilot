@@ -263,3 +263,23 @@ describe('parseConfig', () => {
     expect(errors.some((e) => e.startsWith('budget.pricing.outputPerMTok'))).toBe(true);
   });
 });
+
+
+describe('workspace perReviewUsd defaults', () => {
+  const defaults = { provider: 'openai', model: 'gpt-x', perReviewUsd: 3 };
+  it.each(['language: en\n', 'budget:\n  maxInputTokens: 5000\n'])('fills only an omitted cap (%s)', (text) => {
+    const result = parseConfig(text, { defaults });
+    expect(result.ok && result.config.budget.perReviewUsd).toBe(3);
+    expect(result.ok && result.defaulted).toContain('perReviewUsd');
+  });
+  it('keeps an explicit cap and does not mark it inherited', () => {
+    const result = parseConfig('budget:\n  perReviewUsd: 0.2\n', { defaults });
+    expect(result.ok && result.config.budget.perReviewUsd).toBe(0.2);
+    expect(result.ok && result.defaulted).not.toContain('perReviewUsd');
+  });
+  it.each(['budget: []', 'budget: null', 'budget: false', 'budget:\n  perReviewUsd: null', 'budget:\n  perReviewUsd: 0'])(
+    'does not hide invalid repository values (%s)', (text) => {
+      expect(parseConfig(text, { defaults }).ok).toBe(false);
+    },
+  );
+});
