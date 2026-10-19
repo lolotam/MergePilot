@@ -116,11 +116,14 @@ export type Settings = z.infer<typeof SettingsSchema>;
  * wipe the J2 fields; an explicit `null` clears it (fallback → [], minSeverity → medium).
  */
 export const SettingsUpdateSchema = SettingsSchema.extend({
+  /** Version of the settings the client rendered; omitted by clients without version support. */
+  expectedVersion: z.string().optional(),
   fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).nullable().optional(),
   minSeverity: SeveritySchema.nullable().optional(),
 });
 export type SettingsUpdate = z.infer<typeof SettingsUpdateSchema>;
-export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable() });
+export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable(), settingsVersion: z.string() });
+export type SettingsResponse = z.infer<typeof SettingsResponseSchema>;
 
 export const KeyQuotaStatusSchema = z.enum(['valid', 'invalid', 'quota-exhausted']);
 

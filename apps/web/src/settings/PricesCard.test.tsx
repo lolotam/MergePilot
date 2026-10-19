@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PricesResponse, Settings } from '@mergepilot/app/contract';
 import * as client from '../api/client.js';
@@ -75,15 +75,15 @@ const unusedOverride = { provider: 'openai', model: 'gpt-5', inputPerMTok: 5, ou
 function renderCard(options: { isMember?: boolean; putError?: Error; pricesData?: PricesResponse; settingsError?: Error } = {}) {
   const settings: Settings = { ...baseSettings, priceOverrides: [deepseekOverride, unusedOverride] };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  if (!options.settingsError) queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], { settings });
+  if (!options.settingsError) queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], { settings, settingsVersion: 'version-0' });
   vi.mocked(client.fetchApi).mockImplementation(async (path: string, init?: RequestInit) => {
     if (path.endsWith('/prices')) return options.pricesData ?? prices;
     if (options.settingsError && !init?.method) throw options.settingsError;
     if (init?.method === 'PUT') {
       if (options.putError) throw options.putError;
-      return { settings: { ...settings, ...(JSON.parse(String(init.body)) as object) } };
+      return { settings: { ...settings, ...(JSON.parse(String(init.body)) as object) }, settingsVersion: 'version-1' };
     }
-    return { settings };
+    return { settings, settingsVersion: 'version-0' };
   });
   render(
     <QueryClientProvider client={queryClient}>
@@ -94,6 +94,7 @@ function renderCard(options: { isMember?: boolean; putError?: Error; pricesData?
       </I18nProvider>
     </QueryClientProvider>,
   );
+  return { queryClient };
 }
 
 const putBodies = () =>
@@ -113,6 +114,33 @@ async function rowOf(model: string): Promise<HTMLElement> {
 describe('PricesCard (model prices)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('closes a stale price draft on a settings conflict and shows the server message', async () => {
+    const message = 'Settings changed while saving; reload and try again';
+    renderCard({ putError: new client.ApiClientError(message, 'settings_conflict', 409) });
+    const main = await rowOf('claude-sonnet-5-5');
+    fireEvent.click(within(main).getByRole('button', { name: 'Edit price' }));
+    fireEvent.change(screen.getByLabelText('Input $/1M'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Output $/1M'), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).toBeNull());
+    expect(screen.getByText(message)).toBeDefined();
+  });
+
+  it('keeps the version from opening a price draft when settings are refreshed in the background', async () => {
+    const { queryClient } = renderCard();
+    fireEvent.click(within(await rowOf('claude-sonnet-5-5')).getByRole('button', { name: 'Edit price' }));
+    fireEvent.change(screen.getByLabelText('Input $/1M'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Output $/1M'), { target: { value: '8' } });
+    act(() => {
+      queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], {
+        settings: { ...baseSettings, priceOverrides: [deepseekOverride, unusedOverride] }, settingsVersion: 'version-new',
+      });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(putBodies()).toHaveLength(1));
+    expect(putBodies()[0]).toHaveProperty('expectedVersion', 'version-0');
   });
 
   it('opens one editor when the same model is listed twice (main and heavy)', async () => {
@@ -177,6 +205,7 @@ describe('PricesCard (model prices)', () => {
 
     await waitFor(() => expect(putBodies()).toHaveLength(1));
     expect(putBodies()[0]).toEqual({
+      expectedVersion: 'version-0',
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',
       language: 'en',

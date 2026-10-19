@@ -70,7 +70,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     } as unknown as ReturnType<typeof hooks.useMeQuery>);
 
     vi.mocked(hooks.useSettingsQuery).mockReturnValue({
-      data: { settings },
+      data: { settings, settingsVersion: 'version-0' },
       isLoading: false,
     } as unknown as ReturnType<typeof hooks.useSettingsQuery>);
 
@@ -151,6 +151,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     const user = userEvent.setup();
     setupMocks({ role: 'admin' });
     renderComponent();
+    expect(hooks.useUpdateSettingsMutation).toHaveBeenCalledWith('ws-1', 'version-0');
 
     // Switch to manual model entry to test manual clear and validation
     const manualBtn = screen.getByRole('button', { name: /إدخال يدوي/i });

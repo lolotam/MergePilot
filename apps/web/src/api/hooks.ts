@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse, Settings } from '@mergepilot/app/contract';
-import { api, type GetRunsParams, type KeyProvider } from './client.js';
+import { api, ApiClientError, type GetRunsParams, type KeyProvider } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
+import { settingsSaveScope } from '../settings/useSettingsPatch.js';
 
 export function useMeQuery() {
   return useQuery({
@@ -20,14 +21,19 @@ export function useSettingsQuery(workspaceId: string) {
   });
 }
 
-export function useUpdateSettingsMutation(workspaceId: string) {
+export function useUpdateSettingsMutation(workspaceId: string, settingsVersion: string | undefined) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: (settings: Settings) => api.updateSettings(workspaceId, settings),
-    onSuccess: () => {
+    scope: { id: settingsSaveScope(workspaceId) },
+    mutationFn: (settings: Settings) => {
+      if (settingsVersion === undefined) throw new Error(t('error'));
+      return api.updateSettings(workspaceId, { ...settings, expectedVersion: settingsVersion });
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['workspaces', workspaceId, 'settings'], saved);
       showToast(t('settingsSavedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
       // The main bot's name and logo are saved with the settings (ADR-0017).
@@ -35,8 +41,11 @@ export function useUpdateSettingsMutation(workspaceId: string) {
       // The main bot's skill choice changes the skills' "used by" (ADR-0034).
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'skills'] });
     },
-    onError: (err: Error) => {
+    onError: async (err: Error) => {
       showToast(err.message || t('error'), 'error');
+      if (err instanceof ApiClientError && err.code === 'settings_conflict') {
+        await queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
+      }
     },
   });
 }

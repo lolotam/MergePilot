@@ -39,7 +39,7 @@ export function SettingsPage() {
   const { data: settingsData, isLoading: settingsLoading } = useSettingsQuery(workspaceId);
   const { data: keysData, isLoading: keysLoading } = useKeysQuery(workspaceId);
 
-  const updateSettingsMutation = useUpdateSettingsMutation(workspaceId);
+  const updateSettingsMutation = useUpdateSettingsMutation(workspaceId, settingsData?.settingsVersion);
   const saveKeyMutation = useSaveKeyMutation(workspaceId);
   const deleteKeyMutation = useDeleteKeyMutation(workspaceId);
   const defaultMethodMutation = useSetProviderDefaultMethodMutation(workspaceId);

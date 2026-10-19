@@ -26,9 +26,10 @@ function renderCard(options: { isMember?: boolean; keyed?: KeyProvider[]; judge?
   vi.spyOn(client.api, 'getJudgeProviders').mockResolvedValue(catalog);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const settings: Settings = { ...baseSettings, judge: options.judge === undefined ? stored : options.judge };
-  queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], { settings });
+  queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], { settings, settingsVersion: 'version-0' });
   vi.mocked(client.fetchApi).mockImplementation(async (_path: string, init?: RequestInit) => ({
     settings: init?.body ? { ...settings, ...(JSON.parse(String(init.body)) as object) } : settings,
+    settingsVersion: 'version-1',
   }));
   render(
     <QueryClientProvider client={queryClient}>
@@ -90,6 +91,7 @@ describe('JudgeCard (Jev)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save judge settings' }));
     await waitFor(() => expect(putBodies()).toHaveLength(1));
+    expect(putBodies()[0]).toHaveProperty('expectedVersion', 'version-0');
     expect(putBodies()[0]?.judge).toEqual({
       ...stored,
       fallback: [

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Pencil, RotateCcw, Tags } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchApi, type PricesResponse } from '../api/client.js';
+import { ApiClientError, fetchApi, type PricesResponse } from '../api/client.js';
 import { formatDateTime } from '../admin/format.js';
 import { useI18n } from '../i18n/context.js';
 import { PriceEditRow, type PriceFields } from './PriceEditRow.js';
@@ -58,8 +58,10 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
     queryFn: () => fetchApi<PricesResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/prices`),
     enabled: Boolean(workspaceId && settings),
   });
-  const patch = usePatchSettings(workspaceId, 'pricesSaved');
   const [editing, setEditing] = useState<string | null>(null);
+  // A refetch must not advance the version of an editor that still holds its earlier local draft.
+  const [editingVersion, setEditingVersion] = useState<string | undefined>();
+  const patch = usePatchSettings(workspaceId, 'pricesSaved', editing === null ? undefined : editingVersion);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const models = pricesQuery.data?.models ?? [];
@@ -73,7 +75,10 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
       { priceOverrides: next },
       {
         onSuccess: () => onDone?.(),
-        onError: (err: Error) => setServerError(err.message || t('error')),
+        onError: (err: Error) => {
+          setServerError(err.message || t('error'));
+          if (err instanceof ApiClientError && err.code === 'settings_conflict') setEditing(null);
+        },
         onSettled: () => void queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] }),
       },
     );
@@ -163,6 +168,7 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
                           disabled={disabled}
                           onClick={() => {
                             setServerError(null);
+                            setEditingVersion(settingsQuery.data?.settingsVersion);
                             setEditing(rowKey(m, index));
                           }}
                           title={t('pricesEdit')}

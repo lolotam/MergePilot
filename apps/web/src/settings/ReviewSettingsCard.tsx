@@ -61,6 +61,7 @@ export function ReviewSettingsCard({
   // The main bot's review skill (ADR-0034); null = Default.
   const [skillId, setSkillId] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [reloadCount, setReloadCount] = useState(0);
   const efforts = useModelEfforts(workspaceId, provider, model);
   // The heavy model starts on the main provider when it has a key, else on the first keyed one.
   const heavyDefault: ApiProvider =
@@ -101,14 +102,14 @@ export function ReviewSettingsCard({
     setMonthlyBudget(
       settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined ? String(settings.monthlyBudgetUsd) : '',
     );
-  }, [settings]);
+  }, [settings, reloadCount]);
 
   // The skill follows the server on its own (ADR-0034): deleting a skill sets this bot to Default,
   // and that refetch must not discard unsaved edits to the model or the other fields.
   const savedSkillId = settings?.skillId ?? null;
   useEffect(() => {
     setSkillId(savedSkillId);
-  }, [savedSkillId]);
+  }, [savedSkillId, reloadCount]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,6 +158,11 @@ export function ReviewSettingsCard({
         skillId,
       });
     } catch (err) {
+      if (err instanceof ApiClientError && err.code === 'settings_conflict') {
+        shownKey.current = null;
+        setErrors({});
+        setReloadCount((count) => count + 1);
+      }
       // A taken bot name and an unknown skill are shown on their field; other errors were already shown as a toast.
       if (err instanceof ApiClientError && err.code === 'bot_name_taken') setErrors({ botName: t('botNameTaken') });
       if (err instanceof ApiClientError && err.code === 'unknown_skill') setErrors({ skill: t('skillErrorUnknown') });

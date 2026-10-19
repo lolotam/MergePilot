@@ -100,6 +100,7 @@ export function renderRunsPage(options: RenderRunsOptions) {
   // The page reads repo colors from the settings cache; seed it so nothing is fetched on mount.
   queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], {
     settings: options.settings === null ? null : { ...baseSettings, ...options.settings },
+    settingsVersion: 'version-0',
   });
 
   const utils = render(
@@ -124,10 +125,15 @@ export function renderRunsPage(options: RenderRunsOptions) {
  */
 export function fakeSettingsServer(fetchApi: (path: string, init?: RequestInit) => Promise<unknown>, initial: Partial<Settings> = {}) {
   let state: Settings = { ...baseSettings, ...initial };
+  let version = 0;
   vi.mocked(fetchApi).mockImplementation(async (path: string, init?: RequestInit) => {
     if (!path.endsWith('/settings')) return {};
-    if (init?.method === 'PUT') state = { ...state, ...(JSON.parse(String(init.body)) as Partial<Settings>) };
-    return { settings: state };
+    if (init?.method === 'PUT') {
+      const { expectedVersion: _version, ...patch } = JSON.parse(String(init.body));
+      state = { ...state, ...patch };
+      version += 1;
+    }
+    return { settings: state, settingsVersion: `version-${version}` };
   });
   return () => state;
 }

@@ -18,6 +18,9 @@ export function useWorkspaceSettings(workspaceId: string) {
   });
 }
 
+/** Mutation scope shared by every PUT /settings caller of a workspace (React Query runs one at a time). */
+export const settingsSaveScope = (workspaceId: string) => `settings-save:${workspaceId}`;
+
 export interface SettingsPatch {
   runRetentionDays?: Settings['runRetentionDays'];
   repoColors?: Record<string, RepoColorKey>;
@@ -35,24 +38,33 @@ export interface SettingsPatch {
  * The cache is updated at once, so the runs table recolors right away, and rolled back on error.
  * Needs saved settings: the PUT requires provider, model and language.
  */
-export function usePatchSettings(workspaceId: string, successKey: I18nKey) {
+export function usePatchSettings(workspaceId: string, successKey: I18nKey, expectedVersion?: string) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { t } = useI18n();
   const key = settingsKey(workspaceId);
 
   return useMutation({
+    // One settings save at a time per workspace, so a quick second patch sends the version the first returned.
+    scope: { id: settingsSaveScope(workspaceId) },
     mutationFn: async (patch: SettingsPatch) => {
-      const current = queryClient.getQueryData<SettingsResponse>(key)?.settings;
+      // The cache, not a render-time snapshot: it holds the version of the last successful save.
+      const cached = queryClient.getQueryData<SettingsResponse>(key);
+      const current = cached?.settings;
       if (!current) throw new Error(t('retentionNeedsSettings'));
-      const body = { provider: current.provider, model: current.model, language: current.language, ...patch };
+      const version = expectedVersion ?? cached.settingsVersion;
+      if (version === undefined) throw new Error(t('error'));
+      const body = {
+        provider: current.provider, model: current.model, language: current.language,
+        ...patch, expectedVersion: version,
+      };
       return fetchApi<SettingsResponse>(settingsUrl(workspaceId), { method: 'PUT', body: JSON.stringify(body) });
     },
     onMutate: async (patch: SettingsPatch) => {
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<SettingsResponse>(key);
       if (previous?.settings) {
-        queryClient.setQueryData<SettingsResponse>(key, { settings: { ...previous.settings, ...patch } });
+        queryClient.setQueryData<SettingsResponse>(key, { ...previous, settings: { ...previous.settings, ...patch } });
       }
       return { previous };
     },
@@ -60,11 +72,12 @@ export function usePatchSettings(workspaceId: string, successKey: I18nKey) {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
       showToast(err.message || t('error'), 'error');
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      queryClient.setQueryData<SettingsResponse>(key, saved);
       showToast(t(successKey), 'success');
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: key });
+      return queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }

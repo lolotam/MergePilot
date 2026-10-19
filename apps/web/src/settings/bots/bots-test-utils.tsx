@@ -61,6 +61,7 @@ export function fakeBotsServer(
 ) {
   const state = { settings: { ...MAIN_SETTINGS, ...options.settings }, bots: [...(options.bots ?? [])] };
   const calls: FakeCall[] = [];
+  let settingsVersion = 0;
   vi.mocked(fetchApi).mockImplementation(async (path: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
@@ -69,8 +70,12 @@ export function fakeBotsServer(
       return { skills: options.skills ?? [], limits: { maxSkills: 50, maxTokens: 8000, maxNameLength: 60 } };
     }
     if (path.endsWith('/settings')) {
-      if (method === 'PUT') state.settings = { ...state.settings, ...(body as Partial<Settings>) };
-      return { settings: state.settings };
+      if (method === 'PUT') {
+        const { expectedVersion: _version, ...patch } = body ?? {};
+        state.settings = { ...state.settings, ...patch };
+        settingsVersion += 1;
+      }
+      return { settings: state.settings, settingsVersion: `version-${settingsVersion}` };
     }
     const slotMatch = /\/bots\/(\d)$/.exec(path);
     if (slotMatch) {
@@ -117,7 +122,7 @@ export function renderPanel(options: {
 } = {}) {
   const settings = options.settings ?? MAIN_SETTINGS;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  client.setQueryData(['workspaces', 'ws-1', 'settings'], { settings });
+  client.setQueryData(['workspaces', 'ws-1', 'settings'], { settings, settingsVersion: 'version-0' });
   const onSave = options.onSave ?? vi.fn(async () => undefined);
   const tree = (settings: Settings) => (
     <QueryClientProvider client={client}>
