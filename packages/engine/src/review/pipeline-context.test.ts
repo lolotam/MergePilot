@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Secret } from '../credentials/secret.js';
+import { estimateTokens } from './budget.js';
 import type { RepositoryContextFile } from './context.js';
 import type { ReviewModel, ReviewModelRequest } from './model.js';
 import { makeAnswerJson, makeConfig, SIMPLE_PATCH, validFindingJson } from './pipeline.fixtures.js';
@@ -46,6 +47,77 @@ function bigPatch(lines: number): string {
 }
 
 describe('runReview — repository context (ADR-0029)', () => {
+  it.each([0, 100_000])('fits context into one small-PR call with scaling %i and prices only what is sent', async (contextTokensPerFile) => {
+    const baseline = recordingModel();
+    await runReview(input(baseline.model));
+    const bareTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user);
+    const maxPromptTokens = bareTokens + 800;
+    const { model, requests } = recordingModel();
+    const offered = Array.from({ length: 8 }, (_, i) => context(`src/ref${i}.ts`, 'src/a.ts', 'const value = 1;\n'.repeat(30)));
+    const reviewInput = input(model, { contextFiles: offered }, { contextTokens: 120_000, contextTokensPerFile, maxPromptTokens });
+    reviewInput.config.budget = {
+      perReviewUsd: (maxPromptTokens + 1) / 10_000,
+      maxInputTokens: maxPromptTokens,
+      pricing: { inputPerMTok: 100, outputPerMTok: 0 },
+    };
+    const result = await runReview(reviewInput);
+
+    expect(result.status).toBe('completed');
+    expect(requests).toHaveLength(1);
+    const sentTokens = estimateTokens(requests[0]!.system + requests[0]!.user);
+    expect(sentTokens).toBeLessThanOrEqual(maxPromptTokens);
+    expect(requests[0]!.user).not.toContain('UNTRUSTED:PR_MANIFEST');
+    expect(result.status === 'completed' && result.context?.sent.length).toBeGreaterThan(0);
+    if (result.status !== 'completed') throw new Error('expected completed review');
+    expect(result.context!.sent.length).toBeLessThan(offered.length);
+    expect(result.context!.sent.length + result.context!.leftOut.length).toBe(offered.length);
+    for (const path of result.context!.sent) expect(requests[0]!.user).toContain(`REPOSITORY_CONTEXT:${path}>>>`);
+    for (const path of result.context!.leftOut) expect(requests[0]!.user).not.toContain(`REPOSITORY_CONTEXT:${path}>>>`);
+    expect(result.costUsd).toBeCloseTo(sentTokens / 10_000);
+  });
+
+  it('still batches when the prompt without context exceeds maxPromptTokens', async () => {
+    const { model, requests } = recordingModel();
+    await runReview(input(model, {
+      files: ['src/a.ts', 'src/b.ts'].map((path) => ({ path, status: 'modified', patch: bigPatch(100), changes: 101 })),
+      contextFiles: [context('src/dep.ts', 'src/a.ts')],
+    }, { maxPromptTokens: 1_000, batchTokens: 800, contextTokens: 120_000 }));
+    expect(requests).toHaveLength(2);
+    expect(requests.every((r) => r.user.includes('UNTRUSTED:PR_MANIFEST'))).toBe(true);
+    expect(requests[0]!.user).toContain('REPOSITORY_CONTEXT:src/dep.ts');
+  });
+
+  it('drops context whose long fence labels exceed the remaining prompt room', async () => {
+    const baseline = recordingModel();
+    await runReview(input(baseline.model));
+    const bareTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user);
+    const maxPromptTokens = bareTokens + 800;
+    const { model, requests } = recordingModel();
+    const path = `src/${'a'.repeat(2_000)}.ts`;
+    const result = await runReview(input(model, { contextFiles: [{ ...context(path, 'src/a.ts', 'const x = 1;'), reason: 'cited' }] }, { maxPromptTokens }));
+    expect(requests).toHaveLength(1);
+    expect(estimateTokens(requests[0]!.system + requests[0]!.user)).toBeLessThanOrEqual(maxPromptTokens);
+    expect(requests[0]!.user).not.toContain('UNTRUSTED:PR_MANIFEST');
+    expect(result).toMatchObject({ status: 'completed', context: { sent: [], leftOut: [path] } });
+  });
+
+  it('forwards the batch context override independently of the diff batch size', async () => {
+    const { model, requests } = recordingModel();
+    await runReview(input(model, {
+      contextFiles: [context('src/dep.ts', 'src/a.ts', 'const value = 1;\n'.repeat(100))],
+    }, { maxPromptTokens: 1, batchTokens: 100, batchContextTokens: 2_000 }));
+    expect(requests[0]?.user).toContain('REPOSITORY_CONTEXT:src/dep.ts');
+  });
+
+  it('counts the opt-in scaled whole-PR context in the model prompt', async () => {
+    const { model, requests } = recordingModel();
+    await runReview(input(model, {
+      contextFiles: [context('src/dep.ts', 'src/a.ts', 'const value = 1;\n'.repeat(100))],
+    }, { contextTokens: 100, contextTokensPerFile: 2_000 }));
+    expect(requests[0]?.user).toContain('REPOSITORY_CONTEXT:src/dep.ts');
+    expect(requests[0]?.user).not.toContain('[context truncated:');
+  });
+
   it('sends the context with known secrets redacted and discloses what was sent', async () => {
     const secret = new Secret('workspace-known-value-42');
     const { model, requests } = recordingModel();

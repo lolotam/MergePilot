@@ -139325,10 +139325,16 @@ var ReviewSettingsSchema = external_exports.strictObject({
   maxRulesTokens: external_exports.number().int().positive().default(DEFAULT_MAX_RULES_TOKENS),
   /**
    * Estimated tokens of repository context (files outside the diff, read at the PR head) per review
-   * call: the whole-PR call gets up to this much; each batch up to `min(contextTokens, batchTokens)`
+   * call: the whole-PR call can scale; batches use `min(contextTokens, batchContextTokens ?? batchTokens)`
    * from its own files. 0 turns it off. What is left out is counted in the summary (ADR-0029).
    */
   contextTokens: external_exports.number().int().min(0).default(DEFAULT_CONTEXT_TOKENS),
+  /** Shared head-file lookup and directory-listing limit. */
+  contextReads: external_exports.number().int().min(1).max(500).default(120),
+  /** Context per batch, independent of its diff size; absent preserves the diff batch cap. */
+  batchContextTokens: external_exports.number().int().min(0).optional(),
+  /** Extra whole-PR context tokens per reviewed file; positive also scales the read cap. */
+  contextTokensPerFile: external_exports.number().int().min(0).default(0),
   /**
    * On a follow-up (incremental) review, the share of each call's `contextTokens` that goes to the
    * pull request's other changed files (their PR diff, as PR_CONTEXT); repository context fills the
@@ -139344,7 +139350,7 @@ var ReviewSettingsSchema = external_exports.strictObject({
     maxCharsPerLibrary: external_exports.number().int().min(500).max(5e4).default(8e3),
     maxLibraries: external_exports.number().int().min(0).max(20).default(5)
   }).prefault({}),
-  /** Above this estimated prompt size the single whole-PR call is skipped: the PR goes straight to batches. */
+  /** Above this prompt size without context, use batches; context fills only the room left below it. */
   maxPromptTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.maxPromptTokens),
   /** Diff tokens per batch; a single file bigger than this is its own batch, its patch truncated. */
   batchTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.batchTokens),
@@ -141090,11 +141096,16 @@ async function executeBatchedReview(input2) {
 var KIND_ORDER = {
   "changed-file": 0,
   "test-pair": 1,
-  import: 2,
-  "build-config": 3,
-  "pr-change": 4
+  cited: 2,
+  import: 3,
+  "build-config": 4,
+  "pr-change": 5
 };
 var CONTEXT_FILE_MAX_TOKENS = 8e3;
+var MAX_SCALED_CONTEXT_TOKENS = 4e5;
+function scaledContextTokens(contextTokens, perFile, reviewedFileCount) {
+  return contextTokens > 0 && perFile > 0 ? Math.min(contextTokens + perFile * reviewedFileCount, MAX_SCALED_CONTEXT_TOKENS) : contextTokens;
+}
 var BLOCK_OVERHEAD_TOKENS = 30;
 var blockKey = (file2) => `${file2.source ?? "repository"}:${file2.path}`;
 function cutAtLineBreak(file2, maxTokens) {
@@ -141188,7 +141199,7 @@ var ContextPlan = class {
   constructor(offered, opts) {
     this.opts = opts;
     const on = opts.contextTokens > 0;
-    this.files = on ? prepareRepository(offered, opts) : [];
+    this.files = on ? prepareRepository(offered, { ...opts, contextTokens: this.wholeCap() }) : [];
     this.prFiles = on ? preparePullRequest(offered, opts) : [];
   }
   /**
@@ -141199,7 +141210,7 @@ var ContextPlan = class {
     const wanted = new Set(paths);
     const related = (file2) => file2.forPaths.some((p) => wanted.has(p));
     const chosen = [];
-    let prLeft = Math.min(this.opts.prContextTokens ?? 0, maxTokens);
+    let prLeft = Math.min(this.opts.prContextTokens ?? 0, this.opts.contextTokens, maxTokens);
     let left = maxTokens;
     for (const file2 of [...this.prFiles.filter(related), ...this.prFiles.filter((f3) => !related(f3))]) {
       if (file2.tokens > prLeft)
@@ -141225,8 +141236,11 @@ var ContextPlan = class {
     return chosen;
   }
   /** The context of the whole-PR call (not yet recorded: the call may be replaced by batches). */
-  whole() {
-    return this.select(this.opts.reviewedPaths, this.opts.contextTokens);
+  whole(maxTokens = Infinity) {
+    return this.select(this.opts.reviewedPaths, Math.min(this.wholeCap(), maxTokens));
+  }
+  wholeCap() {
+    return scaledContextTokens(this.opts.contextTokens, this.opts.contextTokensPerFile ?? 0, this.opts.reviewedPaths.length);
   }
   /** Records files as sent to the model. */
   markSent(files) {
@@ -141235,7 +141249,7 @@ var ContextPlan = class {
   }
   /** The context of one batch, from its own files' context, recorded as sent. */
   forBatch = (batch) => {
-    const cap = Math.min(this.opts.contextTokens, this.opts.batchTokens);
+    const cap = Math.min(this.opts.contextTokens, this.opts.batchContextTokens ?? this.opts.batchTokens);
     const files = this.select(batch.map((f3) => f3.path), cap);
     this.markSent(files);
     return files;
@@ -141966,6 +141980,7 @@ async function runVerifyPass(input2) {
   };
 }
 
+var WHOLE_CONTEXT_SAFETY_TOKENS = 128;
 async function runReview(input2) {
   const { config: config2, pr, files, rulesFiles, signal } = input2;
   const reviewCfg = config2.review;
@@ -142012,21 +142027,31 @@ async function runReview(input2) {
     reviewedPaths: redactedReviewableFiles.map((f3) => f3.path),
     contextTokens: reviewCfg.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
     batchTokens: limits2.batchTokens,
+    batchContextTokens: reviewCfg.batchContextTokens,
+    contextTokensPerFile: reviewCfg.contextTokensPerFile,
     // The rest of the PR is context on a follow-up review only (ADR-0030).
     prContextTokens: followUp ? reviewCfg.prContextTokens ?? DEFAULT_PR_CONTEXT_TOKENS : 0
   });
-  const wholeContext = context.whole();
-  const prompt = buildReviewPrompt({
+  const promptInput = {
     language: config2.language,
     maxFindings: reviewCfg.maxFindings,
     pr: promptPr,
     rulesFiles: redactedRulesFiles,
     pathInstructions: reviewCfg.pathInstructions,
     files: redactedReviewableFiles,
-    ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {},
-    ...wholeContext.length > 0 ? { contextFiles: wholeContext } : {}
-  });
-  const promptTokens = estimateTokens(prompt.system + prompt.user);
+    ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {}
+  };
+  const withoutContext = buildReviewPrompt(promptInput);
+  const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
+  const contextRoom = Math.max(0, limits2.maxPromptTokens - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS);
+  const wholeContext = context.whole(contextRoom);
+  let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;
+  let promptTokens = estimateTokens(prompt.system + prompt.user);
+  while (promptTokens > limits2.maxPromptTokens && wholeContext.length > 0) {
+    wholeContext.pop();
+    prompt = buildReviewPrompt({ ...promptInput, contextFiles: wholeContext });
+    promptTokens = estimateTokens(prompt.system + prompt.user);
+  }
   const budgetResult = checkBudget({
     promptTokens,
     maxInputTokens: budgetCfg.maxInputTokens
@@ -142035,7 +142060,7 @@ async function runReview(input2) {
     return { status: "skipped-budget", reason: budgetResult.reason };
   }
   let plan;
-  if (promptTokens > limits2.maxPromptTokens && redactedReviewableFiles.length > 0) {
+  if (withoutContextTokens > limits2.maxPromptTokens && redactedReviewableFiles.length > 0) {
     plan = batchFilesByTokenCap(redactedReviewableFiles, limits2.batchTokens);
     for (const path12 of plan.truncatedPaths) {
       incompleteReasons.push(`${path12}: patch truncated to fit review.batchTokens`);
@@ -142060,10 +142085,11 @@ async function runReview(input2) {
   const verifyOutputTokens = model.outputTokensFor(verifyOutputTokensFor(reviewCfg.maxFindings * callPromptTokens.length));
   const initialPricing = currentPricing();
   if (initialPricing) {
+    const verifyContextPrompt = plan && reviewCfg.verify ? buildReviewPrompt({ ...promptInput, contextFiles: context.sentFiles() }) : prompt;
     const estimatedCostUsd = estimateReviewCostUsd({
       callPromptTokens,
       reviewOutputTokens,
-      verifyPromptTokens: reviewCfg.verify ? promptTokens : void 0,
+      verifyPromptTokens: reviewCfg.verify ? estimateTokens(verifyContextPrompt.system + verifyContextPrompt.user) : void 0,
       verifyOutputTokens
     }, initialPricing);
     if (estimatedCostUsd > budgetCfg.perReviewUsd) {
@@ -195423,6 +195449,7 @@ async function withNestedRulesFiles(client, params) {
 }
 
 var MAX_CONTEXT_READS = 120;
+var MAX_CITED_LOOKUPS = 20;
 var READ_CONCURRENCY2 = 8;
 var JS_EXTENSIONS = /* @__PURE__ */ new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
 var SOURCE_FOR_EMITTED = {
@@ -195544,6 +195571,46 @@ function importLookups(path12, content) {
     disclose: true
   }));
 }
+async function citedLookups(reader, reviewed, exclude) {
+  const lookups = [];
+  const selected = /* @__PURE__ */ new Set();
+  let adrs;
+  for (const file2 of reviewed) {
+    let inHunk = false;
+    const added = (file2.patch ?? "").split("\n").filter((line) => {
+      if (line.startsWith("@@ "))
+        inHunk = true;
+      return inHunk && line.startsWith("+");
+    }).map((line) => line.slice(1)).join("\n");
+    const references = added.matchAll(/\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])/gu);
+    for (const match3 of references) {
+      let candidates;
+      if (match3[1]) {
+        if (adrs === void 0)
+          adrs = (await reader.list("docs/adr")).sort();
+        candidates = adrs.filter((path12) => path12.startsWith(`docs/adr/${match3[1]}-`) && path12.endsWith(".md"));
+      } else {
+        let path12 = match3[2].split("](").pop();
+        for (const [open4, close] of [["(", ")"], ["[", "]"]]) {
+          while (path12.startsWith(open4) && path12.split(open4).length > path12.split(close).length)
+            path12 = path12.slice(1);
+        }
+        candidates = path12.split("/").some((part) => part === "." || part === "..") ? [] : [path12];
+      }
+      for (const path12 of candidates) {
+        if (!isContextPathAllowed(path12, { exclude, isSensitivePath }))
+          continue;
+        if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
+          reader.leftOut.push(`${path12} (cited lookup limit)`);
+          continue;
+        }
+        selected.add(path12);
+        lookups.push({ candidates: [path12], kind: "cited", reason: `cited by ${file2.path}`, forPath: file2.path, disclose: true });
+      }
+    }
+  }
+  return lookups;
+}
 async function inChunks(items, fn) {
   for (let i2 = 0; i2 < items.length; i2 += READ_CONCURRENCY2) {
     await Promise.all(items.slice(i2, i2 + READ_CONCURRENCY2).map(fn));
@@ -195553,14 +195620,16 @@ var ContextReader = class {
   client;
   params;
   known;
+  maxReads;
   reads = 0;
   attempted = /* @__PURE__ */ new Map();
   found = [];
   leftOut = [];
-  constructor(client, params, known) {
+  constructor(client, params, known, maxReads) {
     this.client = client;
     this.params = params;
     this.known = known;
+    this.maxReads = maxReads;
   }
   /** A path several reviewed files import is read, and counted against the limit, once. */
   read(path12) {
@@ -195572,7 +195641,7 @@ var ContextReader = class {
     return outcome;
   }
   async readOnce(path12) {
-    if (this.reads >= MAX_CONTEXT_READS)
+    if (this.reads >= this.maxReads)
       return "limit";
     this.reads++;
     try {
@@ -195586,7 +195655,7 @@ var ContextReader = class {
   async list(dir) {
     if (!this.client.listDirectoryFiles)
       return [];
-    if (this.reads >= MAX_CONTEXT_READS) {
+    if (this.reads >= this.maxReads) {
       this.leftOut.push(`${dir}/ (not looked up)`);
       return [];
     }
@@ -195698,7 +195767,9 @@ async function gatherRepositoryContext(client, params) {
     return { files: [], leftOut: [] };
   const reviewed = params.files.filter((f3) => classifyFile(f3, { exclude: params.exclude, isSensitivePath }) === "review");
   const added = reviewed.filter((f3) => f3.status === "added").map((f3) => [f3.path, patchNewSide(f3.patch ?? "")]);
-  const reader = new ContextReader(client, params, new Map(added));
+  const configuredReads = params.contextReads ?? MAX_CONTEXT_READS;
+  const maxReads = (params.contextTokensPerFile ?? 0) > 0 ? Math.min(Math.max(configuredReads, 4 * reviewed.length), 500) : configuredReads;
+  const reader = new ContextReader(client, params, new Map(added), maxReads);
   const readable = reviewed.filter((f3) => f3.status !== "added" && isContextPathAllowed(f3.path, { exclude: params.exclude, isSensitivePath }));
   await inChunks(readable, (file2) => reader.readChangedFile(file2));
   const pairs = reviewed.flatMap((file2) => {
@@ -195706,7 +195777,9 @@ async function gatherRepositoryContext(client, params) {
     return pair ? [{ ...pair, kind: "test-pair", forPath: file2.path, disclose: false }] : [];
   });
   const imports = reviewed.flatMap((file2) => importLookups(file2.path, reader.known.get(file2.path) ?? patchNewSide(file2.patch ?? "")));
-  await reader.run([...pairs, ...imports]);
+  await reader.run(pairs);
+  await reader.run(await citedLookups(reader, reviewed, params.exclude));
+  await reader.run(imports);
   await reader.run(await buildWiringLookups(reader, reviewed));
   return { files: reader.found, leftOut: reader.leftOut };
 }
@@ -195838,7 +195911,9 @@ async function gatherReviewInputs(client, params) {
       headSha: params.headSha,
       files: params.files,
       exclude: config2.review.exclude,
-      contextTokens
+      contextTokens,
+      contextReads: config2.review.contextReads,
+      contextTokensPerFile: config2.review.contextTokensPerFile
     }),
     followUp ? gatherOpenFindings(client, {
       owner,

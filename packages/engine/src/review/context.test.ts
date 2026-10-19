@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { estimateTokens } from './budget.js';
-import { ContextPlan, type ContextPlanOptions, type RepositoryContextFile } from './context.js';
+import { ContextPlan, MAX_SCALED_CONTEXT_TOKENS, scaledContextTokens, type ContextPlanOptions, type RepositoryContextFile } from './context.js';
 import { buildReviewPrompt, CONTEXT_TRUNCATED_MARKER, renderContextFile } from './prompt.js';
 
 // ADR-0029: repository context is filtered, redacted, capped per file and fitted per call in
@@ -15,6 +15,53 @@ function options(overrides: Partial<ContextPlanOptions> = {}): ContextPlanOption
 }
 
 describe('ContextPlan', () => {
+  const tokens = (files: ReturnType<ContextPlan['whole']>) =>
+    files.reduce((sum, f) => sum + estimateTokens(renderContextFile(f)) + 30, 0);
+
+  it('decouples the batch context cap and preserves the old cap when unset', () => {
+    const offered = [file('src/ref.ts', 'cited', 'const x = 1;\n'.repeat(100))];
+    expect(new ContextPlan(offered, options({ batchTokens: 100 })).forBatch([{ path: 'src/a.ts' }])).toEqual([]);
+    expect(new ContextPlan(offered, options({ batchTokens: 100, batchContextTokens: 2_000 })).forBatch([{ path: 'src/a.ts' }])).toHaveLength(1);
+    const capped = new ContextPlan(offered, options({ contextTokens: 100, batchContextTokens: 2_000 })).forBatch([{ path: 'src/a.ts' }]);
+    expect(capped).toHaveLength(1);
+    expect(capped[0]?.truncated).toBe(true);
+    expect(tokens(capped)).toBeLessThanOrEqual(100);
+    expect(new ContextPlan(offered, options({ batchContextTokens: 0 })).forBatch([{ path: 'src/a.ts' }])).toEqual([]);
+  });
+
+  it('scales only the whole-PR budget, capped at 400000, and keeps zero disabled', () => {
+    const offered = Array.from({ length: 80 }, (_, i) => file(`src/ref${i}.ts`, 'cited', 'const x = 1;\n'.repeat(1500)));
+    const plan = new ContextPlan(offered, options({ contextTokens: 1_000, contextTokensPerFile: 1_000_000 }));
+    const tokens = (files: ReturnType<ContextPlan['whole']>) => files.reduce((sum, f) => sum + estimateTokens(renderContextFile(f)) + 30, 0);
+    expect(tokens(plan.whole())).toBeGreaterThan(390_000);
+    expect(tokens(plan.whole())).toBeLessThanOrEqual(MAX_SCALED_CONTEXT_TOKENS);
+    expect(tokens(plan.forBatch([{ path: 'src/a.ts' }]))).toBeLessThanOrEqual(1_000);
+    expect(scaledContextTokens(1_000, 500, 3)).toBe(2_500);
+    expect(scaledContextTokens(1_000, 0, 3)).toBe(1_000);
+    expect(scaledContextTokens(0, 500, 3)).toBe(0);
+  });
+
+  it('ranks cited files before imports and redacts their contents', () => {
+    const plan = new ContextPlan([
+      file('src/import.ts', 'import'), file('docs/ref.md', 'cited', 'token ghp_abcdefghijklmnopqrstuvwxyz1234567890'),
+      file('src/a.test.ts', 'test-pair'), file('src/a.ts', 'changed-file'),
+    ], options());
+    const shown = plan.whole();
+    expect(shown.map((f) => f.path)).toEqual(['src/a.ts', 'src/a.test.ts', 'docs/ref.md', 'src/import.ts']);
+    expect(shown[2]!.content).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz1234567890');
+    plan.markSent(shown);
+    expect(plan.disclosure()?.sent).toContain('docs/ref.md');
+  });
+
+  it('caps the incremental PR share by the configured batch cap and base context budget', () => {
+    const offered = [file('src/earlier.ts', 'pr-change', '+const x = 1;\n'.repeat(100), [])];
+    expect(new ContextPlan(offered, options({ batchTokens: 100, prContextTokens: 3_000 })).forBatch([{ path: 'src/a.ts' }])).toEqual([]);
+    expect(new ContextPlan(offered, options({ batchTokens: 100, batchContextTokens: 2_000, prContextTokens: 3_000 })).forBatch([{ path: 'src/a.ts' }])).toHaveLength(1);
+    const capped = new ContextPlan(offered, options({ batchContextTokens: 2_000, prContextTokens: 100 })).forBatch([{ path: 'src/a.ts' }]);
+    expect(capped).toHaveLength(1);
+    expect(capped[0]?.truncated).toBe(true);
+    expect(tokens(capped)).toBeLessThanOrEqual(100);
+  });
   it('sends the changed file, then its test, then its imports, and counts what did not fit', () => {
     const body = 'const value = 1;\n'.repeat(20);
     const offered = [
