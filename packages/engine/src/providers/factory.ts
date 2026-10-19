@@ -261,9 +261,11 @@ export async function createReviewModel(
           };
     }
   } catch (error) {
-    // Only a subscription the credential store could not refresh is deferred to the first call; a
-    // missing API key (or any other construction failure) still fails the review here.
-    if (!isSubscriptionProvider(provider) || !(error instanceof LlmFailure) || failureKind(error.code) !== 'auth') throw error;
+    // Only a subscription primary the credential store could not refresh is deferred to the first
+    // call; an API-key primary (a missing key, including a dual provider's API-key default) or any
+    // other construction failure still fails the review here.
+    const subscriptionPrimary = isSubscriptionProvider(provider) && (!dual || dual.defaultMethod === 'subscription');
+    if (!subscriptionPrimary || !(error instanceof LlmFailure) || failureKind(error.code) !== 'auth') throw error;
     primary = unavailableSubscription(error);
   }
   // The chain: [primary, primary's other method (ADR-0027), configured fallbacks (ADR-0008)...].

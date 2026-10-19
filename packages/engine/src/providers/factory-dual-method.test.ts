@@ -223,6 +223,17 @@ describe('createReviewModel — dual-method chain (ADR-0027)', () => {
     );
   });
 
+  it('still fails construction when an API-key default has no keys, even with a configured fallback', async () => {
+    const ws: Workspace = { defaults: { anthropic: 'api-key', openai: 'api-key' }, subscriptions: { anthropic: envelope('anthropic') },
+      rosters: { anthropic: keys('anthropic'), openai: keys('openai') } };
+    // The anthropic roster is missing at construction: buildMethodModel's API-key branch throws an auth LlmFailure.
+    const built = createReviewModel(config('anthropic', 'claude-sonnet-5-5', { fallback: [{ provider: 'openai', model: 'gpt-5' }] }),
+      workspaceStore(ws), { cwd: '/tmp', dualMethods: { anthropic: { defaultMethod: 'api-key' }, openai: { defaultMethod: 'api-key' } },
+        keyRosters: rostersOf({ ...ws, rosters: { openai: ws.rosters.openai } }) });
+
+    await expect(built).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL', message: 'no API key is configured for anthropic' });
+  });
+
   it('puts the subscription behind an API-key default, though a plain resolve returns a key', async () => {
     const ws: Workspace = { defaults: { anthropic: 'api-key' }, subscriptions: { anthropic: envelope('anthropic') }, rosters: { anthropic: keys('anthropic') } };
     const model = await build(ws, config('anthropic', 'claude-sonnet-5-5'));

@@ -9,6 +9,8 @@ export class WorkspaceCredentialStore implements CredentialStore {
   private readonly secrets = new Map<string, Secret>();
   private readonly extra: Secret[] = [];
   private primaryFailure: LlmFailure | undefined;
+  /** The other (subscription) method of an API-key primary, once it cannot be refreshed in this run. */
+  private otherMethodFailure: LlmFailure | undefined;
 
   /**
    * `subscriptionOnlyProviders`: the bot was admitted free (ADR-0033, ADR-0035), so every resolve
@@ -55,10 +57,14 @@ export class WorkspaceCredentialStore implements CredentialStore {
       return subscription;
     }
     if (ref.method === 'subscription') {
+      if (this.otherMethodFailure) throw this.otherMethodFailure;
       // The other method of a dual provider (ADR-0027): the parent envelope, refreshed when it is
       // about to expire, whatever the effective default is. Kept apart from the default's key so
       // both are redacted.
-      const subscription = await this.resolveSubscription(provider, () => this.credentials.resolve(this.workspaceId, provider));
+      // Only the primary's own method: with an API-key default this is the secondary method, whose
+      // failure leaves the primary usable.
+      const ownMethod = !this.secrets.has(provider) || decodeSubscription(this.secrets.get(provider)!.reveal(), provider) !== undefined;
+      const subscription = await this.resolveSubscription(provider, () => this.credentials.resolve(this.workspaceId, provider), ownMethod);
       this.secrets.set(`${ref.provider}:subscription`, subscription);
       return subscription;
     }
@@ -79,12 +85,17 @@ export class WorkspaceCredentialStore implements CredentialStore {
     return resolved;
   }
 
-  private async resolveSubscription(provider: ApiProvider, resolve: () => Promise<Secret>): Promise<Secret> {
+  private async resolveSubscription(provider: ApiProvider, resolve: () => Promise<Secret>, primaryMethod = true): Promise<Secret> {
     try {
       return await resolve();
     } catch (error) {
       const terminal = provider === this.primaryProvider ? terminalSubscriptionFailure(error, provider) : undefined;
       if (!terminal) throw error;
+      // The secondary method fails as auth for its own chain entry; the primary and its warning stay.
+      if (!primaryMethod) {
+        this.otherMethodFailure ??= new LlmFailure({ code: 'INVALID_CREDENTIAL', provider, message: terminal.message });
+        throw this.otherMethodFailure;
+      }
       if (!this.primaryFailure) {
         this.primaryFailure = new LlmFailure({ code: 'INVALID_CREDENTIAL', provider, message: terminal.message });
         this.options.onPrimaryUnavailable?.(terminal.reason);

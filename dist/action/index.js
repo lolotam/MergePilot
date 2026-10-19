@@ -189335,7 +189335,8 @@ async function createReviewModel(config2, store, opts) {
       };
     }
   } catch (error62) {
-    if (!isSubscriptionProvider(provider) || !(error62 instanceof LlmFailure) || failureKind(error62.code) !== "auth")
+    const subscriptionPrimary = isSubscriptionProvider(provider) && (!dual || dual.defaultMethod === "subscription");
+    if (!subscriptionPrimary || !(error62 instanceof LlmFailure) || failureKind(error62.code) !== "auth")
       throw error62;
     primary = unavailableSubscription(error62);
   }

@@ -65,7 +65,8 @@ describe('WorkspaceCredentialStore', () => {
       resolve: vi.fn(async () => { throw new SubscriptionRefreshError('sign-in'); }),
       getEffectiveAuthMethod: vi.fn(async () => 'api-key'),
     };
-    const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', primaryKey);
+    const onPrimaryUnavailable = vi.fn();
+    const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', primaryKey, { onPrimaryUnavailable });
     const ref = { provider: 'anthropic', method: 'subscription' as const };
     const failure = await store.resolve(ref, 'review').catch((error: unknown) => error);
 
@@ -73,6 +74,8 @@ describe('WorkspaceCredentialStore', () => {
     await expect(store.resolve(ref, 'review')).rejects.toBe(failure);
     await expect(store.resolve({ provider: 'anthropic' }, 'review')).resolves.toBe(primaryKey);
     expect(credentials.resolve).toHaveBeenCalledOnce();
+    // Only the secondary method failed: no primary-unavailable warning.
+    expect(onPrimaryUnavailable).not.toHaveBeenCalled();
   });
 
   it('refuses an api-key fallback without keys instead of using the subscription', async () => {
