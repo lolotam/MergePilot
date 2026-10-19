@@ -16,6 +16,7 @@ import { defineBackupRestoreContract } from './store-contract-backup.js';
 import { defineReviewSkillContract } from './store-contract-skills.js';
 import { defineProviderKeyCursorContract } from './store-contract-provider-keys.js';
 import { defineDualAuthStoreContract } from './store-contract-dual-auth.js';
+import { defineSettingsContract } from './store-contract-settings.js';
 
 /** Workspaces the contract records review runs for; stores backed by Postgres must seed them. */
 export const STORE_CONTRACT_WORKSPACES = [
@@ -401,5 +402,6 @@ export function describeStoreContract(
     defineBackupRestoreContract(createStore, cleanup);
     defineProviderKeyCursorContract(createStore, cleanup);
     defineDualAuthStoreContract(createStore, cleanup);
+    defineSettingsContract(createStore, cleanup);
   });
 }

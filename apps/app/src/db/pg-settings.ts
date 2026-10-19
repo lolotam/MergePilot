@@ -1,6 +1,7 @@
+import { isDeepStrictEqual } from 'node:util';
 import { eq } from 'drizzle-orm';
 import { DEFAULT_JUDGE_THRESHOLD, isJudgeUse, legacyJudgeMode, normalizeJudgeUses } from '@mergepilot/engine';
-import { BotNameTakenError, sameBotName, UnknownSkillError } from '../core/types.js';
+import { BotNameTakenError, type SaveSettingsOptions, sameBotName, SettingsChangedError, UnknownSkillError } from '../core/types.js';
 import type {
   ApiProvider,
   BotLogo,
@@ -14,9 +15,9 @@ import { DEFAULT_RUN_RETENTION_DAYS } from '../core/run-types.js';
 import type { AppDb } from './pg-store.js';
 import { isConstraintViolation, SKILL_FOREIGN_KEYS, SKILL_ID_PATTERN } from './pg-skills.js';
 import { reviewerBots, workspaceSettings } from './schema.js';
-import { lockBotNames, withLiveWorkspace, type AppTx } from './workspace-lock.js';
+import { lockBotNames, lockSettings, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
-export async function getPgSettings(db: AppDb, workspaceId: string): Promise<WorkspaceSettings | null> {
+export async function getPgSettings(db: AppDb | AppTx, workspaceId: string): Promise<WorkspaceSettings | null> {
   const rows = await db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspaceId));
   const row = rows[0];
   if (!row) return null;
@@ -90,11 +91,11 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
  * Throws BotNameTakenError when `botName` matches an extra bot's name, and UnknownSkillError when
  * `skillId` is not a skill of this workspace.
  */
-export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Promise<void> {
+export async function savePgSettings(db: AppDb, settings: WorkspaceSettings, options?: SaveSettingsOptions): Promise<void> {
   // A skill id that is not a uuid names no skill (and would be a Postgres type error).
   if (settings.skillId != null && !SKILL_ID_PATTERN.test(settings.skillId)) throw new UnknownSkillError(settings.skillId);
   try {
-    await withLiveWorkspace(db, settings.workspaceId, (tx) => writePgSettings(tx, settings));
+    await withLiveWorkspace(db, settings.workspaceId, (tx) => writePgSettings(tx, settings, options));
   } catch (error) {
     if (settings.skillId && isConstraintViolation(error, '23503', SKILL_FOREIGN_KEYS)) throw new UnknownSkillError(settings.skillId);
     throw error;
@@ -102,7 +103,11 @@ export async function savePgSettings(db: AppDb, settings: WorkspaceSettings): Pr
 }
 
 /** The body of savePgSettings, inside the caller's live-workspace transaction (also used by a restore). */
-export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings): Promise<void> {
+export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings, options?: SaveSettingsOptions): Promise<void> {
+  await lockSettings(tx, settings.workspaceId);
+  if (options?.expected !== undefined && !isDeepStrictEqual(await getPgSettings(tx, settings.workspaceId), options.expected)) {
+    throw new SettingsChangedError(settings.workspaceId);
+  }
   const budgetStr = settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined
     ? String(settings.monthlyBudgetUsd) : null;
   const values: Partial<typeof workspaceSettings.$inferInsert> & Pick<typeof workspaceSettings.$inferInsert, 'provider' | 'model' | 'language'> = {
