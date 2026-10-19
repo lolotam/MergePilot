@@ -20,6 +20,7 @@ import { listAtRef, readAtRef } from './read-cache.js';
 /** Default file-read cap per review; configurable with `review.contextReads`. */
 export const MAX_CONTEXT_READS = 120;
 const MAX_CITED_LOOKUPS = 20;
+const ROOT_CITED_EXTENSIONS = new Set(['md', 'mdx', 'txt', 'yml', 'yaml', 'json', 'toml', 'sql']);
 
 /** Reads run this many at a time, to stay clear of GitHub's secondary rate limits. */
 const READ_CONCURRENCY = 8;
@@ -228,11 +229,27 @@ function importLookups(path: string, content: string): Lookup[] {
   }));
 }
 
+/** A slash path, or a root documentation/config name that still needs a root-listing check. */
+function isCitedPath(path: string): boolean {
+  if (path.startsWith('this.') || path.startsWith('www.') || path.includes('://')) return false;
+  const segments = path.split('/');
+  const name = segments.pop() ?? '';
+  if (!/^[\p{L}\p{N}_@.-]+\.[a-zA-Z]\w*$/u.test(name)) return false;
+  if (segments.length === 0) return ROOT_CITED_EXTENSIONS.has(extOf(name));
+  return segments.every((segment) => segment !== '.' && segment !== '..' && (
+    /^[\p{L}\p{N}_@.-]+$/u.test(segment) ||
+    /^\([\p{L}\p{N}_@.-]+\)$/u.test(segment) ||
+    /^\[(?:\.\.\.)?[\p{L}\p{N}_-]+\]$/u.test(segment) ||
+    /^\[\[\.\.\.[\p{L}\p{N}_-]+\]\]$/u.test(segment)
+  ));
+}
+
 /** Explicit repository paths and ADR ids on added lines only, never PR metadata or head text. */
 async function citedLookups(reader: ContextReader, reviewed: readonly ReviewedFile[], exclude: string[]): Promise<Lookup[]> {
   const lookups: Lookup[] = [];
   const selected = new Set<string>();
   let adrs: string[] | undefined;
+  let rootFiles: Set<string> | undefined;
   for (const file of reviewed) {
     let inHunk = false;
     const added = (file.patch ?? '').split('\n').filter((line) => {
@@ -251,10 +268,14 @@ async function citedLookups(reader: ContextReader, reviewed: readonly ReviewedFi
         for (const [open, close] of [['(', ')'], ['[', ']']] as const) {
           while (path.startsWith(open) && path.split(open).length > path.split(close).length) path = path.slice(1);
         }
-        candidates = path.split('/').some((part) => part === '.' || part === '..') ? [] : [path];
+        candidates = isCitedPath(path) ? [path] : [];
       }
       for (const path of candidates) {
         if (!isContextPathAllowed(path, { exclude, isSensitivePath })) continue;
+        if (!path.includes('/')) {
+          rootFiles ??= new Set(await reader.list(''));
+          if (!rootFiles.has(path)) continue;
+        }
         if (!selected.has(path) && selected.size >= MAX_CITED_LOOKUPS) {
           reader.leftOut.push(`${path} (cited lookup limit)`);
           continue;

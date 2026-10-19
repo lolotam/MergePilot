@@ -36,6 +36,25 @@ const blockTokens = (file: RepositoryContextFile): number =>
   estimateTokens(renderContextFile({ ...file, source: file.kind === 'pr-change' ? 'pull-request' : undefined })) + 30;
 
 describe('ContextPlan — PR context on a follow-up review (ADR-0030)', () => {
+  it.each([{ batchTokens: 500 }, { batchContextTokens: 500 }])('cuts PR files to the batch share and discloses them as sent: %o', (limits) => {
+    const content = `@@ -1,1 +1,301 @@\n const a = 1;\n${'+const value = 1;\n'.repeat(300)}`;
+    const opts = options(limits);
+    const share = Math.min(opts.prContextTokens ?? 0, opts.contextTokens, opts.batchContextTokens ?? opts.batchTokens);
+    const plan = new ContextPlan([prChange('lib/earlier.ts', ['src/a.ts'], content)], opts);
+    const whole = plan.whole();
+    expect(whole[0]?.content).toBe(content);
+    expect(whole[0]?.truncated).not.toBe(true);
+
+    const batch = plan.forBatch([{ path: 'src/a.ts' }]);
+    expect(batch).toHaveLength(1);
+    expect(batch[0]?.truncated).toBe(true);
+    expect(batch[0]?.content).toContain('+const value = 1;');
+    expect(content.startsWith(batch[0]!.content)).toBe(true);
+    expect(estimateTokens(renderContextFile(batch[0]!)) + 30).toBeLessThanOrEqual(share);
+    expect(plan.whole()).toEqual(whole);
+    expect(plan.disclosure()).toEqual({ sent: [], leftOut: [], pr: { sent: ['lib/earlier.ts'], leftOut: [] } });
+  });
+
   it('sends a PR file related to the reviewed files before a smaller unrelated one', () => {
     const related = prChange('deep/dir/related.ts', ['src/a.ts'], `${PATCH}\n+const c = 3;`);
     const unrelated = prChange('x.ts');

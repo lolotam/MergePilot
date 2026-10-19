@@ -8,7 +8,7 @@ import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { FINDINGS_MISSING_REASON, parseReviewAnswer, type ParseReviewAnswerResult } from './answer.js';
-import { estimateTokens } from './budget.js';
+import { checkBudget, estimateTokens } from './budget.js';
 import { describePaths, remindMissingFindingsList, retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { PromptPr } from './follow-up.js';
 import { renderManifest, type ManifestFile } from './manifest.js';
@@ -195,6 +195,12 @@ export async function executeBatchedReview(
     const label = labelOf(bIdx);
     const batchPrompt = buildBatchPrompt(input, bIdx);
     const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
+
+    const tokenBudget = checkBudget({ promptTokens: bPromptTokens, maxInputTokens: input.config.budget.maxInputTokens });
+    if (!tokenBudget.ok) {
+      incompleteReasons.push(`${label}: ${tokenBudget.reason}`);
+      continue;
+    }
 
     if (!spend.canAfford(bPromptTokens, reviewOutputTokens)) {
       skipFrom(bIdx, 'budget limit reached');

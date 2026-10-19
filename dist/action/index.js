@@ -141063,6 +141063,11 @@ async function executeBatchedReview(input2) {
     const label = labelOf(bIdx);
     const batchPrompt = buildBatchPrompt(input2, bIdx);
     const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
+    const tokenBudget = checkBudget({ promptTokens: bPromptTokens, maxInputTokens: input2.config.budget.maxInputTokens });
+    if (!tokenBudget.ok) {
+      incompleteReasons.push(`${label}: ${tokenBudget.reason}`);
+      continue;
+    }
     if (!spend.canAfford(bPromptTokens, reviewOutputTokens)) {
       skipFrom(bIdx, "budget limit reached");
       break;
@@ -141190,13 +141195,16 @@ var shownOf = (file2) => ({
   ...file2.source ? { source: file2.source } : {}
 });
 var ContextPlan = class {
+  offered;
   opts;
   files;
   prFiles;
+  batchContext;
   sent = /* @__PURE__ */ new Map();
   /** Context skipped because the file's own patch was in the call: shown, so never left out. */
   shownAsPatch = /* @__PURE__ */ new Set();
   constructor(offered, opts) {
+    this.offered = offered;
     this.opts = opts;
     const on = opts.contextTokens > 0;
     this.files = on ? prepareRepository(offered, { ...opts, contextTokens: this.wholeCap() }) : [];
@@ -141207,12 +141215,15 @@ var ContextPlan = class {
    * context first (files related to `paths` first) within the PR share; repository files fill the rest.
    */
   select(paths, maxTokens) {
+    return this.selectPrepared(paths, maxTokens, this.files, this.prFiles);
+  }
+  selectPrepared(paths, maxTokens, files, prFiles) {
     const wanted = new Set(paths);
     const related = (file2) => file2.forPaths.some((p) => wanted.has(p));
     const chosen = [];
     let prLeft = Math.min(this.opts.prContextTokens ?? 0, this.opts.contextTokens, maxTokens);
     let left = maxTokens;
-    for (const file2 of [...this.prFiles.filter(related), ...this.prFiles.filter((f3) => !related(f3))]) {
+    for (const file2 of [...prFiles.filter(related), ...prFiles.filter((f3) => !related(f3))]) {
       if (file2.tokens > prLeft)
         continue;
       if (file2.truncated && file2.content.split("\n").every((line) => line === "" || line.startsWith("@@")))
@@ -141221,7 +141232,7 @@ var ContextPlan = class {
       prLeft -= file2.tokens;
       left -= file2.tokens;
     }
-    for (const file2 of this.files) {
+    for (const file2 of files) {
       if (file2.tokens > left || !related(file2))
         continue;
       if (file2.truncated && file2.content === "")
@@ -141242,15 +141253,27 @@ var ContextPlan = class {
   wholeCap() {
     return scaledContextTokens(this.opts.contextTokens, this.opts.contextTokensPerFile ?? 0, this.opts.reviewedPaths.length);
   }
-  /** Records files as sent to the model. */
+  /** Records files as sent, retaining the longest version for verification after batch recovery. */
   markSent(files) {
-    for (const file2 of files)
-      this.sent.set(blockKey(file2), file2);
+    for (const file2 of files) {
+      const key = blockKey(file2);
+      const previous = this.sent.get(key);
+      if (!previous || file2.content.length > previous.content.length || previous.truncated && !file2.truncated) {
+        this.sent.set(key, file2);
+      }
+    }
   }
   /** The context of one batch, from its own files' context, recorded as sent. */
   forBatch = (batch) => {
     const cap = Math.min(this.opts.contextTokens, this.opts.batchContextTokens ?? this.opts.batchTokens);
-    const files = this.select(batch.map((f3) => f3.path), cap);
+    if (!this.batchContext) {
+      const batchOpts = { ...this.opts, contextTokens: cap };
+      this.batchContext = {
+        files: cap > 0 ? prepareRepository(this.offered, batchOpts) : [],
+        prFiles: cap > 0 ? preparePullRequest(this.offered, batchOpts) : []
+      };
+    }
+    const files = this.selectPrepared(batch.map((f3) => f3.path), cap, this.batchContext.files, this.batchContext.prFiles);
     this.markSent(files);
     return files;
   };
@@ -142080,6 +142103,11 @@ async function runReview(input2) {
     const batchPrompt = buildBatchPrompt({ ...promptArgs, batches }, index);
     return estimateTokens(batchPrompt.system + batchPrompt.user);
   }) : [promptTokens];
+  for (const callTokens of callPromptTokens) {
+    const callBudget = checkBudget({ promptTokens: callTokens, maxInputTokens: budgetCfg.maxInputTokens });
+    if (!callBudget.ok)
+      return { status: "skipped-budget", reason: callBudget.reason };
+  }
   const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
   const verifyOutputTokens = model.outputTokensFor(verifyOutputTokensFor(reviewCfg.maxFindings * callPromptTokens.length));
@@ -195450,6 +195478,7 @@ async function withNestedRulesFiles(client, params) {
 
 var MAX_CONTEXT_READS = 120;
 var MAX_CITED_LOOKUPS = 20;
+var ROOT_CITED_EXTENSIONS = /* @__PURE__ */ new Set(["md", "mdx", "txt", "yml", "yaml", "json", "toml", "sql"]);
 var READ_CONCURRENCY2 = 8;
 var JS_EXTENSIONS = /* @__PURE__ */ new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
 var SOURCE_FOR_EMITTED = {
@@ -195571,10 +195600,22 @@ function importLookups(path12, content) {
     disclose: true
   }));
 }
+function isCitedPath(path12) {
+  if (path12.startsWith("this.") || path12.startsWith("www.") || path12.includes("://"))
+    return false;
+  const segments = path12.split("/");
+  const name = segments.pop() ?? "";
+  if (!/^[\p{L}\p{N}_@.-]+\.[a-zA-Z]\w*$/u.test(name))
+    return false;
+  if (segments.length === 0)
+    return ROOT_CITED_EXTENSIONS.has(extOf(name));
+  return segments.every((segment) => segment !== "." && segment !== ".." && (/^[\p{L}\p{N}_@.-]+$/u.test(segment) || /^\([\p{L}\p{N}_@.-]+\)$/u.test(segment) || /^\[(?:\.\.\.)?[\p{L}\p{N}_-]+\]$/u.test(segment) || /^\[\[\.\.\.[\p{L}\p{N}_-]+\]\]$/u.test(segment)));
+}
 async function citedLookups(reader, reviewed, exclude) {
   const lookups = [];
   const selected = /* @__PURE__ */ new Set();
   let adrs;
+  let rootFiles;
   for (const file2 of reviewed) {
     let inHunk = false;
     const added = (file2.patch ?? "").split("\n").filter((line) => {
@@ -195595,11 +195636,16 @@ async function citedLookups(reader, reviewed, exclude) {
           while (path12.startsWith(open4) && path12.split(open4).length > path12.split(close).length)
             path12 = path12.slice(1);
         }
-        candidates = path12.split("/").some((part) => part === "." || part === "..") ? [] : [path12];
+        candidates = isCitedPath(path12) ? [path12] : [];
       }
       for (const path12 of candidates) {
         if (!isContextPathAllowed(path12, { exclude, isSensitivePath }))
           continue;
+        if (!path12.includes("/")) {
+          rootFiles ??= new Set(await reader.list(""));
+          if (!rootFiles.has(path12))
+            continue;
+        }
         if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
           reader.leftOut.push(`${path12} (cited lookup limit)`);
           continue;

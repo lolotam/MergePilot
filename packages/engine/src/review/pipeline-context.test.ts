@@ -47,6 +47,86 @@ function bigPatch(lines: number): string {
 }
 
 describe('runReview — repository context (ADR-0029)', () => {
+  it('never dispatches an oversized context prompt during truncation recovery', async () => {
+    const files = ['src/a.ts', 'src/b.ts'].map((path) => ({ path, status: 'modified', patch: SIMPLE_PATCH, changes: 3 }));
+    const baseline = recordingModel();
+    await runReview(input(baseline.model, { files }));
+    const bareTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user);
+    const maxInputTokens = bareTokens + 2_000;
+    const requests: ReviewModelRequest[] = [];
+    const model: ReviewModel = {
+      label: 'fake:context-recovery',
+      generate: async (request) => {
+        requests.push(request);
+        return requests.length <= 2
+          ? { text: '{"summary":', finishReason: 'max-tokens' }
+          : { text: makeAnswerJson([]), finishReason: 'stop' };
+      },
+    };
+    const value = input(model, {
+      files, contextFiles: [context('src/dep.ts', 'src/a.ts', 'const value = 1;\n'.repeat(700))],
+    }, { maxPromptTokens: bareTokens + 500, contextTokens: 12_000, batchContextTokens: 6_000 });
+    value.config.budget = { perReviewUsd: 10, maxInputTokens };
+    const result = await runReview(value);
+    expect(requests).toHaveLength(3);
+    expect(requests.every((r) => estimateTokens(r.system + r.user) <= maxInputTokens)).toBe(true);
+    expect(requests[2]!.user).toContain('PATCH:src/b.ts');
+    expect(result).toMatchObject({ status: 'completed', complete: false });
+    if (result.status !== 'completed') throw new Error('expected completed partial review');
+    expect(result.result.incompleteReasons).toContainEqual(expect.stringContaining('maxInputTokens limit'));
+  });
+
+  it('checks each planned batch prompt with context against maxInputTokens before dispatch', async () => {
+    const baseline = recordingModel();
+    const files = ['src/a.ts', 'src/b.ts'].map((path) => ({ path, status: 'modified', patch: bigPatch(30), changes: 31 }));
+    await runReview(input(baseline.model, { files }));
+    const maxInputTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user) + 2_000;
+    const review = { maxPromptTokens: 1, batchTokens: 300, batchContextTokens: 6_000, contextTokens: 12_000 };
+    const boundedInput = (model: ReviewModel, contextFiles: RepositoryContextFile[]) => {
+      const value = input(model, { files, contextFiles }, review);
+      value.config.budget = { perReviewUsd: 10, maxInputTokens };
+      return value;
+    };
+    const without = recordingModel();
+    expect((await runReview(boundedInput(without.model, []))).status).toBe('completed');
+    expect(without.requests).toHaveLength(2);
+
+    const withContext = recordingModel();
+    const result = await runReview(boundedInput(withContext.model, [context('src/dep.ts', 'src/b.ts', 'const value = 1;\n'.repeat(700))]));
+    expect(result.status).toBe('skipped-budget');
+    expect(result.status === 'skipped-budget' && result.reason).toContain(`exceed maxInputTokens limit (${maxInputTokens})`);
+    expect(withContext.requests).toHaveLength(0);
+  });
+
+  it('allows planned batch prompts at the exact maxInputTokens boundary', async () => {
+    const baseline = recordingModel();
+    const offered = [context('src/dep.ts', 'src/a.ts', 'const value = 1;\n'.repeat(100))];
+    const review = { maxPromptTokens: 1, batchContextTokens: 2_000 };
+    await runReview(input(baseline.model, { contextFiles: offered }, review));
+    const maxInputTokens = Math.max(...baseline.requests.map((r) => estimateTokens(r.system + r.user)));
+    const { model, requests } = recordingModel();
+    const value = input(model, { contextFiles: offered }, review);
+    value.config.budget = { perReviewUsd: 10, maxInputTokens };
+    expect((await runReview(value)).status).toBe('completed');
+    expect(requests).toHaveLength(1);
+    expect(estimateTokens(requests[0]!.system + requests[0]!.user)).toBe(maxInputTokens);
+  });
+
+  it.each([
+    { contextTokens: 1_000, contextTokensPerFile: 2_000 },
+    { batchContextTokens: 500 },
+  ])('sends oversized repository context cut to the batch cap: %o', async (limits) => {
+    const { model, requests } = recordingModel();
+    const result = await runReview(input(model, {
+      contextFiles: [context('src/dep.ts', 'src/a.ts', 'const value = 1;\n'.repeat(300))],
+    }, { maxPromptTokens: 1, batchTokens: 1_000, ...limits }));
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.user).toContain('UNTRUSTED:PR_MANIFEST');
+    expect(requests[0]!.user).toContain('REPOSITORY_CONTEXT:src/dep.ts');
+    expect(requests[0]!.user).toContain('[context truncated: the rest of this file was not sent]');
+    expect(result).toMatchObject({ status: 'completed', context: { sent: ['src/dep.ts'], leftOut: [] } });
+  });
+
   it.each([0, 100_000])('fits context into one small-PR call with scaling %i and prices only what is sent', async (contextTokensPerFile) => {
     const baseline = recordingModel();
     await runReview(input(baseline.model));

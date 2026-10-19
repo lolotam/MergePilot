@@ -290,6 +290,11 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       })
     : [promptTokens];
 
+  for (const callTokens of callPromptTokens) {
+    const callBudget = checkBudget({ promptTokens: callTokens, maxInputTokens: budgetCfg.maxInputTokens });
+    if (!callBudget.ok) return { status: 'skipped-budget', reason: callBudget.reason };
+  }
+
   // Each call may return up to maxFindings findings, so its answer budget grows with them (ADR-0033).
   const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
   // Price the output limit each call really requests: answer budget + effort's thinking headroom

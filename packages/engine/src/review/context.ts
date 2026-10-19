@@ -207,12 +207,13 @@ const shownOf = (file: PreparedContextFile): ContextFile => ({
 export class ContextPlan {
   private readonly files: PreparedContextFile[];
   private readonly prFiles: PreparedContextFile[];
+  private batchContext: { files: PreparedContextFile[]; prFiles: PreparedContextFile[] } | undefined;
   private readonly sent = new Map<string, ContextFile>();
   /** Context skipped because the file's own patch was in the call: shown, so never left out. */
   private readonly shownAsPatch = new Set<string>();
 
   constructor(
-    offered: readonly RepositoryContextFile[],
+    private readonly offered: readonly RepositoryContextFile[],
     private readonly opts: ContextPlanOptions,
   ) {
     const on = opts.contextTokens > 0;
@@ -225,12 +226,21 @@ export class ContextPlan {
    * context first (files related to `paths` first) within the PR share; repository files fill the rest.
    */
   select(paths: readonly string[], maxTokens: number): ContextFile[] {
+    return this.selectPrepared(paths, maxTokens, this.files, this.prFiles);
+  }
+
+  private selectPrepared(
+    paths: readonly string[],
+    maxTokens: number,
+    files: readonly PreparedContextFile[],
+    prFiles: readonly PreparedContextFile[],
+  ): ContextFile[] {
     const wanted = new Set(paths);
     const related = (file: PreparedContextFile): boolean => file.forPaths.some((p) => wanted.has(p));
     const chosen: ContextFile[] = [];
     let prLeft = Math.min(this.opts.prContextTokens ?? 0, this.opts.contextTokens, maxTokens);
     let left = maxTokens;
-    for (const file of [...this.prFiles.filter(related), ...this.prFiles.filter((f) => !related(f))]) {
+    for (const file of [...prFiles.filter(related), ...prFiles.filter((f) => !related(f))]) {
       if (file.tokens > prLeft) continue;
       // As for repository context: a patch of which not one changed or context line fit (only its
       // hunk header, or nothing) is left out instead of being counted as sent.
@@ -239,7 +249,7 @@ export class ContextPlan {
       prLeft -= file.tokens;
       left -= file.tokens;
     }
-    for (const file of this.files) {
+    for (const file of files) {
       if (file.tokens > left || !related(file)) continue;
       // Not even its first line fit the per-file cap (a one-line or minified file): sending an
       // empty block would count it as sent; it stays left out instead.
@@ -264,15 +274,28 @@ export class ContextPlan {
     return scaledContextTokens(this.opts.contextTokens, this.opts.contextTokensPerFile ?? 0, this.opts.reviewedPaths.length);
   }
 
-  /** Records files as sent to the model. */
+  /** Records files as sent, retaining the longest version for verification after batch recovery. */
   markSent(files: readonly ContextFile[]): void {
-    for (const file of files) this.sent.set(blockKey(file), file);
+    for (const file of files) {
+      const key = blockKey(file);
+      const previous = this.sent.get(key);
+      if (!previous || file.content.length > previous.content.length || (previous.truncated && !file.truncated)) {
+        this.sent.set(key, file);
+      }
+    }
   }
 
   /** The context of one batch, from its own files' context, recorded as sent. */
   readonly forBatch = (batch: ReadonlyArray<{ path: string }>): ContextFile[] => {
     const cap = Math.min(this.opts.contextTokens, this.opts.batchContextTokens ?? this.opts.batchTokens);
-    const files = this.select(batch.map((f) => f.path), cap);
+    if (!this.batchContext) {
+      const batchOpts = { ...this.opts, contextTokens: cap };
+      this.batchContext = {
+        files: cap > 0 ? prepareRepository(this.offered, batchOpts) : [],
+        prFiles: cap > 0 ? preparePullRequest(this.offered, batchOpts) : [],
+      };
+    }
+    const files = this.selectPrepared(batch.map((f) => f.path), cap, this.batchContext.files, this.batchContext.prFiles);
     this.markSent(files);
     return files;
   };

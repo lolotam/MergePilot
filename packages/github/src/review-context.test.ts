@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { GitHubClient } from './client.js';
+import { fakeClient, modified, params } from './review-context.fixtures.js';
 import {
   gatherRepositoryContext,
   isBuildWiringChange,
@@ -11,7 +11,6 @@ import {
   pairCandidates,
   pythonImportCandidates,
   resolveImportCandidates,
-  type GatherContextParams,
 } from './review-context.js';
 import { mergeContextDisclosures, renderContextNote } from './review-notes.js';
 
@@ -87,30 +86,6 @@ describe('pairCandidates', () => {
     expect(pairCandidates('README.md')).toBeUndefined();
   });
 });
-
-/** A client reading `files` at the head; with `dirs`, it can also list those directories. */
-function fakeClient(
-  files: Record<string, string>,
-  fail: string[] = [],
-  dirs?: Record<string, string[]>,
-): { client: GitHubClient; reads: Array<{ path: string; ref: string }> } {
-  const reads: Array<{ path: string; ref: string }> = [];
-  const client = {
-    getFileContent: async ({ path, ref }: { path: string; ref: string }) => {
-      reads.push({ path, ref });
-      if (fail.includes(path)) throw new Error('HTTP 502');
-      return ref === 'head-sha' ? (files[path] ?? null) : 'BASE VERSION';
-    },
-    ...(dirs ? { listDirectoryFiles: async ({ path }: { path: string }) => dirs[path] ?? null } : {}),
-  } as unknown as GitHubClient;
-  return { client, reads };
-}
-
-function params(files: GatherContextParams['files'], overrides: Partial<GatherContextParams> = {}): GatherContextParams {
-  return { owner: 'o', repo: 'r', headSha: 'head-sha', files, exclude: [], contextTokens: 30_000, ...overrides };
-}
-
-const modified = (path: string) => ({ path, status: 'modified', patch: '@@ -1 +1 @@\n-a\n+b', changes: 2 });
 
 describe('gatherRepositoryContext', () => {
   it.each([
