@@ -21,11 +21,25 @@ describe('cited repository context', () => {
     const listings: string[] = [];
     client.listDirectoryFiles = async ({ path }) => { listings.push(path); return ['AGENTS.md']; };
     const result = await gatherRepositoryContext(client, params([{
-      ...modified('notes.md'), status: 'added', patch: `@@ -0,0 +1 @@\n+${paths.join(' ')} AGENTS.md`,
+      ...modified('notes.md'), status: 'added', patch: `@@ -0,0 +1 @@\n+${paths.join(' ')} AGENTS.md MISSING.md tsconfig.json MISSING.md`,
     }]));
     expect(reads.map((r) => r.path)).toEqual(paths);
     expect(listings).toEqual([]);
-    expect(result.leftOut).toEqual(['AGENTS.md (cited lookup limit)']);
+    expect(result.leftOut).toEqual([]);
+  });
+
+  it('discloses repeated over-limit paths once and only confirms bare names from an already-loaded root listing', async () => {
+    const paths = Array.from({ length: 19 }, (_, i) => `docs/ref${i}.md`);
+    const { client, reads } = fakeClient({ 'AGENTS.md': 'rules', ...Object.fromEntries(paths.map((p) => [p, 'reference'])) });
+    const listings: string[] = [];
+    client.listDirectoryFiles = async ({ path }) => { listings.push(path); return ['AGENTS.md', 'GUIDE.md']; };
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added',
+      patch: `@@ -0,0 +1 @@\n+AGENTS.md ${paths.join(' ')} GUIDE.md MISSING.md docs/late.md GUIDE.md docs/late.md MISSING.md`,
+    }]));
+    expect(listings).toEqual(['']);
+    expect(reads.map((r) => r.path)).toEqual(['AGENTS.md', ...paths]);
+    expect(result.leftOut).toEqual(['GUIDE.md (cited lookup limit)', 'docs/late.md (cited lookup limit)']);
   });
 
   it('discloses an exhausted root-listing read budget with a readable root label', async () => {

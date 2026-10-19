@@ -47,6 +47,58 @@ function bigPatch(lines: number): string {
 }
 
 describe('runReview — repository context (ADR-0029)', () => {
+  it('fits optional context to maxInputTokens when it is below maxPromptTokens', async () => {
+    const baseline = recordingModel();
+    await runReview(input(baseline.model));
+    const bareTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user);
+    const maxInputTokens = bareTokens + 800;
+    const offered = Array.from({ length: 8 }, (_, i) => context(`src/ref${i}.ts`, 'src/a.ts', 'const value = 1;\n'.repeat(30)));
+    const { model, requests } = recordingModel();
+    const value = input(model, { contextFiles: offered }, {
+      maxPromptTokens: bareTokens + 8_000, contextTokens: 120_000, contextTokensPerFile: 100_000,
+    });
+    value.config.budget = { perReviewUsd: 10, maxInputTokens };
+    const result = await runReview(value);
+    expect(result.status).toBe('completed');
+    expect(requests).toHaveLength(1);
+    expect(estimateTokens(requests[0]!.system + requests[0]!.user)).toBeLessThanOrEqual(maxInputTokens);
+    expect(requests[0]!.user).not.toContain('UNTRUSTED:PR_MANIFEST');
+    if (result.status !== 'completed') throw new Error('expected completed review');
+    expect(result.context!.sent.length).toBeGreaterThan(0);
+    expect(result.context!.leftOut.length).toBeGreaterThan(0);
+    expect(result.context!.sent.length + result.context!.leftOut.length).toBe(offered.length);
+  });
+
+  it('trims long context fence labels against maxInputTokens as well as maxPromptTokens', async () => {
+    const baseline = recordingModel();
+    await runReview(input(baseline.model));
+    const bareTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user);
+    const maxInputTokens = bareTokens + 800;
+    const path = `src/${'a'.repeat(2_000)}.ts`;
+    const { model, requests } = recordingModel();
+    const value = input(model, {
+      contextFiles: [{ ...context(path, 'src/a.ts', 'const x = 1;'), reason: 'cited' }],
+    }, { maxPromptTokens: bareTokens + 8_000 });
+    value.config.budget = { perReviewUsd: 10, maxInputTokens };
+    const result = await runReview(value);
+    expect(requests).toHaveLength(1);
+    expect(estimateTokens(requests[0]!.system + requests[0]!.user)).toBeLessThanOrEqual(maxInputTokens);
+    expect(result).toMatchObject({ status: 'completed', context: { sent: [], leftOut: [path] } });
+  });
+
+  it('still skips a review whose prompt without context exceeds maxInputTokens', async () => {
+    const baseline = recordingModel();
+    await runReview(input(baseline.model));
+    const maxInputTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user) - 1;
+    const { model, requests } = recordingModel();
+    const value = input(model, { contextFiles: [context('src/dep.ts', 'src/a.ts')] }, { contextTokens: 120_000 });
+    value.config.budget = { perReviewUsd: 10, maxInputTokens };
+    const result = await runReview(value);
+    expect(result.status).toBe('skipped-budget');
+    expect(result.status === 'skipped-budget' && result.reason).toContain(`exceed maxInputTokens limit (${maxInputTokens})`);
+    expect(requests).toHaveLength(0);
+  });
+
   it('never dispatches an oversized context prompt during truncation recovery', async () => {
     const files = ['src/a.ts', 'src/b.ts'].map((path) => ({ path, status: 'modified', patch: SIMPLE_PATCH, changes: 3 }));
     const baseline = recordingModel();

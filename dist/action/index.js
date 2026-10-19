@@ -142066,11 +142066,12 @@ async function runReview(input2) {
   };
   const withoutContext = buildReviewPrompt(promptInput);
   const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
-  const contextRoom = Math.max(0, limits2.maxPromptTokens - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS);
+  const wholePromptLimit = Math.min(limits2.maxPromptTokens, budgetCfg.maxInputTokens);
+  const contextRoom = Math.max(0, wholePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS);
   const wholeContext = context.whole(contextRoom);
   let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;
   let promptTokens = estimateTokens(prompt.system + prompt.user);
-  while (promptTokens > limits2.maxPromptTokens && wholeContext.length > 0) {
+  while (promptTokens > wholePromptLimit && wholeContext.length > 0) {
     wholeContext.pop();
     prompt = buildReviewPrompt({ ...promptInput, contextFiles: wholeContext });
     promptTokens = estimateTokens(prompt.system + prompt.user);
@@ -195476,9 +195477,21 @@ async function withNestedRulesFiles(client, params) {
   return { rulesFiles: [...params.rulesFiles, ...nested], leftOut };
 }
 
+var ROOT_CITED_EXTENSIONS = /* @__PURE__ */ new Set(["md", "mdx", "txt", "yml", "yaml", "json", "toml", "sql"]);
+function isCitedPath(path12) {
+  if (path12.startsWith("this.") || path12.startsWith("www.") || path12.includes("://"))
+    return false;
+  const segments = path12.split("/");
+  const name = segments.pop() ?? "";
+  if (!/^[\p{L}\p{N}_@.-]+\.[a-zA-Z]\w*$/u.test(name))
+    return false;
+  if (segments.length === 0)
+    return ROOT_CITED_EXTENSIONS.has(name.slice(name.lastIndexOf(".") + 1).toLowerCase());
+  return segments.every((segment) => segment !== "." && segment !== ".." && (/^[\p{L}\p{N}_@.-]+$/u.test(segment) || /^\([\p{L}\p{N}_@.-]+\)$/u.test(segment) || /^\[(?:\.\.\.)?[\p{L}\p{N}_-]+\]$/u.test(segment) || /^\[\[\.\.\.[\p{L}\p{N}_-]+\]\]$/u.test(segment)));
+}
+
 var MAX_CONTEXT_READS = 120;
 var MAX_CITED_LOOKUPS = 20;
-var ROOT_CITED_EXTENSIONS = /* @__PURE__ */ new Set(["md", "mdx", "txt", "yml", "yaml", "json", "toml", "sql"]);
 var READ_CONCURRENCY2 = 8;
 var JS_EXTENSIONS = /* @__PURE__ */ new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
 var SOURCE_FOR_EMITTED = {
@@ -195600,20 +195613,10 @@ function importLookups(path12, content) {
     disclose: true
   }));
 }
-function isCitedPath(path12) {
-  if (path12.startsWith("this.") || path12.startsWith("www.") || path12.includes("://"))
-    return false;
-  const segments = path12.split("/");
-  const name = segments.pop() ?? "";
-  if (!/^[\p{L}\p{N}_@.-]+\.[a-zA-Z]\w*$/u.test(name))
-    return false;
-  if (segments.length === 0)
-    return ROOT_CITED_EXTENSIONS.has(extOf(name));
-  return segments.every((segment) => segment !== "." && segment !== ".." && (/^[\p{L}\p{N}_@.-]+$/u.test(segment) || /^\([\p{L}\p{N}_@.-]+\)$/u.test(segment) || /^\[(?:\.\.\.)?[\p{L}\p{N}_-]+\]$/u.test(segment) || /^\[\[\.\.\.[\p{L}\p{N}_-]+\]\]$/u.test(segment)));
-}
 async function citedLookups(reader, reviewed, exclude) {
   const lookups = [];
   const selected = /* @__PURE__ */ new Set();
+  const omitted = /* @__PURE__ */ new Set();
   let adrs;
   let rootFiles;
   for (const file2 of reviewed) {
@@ -195644,7 +195647,10 @@ async function citedLookups(reader, reviewed, exclude) {
         if (!isContextPathAllowed(path12, { exclude, isSensitivePath }))
           continue;
         if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
-          reader.leftOut.push(`${path12} (cited lookup limit)`);
+          if (!omitted.has(path12) && (path12.includes("/") || rootFiles?.has(path12))) {
+            omitted.add(path12);
+            reader.leftOut.push(`${path12} (cited lookup limit)`);
+          }
           continue;
         }
         if (!path12.includes("/")) {

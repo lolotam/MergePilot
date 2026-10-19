@@ -242,13 +242,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   };
   const withoutContext = buildReviewPrompt(promptInput);
   const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
-  const contextRoom = Math.max(0, limits.maxPromptTokens - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS);
+  const wholePromptLimit = Math.min(limits.maxPromptTokens, budgetCfg.maxInputTokens);
+  const contextRoom = Math.max(0, wholePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS);
   const wholeContext = context.whole(contextRoom);
   let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;
   let promptTokens = estimateTokens(prompt.system + prompt.user);
   // Long path labels can outgrow the estimated block overhead. Drop the lowest-priority files,
   // never split a review just to accommodate context, and disclose exactly what remains.
-  while (promptTokens > limits.maxPromptTokens && wholeContext.length > 0) {
+  while (promptTokens > wholePromptLimit && wholeContext.length > 0) {
     wholeContext.pop();
     prompt = buildReviewPrompt({ ...promptInput, contextFiles: wholeContext });
     promptTokens = estimateTokens(prompt.system + prompt.user);
