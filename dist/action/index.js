@@ -195631,6 +195631,8 @@ async function citedLookups(reader, reviewed, exclude) {
           adrs = (await reader.list("docs/adr")).sort();
         candidates = adrs.filter((path12) => path12.startsWith(`docs/adr/${match3[1]}-`) && path12.endsWith(".md"));
       } else {
+        if (added[match3.index + match3[0].length] === "(")
+          continue;
         let path12 = match3[2].split("](").pop();
         for (const [open4, close] of [["(", ")"], ["[", "]"]]) {
           while (path12.startsWith(open4) && path12.split(open4).length > path12.split(close).length)
@@ -195641,14 +195643,14 @@ async function citedLookups(reader, reviewed, exclude) {
       for (const path12 of candidates) {
         if (!isContextPathAllowed(path12, { exclude, isSensitivePath }))
           continue;
+        if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
+          reader.leftOut.push(`${path12} (cited lookup limit)`);
+          continue;
+        }
         if (!path12.includes("/")) {
           rootFiles ??= new Set(await reader.list(""));
           if (!rootFiles.has(path12))
             continue;
-        }
-        if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
-          reader.leftOut.push(`${path12} (cited lookup limit)`);
-          continue;
         }
         selected.add(path12);
         lookups.push({ candidates: [path12], kind: "cited", reason: `cited by ${file2.path}`, forPath: file2.path, disclose: true });
@@ -195701,15 +195703,16 @@ var ContextReader = class {
   async list(dir) {
     if (!this.client.listDirectoryFiles)
       return [];
+    const label = dir ? `${dir}/` : "(repository root)";
     if (this.reads >= this.maxReads) {
-      this.leftOut.push(`${dir}/ (not looked up)`);
+      this.leftOut.push(`${label} (not looked up)`);
       return [];
     }
     this.reads++;
     try {
       return await listAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, dir) ?? [];
     } catch {
-      this.leftOut.push(`${dir}/ (could not be read)`);
+      this.leftOut.push(`${label} (could not be read)`);
       return [];
     }
   }

@@ -263,6 +263,7 @@ async function citedLookups(reader: ContextReader, reviewed: readonly ReviewedFi
         if (adrs === undefined) adrs = (await reader.list('docs/adr')).sort();
         candidates = adrs.filter((path) => path.startsWith(`docs/adr/${match[1]}-`) && path.endsWith('.md'));
       } else {
+        if (added[match.index + match[0].length] === '(') continue;
         let path = match[2]!.split('](').pop()!;
         // Markdown's opening link punctuation is not part of a path; route groups stay intact.
         for (const [open, close] of [['(', ')'], ['[', ']']] as const) {
@@ -272,13 +273,13 @@ async function citedLookups(reader: ContextReader, reviewed: readonly ReviewedFi
       }
       for (const path of candidates) {
         if (!isContextPathAllowed(path, { exclude, isSensitivePath })) continue;
-        if (!path.includes('/')) {
-          rootFiles ??= new Set(await reader.list(''));
-          if (!rootFiles.has(path)) continue;
-        }
         if (!selected.has(path) && selected.size >= MAX_CITED_LOOKUPS) {
           reader.leftOut.push(`${path} (cited lookup limit)`);
           continue;
+        }
+        if (!path.includes('/')) {
+          rootFiles ??= new Set(await reader.list(''));
+          if (!rootFiles.has(path)) continue;
         }
         selected.add(path);
         lookups.push({ candidates: [path], kind: 'cited', reason: `cited by ${file.path}`, forPath: file.path, disclose: true });
@@ -341,15 +342,16 @@ class ContextReader {
   /** The files of a directory; one read against the limit, none when the client cannot list. */
   async list(dir: string): Promise<string[]> {
     if (!this.client.listDirectoryFiles) return [];
+    const label = dir ? `${dir}/` : '(repository root)';
     if (this.reads >= this.maxReads) {
-      this.leftOut.push(`${dir}/ (not looked up)`);
+      this.leftOut.push(`${label} (not looked up)`);
       return [];
     }
     this.reads++;
     try {
       return (await listAtRef(this.client, this.params.owner, this.params.repo, this.params.headSha, dir)) ?? [];
     } catch {
-      this.leftOut.push(`${dir}/ (could not be read)`);
+      this.leftOut.push(`${label} (could not be read)`);
       return [];
     }
   }

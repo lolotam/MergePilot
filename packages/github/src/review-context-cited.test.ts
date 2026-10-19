@@ -3,6 +3,49 @@ import { gatherRepositoryContext } from './review-context.js';
 import { fakeClient, modified, params } from './review-context.fixtures.js';
 
 describe('cited repository context', () => {
+  it.each(['response.json()', 'res.json(x)'])('never reads or lists the root for the member call %s', async (call) => {
+    const { client, reads } = fakeClient({ 'response.json': '{}', 'res.json': '{}' });
+    const listings: string[] = [];
+    client.listDirectoryFiles = async ({ path }) => { listings.push(path); return ['response.json', 'res.json']; };
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added', patch: `@@ -0,0 +1 @@\n+${call}`,
+    }]));
+    expect(reads).toEqual([]);
+    expect(listings).toEqual([]);
+    expect(result).toEqual({ files: [], leftOut: [] });
+  });
+
+  it('checks the citation limit before listing the root for a later bare filename', async () => {
+    const paths = Array.from({ length: 20 }, (_, i) => `docs/ref${i}.md`);
+    const { client, reads } = fakeClient(Object.fromEntries(paths.map((p) => [p, 'reference'])));
+    const listings: string[] = [];
+    client.listDirectoryFiles = async ({ path }) => { listings.push(path); return ['AGENTS.md']; };
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added', patch: `@@ -0,0 +1 @@\n+${paths.join(' ')} AGENTS.md`,
+    }]));
+    expect(reads.map((r) => r.path)).toEqual(paths);
+    expect(listings).toEqual([]);
+    expect(result.leftOut).toEqual(['AGENTS.md (cited lookup limit)']);
+  });
+
+  it('discloses an exhausted root-listing read budget with a readable root label', async () => {
+    const { client, reads } = fakeClient({ 'notes.md': 'AGENTS.md' }, [], { '': ['AGENTS.md'] });
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), patch: '@@ -1 +1 @@\n-old\n+AGENTS.md',
+    }], { contextReads: 1 }));
+    expect(reads.map((r) => r.path)).toEqual(['notes.md']);
+    expect(result.leftOut).toEqual(['(repository root) (not looked up)']);
+  });
+
+  it('uses the readable root label when the root listing fails', async () => {
+    const { client } = fakeClient({});
+    client.listDirectoryFiles = async () => { throw new Error('HTTP 502'); };
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added', patch: '@@ -0,0 +1 @@\n+AGENTS.md',
+    }]));
+    expect(result.leftOut).toEqual(['(repository root) (could not be read)']);
+  });
+
   it('rejects code, prose and URLs before they consume citation slots or reads', async () => {
     const junk = [
       'this.opts.contextTokens', 'Math.min', 'config.review.contextReads',
