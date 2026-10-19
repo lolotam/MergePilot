@@ -1,4 +1,4 @@
-import { createReviewModel, redactSecrets, type ApiProviderId, type ReviewModel, type Secret, type TokenUsage } from '@mergepilot/engine';
+import { createReviewModel, LlmFailure, redactSecrets, type ApiProviderId, type ReviewModel, type Secret, type TokenUsage } from '@mergepilot/engine';
 import type { SemanticDedupeResult } from '@mergepilot/github';
 import {
   MAIN_BOT_SLOT,
@@ -9,6 +9,7 @@ import {
   type ReviewRunStatus,
 } from '../core/types.js';
 import type { RunPricing } from '../core/price-types.js';
+import { terminalSubscriptionFailure } from '../credentials/subscription-resolution.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { buildBotConfig } from './bot-config.js';
 import { skillKeyOf } from './effective-config.js';
@@ -75,22 +76,47 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       : builtConfig;
 
     const effectiveAuth = await deps.credentials.getEffectiveAuthMethod?.(workspaceId, choice.provider as ApiProvider);
-    let primarySecret: Secret;
-    if (subscriptionOnly) {
-      primarySecret = await admittedSubscription(deps.credentials, workspaceId, choice.provider);
-    } else if (effectiveAuth === 'api-key' && deps.credentials.resolveKeyRoster) {
-      const roster = await deps.credentials.resolveKeyRoster(workspaceId, choice.provider as ApiProvider);
-      if (!roster || roster.secrets.length === 0) {
-        throw new Error(`No API key roster is available for provider "${choice.provider}"`);
+    const unavailableSubscriptions = new Set<string>();
+    const onPrimaryUnavailable = (reason: string) => {
+      if (unavailableSubscriptions.has(choice.provider)) return;
+      unavailableSubscriptions.add(choice.provider);
+      logger.warn({ event: 'credential.primary_unavailable', workspaceId, runId: br.run.id, provider: choice.provider, reason },
+        'Primary subscription credential is unavailable; configured model fallbacks remain eligible');
+    };
+    let primarySecret: Secret | undefined;
+    let primaryFailure: LlmFailure | undefined;
+    try {
+      if (subscriptionOnly) {
+        primarySecret = await admittedSubscription(deps.credentials, workspaceId, choice.provider);
+      } else if (effectiveAuth === 'api-key' && deps.credentials.resolveKeyRoster) {
+        const roster = await deps.credentials.resolveKeyRoster(workspaceId, choice.provider as ApiProvider);
+        if (!roster || roster.secrets.length === 0) {
+          throw new Error(`No API key roster is available for provider "${choice.provider}"`);
+        }
+        const start = roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;
+        primarySecret = roster.secrets[start]!;
+      } else {
+        primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
       }
-      const start = roster.startIndex >= 0 && roster.startIndex < roster.secrets.length ? roster.startIndex : 0;
-      primarySecret = roster.secrets[start]!;
-    } else {
-      primarySecret = await deps.credentials.resolve(workspaceId, choice.provider as ApiProvider);
+    } catch (error) {
+      // An API-key primary keeps today's error; only its subscription can be refused a refresh.
+      if (!subscriptionOnly && effectiveAuth === 'api-key') throw error;
+      const terminal = terminalSubscriptionFailure(error, choice.provider);
+      if (!terminal) throw error;
+      primaryFailure = new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: choice.provider, message: terminal.message });
+      onPrimaryUnavailable(terminal.reason);
     }
-    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders });
+    credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders, primaryFailure, onPrimaryUnavailable });
+    if (primaryFailure) {
+      try {
+        const stored = await deps.credentials.resolveForRedaction?.(workspaceId, choice.provider as ApiProvider);
+        if (stored) credStore.addKnownSecrets([stored]);
+      } catch {
+        // An unreadable credential has no value available for redaction.
+      }
+    }
     await addRedactionCredentials(deps.credentials, workspaceId,
-      [...subscriptionOnlyProviders, ...(br.skipPaidFallbacks ?? [])], choice.provider, credStore);
+      [...subscriptionOnlyProviders, ...(br.skipPaidFallbacks ?? []), ...(primaryFailure ? [choice.provider] : [])], choice.provider, credStore);
     const rotationEvents: KeyRotationDisclosure[] = [];
     const makeRotationHandler = (keyIds: Readonly<Record<string, readonly string[]>>) =>
       rotationHandler(rotationEvents, deps.credentials, workspaceId, logger, keyIds, cursorWrites);
@@ -100,19 +126,22 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       fetch: deps.judgeFetch,
       priceLookup: ctx.judgePrices,
       makeRotationHandler,
+      unavailableSubscriptions,
     });
     credStore.addKnownSecrets(judgeSetup.secrets);
 
     let model: ReviewModel;
-    if (deps.createModelForProvider) {
+    if (deps.createModelForProvider && primarySecret) {
       model = await deps.createModelForProvider(effectiveConfig, primarySecret);
     } else {
       // No key roster for a subscription-only provider: the engine would rotate over paid keys.
-      const rosterProviders = providerIds.filter((provider) => !subscriptionOnlyProviders.has(provider));
+      const rosterProviders = providerIds.filter((provider) => !subscriptionOnlyProviders.has(provider) &&
+        !(primaryFailure && provider === choice.provider && !dualMethods[provider as ApiProviderId]));
       const { rosters, keyIds } = await loadRosters(deps.credentials, workspaceId, rosterProviders, choice.provider, logger, dualMethods);
       credStore.addKnownSecrets(rosterSecrets(rosters));
       model = await createReviewModel(effectiveConfig, credStore, {
         cwd: process.cwd(),
+        primarySubscriptionFailure: primaryFailure,
         keyRosters: rosters,
         onKeyRotation: makeRotationHandler(keyIds),
         dualMethods,

@@ -56,7 +56,21 @@ export function credentialSecretValues(value: string): string[] {
     const subscription = decodeSubscription(value);
     return subscription ? [value, subscription.credential.access, subscription.credential.refresh] : [value];
   } catch {
-    // Malformed persisted/env credentials still need their raw value redacted from error output.
-    return [value];
+    // Malformed persisted/env credentials still need their raw value redacted from error output, and
+    // any token still readable inside them on its own: a review can continue on a fallback model.
+    return [value, ...malformedEnvelopeTokens(value)];
+  }
+}
+
+/** Best-effort `credential.access` / `credential.refresh` strings of an envelope that failed validation. */
+function malformedEnvelopeTokens(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value.slice(SUBSCRIPTION_PREFIX.length));
+    const credential = (parsed as { credential?: unknown } | null)?.credential;
+    if (!credential || typeof credential !== 'object') return [];
+    const { access, refresh } = credential as { access?: unknown; refresh?: unknown };
+    return [access, refresh].filter((token): token is string => typeof token === 'string' && token.length > 0);
+  } catch {
+    return [];
   }
 }

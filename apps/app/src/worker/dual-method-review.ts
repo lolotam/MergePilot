@@ -113,8 +113,10 @@ export async function reviewUsesSubscriptionAdmission(
     if (dual) return dual.effective === 'subscription' && !dual.hasApiKeys;
     const effective = await credentials.getEffectiveAuthMethod?.(workspaceId, provider);
     if (effective) return effective === 'subscription';
-    const secret = await credentials.resolve(workspaceId, provider as KeyProvider);
-    return secret.reveal().startsWith(SUBSCRIPTION_PREFIX);
+    const secret = credentials.resolveForRedaction
+      ? await credentials.resolveForRedaction(workspaceId, provider as KeyProvider)
+      : await credentials.resolve(workspaceId, provider as KeyProvider);
+    return secret?.reveal().startsWith(SUBSCRIPTION_PREFIX) ?? false;
   } catch {
     return false;
   }

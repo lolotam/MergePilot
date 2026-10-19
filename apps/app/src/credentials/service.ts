@@ -21,6 +21,7 @@ import {
 } from './key-list-helpers.js';
 import { isDualMethodProvider, isKeyListProvider, MAX_PROVIDER_KEYS } from './multi-key.js';
 import { coordinateRefresh } from './refresh-coordination.js';
+import { readCredentialForRedaction, readStoredSubscription, UnavailableCredentialError } from './subscription-resolution.js';
 
 export { UnavailableAuthMethodError } from './dual-auth.js';
 export { NoSubscriptionConnectedError } from './credential-dual-methods.js';
@@ -416,16 +417,15 @@ export class CredentialService {
   async resolve(workspaceId: string, provider: KeyProvider): Promise<Secret> {
     if (isSubscriptionProvider(provider)) {
       const initial = await this.#store.getCredential(workspaceId, provider);
-      if (!initial) throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
-      const plaintext = await this.#vault.decrypt(initial.ciphertext, { workspaceId, provider });
-      const envelope = decodeSubscription(plaintext, provider);
+      const { value: plaintext, subscription: envelope } = await readStoredSubscription(this.#vault, initial, workspaceId, provider);
       if (!envelope || envelope.credential.expires > Date.now() + 60_000) return new Secret(plaintext);
       return coordinateRefresh(this.#store, `${workspaceId}:${provider}`, async () => {
         let value = '';
         await this.#store.modifyCredential(workspaceId, provider, async (stored) => {
-          if (!stored) throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
-          value = await this.#vault.decrypt(stored.ciphertext, { workspaceId, provider });
-          const subscription = decodeSubscription(value, provider);
+          if (!stored) throw new UnavailableCredentialError('missing');
+          const current = await readStoredSubscription(this.#vault, stored, workspaceId, provider);
+          value = current.value;
+          const subscription = current.subscription;
           if (!subscription || subscription.credential.expires > Date.now() + 60_000) return stored;
           const refreshed = await refreshSubscription(provider, subscription.credential, AbortSignal.timeout(30_000));
           value = encodeSubscription(provider, refreshed);
@@ -441,6 +441,11 @@ export class CredentialService {
 
     const plaintext = await this.#vault.decrypt(cred.ciphertext, { workspaceId, provider });
     return new Secret(plaintext);
+  }
+
+  /** Reads even an expired envelope for redaction only; never refreshes or validates it. */
+  resolveForRedaction(workspaceId: string, provider: KeyProvider): Promise<Secret | null> {
+    return readCredentialForRedaction(this.#store, this.#vault, workspaceId, provider);
   }
 
   async resolveCredential(

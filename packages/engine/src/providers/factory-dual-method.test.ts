@@ -3,6 +3,7 @@ import type { MergePilotConfig } from '../config/schema.js';
 import { Secret } from '../credentials/secret.js';
 import type { AnyCredentialStore, CredentialInfo } from '../credentials/store.js';
 import { encodeSubscription } from '../credentials/subscription.js';
+import { LlmFailure } from '../llm/failure.js';
 import { redactSecrets } from '../security/redact.js';
 import type { ReviewAuthMethod } from '../review/model.js';
 import { createReviewModel } from './factory.js';
@@ -76,6 +77,53 @@ async function build(ws: Workspace, cfg: MergePilotConfig) {
 const revealed = (secrets: readonly Secret[] | undefined) => (secrets ?? []).map((s) => s.reveal());
 
 describe('createReviewModel — dual-method chain (ADR-0027)', () => {
+  it.each(['default', 'subscription'] as const)('defers an auth failure resolving the primary %s during construction', async (stage) => {
+    const ws: Workspace = { defaults: { anthropic: 'subscription', openai: 'api-key' },
+      subscriptions: { anthropic: envelope('anthropic') }, rosters: { anthropic: keys('anthropic'), openai: keys('openai') } };
+    const store = workspaceStore(ws);
+    const original = store.resolve.bind(store);
+    const failure = new LlmFailure({ provider: 'anthropic', code: 'INVALID_CREDENTIAL', message: 'Subscription token refresh failed; sign in again' });
+    vi.spyOn(store, 'resolve').mockImplementation(async (ref, purpose) => {
+      if (ref.provider === 'anthropic' && (stage === 'default' || ref.method === 'subscription')) throw failure;
+      return original(ref, purpose);
+    });
+    const model = await createReviewModel(config('anthropic', 'claude-3-5-sonnet', {
+      fallback: [{ provider: 'openai', model: 'gpt-5' }],
+    }), store, { cwd: '/tmp', dualMethods: { anthropic: { defaultMethod: 'subscription' } }, keyRosters: rostersOf(ws) });
+
+    expect(model).toMatchObject({ authMethod: 'subscription', includedInSubscription: true });
+    await expect(model.generate({ system: '', user: '', maxOutputTokens: 100 })).rejects.toBe(failure);
+    expect(model.fallbacks?.map((entry) => entry.label)).toEqual(['anthropic:claude-3-5-sonnet', 'openai:gpt-5']);
+    expect(model.fallbacks?.[0]?.fallbackTriggers).toEqual(['quota', 'rate-limit']);
+  });
+
+  it.each([new Error('stored credential unavailable'), new LlmFailure({ provider: 'anthropic', code: 'NETWORK', message: 'provider unreachable' })])(
+    'propagates a non-auth construction failure: %s', async (failure) => {
+      const store = workspaceStore({ defaults: {}, subscriptions: {}, rosters: {} });
+      vi.spyOn(store, 'resolve').mockRejectedValue(failure);
+      await expect(createReviewModel(config('anthropic', 'claude-3-5-sonnet'), store, { cwd: '/tmp' })).rejects.toBe(failure);
+    },
+  );
+
+  it('defers an unavailable primary subscription to its first call without resolving it again', async () => {
+    const ws: Workspace = { defaults: { anthropic: 'subscription', openai: 'api-key' },
+      subscriptions: {}, rosters: { anthropic: keys('anthropic'), openai: keys('openai') } };
+    const store = workspaceStore(ws);
+    const resolve = vi.spyOn(store, 'resolve');
+    const failure = new LlmFailure({ provider: 'anthropic', code: 'INVALID_CREDENTIAL', message: 'Subscription token refresh failed; sign in again' });
+    const model = await createReviewModel(config('anthropic', 'claude-3-5-sonnet', {
+      fallback: [{ provider: 'openai', model: 'gpt-5' }],
+    }), store, { cwd: '/tmp', primarySubscriptionFailure: failure,
+      dualMethods: { anthropic: { defaultMethod: 'subscription' } }, keyRosters: rostersOf(ws) });
+
+    expect(model).toMatchObject({ label: 'anthropic:claude-3-5-sonnet', authMethod: 'subscription', includedInSubscription: true });
+    await expect(model.generate({ system: '', user: '', maxOutputTokens: 100 })).rejects.toBe(failure);
+    expect(model.fallbacks?.map((entry) => entry.label)).toEqual(['anthropic:claude-3-5-sonnet', 'openai:gpt-5']);
+    expect(model.fallbacks?.[0]?.fallbackTriggers).toEqual(['quota', 'rate-limit']);
+    expect(resolve.mock.calls.some(([ref]) => ref.provider === 'anthropic')).toBe(false);
+    expect(model.secrets).toEqual(expect.arrayContaining([...ws.rosters.anthropic!, ...ws.rosters.openai!]));
+  });
+
   it('keeps unavailable configured fallbacks skipped after checking their credentials', async () => {
     const ws: Workspace = { defaults: { openai: 'subscription' }, subscriptions: { openai: envelope('openai') }, rosters: {} };
     const store = workspaceStore(ws);
@@ -173,6 +221,17 @@ describe('createReviewModel — dual-method chain (ADR-0027)', () => {
     expect(revealed(model.secrets)).toEqual(
       expect.arrayContaining([ws.subscriptions.openai!.reveal(), ...keys('openai').map((k) => k.reveal())]),
     );
+  });
+
+  it('still fails construction when an API-key default has no keys, even with a configured fallback', async () => {
+    const ws: Workspace = { defaults: { anthropic: 'api-key', openai: 'api-key' }, subscriptions: { anthropic: envelope('anthropic') },
+      rosters: { anthropic: keys('anthropic'), openai: keys('openai') } };
+    // The anthropic roster is missing at construction: buildMethodModel's API-key branch throws an auth LlmFailure.
+    const built = createReviewModel(config('anthropic', 'claude-sonnet-5-5', { fallback: [{ provider: 'openai', model: 'gpt-5' }] }),
+      workspaceStore(ws), { cwd: '/tmp', dualMethods: { anthropic: { defaultMethod: 'api-key' }, openai: { defaultMethod: 'api-key' } },
+        keyRosters: rostersOf({ ...ws, rosters: { openai: ws.rosters.openai } }) });
+
+    await expect(built).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL', message: 'no API key is configured for anthropic' });
   });
 
   it('puts the subscription behind an API-key default, though a plain resolve returns a key', async () => {

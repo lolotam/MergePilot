@@ -40,6 +40,7 @@ export async function workspaceJudge(
   context: {
     jobId: string;
     runId: string;
+    unavailableSubscriptions?: ReadonlySet<string> | undefined;
     fetch?: FetchLike | undefined;
     priceLookup?: JudgePriceLookup | undefined;
     makeRotationHandler?: ((keyIds: Readonly<Record<string, readonly string[]>>) => (event: KeyRotationEvent) => void) | undefined;
@@ -81,6 +82,10 @@ export async function workspaceJudge(
           entries.push(entry);
           continue;
         }
+      }
+      if (effective !== 'api-key' && context.unavailableSubscriptions?.has(entry.provider)) {
+        entries.push(entry);
+        continue;
       }
       const apiKey = await credentials.resolve(workspaceId, entry.provider);
       secrets.push(apiKey);
