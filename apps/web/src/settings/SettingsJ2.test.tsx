@@ -242,7 +242,20 @@ describe('J2 settings components', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ perReviewUsd: 3.21 }));
   });
 
-  it.each(['', '0.49', '1000.01', '1.001'])('refuses invalid spending caps (%s)', async (value) => {
+  it.each([0.5, 1.15, 4.35, 10, 999.99, 1000, 1.15 + Number.EPSILON, 1.150000001])('accepts whole-cent spending caps with floating-point tolerance (%s)', async (value) => {
+    const onSave = vi.fn(async () => undefined);
+    renderSettings(<ReviewSettingsCard workspaceId="ws-1"
+      settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'en', fallback: [], minSeverity: 'medium' }}
+      isLoading={false} isMember={false} onSave={onSave} isSaving={false} />, 'en');
+    const input = screen.getByRole('spinbutton', { name: enSettings.perReviewLabel });
+    await user.clear(input);
+    await user.type(input, String(value));
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ perReviewUsd: value }));
+    expect(screen.queryByText(enSettings.perReviewInvalid)).toBeNull();
+  });
+
+  it.each(['', '0.49', '0.511', '1.001', '1.1500001', '1000.01', 'NaN'])('refuses invalid spending caps (%s)', async (value) => {
     const onSave = vi.fn(async () => undefined);
     renderSettings(<ReviewSettingsCard workspaceId="ws-1"
       settings={{ provider: 'openrouter', model: 'z-ai/glm-5', language: 'en', fallback: [], minSeverity: 'medium' }}

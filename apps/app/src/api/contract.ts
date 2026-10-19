@@ -43,7 +43,10 @@ export const MaxFindingsSchema = z.literal([...MAX_FINDINGS_CHOICES], {
 });
 
 /** Workspace per-bot API spending cap in whole cents (ADR-0036). */
-export const PerReviewUsdSchema = z.number().min(0.5).max(1000).multipleOf(0.01);
+export const PerReviewUsdSchema = z.number().min(0.5).max(1000).refine(
+  (value) => Math.abs(Math.round(value * 100) - value * 100) < 1e-6,
+  { message: 'perReviewUsd must be in whole cents' },
+);
 
 export const ErrorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),

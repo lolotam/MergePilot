@@ -125,7 +125,7 @@ export function ReviewSettingsCard({
     }
     const parsedPerReview = Number(perReview);
     if (!perReview.trim() || !Number.isFinite(parsedPerReview) || parsedPerReview < 0.5 || parsedPerReview > 1000
-      || Number(parsedPerReview.toFixed(2)) !== parsedPerReview) {
+      || Math.abs(Math.round(parsedPerReview * 100) - parsedPerReview * 100) >= 1e-6) {
       next.perReview = t('perReviewInvalid');
     } else if (parsedBudget !== null && parsedPerReview > parsedBudget) {
       next.perReview = t('perReviewAboveMonthly');

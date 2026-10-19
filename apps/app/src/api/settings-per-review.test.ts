@@ -9,12 +9,12 @@ describe('settings contract: perReviewUsd', () => {
 
   it('accepts the bounds and whole cents; omission stays a patch', () => {
     expect(SettingsUpdateSchema.parse(base).perReviewUsd).toBeUndefined();
-    for (const perReviewUsd of [0.5, 0.51, 3, 10, 1000]) {
+    for (const perReviewUsd of [0.5, 1.15, 4.35, 10, 999.99, 1000, 1.15 + Number.EPSILON, 1.150000001]) {
       expect(SettingsUpdateSchema.parse({ ...base, perReviewUsd }).perReviewUsd).toBe(perReviewUsd);
     }
   });
 
-  it.each([0, 0.49, 1000.01, 1.001, '10', null])('rejects %s', (perReviewUsd) => {
+  it.each([0, 0.49, 0.511, 1.001, 1.1500001, 1000.01, NaN, '10', null])('rejects %s', (perReviewUsd) => {
     expect(SettingsUpdateSchema.safeParse({ ...base, perReviewUsd }).success).toBe(false);
   });
 });
