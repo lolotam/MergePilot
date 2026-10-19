@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import { vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { Settings } from '@mergepilot/app/contract';
+import type { Settings, SettingsUpdate } from '@mergepilot/app/contract';
 import type { BotsResponse, ReviewerBotDto } from '../../api/bots.js';
 import type { SkillSummary } from '../../api/skills.js';
 import { ApiClientError, fetchApi, type ApiProvider } from '../../api/client.js';
@@ -61,7 +61,6 @@ export function fakeBotsServer(
 ) {
   const state = { settings: { ...MAIN_SETTINGS, ...options.settings }, bots: [...(options.bots ?? [])] };
   const calls: FakeCall[] = [];
-  let settingsVersion = 0;
   vi.mocked(fetchApi).mockImplementation(async (path: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
@@ -71,11 +70,10 @@ export function fakeBotsServer(
     }
     if (path.endsWith('/settings')) {
       if (method === 'PUT') {
-        const { expectedVersion: _version, ...patch } = body ?? {};
+        const { base: _base, ...patch } = body ?? {};
         state.settings = { ...state.settings, ...patch };
-        settingsVersion += 1;
       }
-      return { settings: state.settings, settingsVersion: `version-${settingsVersion}` };
+      return { settings: state.settings };
     }
     const slotMatch = /\/bots\/(\d)$/.exec(path);
     if (slotMatch) {
@@ -116,13 +114,13 @@ export function fakeBotsServer(
 
 export function renderPanel(options: {
   isMember?: boolean;
-  onSave?: (settings: Settings) => Promise<void>;
+  onSave?: (settings: SettingsUpdate) => Promise<void>;
   keyedProviders?: readonly ApiProvider[] | undefined;
   settings?: Settings;
 } = {}) {
   const settings = options.settings ?? MAIN_SETTINGS;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  client.setQueryData(['workspaces', 'ws-1', 'settings'], { settings, settingsVersion: 'version-0' });
+  client.setQueryData(['workspaces', 'ws-1', 'settings'], { settings });
   const onSave = options.onSave ?? vi.fn(async () => undefined);
   const tree = (settings: Settings) => (
     <QueryClientProvider client={client}>

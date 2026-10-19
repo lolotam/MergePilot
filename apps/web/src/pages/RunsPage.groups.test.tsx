@@ -156,7 +156,7 @@ describe('RunsPage grouped by PR', () => {
         model: 'claude-sonnet-5-5',
         language: 'en',
         repoColors: { 'acme/web': 'violet', 'acme/backend': 'teal' },
-        expectedVersion: 'version-0',
+        base: { provider: 'anthropic', model: 'claude-sonnet-5-5', language: 'en', repoColors: { 'acme/web': 'violet' } },
       }),
     });
 

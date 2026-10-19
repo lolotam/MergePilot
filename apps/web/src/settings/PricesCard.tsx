@@ -14,7 +14,7 @@ import {
   upsertOverride,
   type PricedModel,
 } from './price-format.js';
-import { usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
+import { settingsPatch, usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
 
 const badgeClass = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap';
 const thClass = 'py-2.5 px-3 text-start font-semibold';
@@ -59,9 +59,7 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
     enabled: Boolean(workspaceId && settings),
   });
   const [editing, setEditing] = useState<string | null>(null);
-  // A refetch must not advance the version of an editor that still holds its earlier local draft.
-  const [editingVersion, setEditingVersion] = useState<string | undefined>();
-  const patch = usePatchSettings(workspaceId, 'pricesSaved', editing === null ? undefined : editingVersion);
+  const patch = usePatchSettings(workspaceId, 'pricesSaved');
   const [serverError, setServerError] = useState<string | null>(null);
 
   const models = pricesQuery.data?.models ?? [];
@@ -70,9 +68,10 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
   const colSpan = isMember ? 6 : 7;
 
   const saveOverrides = (next: NonNullable<NonNullable<typeof settings>['priceOverrides']>, onDone?: () => void) => {
+    if (!settings) return;
     setServerError(null);
     patch.mutate(
-      { priceOverrides: next },
+      settingsPatch({ ...settings, priceOverrides: current }, { priceOverrides: next }),
       {
         onSuccess: () => onDone?.(),
         onError: (err: Error) => {
@@ -168,7 +167,6 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
                           disabled={disabled}
                           onClick={() => {
                             setServerError(null);
-                            setEditingVersion(settingsQuery.data?.settingsVersion);
                             setEditing(rowKey(m, index));
                           }}
                           title={t('pricesEdit')}

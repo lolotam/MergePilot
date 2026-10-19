@@ -1,7 +1,7 @@
 import { History } from 'lucide-react';
 import type { Settings } from '@mergepilot/app/contract';
 import { useI18n } from '../i18n/context.js';
-import { usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
+import { settingsPatch, usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
 
 type Retention = Settings['runRetentionDays'];
 
@@ -45,7 +45,7 @@ export function RetentionCard({ workspaceId, isMember }: RetentionCardProps) {
             disabled={disabled}
             onChange={(e) => {
               const next: Retention = e.target.value === 'forever' ? null : (Number(e.target.value) as NonNullable<Retention>);
-              patch.mutate({ runRetentionDays: next });
+              if (settings) patch.mutate(settingsPatch(settings, { runRetentionDays: next }));
             }}
             className="mt-3 w-full sm:w-56 px-3 py-2 text-sm rounded-md border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 focus:outline-hidden focus:ring-2 focus:ring-brand-500 disabled:opacity-60"
           >

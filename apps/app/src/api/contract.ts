@@ -109,6 +109,8 @@ export const SettingsSchema = z.object({
   skillRemovedName: z.string().nullable().optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
+export const SettingsBaseSchema = z.record(z.string(), z.unknown());
+export type SettingsBase = z.infer<typeof SettingsBaseSchema>;
 
 /**
  * PUT body: provider, model and language are required; every other field is a patch. Left out
@@ -116,13 +118,13 @@ export type Settings = z.infer<typeof SettingsSchema>;
  * wipe the J2 fields; an explicit `null` clears it (fallback → [], minSeverity → medium).
  */
 export const SettingsUpdateSchema = SettingsSchema.extend({
-  /** Version of the settings the client rendered; omitted by clients without version support. */
-  expectedVersion: z.string().optional(),
+  /** Field values from the snapshot used to build this patch. */
+  base: SettingsBaseSchema.optional(),
   fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).nullable().optional(),
   minSeverity: SeveritySchema.nullable().optional(),
 });
 export type SettingsUpdate = z.infer<typeof SettingsUpdateSchema>;
-export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable(), settingsVersion: z.string() });
+export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable() });
 export type SettingsResponse = z.infer<typeof SettingsResponseSchema>;
 
 export const KeyQuotaStatusSchema = z.enum(['valid', 'invalid', 'quota-exhausted']);

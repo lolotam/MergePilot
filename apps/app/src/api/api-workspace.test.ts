@@ -119,7 +119,7 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
       headers: { cookie: signedSessionCookie('token-member', config.authSecret) },
     });
     expect(res200.statusCode).toBe(200);
-    expect(res200.json()).toEqual({ settings: null, settingsVersion: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(res200.json()).toEqual({ settings: null });
   });
 
   it('PUT /api/workspaces/:workspaceId/settings requires admin, validates schema, rejects claude-code', async () => {
@@ -150,7 +150,6 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     });
     expect(adminPut.statusCode).toBe(200);
     expect(adminPut.json()).toEqual({
-      settingsVersion: expect.stringMatching(/^[a-f0-9]{64}$/),
       settings: {
         provider: 'anthropic',
         model: 'claude-3-5-sonnet-latest',
@@ -184,7 +183,7 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     });
     expect(getRes.statusCode).toBe(200);
     expect(getRes.json().settings?.monthlyBudgetUsd).toBe(150);
-    expect(getRes.json().settingsVersion).toBe(adminPut.json().settingsVersion);
+    expect(getRes.json()).not.toHaveProperty('settingsVersion');
   });
 
   it('keys routes: GET/PUT/DELETE enforce admin, 422 on validation failure, never leak plaintext/ciphertext', async () => {

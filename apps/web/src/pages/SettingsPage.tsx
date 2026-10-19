@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router';
 import { KeyRound, ShieldAlert, Trash2, Plus } from 'lucide-react';
-import type { Settings } from '@mergepilot/app/contract';
+import type { SettingsUpdate } from '@mergepilot/app/contract';
 import type { ApiProvider, KeyProvider } from '../api/client.js';
 import {
   useMeQuery,
@@ -39,7 +39,7 @@ export function SettingsPage() {
   const { data: settingsData, isLoading: settingsLoading } = useSettingsQuery(workspaceId);
   const { data: keysData, isLoading: keysLoading } = useKeysQuery(workspaceId);
 
-  const updateSettingsMutation = useUpdateSettingsMutation(workspaceId, settingsData?.settingsVersion);
+  const updateSettingsMutation = useUpdateSettingsMutation(workspaceId);
   const saveKeyMutation = useSaveKeyMutation(workspaceId);
   const deleteKeyMutation = useDeleteKeyMutation(workspaceId);
   const defaultMethodMutation = useSetProviderDefaultMethodMutation(workspaceId);
@@ -56,7 +56,7 @@ export function SettingsPage() {
   // Jev-only key types (ADR-0015) never serve as review providers.
   const keyedProviders = savedKeys?.filter((p): p is ApiProvider => !isJudgeKeyOnly(p));
 
-  const handleSettingsSave = async (updatedSettings: Settings) => {
+  const handleSettingsSave = async (updatedSettings: SettingsUpdate) => {
     if (isMember) return;
     await updateSettingsMutation.mutateAsync(updatedSettings);
   };

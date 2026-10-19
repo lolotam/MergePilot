@@ -19,8 +19,7 @@ function renderCards(isMember: boolean, settings: Partial<Settings> | null) {
   } as unknown as ReturnType<typeof hooks.useRunReposQuery>);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], {
-    settings: settings === null ? null : { ...baseSettings, ...settings },
-    settingsVersion: 'version-0',
+    settings: settings === null ? null : { ...baseSettings, runRetentionDays: 30, repoColors: {}, ...settings },
   });
   render(
     <QueryClientProvider client={queryClient}>
@@ -54,7 +53,10 @@ describe('Settings: review history retention and repository colors', () => {
 
     fireEvent.change(select, { target: { value: 'forever' } });
     await waitFor(() => expect(putBodies()).toHaveLength(1));
-    expect(putBodies()[0]).toEqual({ provider: 'anthropic', model: 'claude-sonnet-5-5', language: 'en', runRetentionDays: null, expectedVersion: 'version-0' });
+    expect(putBodies()[0]).toEqual({
+      provider: 'anthropic', model: 'claude-sonnet-5-5', language: 'en', runRetentionDays: null,
+      base: { provider: 'anthropic', model: 'claude-sonnet-5-5', language: 'en', runRetentionDays: 30 },
+    });
     await waitFor(() => expect(select.value).toBe('forever'));
 
     fireEvent.change(select, { target: { value: '365' } });
@@ -71,7 +73,7 @@ describe('Settings: review history retention and repository colors', () => {
     fireEvent.click(within(web).getByRole('button', { name: 'Violet' }));
     await waitFor(() => expect(web.querySelector('[data-repo-color]')?.getAttribute('data-repo-color')).toBe('violet'));
     await waitFor(() => expect(saved().repoColors).toEqual({ 'acme/web': 'violet' }));
-    expect(putBodies()[0]).toHaveProperty('expectedVersion', 'version-0');
+    expect(putBodies()[0]?.base).toHaveProperty('repoColors', {});
     expect(within(web).getByRole('button', { name: 'Violet' }).getAttribute('aria-pressed')).toBe('true');
 
     fireEvent.click(within(web).getByRole('button', { name: 'Auto' }));

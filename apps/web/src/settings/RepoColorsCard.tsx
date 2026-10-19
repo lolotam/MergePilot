@@ -3,7 +3,7 @@ import { useRunReposQuery } from '../api/hooks.js';
 import { useI18n } from '../i18n/context.js';
 import { RepoChip, RepoColorSwatches } from '../runs/RepoColorPicker.js';
 import { repoColor } from '../runs/repo-colors.js';
-import { usePatchSettings, useWorkspaceSettings, withRepoColor } from './useSettingsPatch.js';
+import { settingsPatch, usePatchSettings, useWorkspaceSettings, withRepoColor } from './useSettingsPatch.js';
 
 interface RepoColorsCardProps {
   workspaceId: string;
@@ -47,7 +47,11 @@ export function RepoColorsCard({ workspaceId, isMember }: RepoColorsCardProps) {
                 repo={repo}
                 selected={colors?.[repo]}
                 disabled={disabled || patch.isPending}
-                onPick={(color) => patch.mutate({ repoColors: withRepoColor(colors, repo, color) })}
+                onPick={(color) => {
+                  if (settings) patch.mutate(settingsPatch(
+                    { ...settings, repoColors: colors ?? {} }, { repoColors: withRepoColor(colors, repo, color) },
+                  ));
+                }}
               />
             </li>
           ))}

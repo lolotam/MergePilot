@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sliders } from 'lucide-react';
-import type { FallbackEntry, Settings, Severity } from '@mergepilot/app/contract';
+import type { FallbackEntry, Settings, SettingsUpdate, Severity } from '@mergepilot/app/contract';
+import { withSettingsBase } from './settings-base.js';
 import type { BotLogo } from '../api/bots.js';
 import { ApiClientError, type ApiProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
@@ -20,7 +21,7 @@ export interface ReviewSettingsCardProps {
   settings: Settings | null | undefined;
   isLoading: boolean;
   isMember: boolean;
-  onSave: (settings: Settings) => Promise<void>;
+  onSave: (settings: SettingsUpdate) => Promise<void>;
   isSaving: boolean;
   /** Providers with a saved key; heavy and fallback models may only use these. Undefined = unknown. */
   keyedProviders?: readonly ApiProvider[] | undefined;
@@ -70,6 +71,7 @@ export function ReviewSettingsCard({
   // Refill the form only when a field it shows changed on the server: a patch to another part of
   // the settings (panel output, retention, judge…) must not discard unsaved edits here.
   const shownKey = useRef<string | null>(null);
+  const initializedSettings = useRef<Settings | null | undefined>(settings);
   useEffect(() => {
     if (!settings) return;
     const key = JSON.stringify([
@@ -79,6 +81,7 @@ export function ReviewSettingsCard({
     ]);
     if (key === shownKey.current) return;
     shownKey.current = key;
+    initializedSettings.current = structuredClone(settings);
     setBotName(settings.botName ?? MAIN_BOT_DEFAULT_NAME);
     setBotLogo(settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO);
     setProvider(settings.provider);
@@ -109,6 +112,7 @@ export function ReviewSettingsCard({
   const savedSkillId = settings?.skillId ?? null;
   useEffect(() => {
     setSkillId(savedSkillId);
+    if (initializedSettings.current) initializedSettings.current = { ...initializedSettings.current, skillId: savedSkillId };
   }, [savedSkillId, reloadCount]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -138,7 +142,7 @@ export function ReviewSettingsCard({
 
     const heavyOn = Boolean(heavy.heavyProvider && heavy.heavyModel);
     try {
-      await onSave({
+      await onSave(withSettingsBase({
         provider,
         model: model.trim(),
         language,
@@ -154,9 +158,9 @@ export function ReviewSettingsCard({
         maxFindings,
         botName: botName.trim(),
         botLogo,
-        // Always sent: saving the form confirms the skill choice and clears a deleted-skill note.
+        // Always sent: a changed skill choice clears a deleted-skill note.
         skillId,
-      });
+      }, initializedSettings.current));
     } catch (err) {
       if (err instanceof ApiClientError && err.code === 'settings_conflict') {
         shownKey.current = null;

@@ -1,9 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MeResponse, Settings } from '@mergepilot/app/contract';
+import type { MeResponse, SettingsUpdate } from '@mergepilot/app/contract';
 import { api, ApiClientError, type GetRunsParams, type KeyProvider } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
-import { settingsSaveScope } from '../settings/useSettingsPatch.js';
 
 export function useMeQuery() {
   return useQuery({
@@ -21,17 +20,13 @@ export function useSettingsQuery(workspaceId: string) {
   });
 }
 
-export function useUpdateSettingsMutation(workspaceId: string, settingsVersion: string | undefined) {
+export function useUpdateSettingsMutation(workspaceId: string) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { t } = useI18n();
 
   return useMutation({
-    scope: { id: settingsSaveScope(workspaceId) },
-    mutationFn: (settings: Settings) => {
-      if (settingsVersion === undefined) throw new Error(t('error'));
-      return api.updateSettings(workspaceId, { ...settings, expectedVersion: settingsVersion });
-    },
+    mutationFn: (settings: SettingsUpdate) => api.updateSettings(workspaceId, settings),
     onSuccess: (saved) => {
       queryClient.setQueryData(['workspaces', workspaceId, 'settings'], saved);
       showToast(t('settingsSavedSuccess'), 'success');

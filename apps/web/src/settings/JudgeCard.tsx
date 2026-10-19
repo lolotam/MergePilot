@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Gavel, Plus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import type { JudgeProvider, JudgeSettings } from '@mergepilot/app/contract';
@@ -7,7 +7,7 @@ import { useI18n } from '../i18n/context.js';
 import { JudgeTestButton } from './JudgeTestButton.js';
 import { DEFAULT_ENABLED_USES, JudgeUsesField } from './JudgeUses.js';
 import { fieldClass, labelClass, ProviderSelect } from './providers.js';
-import { usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
+import { settingsPatch, usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
 
 export const MAX_JUDGE_FALLBACKS = 3;
 type Catalog = JudgeProvidersResponse['providers'];
@@ -68,12 +68,14 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
   const catalog = useMemo(() => catalogQuery.data?.providers ?? [], [catalogQuery.data]);
   const patch = usePatchSettings(workspaceId, 'judgeSaved');
   const stored = settings?.judge ?? null;
+  const judgeBase = useRef(stored);
   const [draft, setDraft] = useState<JudgeSettings | null>(null);
 
   // The form follows the stored judge until it is edited (and again after a save).
   const storedKey = JSON.stringify(stored);
   useEffect(() => {
     setDraft(null);
+    judgeBase.current = structuredClone(stored);
   }, [storedKey]);
   // Nothing is shown until the Jev model table arrives, so every select lists only Jev models.
   const value = catalog.length === 0 ? null : (draft ?? stored ?? defaults(catalog, keyedProviders));
@@ -253,7 +255,9 @@ export function JudgeCard({ workspaceId, isMember, keyedProviders }: JudgeCardPr
             <button
               type="button"
               disabled={disabled || !draft}
-              onClick={() => patch.mutate({ judge: value })}
+              onClick={() => {
+                if (settings) patch.mutate(settingsPatch({ ...settings, judge: judgeBase.current }, { judge: value }));
+              }}
               className="px-5 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-full text-xs font-semibold transition-colors focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
             >
               {t('judgeSave')}
