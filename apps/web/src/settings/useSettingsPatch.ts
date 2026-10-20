@@ -61,8 +61,7 @@ export function usePatchSettings(workspaceId: string, successKey: I18nKey) {
       if (context?.previous) queryClient.setQueryData(key, context.previous);
       showToast(err.message || t('error'), 'error');
     },
-    onSuccess: (saved) => {
-      queryClient.setQueryData<SettingsResponse>(key, saved);
+    onSuccess: () => {
       showToast(t(successKey), 'success');
     },
     onSettled: () => {

@@ -32,11 +32,11 @@ function harness() {
 afterEach(() => vi.restoreAllMocks());
 
 describe('field baselines in dashboard saves', () => {
-  it('sends the form baseline supplied in its variables and caches the successful response', async () => {
+  it('sends the form baseline supplied in its variables and refetches instead of caching the response', async () => {
     const { queryClient, wrapper } = harness();
     vi.spyOn(client.api, 'getSettings').mockResolvedValue(initial);
     const update = vi.spyOn(client.api, 'updateSettings').mockResolvedValue(saved);
-    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
     const { result } = renderHook(() => ({
       query: useSettingsQuery('ws-1'), mutation: useUpdateSettingsMutation('ws-1'),
     }), { wrapper });
@@ -46,7 +46,9 @@ describe('field baselines in dashboard saves', () => {
     await act(async () => { await result.current.mutation.mutateAsync(body); });
     expect(update).toHaveBeenLastCalledWith('ws-1', body);
     expect(update.mock.calls[0]?.[1].base).toHaveProperty('monthlyBudgetUsd', 50);
-    expect(queryClient.getQueryData(key)).toEqual(saved);
+    // A response that may be older than a parallel save is not written over the cache.
+    expect(queryClient.getQueryData(key)).not.toEqual(saved);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: key });
   });
 
   it('shows a form conflict and refetches current settings', async () => {
