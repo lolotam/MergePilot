@@ -240,6 +240,13 @@ describe('the two-phase release', () => {
     const hold = vi.mocked(github.openHold).mock.calls[0];
     expect(hold?.[0]).toBe(`Release hold: ${NEW.slice(0, 7)} stopped between its phases`);
     expect(hold?.[1]).toContain(OLD_REF);
+
+    // A dry run on the same state only reports: no hold, no commit, no deploy.
+    const dry = setup({ head: { sha: 'r1', message: webPhase } });
+    const dryOutcome = await runRelease({ ...dry.cfg, live: false }, dry.ports);
+    expect(dryOutcome).toMatchObject({ kind: 'blocked', detail: expect.stringContaining('a live run would open a hold') });
+    expect(dry.github.openHold).not.toHaveBeenCalled();
+    expect(dry.commits).toHaveLength(0);
   });
 
   it('rolls a newer candidate back to the pair a split rollback record runs', async () => {

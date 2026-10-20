@@ -259,6 +259,8 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   // reconciles production; until the hold is closed every release stops at the hold check above.
   if (deployed.webPhase) {
     const short = (deployed.sourceSha ?? 'unknown').slice(0, 7);
+    // A dry run changes nothing, not even the hold issue: it only reports what a live run would do.
+    if (!cfg.live) return { kind: 'blocked', detail: `release ${short} stopped between its phases; a live run would open a hold` };
     const hold = await gh.openHold(
       `Release hold: ${short} stopped between its phases`,
       [
