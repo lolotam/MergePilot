@@ -218,7 +218,7 @@ describe('the two-phase release', () => {
     expect(github.openHold).toHaveBeenCalledTimes(1);
   });
 
-  it('skips a web-phase head of the same commit as already deployed', async () => {
+  it('opens a hold for a web-phase head instead of treating it as deployed', async () => {
     const webPhase = releaseMessage(
       {
         sourceCommit: NEW,
@@ -232,11 +232,14 @@ describe('the two-phase release', () => {
       },
       'web',
     );
-    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: webPhase } });
+    const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhase } });
     const outcome = await runRelease(cfg, ports);
-    expect(outcome).toMatchObject({ kind: 'skipped', detail: expect.stringContaining('already deployed') });
+    expect(outcome).toMatchObject({ kind: 'failed', hold: 77, detail: expect.stringContaining('stopped between its phases') });
     expect(commits).toHaveLength(0);
     expect(deployments).toHaveLength(0);
+    const hold = vi.mocked(github.openHold).mock.calls[0];
+    expect(hold?.[0]).toBe(`Release hold: ${NEW.slice(0, 7)} stopped between its phases`);
+    expect(hold?.[1]).toContain(OLD_REF);
   });
 
   it('rolls a newer candidate back to the pair a split rollback record runs', async () => {

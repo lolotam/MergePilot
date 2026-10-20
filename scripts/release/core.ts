@@ -283,6 +283,12 @@ export function isReleaseCommit(message: string): boolean {
   return message.startsWith(RELEASE_SUBJECT_PREFIX);
 }
 
+/** Whether a release commit is the web phase of a release: its subject ends in `(web first)`. */
+export function isWebPhaseCommit(message: string): boolean {
+  const subject = message.split('\n')[0] ?? '';
+  return subject.startsWith(RELEASE_SUBJECT_PREFIX) && subject.endsWith(' (web first)');
+}
+
 /** Automatic image rollback is safe only when no migration changed between the two releases. */
 export function rollbackEligible(changedFiles: readonly string[]): { eligible: boolean; migrations: string[] } {
   const migrations = changedFiles.filter((file) => file.startsWith('apps/app/migrations/'));

@@ -8,6 +8,7 @@ import {
   evaluateChecks,
   hasWorkerPin,
   isReleaseCommit,
+  isWebPhaseCommit,
   parseReleaseMessage,
   pinRef,
   producesImage,
@@ -246,6 +247,13 @@ describe('release commits', () => {
   it('keeps a worker commit recorded as none instead of taking the web commit', () => {
     const message = releaseMessage({ ...trailers, workerSourceCommit: null, previousWorkerSourceCommit: null }, 'web');
     expect(parseReleaseMessage(message)).toMatchObject({ workerSourceCommit: null, previousWorkerSourceCommit: null });
+  });
+
+  it('recognises only a web-phase release commit', () => {
+    expect(isWebPhaseCommit(releaseMessage(trailers, 'web'))).toBe(true);
+    expect(isWebPhaseCommit(releaseMessage(trailers, 'release'))).toBe(false);
+    expect(isWebPhaseCommit(releaseMessage(trailers, 'rollback'))).toBe(false);
+    expect(isWebPhaseCommit('fix: something (web first)')).toBe(false);
   });
 
   it('reads a message without worker trailers as a release where the worker runs the web image', () => {

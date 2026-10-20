@@ -7,6 +7,7 @@ import {
   decideRelease,
   hasWorkerPin,
   isReleaseCommit,
+  isWebPhaseCommit,
   parseReleaseMessage,
   pinRef,
   readPin,
@@ -113,6 +114,8 @@ interface Deployed {
   previousImageRef: string | null;
   previousWorkerSourceCommit: string | null;
   previousWorkerImageRef: string | null;
+  /** The head is the web phase of a release: a release stopped between its phases. */
+  webPhase: boolean;
   /** Head of the release branch, or null before its first release commit. */
   head: string | null;
 }
@@ -162,6 +165,7 @@ async function currentDeployment(cfg: ReleaseConfig, gh: GitHubPort): Promise<De
         previousImageRef: trailers.previousImageRef,
         previousWorkerSourceCommit: trailers.previousWorkerSourceCommit,
         previousWorkerImageRef: trailers.previousWorkerImageRef,
+        webPhase: isWebPhaseCommit(head.message),
         head: head.sha,
       };
     }
@@ -185,6 +189,7 @@ function deployedFromCompose(compose: string, head: string | null): Deployed {
     previousImageRef: null,
     previousWorkerSourceCommit: null,
     previousWorkerImageRef: null,
+    webPhase: false,
     head,
   };
 }
@@ -249,6 +254,22 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
 
   const deployed = await currentDeployment(cfg, gh);
   if (!deployed) return { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
+  // A web-phase head is a release stopped between its phases: its web phase may never have been
+  // deployed or verified, so it is neither a finished release nor a safe rollback target. A person
+  // reconciles production; until the hold is closed every release stops at the hold check above.
+  if (deployed.webPhase) {
+    const short = (deployed.sourceSha ?? 'unknown').slice(0, 7);
+    const hold = await gh.openHold(
+      `Release hold: ${short} stopped between its phases`,
+      [
+        `The release branch head is the web phase of \`${deployed.sourceSha ?? 'unknown'}\` (\`${deployed.imageRef}\`), and its worker phase never ran.`,
+        `The web phase may not have been deployed or verified; the worker should still run \`${deployed.workerImageRef}\`.`,
+        '',
+        'Check what production runs, then finish the release or roll it back by hand, and close this hold.',
+      ].join('\n'),
+    );
+    return { kind: 'failed', detail: `release ${short} stopped between its phases`, hold };
+  }
 
   const candidateCompose = await gh.fileAt(sha, cfg.composePath);
   const decision = decideRelease({
