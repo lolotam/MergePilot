@@ -88,8 +88,8 @@ function changedGroupFields(
  * The fields of a group change together: when one of them changed, every field of the group
  * must still hold the value the client read, so an effort is never kept for another model.
  * Without a base there is nothing to compare: the save writes every field it sends (last write
- * wins for those fields) and only a race inside the request answers 409. The dashboard always
- * sends a base.
+ * wins for those fields) and only a race inside the request answers 409. The dashboard does not
+ * send a base yet, so its saves keep these semantics until it does.
  */
 export function reconcileSettingsPatch(
   submitted: Omit<SettingsUpdate, 'base'>,

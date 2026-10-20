@@ -117,8 +117,8 @@ export type SettingsBase = z.infer<typeof SettingsBaseSchema>;
  * (undefined) keeps the stored value, so an older client that only sends the budget does not
  * wipe the J2 fields; an explicit `null` clears it (fallback → [], minSeverity → medium).
  * Without `base` there is nothing to compare: the save writes every field it sends (last write
- * wins for those fields) and only a race inside the request answers 409. The dashboard always
- * sends `base`.
+ * wins for those fields) and only a race inside the request answers 409. The dashboard does not
+ * send `base` yet, so its saves keep these semantics until it does.
  */
 export const SettingsUpdateSchema = SettingsSchema.extend({
   /** Field values from the snapshot used to build this patch. */
