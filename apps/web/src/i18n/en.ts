@@ -265,7 +265,7 @@ export const en: I18nDictionary = {
   keySecretPlaceholder: 'sk-...',
   keySecretHelp: 'The key will never be shown again after saving.',
   minimaxCodingPlanKeyHint:
-    'This doesn\'t look like a MiniMax Coding Plan key. Coding Plan keys start with sk-cp-. A pay-as-you-go key here fails with "insufficient balance".',
+    'This doesn\'t look like a MiniMax Coding Plan key. Coding Plan keys start with sk-cp-. A pay-as-you-go key here does not use your plan: it is billed from the account balance and fails with "insufficient balance" when that is empty.',
   minimaxPayAsYouGoKeyHint:
     'This looks like a MiniMax Coding Plan key (sk-cp-). Add it under "MiniMax Coding Plan" so reviews use your plan.',
   keySecretMinLength: 'Key must be at least 8 characters',
