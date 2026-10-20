@@ -249,15 +249,6 @@ export function releaseMessage(t: ReleaseTrailers, kind: ReleaseKind): string {
   ].join('\n');
 }
 
-/**
- * Whether a commit message is the web phase of a release: its subject names the web phase. A
- * rollback record may pin two different images too, so only the subject tells the two apart.
- */
-export function isWebPhaseCommit(message: string): boolean {
-  const subject = message.split('\n')[0] ?? '';
-  return subject.startsWith(RELEASE_SUBJECT_PREFIX) && subject.endsWith(' (web first)');
-}
-
 /** Reads the trailers of a release commit; null when the message is not one. */
 export function parseReleaseMessage(message: string): ReleaseTrailers | null {
   if (!message.startsWith(RELEASE_SUBJECT_PREFIX)) return null;

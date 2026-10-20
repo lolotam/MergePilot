@@ -51,6 +51,8 @@ interface Options {
   fail?: 'web' | 'worker';
   /** A line the candidate's compose file changed beyond the image pins. */
   changedLine?: string;
+  /** Makes the worker-phase release commit fail, as a moved release branch would. */
+  failWorkerCommit?: boolean;
 }
 
 function setup(opts: Options = {}) {
@@ -105,6 +107,8 @@ function setup(opts: Options = {}) {
     openHold: vi.fn(async () => 77),
     writeReleaseCommit: vi.fn(async (input) => {
       if ((branch.head?.sha ?? null) !== input.expectedHead) throw new Error('branch moved');
+      // The second commit of a two-phase release is the worker phase.
+      if (opts.failWorkerCommit && commits.length === 1) throw new Error('production moved');
       commits.push(input);
       const sha = `r${commits.length + 2}`;
       branch.head = { sha, message: input.message };
@@ -196,97 +200,39 @@ describe('the two-phase release', () => {
     expect(deployments.map((d) => d.worker)).toEqual([OLD_REF, NEW_REF, OLD_REF]);
   });
 
-  it('resumes an incomplete record of the same commit with the web phase again and then the worker phase', async () => {
-    const webPhase = releaseMessage(
-      {
-        sourceCommit: NEW,
-        imageRef: NEW_REF,
-        workerSourceCommit: OLD,
-        workerImageRef: OLD_REF,
-        previousSourceCommit: OLD,
-        previousImageRef: OLD_REF,
-        previousWorkerSourceCommit: OLD,
-        previousWorkerImageRef: OLD_REF,
-      },
-      'web',
-    );
-    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: webPhase } });
+  it('opens a hold and rolls nothing back when the worker-phase commit cannot be written', async () => {
+    const { cfg, ports, commits, deployments, github } = setup({ failWorkerCommit: true });
     const outcome = await runRelease(cfg, ports);
-    expect(outcome).toMatchObject({ kind: 'deployed' });
-    // One new commit only: the worker phase. The web phase is deployed again, not written again.
+    expect(outcome).toMatchObject({ kind: 'failed', hold: 77, detail: expect.stringContaining('production moved') });
+    // The web phase ran and verified; the worker phase never deployed.
+    expect(deployments).toEqual([{ title: `release ${NEW.slice(0, 7)} (web first)`, web: NEW_REF, worker: OLD_REF }]);
+    // No rollback commit: the web phase is healthy, only the worker is behind.
     expect(commits).toHaveLength(1);
-    expect(commits[0]?.message.split('\n')[0]).toBe(`chore(release): deploy ${NEW.slice(0, 7)}`);
-    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${NEW_REF}`);
-    // Two deploys: the recorded web phase again (the worker stays on the old image), then the worker.
-    expect(deployments).toEqual([
-      { title: `release ${NEW.slice(0, 7)} (web first, resumed)`, web: NEW_REF, worker: OLD_REF },
-      { title: `release ${NEW.slice(0, 7)} (worker)`, web: NEW_REF, worker: NEW_REF },
-    ]);
-  });
-
-  it('resumes with the recorded digest even when the registry now has a rebuilt one', async () => {
-    const webPhase = releaseMessage(
-      {
-        sourceCommit: NEW,
-        imageRef: NEW_REF,
-        workerSourceCommit: OLD,
-        workerImageRef: OLD_REF,
-        previousSourceCommit: OLD,
-        previousImageRef: OLD_REF,
-        previousWorkerSourceCommit: OLD,
-        previousWorkerImageRef: OLD_REF,
-      },
-      'web',
-    );
-    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: webPhase } });
-    ports.registry.resolve = vi.fn(async (_repo: string, sha: string) => ({ digest: `sha256:${'b'.repeat(64)}`, revision: sha }));
-    const outcome = await runRelease(cfg, ports);
-    expect(outcome).toMatchObject({ kind: 'deployed' });
-    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${NEW_REF}`);
-    expect(deployments.map((d) => d.web)).toEqual([NEW_REF, NEW_REF]);
-  });
-
-  it('rolls back to the recorded previous release when the resumed web phase fails to verify', async () => {
-    const webPhase = releaseMessage(
-      {
-        sourceCommit: NEW,
-        imageRef: NEW_REF,
-        workerSourceCommit: OLD,
-        workerImageRef: OLD_REF,
-        previousSourceCommit: OLD,
-        previousImageRef: OLD_REF,
-        previousWorkerSourceCommit: OLD,
-        previousWorkerImageRef: OLD_REF,
-      },
-      'web',
-    );
-    const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhase }, fail: 'web' });
-    const outcome = await runRelease(cfg, ports);
-    expect(outcome).toMatchObject({ kind: 'rolled-back', hold: 77 });
-    // The rollback commit is the only one: the worker phase never runs.
-    expect(commits).toHaveLength(1);
-    expect(commits[0]?.message.split('\n')[0]).toBe(`chore(release): deploy ${OLD.slice(0, 7)} (rollback)`);
-    expect(commits[0]?.content).toContain(`x-image: &image ${OLD_REF}`);
-    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${OLD_REF}`);
-    expect(deployments[1]).toEqual({ title: `rollback to ${OLD.slice(0, 7)}`, web: OLD_REF, worker: OLD_REF });
+    expect(commits[0]?.message.split('\n')[0]).toBe(`chore(release): deploy ${NEW.slice(0, 7)} (web first)`);
+    // The hold tells the person what runs and what is missing.
+    const hold = vi.mocked(github.openHold).mock.calls[0];
+    expect(hold?.[0]).toBe(`Release hold: ${NEW.slice(0, 7)} stopped after the web phase`);
+    expect(hold?.[1]).toContain('is deployed and verified');
+    expect(hold?.[1]).toContain(OLD_REF);
+    expect(hold?.[1]).toContain('production moved');
     expect(github.openHold).toHaveBeenCalledTimes(1);
   });
 
-  it('skips a split rollback record of the same commit as already deployed', async () => {
-    const rollback = releaseMessage(
+  it('skips a web-phase head of the same commit as already deployed', async () => {
+    const webPhase = releaseMessage(
       {
         sourceCommit: NEW,
         imageRef: NEW_REF,
         workerSourceCommit: OLD,
         workerImageRef: OLD_REF,
-        previousSourceCommit: NEW,
-        previousImageRef: NEW_REF,
+        previousSourceCommit: OLD,
+        previousImageRef: OLD_REF,
         previousWorkerSourceCommit: OLD,
         previousWorkerImageRef: OLD_REF,
       },
-      'rollback',
+      'web',
     );
-    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: rollback } });
+    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: webPhase } });
     const outcome = await runRelease(cfg, ports);
     expect(outcome).toMatchObject({ kind: 'skipped', detail: expect.stringContaining('already deployed') });
     expect(commits).toHaveLength(0);

@@ -8,7 +8,6 @@ import {
   evaluateChecks,
   hasWorkerPin,
   isReleaseCommit,
-  isWebPhaseCommit,
   parseReleaseMessage,
   pinRef,
   producesImage,
@@ -274,13 +273,6 @@ describe('release commits', () => {
     expect(isReleaseCommit(releaseMessage(trailers, 'release'))).toBe(true);
     expect(isReleaseCommit('fix(app): something (#131)')).toBe(false);
     expect(parseReleaseMessage('fix(app): something')).toBeNull();
-  });
-
-  it('tells a web-phase commit from a full release and from a rollback', () => {
-    expect(isWebPhaseCommit(releaseMessage(trailers, 'web'))).toBe(true);
-    expect(isWebPhaseCommit(releaseMessage(trailers, 'release'))).toBe(false);
-    expect(isWebPhaseCommit(releaseMessage(trailers, 'rollback'))).toBe(false);
-    expect(isWebPhaseCommit('fix(app): something (#131)')).toBe(false);
   });
 });
 

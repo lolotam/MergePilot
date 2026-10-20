@@ -7,7 +7,6 @@ import {
   decideRelease,
   hasWorkerPin,
   isReleaseCommit,
-  isWebPhaseCommit,
   parseReleaseMessage,
   pinRef,
   readPin,
@@ -114,8 +113,6 @@ interface Deployed {
   previousImageRef: string | null;
   previousWorkerSourceCommit: string | null;
   previousWorkerImageRef: string | null;
-  /** The head is the web phase of a release: a release stopped between its phases. */
-  webPhase: boolean;
   /** Head of the release branch, or null before its first release commit. */
   head: string | null;
 }
@@ -165,7 +162,6 @@ async function currentDeployment(cfg: ReleaseConfig, gh: GitHubPort): Promise<De
         previousImageRef: trailers.previousImageRef,
         previousWorkerSourceCommit: trailers.previousWorkerSourceCommit,
         previousWorkerImageRef: trailers.previousWorkerImageRef,
-        webPhase: isWebPhaseCommit(head.message),
         head: head.sha,
       };
     }
@@ -189,7 +185,6 @@ function deployedFromCompose(compose: string, head: string | null): Deployed {
     previousImageRef: null,
     previousWorkerSourceCommit: null,
     previousWorkerImageRef: null,
-    webPhase: false,
     head,
   };
 }
@@ -256,21 +251,14 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   if (!deployed) return { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
 
   const candidateCompose = await gh.fileAt(sha, cfg.composePath);
-  // A release stopped between its phases left a web-phase commit on the branch: the next run for
-  // the same commit deploys and verifies that web phase again, then runs the worker phase. A
-  // rollback record may pin two images too, but it is an ordinary deployed state: what it pins
-  // runs and is the rollback target of the next release.
-  const resume = deployed.webPhase && deployed.sourceSha === sha;
-  if (!resume) {
-    const decision = decideRelease({
-      sourceSha: sha,
-      deployedSha: deployed.sourceSha,
-      onMain: true,
-      sourceIsAncestorOfDeployed: deployed.sourceSha !== null && (await gh.isAncestor(sha, deployed.sourceSha)),
-      deployedIsAncestorOfSource: deployed.sourceSha !== null && (await gh.isAncestor(deployed.sourceSha, sha)),
-    });
-    if (decision.kind !== 'deploy') return { kind: decision.kind === 'skip' ? 'skipped' : 'blocked', detail: decision.reason };
-  }
+  const decision = decideRelease({
+    sourceSha: sha,
+    deployedSha: deployed.sourceSha,
+    onMain: true,
+    sourceIsAncestorOfDeployed: deployed.sourceSha !== null && (await gh.isAncestor(sha, deployed.sourceSha)),
+    deployedIsAncestorOfSource: deployed.sourceSha !== null && (await gh.isAncestor(deployed.sourceSha, sha)),
+  });
+  if (decision.kind !== 'deploy') return { kind: decision.kind === 'skip' ? 'skipped' : 'blocked', detail: decision.reason };
 
   // The compose file of what runs now: the release branch head, or main before the branch exists.
   const deployedCompose = await gh.fileAt(deployed.head ? deployed.head : 'main', cfg.composePath);
@@ -281,21 +269,22 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   // change beyond the pins may recreate the worker in that phase too: its drain then keeps the
   // new web from starting, the outage the two phases exist to prevent.
   const pinsOnly = sameExceptPins(candidateCompose, deployedCompose);
-  const twoPhases = resume || (workerPinned && pinsOnly);
+  const twoPhases = workerPinned && pinsOnly;
 
   const repository = readPin(candidateCompose).repository;
   const image = await ports.registry.resolve(repository, sha);
   if (image.revision !== sha) {
     return { kind: 'blocked', detail: `image ${repository}:${sha} has revision ${image.revision ?? 'missing'}, not ${sha}` };
   }
-  // A resume finishes the release that is already recorded: the branch head pins that digest, and a
-  // rebuild of the same commit since then may have pushed a new one, so the record wins.
-  const imageRef = resume ? deployed.imageRef : pinRef(repository, sha, image.digest);
+  const imageRef = pinRef(repository, sha, image.digest);
 
   // The release before this candidate: the rollback target and the "previous" trailers.
-  const previous: ReleaseTarget = resume
-    ? { sourceSha: deployed.previousSourceCommit, imageRef: deployed.previousImageRef, workerSourceSha: deployed.previousWorkerSourceCommit, workerImageRef: deployed.previousWorkerImageRef }
-    : { sourceSha: deployed.sourceSha, imageRef: deployed.imageRef, workerSourceSha: deployed.workerSourceSha, workerImageRef: deployed.workerImageRef };
+  const previous: ReleaseTarget = {
+    sourceSha: deployed.sourceSha,
+    imageRef: deployed.imageRef,
+    workerSourceSha: deployed.workerSourceSha,
+    workerImageRef: deployed.workerImageRef,
+  };
 
   // The release commit of one phase: the pinned compose file and the record of the release.
   const commit = (input: { parentSha: string; expectedHead: string | null; content: string; trailers: ReleaseTrailers; kind: ReleaseKind }) =>
@@ -329,42 +318,45 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   }
   if (!ports.dokploy) return { kind: 'blocked', detail: 'live mode needs DOKPLOY_URL, DOKPLOY_API_KEY and DOKPLOY_APP_NAME' };
 
-  let head = deployed.head;
-  if (resume) {
-    // The web-phase commit is already the branch head and Dokploy deploys the branch head, so the
-    // web phase is deployed again and verified: the worker phase must never run on top of a web
-    // phase that never reached production.
-    const resumeCommit = deployed.head;
-    if (!resumeCommit) return { kind: 'blocked', detail: `the release branch ${cfg.releaseBranch} has no head to resume the web phase from` };
-    log(`plan: resuming the web phase of ${sha.slice(0, 7)} (the recorded web phase)`);
-    const problems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef: deployed.workerImageRef, sourceSha: commitOf(deployed) } }, `release ${sha.slice(0, 7)} (web first, resumed)`);
-    if (problems.length > 0) {
-      return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, workerImageRef: deployed.workerImageRef, workerSourceSha: deployed.workerSourceSha, releaseCommit: resumeCommit, problems, previous });
-    }
-  } else {
-    const webCommit = await commit({
-      parentSha: sha,
-      expectedHead: deployed.head,
-      content: rewritePins(candidateCompose, { image: imageRef, workerImage: deployed.workerImageRef }),
-      trailers: trailersOf({ sourceCommit: sha, imageRef, workerSourceCommit: deployed.workerSourceSha, workerImageRef: deployed.workerImageRef }, previous),
-      kind: 'web',
-    });
-    log(`release commit ${webCommit} on ${cfg.releaseBranch} (web phase)`);
-    const problems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef: deployed.workerImageRef, sourceSha: commitOf(deployed) } }, `release ${sha.slice(0, 7)} (web first)`);
-    if (problems.length > 0) {
-      return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, workerImageRef: deployed.workerImageRef, workerSourceSha: deployed.workerSourceSha, releaseCommit: webCommit, problems, previous });
-    }
-    head = webCommit;
+  const webCommit = await commit({
+    parentSha: sha,
+    expectedHead: deployed.head,
+    content: rewritePins(candidateCompose, { image: imageRef, workerImage: deployed.workerImageRef }),
+    trailers: trailersOf({ sourceCommit: sha, imageRef, workerSourceCommit: deployed.workerSourceSha, workerImageRef: deployed.workerImageRef }, previous),
+    kind: 'web',
+  });
+  log(`release commit ${webCommit} on ${cfg.releaseBranch} (web phase)`);
+  const webProblems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef: deployed.workerImageRef, sourceSha: commitOf(deployed) } }, `release ${sha.slice(0, 7)} (web first)`);
+  if (webProblems.length > 0) {
+    return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, workerImageRef: deployed.workerImageRef, workerSourceSha: deployed.workerSourceSha, releaseCommit: webCommit, problems: webProblems, previous });
   }
 
   // Worker phase: the new image on the worker too, so only the worker is recreated and drains.
-  const workerCommit = await commit({
-    parentSha: sha,
-    expectedHead: head,
-    content: rewritePins(candidateCompose, { image: imageRef, workerImage: imageRef }),
-    trailers: trailersOf({ sourceCommit: sha, imageRef, workerSourceCommit: sha, workerImageRef: imageRef }, previous),
-    kind: 'release',
-  });
+  let workerCommit: string;
+  try {
+    workerCommit = await commit({
+      parentSha: sha,
+      expectedHead: webCommit,
+      content: rewritePins(candidateCompose, { image: imageRef, workerImage: imageRef }),
+      trailers: trailersOf({ sourceCommit: sha, imageRef, workerSourceCommit: sha, workerImageRef: imageRef }, previous),
+      kind: 'release',
+    });
+  } catch (err) {
+    // The web phase is deployed and verified, so nothing is rolled back: the record names the
+    // web phase, the worker still runs the old image, and a person finishes or rolls back.
+    const message = err instanceof Error ? err.message : String(err);
+    const hold = await ports.github.openHold(
+      `Release hold: ${sha.slice(0, 7)} stopped after the web phase`,
+      [
+        `The web phase of \`${sha}\` is deployed and verified.`,
+        `The worker still runs \`${deployed.workerImageRef}\`.`,
+        `The worker-phase release commit could not be written: ${message}`,
+        '',
+        'A person must finish the release or roll it back by hand.',
+      ].join('\n'),
+    );
+    return { kind: 'failed', detail: `the worker-phase commit could not be written: ${message}`, hold };
+  }
   log(`release commit ${workerCommit} on ${cfg.releaseBranch} (worker phase)`);
   const problems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef, sourceSha: sha } }, `release ${sha.slice(0, 7)} (worker)`);
   if (problems.length === 0) return { kind: 'deployed', detail: `${imageRef} is running and healthy` };
