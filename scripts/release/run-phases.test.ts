@@ -224,6 +224,28 @@ describe('the two-phase release', () => {
     ]);
   });
 
+  it('resumes with the recorded digest even when the registry now has a rebuilt one', async () => {
+    const webPhase = releaseMessage(
+      {
+        sourceCommit: NEW,
+        imageRef: NEW_REF,
+        workerSourceCommit: OLD,
+        workerImageRef: OLD_REF,
+        previousSourceCommit: OLD,
+        previousImageRef: OLD_REF,
+        previousWorkerSourceCommit: OLD,
+        previousWorkerImageRef: OLD_REF,
+      },
+      'web',
+    );
+    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: webPhase } });
+    ports.registry.resolve = vi.fn(async (_repo: string, sha: string) => ({ digest: `sha256:${'b'.repeat(64)}`, revision: sha }));
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'deployed' });
+    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${NEW_REF}`);
+    expect(deployments.map((d) => d.web)).toEqual([NEW_REF, NEW_REF]);
+  });
+
   it('rolls back to the recorded previous release when the resumed web phase fails to verify', async () => {
     const webPhase = releaseMessage(
       {

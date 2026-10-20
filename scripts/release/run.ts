@@ -284,7 +284,9 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   if (image.revision !== sha) {
     return { kind: 'blocked', detail: `image ${repository}:${sha} has revision ${image.revision ?? 'missing'}, not ${sha}` };
   }
-  const imageRef = pinRef(repository, sha, image.digest);
+  // A resume finishes the release that is already recorded: the branch head pins that digest, and a
+  // rebuild of the same commit since then may have pushed a new one, so the record wins.
+  const imageRef = resume ? deployed.imageRef : pinRef(repository, sha, image.digest);
 
   // The release before this candidate: the rollback target and the "previous" trailers.
   const previous: ReleaseTarget = resume
