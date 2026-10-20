@@ -168,19 +168,23 @@ describe('OpenAICompatibleAdapter', () => {
     expect(result.text).toBe('{"summary":"ok","body":"the diff writes <think>x</think>"}');
   });
 
-  it('fails the call when the think block is never closed', async () => {
+  it('keeps the reported usage when the think block is never closed, and leaves the empty answer to the review', async () => {
     const { fetch } = mockFetch(
       sseResponse([
         { choices: [{ delta: { content: '<think>the model kept thinking' } }] },
         { choices: [{ delta: { content: ' and never stopped' }, finish_reason: 'stop' }] },
+        { choices: [], usage: { prompt_tokens: 12, completion_tokens: 340 } },
         '[DONE]',
       ]),
     );
     const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
-    const failure = await failureOf(collectText(adapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' })));
+    const result = await collectText(adapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' }));
 
-    expect(failure.code).toBe('UNKNOWN');
-    expect(failure.message).toBe('MiniMax left an unterminated <think> block');
+    // The thinking is not the answer, so no text is yielded; the call does not fail, so the
+    // usage MiniMax reported and billed stays in the accounting, and the review's own
+    // empty-answer recovery (one retry with thinking off) gets its chance.
+    expect(result).toMatchObject({ text: '', finishReason: 'stop' });
+    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 340, cacheReadTokens: 0, cacheWriteTokens: 0 });
   });
 
   it('reports a dropped connection as a network failure, even while the model is still thinking', async () => {

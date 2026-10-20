@@ -189138,13 +189138,6 @@ ${instruction}`;
       });
     }
     const tail = think?.flush();
-    if (tail?.unterminated && finish !== "max-tokens") {
-      throw new LlmFailure({
-        code: "UNKNOWN",
-        provider: this.provider,
-        message: "MiniMax left an unterminated <think> block"
-      });
-    }
     if (tail && !tail.unterminated && tail.text)
       yield { type: "text-delta", text: tail.text };
     yield { type: "usage", usage: usage ?? { ...ZERO_USAGE } };

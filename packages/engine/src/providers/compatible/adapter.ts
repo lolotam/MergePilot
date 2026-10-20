@@ -229,19 +229,10 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
     }
 
     const tail = think?.flush();
-    // A stream that ran out of output tokens inside the thinking block is a truncation, not a
-    // broken answer: the dropped thinking is not the answer, so nothing is yielded, and the
-    // `max-tokens` finish is what the review's own recovery (more room, thinking off) reacts to.
-    if (tail?.unterminated && finish !== 'max-tokens') {
-      // The thinking never closed, so the answer is not the text the model meant to give.
-      // The call fails instead of returning an empty answer, so the retry rules see it.
-      throw new LlmFailure({
-        code: 'UNKNOWN',
-        provider: this.provider,
-        message: 'MiniMax left an unterminated <think> block',
-      });
-    }
-    // Nothing comes out of an unterminated block: the thinking is not the answer.
+    // Nothing comes out of an unterminated think block: the thinking is not the answer. The
+    // stream is not failed for it, so the usage the provider reported and billed stays in the
+    // accounting, and the review's own empty-answer recovery (one retry with thinking off)
+    // gets its chance with the answer that is missing.
     if (tail && !tail.unterminated && tail.text) yield { type: 'text-delta', text: tail.text };
 
     yield { type: 'usage', usage: usage ?? { ...ZERO_USAGE } };
