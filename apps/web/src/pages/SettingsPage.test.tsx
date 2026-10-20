@@ -151,7 +151,6 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     const user = userEvent.setup();
     setupMocks({ role: 'admin' });
     renderComponent();
-    expect(hooks.useUpdateSettingsMutation).toHaveBeenCalledWith('ws-1');
 
     // Switch to manual model entry to test manual clear and validation
     const manualBtn = screen.getByRole('button', { name: /إدخال يدوي/i });

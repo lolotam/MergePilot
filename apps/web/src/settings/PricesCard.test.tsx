@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PricesResponse, Settings } from '@mergepilot/app/contract';
 import * as client from '../api/client.js';
@@ -81,8 +81,7 @@ function renderCard(options: { isMember?: boolean; putError?: Error; pricesData?
     if (options.settingsError && !init?.method) throw options.settingsError;
     if (init?.method === 'PUT') {
       if (options.putError) throw options.putError;
-      const { base: _base, ...patch } = JSON.parse(String(init.body));
-      return { settings: { ...settings, ...patch } };
+      return { settings: { ...settings, ...(JSON.parse(String(init.body)) as object) } };
     }
     return { settings };
   });
@@ -95,7 +94,6 @@ function renderCard(options: { isMember?: boolean; putError?: Error; pricesData?
       </I18nProvider>
     </QueryClientProvider>,
   );
-  return { queryClient };
 }
 
 const putBodies = () =>
@@ -115,39 +113,6 @@ async function rowOf(model: string): Promise<HTMLElement> {
 describe('PricesCard (model prices)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('closes a stale price draft on a settings conflict and shows the server message', async () => {
-    const message = 'Settings changed while saving; reload and try again';
-    renderCard({ putError: new client.ApiClientError(message, 'settings_conflict', 409) });
-    const main = await rowOf('claude-sonnet-5-5');
-    fireEvent.click(within(main).getByRole('button', { name: 'Edit price' }));
-    fireEvent.change(screen.getByLabelText('Input $/1M'), { target: { value: '2' } });
-    fireEvent.change(screen.getByLabelText('Output $/1M'), { target: { value: '8' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).toBeNull());
-    expect(screen.getByText(message)).toBeDefined();
-  });
-
-  it('bases a price save on the exact current list, even after a refetch and a pencil re-click', async () => {
-    const { queryClient } = renderCard();
-    fireEvent.click(within(await rowOf('claude-sonnet-5-5')).getByRole('button', { name: 'Edit price' }));
-    fireEvent.change(screen.getByLabelText('Input $/1M'), { target: { value: '2' } });
-    fireEvent.change(screen.getByLabelText('Output $/1M'), { target: { value: '8' } });
-    const latest = [deepseekOverride, { ...unusedOverride, inputPerMTok: 99 }];
-    act(() => {
-      queryClient.setQueryData(['workspaces', 'ws-1', 'settings'], {
-        settings: { ...baseSettings, priceOverrides: latest },
-      });
-    });
-    fireEvent.click(within(await rowOf('claude-sonnet-5-5')).getByRole('button', { name: 'Edit price' }));
-    expect((screen.getByLabelText('Input $/1M') as HTMLInputElement).value).toBe('2');
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(putBodies()).toHaveLength(1));
-    expect(putBodies()[0]?.base).toHaveProperty('priceOverrides', latest);
-    expect(putBodies()[0]?.priceOverrides).toMatchObject([...latest, {
-      provider: 'anthropic', model: 'claude-sonnet-5-5', inputPerMTok: 2, outputPerMTok: 8,
-    }]);
   });
 
   it('opens one editor when the same model is listed twice (main and heavy)', async () => {
@@ -212,9 +177,6 @@ describe('PricesCard (model prices)', () => {
 
     await waitFor(() => expect(putBodies()).toHaveLength(1));
     expect(putBodies()[0]).toEqual({
-      base: {
-        provider: 'anthropic', model: 'claude-sonnet-5-5', language: 'en', priceOverrides: [deepseekOverride, unusedOverride],
-      },
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',
       language: 'en',

@@ -126,10 +126,7 @@ export function fakeSettingsServer(fetchApi: (path: string, init?: RequestInit) 
   let state: Settings = { ...baseSettings, ...initial };
   vi.mocked(fetchApi).mockImplementation(async (path: string, init?: RequestInit) => {
     if (!path.endsWith('/settings')) return {};
-    if (init?.method === 'PUT') {
-      const { base: _base, ...patch } = JSON.parse(String(init.body));
-      state = { ...state, ...patch };
-    }
+    if (init?.method === 'PUT') state = { ...state, ...(JSON.parse(String(init.body)) as Partial<Settings>) };
     return { settings: state };
   });
   return () => state;

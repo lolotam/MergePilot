@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Pencil, RotateCcw, Tags } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiClientError, fetchApi, type PricesResponse } from '../api/client.js';
+import { fetchApi, type PricesResponse } from '../api/client.js';
 import { formatDateTime } from '../admin/format.js';
 import { useI18n } from '../i18n/context.js';
 import { PriceEditRow, type PriceFields } from './PriceEditRow.js';
@@ -14,7 +14,7 @@ import {
   upsertOverride,
   type PricedModel,
 } from './price-format.js';
-import { settingsPatch, usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
+import { usePatchSettings, useWorkspaceSettings } from './useSettingsPatch.js';
 
 const badgeClass = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap';
 const thClass = 'py-2.5 px-3 text-start font-semibold';
@@ -58,8 +58,8 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
     queryFn: () => fetchApi<PricesResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/prices`),
     enabled: Boolean(workspaceId && settings),
   });
-  const [editing, setEditing] = useState<string | null>(null);
   const patch = usePatchSettings(workspaceId, 'pricesSaved');
+  const [editing, setEditing] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const models = pricesQuery.data?.models ?? [];
@@ -68,16 +68,12 @@ export function PricesCard({ workspaceId, isMember }: PricesCardProps) {
   const colSpan = isMember ? 6 : 7;
 
   const saveOverrides = (next: NonNullable<NonNullable<typeof settings>['priceOverrides']>, onDone?: () => void) => {
-    if (!settings) return;
     setServerError(null);
     patch.mutate(
-      settingsPatch({ ...settings, priceOverrides: current }, { priceOverrides: next }),
+      { priceOverrides: next },
       {
         onSuccess: () => onDone?.(),
-        onError: (err: Error) => {
-          setServerError(err.message || t('error'));
-          if (err instanceof ApiClientError && err.code === 'settings_conflict') setEditing(null);
-        },
+        onError: (err: Error) => setServerError(err.message || t('error')),
         onSettled: () => void queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] }),
       },
     );

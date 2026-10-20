@@ -13,7 +13,7 @@ import { RepoLegend } from '../runs/RepoLegend.js';
 import { RunsBulkDelete } from '../runs/RunsBulkDelete.js';
 import { RunsTable } from '../runs/RunsTable.js';
 import { useRetryRunMutation, useRetryFailedRunsMutation } from '../runs/useRunRetry.js';
-import { settingsPatch, usePatchSettings, useWorkspaceSettings, withRepoColor } from '../settings/useSettingsPatch.js';
+import { usePatchSettings, useWorkspaceSettings, withRepoColor } from '../settings/useSettingsPatch.js';
 
 const PAGE_SIZE = 25;
 
@@ -243,12 +243,7 @@ export function RunsPage() {
         repos={pageRepos}
         overrides={settings?.repoColors}
         canEdit={canDelete && Boolean(settings)}
-        onPick={(repo, color) => {
-          if (settings) patchSettings.mutate(settingsPatch(
-            { ...settings, repoColors: settings.repoColors ?? {} },
-            { repoColors: withRepoColor(settings.repoColors, repo, color) },
-          ));
-        }}
+        onPick={(repo, color) => patchSettings.mutate({ repoColors: withRepoColor(settings?.repoColors, repo, color) })}
       />
 
       {/* Runs Table */}

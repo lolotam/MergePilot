@@ -173,10 +173,6 @@ describe('Reviewer panel settings (bot tabs)', () => {
     await user.click(screen.getByRole('radio', { name: 'Star' }));
     await user.click(screen.getByRole('button', { name: 'Save settings' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ botName: 'Captain', botLogo: 'star', model: 'main/model' }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ base: expect.objectContaining({
-      provider: MAIN_SETTINGS.provider, model: MAIN_SETTINGS.model, language: MAIN_SETTINGS.language,
-      botName: MAIN_SETTINGS.botName, botLogo: MAIN_SETTINGS.botLogo,
-    }) }));
   });
 
   it('the main tab shows a taken name inline', async () => {
@@ -200,16 +196,6 @@ describe('Reviewer panel settings (bot tabs)', () => {
     expect(((await screen.findByRole('textbox', { name: 'Bot name' })) as HTMLInputElement).value).toBe('Draft name');
   });
 
-  it('discards an unsaved main bot draft after a conflict even if the shown server fields stayed the same', async () => {
-    fakeBotsServer();
-    renderPanel({ onSave: async () => { throw new ApiClientError('conflict', 'settings_conflict', 409); } });
-    const name = (await screen.findByRole('textbox', { name: 'Bot name' })) as HTMLInputElement;
-    await user.clear(name);
-    await user.type(name, 'Stale draft');
-    await user.click(screen.getByRole('button', { name: 'Save settings' }));
-    await waitFor(() => expect(name.value).toBe(MAIN_SETTINGS.botName));
-  });
-
   it('panel output: the mode radio and the minimum agreement save; agreement shows in consensus only', async () => {
     const server = fakeBotsServer();
     renderPanel();
@@ -221,10 +207,7 @@ describe('Reviewer panel settings (bot tabs)', () => {
     expect(server.writes()[0]).toMatchObject({
       method: 'PUT',
       path: '/api/workspaces/ws-1/settings',
-      body: {
-        provider: MAIN_SETTINGS.provider, model: MAIN_SETTINGS.model, language: 'en', panelMode: 'consensus',
-        base: { provider: MAIN_SETTINGS.provider, model: MAIN_SETTINGS.model, language: 'en', panelMode: 'separate' },
-      },
+      body: { provider: MAIN_SETTINGS.provider, model: MAIN_SETTINGS.model, language: 'en', panelMode: 'consensus' },
     });
     expect(screen.getByText('Critical and high findings are always kept')).toBeDefined();
 
@@ -232,7 +215,7 @@ describe('Reviewer panel settings (bot tabs)', () => {
     await waitFor(() => expect((agreement as HTMLSelectElement).disabled).toBe(false));
     await user.selectOptions(agreement, '3');
     await waitFor(() => expect(server.writes()).toHaveLength(2));
-    expect(server.writes()[1]?.body).toMatchObject({ panelMinAgreement: 3, base: { panelMinAgreement: 1 } });
+    expect(server.writes()[1]?.body).toMatchObject({ panelMinAgreement: 3 });
 
     await waitFor(() => expect((screen.getByRole('radio', { name: 'Each bot posts its own review' }) as HTMLInputElement).disabled).toBe(false));
     await user.click(screen.getByRole('radio', { name: 'Each bot posts its own review' }));

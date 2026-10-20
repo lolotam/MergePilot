@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import { vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { Settings, SettingsUpdate } from '@mergepilot/app/contract';
+import type { Settings } from '@mergepilot/app/contract';
 import type { BotsResponse, ReviewerBotDto } from '../../api/bots.js';
 import type { SkillSummary } from '../../api/skills.js';
 import { ApiClientError, fetchApi, type ApiProvider } from '../../api/client.js';
@@ -69,10 +69,7 @@ export function fakeBotsServer(
       return { skills: options.skills ?? [], limits: { maxSkills: 50, maxTokens: 8000, maxNameLength: 60 } };
     }
     if (path.endsWith('/settings')) {
-      if (method === 'PUT') {
-        const { base: _base, ...patch } = body ?? {};
-        state.settings = { ...state.settings, ...patch };
-      }
+      if (method === 'PUT') state.settings = { ...state.settings, ...(body as Partial<Settings>) };
       return { settings: state.settings };
     }
     const slotMatch = /\/bots\/(\d)$/.exec(path);
@@ -114,7 +111,7 @@ export function fakeBotsServer(
 
 export function renderPanel(options: {
   isMember?: boolean;
-  onSave?: (settings: SettingsUpdate) => Promise<void>;
+  onSave?: (settings: Settings) => Promise<void>;
   keyedProviders?: readonly ApiProvider[] | undefined;
   settings?: Settings;
 } = {}) {

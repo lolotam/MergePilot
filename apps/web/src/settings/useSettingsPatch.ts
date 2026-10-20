@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RepoColorKey, Settings, SettingsBase } from '@mergepilot/app/contract';
+import type { RepoColorKey, Settings } from '@mergepilot/app/contract';
 import { fetchApi, type SettingsResponse } from '../api/client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 import type { I18nKey } from '../i18n/ar.js';
-import { withSettingsBase } from './settings-base.js';
 
 const settingsKey = (workspaceId: string) => ['workspaces', workspaceId, 'settings'];
 const settingsUrl = (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/settings`;
@@ -31,8 +30,6 @@ export interface SettingsPatch {
   panelMinAgreement?: Settings['panelMinAgreement'];
 }
 
-export type SettingsPatchRequest = SettingsPatch & Pick<Settings, 'provider' | 'model' | 'language'> & { base: SettingsBase };
-
 /**
  * Saves one or two settings fields through PUT settings (the server keeps every field left out).
  * The cache is updated at once, so the runs table recolors right away, and rolled back on error.
@@ -45,15 +42,17 @@ export function usePatchSettings(workspaceId: string, successKey: I18nKey) {
   const key = settingsKey(workspaceId);
 
   return useMutation({
-    mutationFn: async (body: SettingsPatchRequest) => {
+    mutationFn: async (patch: SettingsPatch) => {
+      const current = queryClient.getQueryData<SettingsResponse>(key)?.settings;
+      if (!current) throw new Error(t('retentionNeedsSettings'));
+      const body = { provider: current.provider, model: current.model, language: current.language, ...patch };
       return fetchApi<SettingsResponse>(settingsUrl(workspaceId), { method: 'PUT', body: JSON.stringify(body) });
     },
-    onMutate: async (body: SettingsPatchRequest) => {
+    onMutate: async (patch: SettingsPatch) => {
       await queryClient.cancelQueries({ queryKey: key });
-      const { base: _base, provider: _provider, model: _model, language: _language, ...patch } = body;
       const previous = queryClient.getQueryData<SettingsResponse>(key);
       if (previous?.settings) {
-        queryClient.setQueryData<SettingsResponse>(key, { ...previous, settings: { ...previous.settings, ...patch } });
+        queryClient.setQueryData<SettingsResponse>(key, { settings: { ...previous.settings, ...patch } });
       }
       return { previous };
     },
@@ -65,16 +64,9 @@ export function usePatchSettings(workspaceId: string, successKey: I18nKey) {
       showToast(t(successKey), 'success');
     },
     onSettled: () => {
-      return queryClient.invalidateQueries({ queryKey: key });
+      void queryClient.invalidateQueries({ queryKey: key });
     },
   });
-}
-
-/** Builds a card save from the same snapshot used to derive its changed fields. */
-export function settingsPatch(snapshot: Settings, patch: SettingsPatch): SettingsPatchRequest {
-  return withSettingsBase({
-    provider: snapshot.provider, model: snapshot.model, language: snapshot.language, ...patch,
-  }, snapshot);
 }
 
 /** The repo -> color map with one repo changed (`null` = back to Auto). */

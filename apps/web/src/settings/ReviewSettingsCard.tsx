@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sliders } from 'lucide-react';
-import type { FallbackEntry, Settings, SettingsUpdate, Severity } from '@mergepilot/app/contract';
-import { withSettingsBase } from './settings-base.js';
+import type { FallbackEntry, Settings, Severity } from '@mergepilot/app/contract';
 import type { BotLogo } from '../api/bots.js';
 import { ApiClientError, type ApiProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
@@ -21,7 +20,7 @@ export interface ReviewSettingsCardProps {
   settings: Settings | null | undefined;
   isLoading: boolean;
   isMember: boolean;
-  onSave: (settings: SettingsUpdate) => Promise<void>;
+  onSave: (settings: Settings) => Promise<void>;
   isSaving: boolean;
   /** Providers with a saved key; heavy and fallback models may only use these. Undefined = unknown. */
   keyedProviders?: readonly ApiProvider[] | undefined;
@@ -62,7 +61,6 @@ export function ReviewSettingsCard({
   // The main bot's review skill (ADR-0034); null = Default.
   const [skillId, setSkillId] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
-  const [reloadCount, setReloadCount] = useState(0);
   const efforts = useModelEfforts(workspaceId, provider, model);
   // The heavy model starts on the main provider when it has a key, else on the first keyed one.
   const heavyDefault: ApiProvider =
@@ -71,7 +69,6 @@ export function ReviewSettingsCard({
   // Refill the form only when a field it shows changed on the server: a patch to another part of
   // the settings (panel output, retention, judge…) must not discard unsaved edits here.
   const shownKey = useRef<string | null>(null);
-  const initializedSettings = useRef<Settings | null | undefined>(settings);
   useEffect(() => {
     if (!settings) return;
     const key = JSON.stringify([
@@ -81,7 +78,6 @@ export function ReviewSettingsCard({
     ]);
     if (key === shownKey.current) return;
     shownKey.current = key;
-    initializedSettings.current = structuredClone(settings);
     setBotName(settings.botName ?? MAIN_BOT_DEFAULT_NAME);
     setBotLogo(settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO);
     setProvider(settings.provider);
@@ -105,15 +101,14 @@ export function ReviewSettingsCard({
     setMonthlyBudget(
       settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined ? String(settings.monthlyBudgetUsd) : '',
     );
-  }, [settings, reloadCount]);
+  }, [settings]);
 
   // The skill follows the server on its own (ADR-0034): deleting a skill sets this bot to Default,
   // and that refetch must not discard unsaved edits to the model or the other fields.
   const savedSkillId = settings?.skillId ?? null;
   useEffect(() => {
     setSkillId(savedSkillId);
-    if (initializedSettings.current) initializedSettings.current = { ...initializedSettings.current, skillId: savedSkillId };
-  }, [savedSkillId, reloadCount]);
+  }, [savedSkillId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,7 +137,7 @@ export function ReviewSettingsCard({
 
     const heavyOn = Boolean(heavy.heavyProvider && heavy.heavyModel);
     try {
-      await onSave(withSettingsBase({
+      await onSave({
         provider,
         model: model.trim(),
         language,
@@ -158,15 +153,10 @@ export function ReviewSettingsCard({
         maxFindings,
         botName: botName.trim(),
         botLogo,
-        // Always sent: a changed skill choice clears a deleted-skill note.
+        // Always sent: saving the form confirms the skill choice and clears a deleted-skill note.
         skillId,
-      }, initializedSettings.current));
+      });
     } catch (err) {
-      if (err instanceof ApiClientError && err.code === 'settings_conflict') {
-        shownKey.current = null;
-        setErrors({});
-        setReloadCount((count) => count + 1);
-      }
       // A taken bot name and an unknown skill are shown on their field; other errors were already shown as a toast.
       if (err instanceof ApiClientError && err.code === 'bot_name_taken') setErrors({ botName: t('botNameTaken') });
       if (err instanceof ApiClientError && err.code === 'unknown_skill') setErrors({ skill: t('skillErrorUnknown') });

@@ -1,7 +1,6 @@
 import type {
   MeResponse,
-  SettingsResponse,
-  SettingsUpdate,
+  Settings,
   ErrorBody,
   ReviewRun,
   RunsResponse,
@@ -26,7 +25,6 @@ import type {
 export type { PricesResponse } from '@mergepilot/app/contract';
 export type { SubscriptionAvailability, SubscriptionLogin, SubscriptionLoginErrorCode, SubscriptionProvider } from '@mergepilot/app/contract';
 export type {
-  SettingsResponse,
   BackupPreview,
   BackupSection,
   ExportBackupBody,
@@ -135,6 +133,10 @@ export interface UsageResponse {
   monthCostUsd: number;
   monthlyBudgetUsd: number | null;
   monthStart: string;
+}
+
+export interface SettingsResponse {
+  settings: Settings | null;
 }
 
 export class ApiClientError extends Error {
@@ -248,7 +250,7 @@ export const api = {
   getMe: () => fetchApi<MeResponseWithAdmin>('/api/me'),
   getSettings: (workspaceId: string) =>
     fetchApi<SettingsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
-  updateSettings: (workspaceId: string, settings: SettingsUpdate) =>
+  updateSettings: (workspaceId: string, settings: Settings) =>
     fetchApi<SettingsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`, {
       method: 'PUT',
       body: JSON.stringify(settings),

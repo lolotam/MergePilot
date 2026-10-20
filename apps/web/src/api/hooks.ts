@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MeResponse, SettingsUpdate } from '@mergepilot/app/contract';
-import { api, ApiClientError, type GetRunsParams, type KeyProvider } from './client.js';
+import type { MeResponse, Settings } from '@mergepilot/app/contract';
+import { api, type GetRunsParams, type KeyProvider } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -26,7 +26,7 @@ export function useUpdateSettingsMutation(workspaceId: string) {
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: (settings: SettingsUpdate) => api.updateSettings(workspaceId, settings),
+    mutationFn: (settings: Settings) => api.updateSettings(workspaceId, settings),
     onSuccess: () => {
       showToast(t('settingsSavedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
@@ -35,11 +35,8 @@ export function useUpdateSettingsMutation(workspaceId: string) {
       // The main bot's skill choice changes the skills' "used by" (ADR-0034).
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'skills'] });
     },
-    onError: async (err: Error) => {
+    onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
-      if (err instanceof ApiClientError && err.code === 'settings_conflict') {
-        await queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
-      }
     },
   });
 }

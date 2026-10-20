@@ -3,7 +3,7 @@ import type { PanelMode } from '../../api/bots.js';
 import type { I18nKey } from '../../i18n/ar.js';
 import { useI18n } from '../../i18n/context.js';
 import { fieldClass, labelClass } from '../providers.js';
-import { settingsPatch, usePatchSettings, useWorkspaceSettings } from '../useSettingsPatch.js';
+import { usePatchSettings, useWorkspaceSettings } from '../useSettingsPatch.js';
 import { MAX_BOTS } from './BotLogo.js';
 
 export interface PanelOutputCardProps {
@@ -58,7 +58,7 @@ export function PanelOutputCard({ workspaceId, isMember, hasActiveExtraBot }: Pa
                   value={value}
                   checked={mode === value}
                   disabled={disabled}
-                  onChange={() => { if (settings) patch.mutate(settingsPatch(settings, { panelMode: value })); }}
+                  onChange={() => patch.mutate({ panelMode: value })}
                   className="w-4 h-4 text-brand-600 focus:ring-brand-500 border-ink-300 dark:border-ink-700"
                 />
                 <span>{t(label)}</span>
@@ -75,9 +75,7 @@ export function PanelOutputCard({ workspaceId, isMember, hasActiveExtraBot }: Pa
                 id="panel-min-agreement"
                 value={String(minAgreement)}
                 disabled={disabled}
-                onChange={(e) => {
-                  if (settings) patch.mutate(settingsPatch(settings, { panelMinAgreement: Number(e.target.value) }));
-                }}
+                onChange={(e) => patch.mutate({ panelMinAgreement: Number(e.target.value) })}
                 className={fieldClass}
               >
                 {AGREEMENT_CHOICES.map((n) => (
