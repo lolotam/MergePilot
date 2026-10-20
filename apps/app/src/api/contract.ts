@@ -116,6 +116,9 @@ export type SettingsBase = z.infer<typeof SettingsBaseSchema>;
  * PUT body: provider, model and language are required; every other field is a patch. Left out
  * (undefined) keeps the stored value, so an older client that only sends the budget does not
  * wipe the J2 fields; an explicit `null` clears it (fallback → [], minSeverity → medium).
+ * Without `base` there is nothing to compare: the save writes every field it sends (last write
+ * wins for those fields) and only a race inside the request answers 409. The dashboard always
+ * sends `base`.
  */
 export const SettingsUpdateSchema = SettingsSchema.extend({
   /** Field values from the snapshot used to build this patch. */

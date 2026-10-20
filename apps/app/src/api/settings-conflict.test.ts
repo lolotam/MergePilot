@@ -61,18 +61,32 @@ describe('PUT /settings field-level concurrency', () => {
     expect(await snapshot()).toEqual(current);
   });
 
-  it.each([false, true])('retries a disjoint store race safely (base supplied: %s)', async (withBase) => {
+  it('retries a disjoint store race when the request carries a base', async () => {
     const base = await snapshot();
     const save = h.store.saveSettings.bind(h.store);
     const spy = vi.spyOn(h.store, 'saveSettings').mockImplementationOnce(async () => {
       await save({ ...base!, monthlyBudgetUsd: 75 });
       throw new SettingsChangedError('ws-1');
     });
-    const res = await put({ maxFindings: 20, ...(withBase ? { base } : {}) });
+    const res = await put({ maxFindings: 20, base });
     expect(res.statusCode).toBe(200);
     expect(spy).toHaveBeenCalledTimes(2);
     expect(spy.mock.calls[1]?.[1]).toEqual({ expected: { ...base, monthlyBudgetUsd: 75 } });
     expect(await snapshot()).toMatchObject({ monthlyBudgetUsd: 75, maxFindings: 20 });
+  });
+
+  it('rejects a store race without a base instead of replaying the stale write', async () => {
+    const base = await snapshot();
+    const save = h.store.saveSettings.bind(h.store);
+    const spy = vi.spyOn(h.store, 'saveSettings').mockImplementationOnce(async () => {
+      await save({ ...base!, monthlyBudgetUsd: 75 });
+      throw new SettingsChangedError('ws-1');
+    });
+    const res = await put({ maxFindings: 20 });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual(conflict);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await snapshot()).toEqual({ ...base, monthlyBudgetUsd: 75 });
   });
 
   it('rejects a same-field store race after re-reading without retrying the stale write', async () => {

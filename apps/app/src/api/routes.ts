@@ -167,7 +167,12 @@ export function registerDashboardApi(
         try {
           await deps.store.saveSettings(patch.skillId === undefined ? withoutSkillFields(merged) : merged, { expected: previous });
         } catch (error) {
-          if (error instanceof SettingsChangedError) continue;
+          if (error instanceof SettingsChangedError) {
+            // Without a base the request cannot be replayed: the retry would write the stale
+            // values over the writer that won the race.
+            if (!base) return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
+            continue;
+          }
           // A bot saved the same name between the check above and this write (the store re-checks it under a lock).
           if (error instanceof BotNameTakenError) {
             return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');

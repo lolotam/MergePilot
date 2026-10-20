@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type { Settings } from '@mergepilot/app/contract';
 import * as client from '../api/client.js';
-import { useSettingsQuery, useUpdateSettingsMutation } from '../api/hooks.js';
+import { useSettingsQuery, settingsSaveScopeId, useUpdateSettingsMutation } from '../api/hooks.js';
 import { ToastProvider } from '../components/Toast.js';
 import { I18nProvider } from '../i18n/context.js';
 import { withSettingsBase } from './settings-base.js';
@@ -47,7 +47,7 @@ describe('field baselines in dashboard saves', () => {
     expect(update).toHaveBeenLastCalledWith('ws-1', body);
     expect(update.mock.calls[0]?.[1].base).toHaveProperty('monthlyBudgetUsd', 50);
     expect(queryClient.getQueryData(key)).toEqual(saved);
-    expect(queryClient.getMutationCache().getAll()[0]?.options.scope).toBeUndefined();
+    expect(queryClient.getMutationCache().getAll()[0]?.options.scope).toEqual({ id: settingsSaveScopeId('ws-1') });
   });
 
   it('shows a form conflict and refetches current settings', async () => {
@@ -143,6 +143,40 @@ describe('field baselines in dashboard saves', () => {
     expect(current.repoColors).toEqual({ 'acme/theirs': 'teal' });
     expect(queryClient.getQueryData(key)).toEqual({ settings: current });
     expect(screen.getByText(message)).toBeDefined();
+  });
+
+  it('runs two quick settings saves one after the other', async () => {
+    const { queryClient, wrapper } = harness();
+    const started: number[] = [];
+    let releaseFirst: () => void = () => {};
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    vi.spyOn(client, 'fetchApi').mockImplementation(async (_path, init) => {
+      if (init?.method !== 'PUT') return initial;
+      const body = JSON.parse(String(init.body)) as { runRetentionDays?: Settings['runRetentionDays'] };
+      started.push(body.runRetentionDays ?? 0);
+      if (body.runRetentionDays === 90) await firstBlocked;
+      return { settings: { ...settings, runRetentionDays: body.runRetentionDays ?? 30 } };
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
+    const { result } = renderHook(() => ({
+      query: useWorkspaceSettings('ws-1'), mutation: usePatchSettings('ws-1', 'retentionSaved'),
+    }), { wrapper });
+    await waitFor(() => expect(result.current.query.data).toEqual(initial));
+
+    let saves: Promise<unknown>[] = [];
+    act(() => {
+      saves = ([90, 180] as const).map((days) =>
+        result.current.mutation.mutateAsync(settingsPatch(settings, { runRetentionDays: days })));
+    });
+    // The second save waits for the first one instead of racing it.
+    await waitFor(() => expect(started).toEqual([90]));
+    await act(async () => {
+      releaseFirst();
+      await Promise.all(saves);
+    });
+    expect(started).toEqual([90, 180]);
+    expect(queryClient.getMutationCache().getAll().map((mutation) => mutation.options.scope?.id))
+      .toEqual([settingsSaveScopeId('ws-1'), settingsSaveScopeId('ws-1')]);
   });
 
   it('captures composite values before source objects can be mutated', () => {
