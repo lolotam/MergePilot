@@ -20,21 +20,12 @@ export function useSettingsQuery(workspaceId: string) {
   });
 }
 
-/**
- * The mutation scope of the settings saves of one workspace: they run one after another, so
- * two quick saves reach the server in the order the user made them.
- */
-export function settingsSaveScopeId(workspaceId: string): string {
-  return `settings-save:${workspaceId}`;
-}
-
 export function useUpdateSettingsMutation(workspaceId: string) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { t } = useI18n();
 
   return useMutation({
-    scope: { id: settingsSaveScopeId(workspaceId) },
     mutationFn: (settings: SettingsUpdate) => api.updateSettings(workspaceId, settings),
     onSuccess: (saved) => {
       queryClient.setQueryData(['workspaces', workspaceId, 'settings'], saved);

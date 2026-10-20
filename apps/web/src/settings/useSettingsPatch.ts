@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RepoColorKey, Settings, SettingsBase } from '@mergepilot/app/contract';
 import { fetchApi, type SettingsResponse } from '../api/client.js';
-import { settingsSaveScopeId } from '../api/hooks.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 import type { I18nKey } from '../i18n/ar.js';
@@ -38,8 +37,6 @@ export type SettingsPatchRequest = SettingsPatch & Pick<Settings, 'provider' | '
  * Saves one or two settings fields through PUT settings (the server keeps every field left out).
  * The cache is updated at once, so the runs table recolors right away, and rolled back on error.
  * Needs saved settings: the PUT requires provider, model and language.
- * The saves of one workspace run one after another (the mutation scope), so two quick saves
- * reach the server in the order the user made them.
  */
 export function usePatchSettings(workspaceId: string, successKey: I18nKey) {
   const queryClient = useQueryClient();
@@ -48,7 +45,6 @@ export function usePatchSettings(workspaceId: string, successKey: I18nKey) {
   const key = settingsKey(workspaceId);
 
   return useMutation({
-    scope: { id: settingsSaveScopeId(workspaceId) },
     mutationFn: async (body: SettingsPatchRequest) => {
       return fetchApi<SettingsResponse>(settingsUrl(workspaceId), { method: 'PUT', body: JSON.stringify(body) });
     },

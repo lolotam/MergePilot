@@ -61,7 +61,9 @@ function changedFields(
 /**
  * The fields of a group that change together: when the client changed one of them, every
  * field of the group must still hold the value it read, so an effort is never kept for
- * another model. Null when the store moved away from that base.
+ * another model. The fields the patch left out are checked too: an effort chosen for a
+ * model another admin changed meanwhile must not land on the new model. Only the fields
+ * the client sent are written. Null when the store moved away from that base.
  */
 function changedGroupFields(
   submitted: Omit<SettingsUpdate, 'base'>,
@@ -71,12 +73,11 @@ function changedGroupFields(
 ): Set<string> | null {
   const groupFields = new Set<string>();
   for (const group of SETTINGS_GROUPS) {
-    const fields = group.filter((key) => Object.hasOwn(submitted, key));
-    if (!fields.some((key) => changed.has(key))) continue;
-    for (const key of fields) {
-      groupFields.add(key);
+    if (!group.some((key) => changed.has(key))) continue;
+    for (const key of group) {
       // Every field of the group must still hold the value the client read.
       if (Object.hasOwn(base, key) && !storedMatchesBase(previous, base, key)) return null;
+      if (Object.hasOwn(submitted, key)) groupFields.add(key);
     }
   }
   return groupFields;

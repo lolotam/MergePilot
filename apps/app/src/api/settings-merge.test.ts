@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { reconcileSettingsPatch } from './settings-merge.js';
+import type { SettingsUpdate } from './contract.js';
 import type { WorkspaceSettings } from '../core/types.js';
 
 const required = { provider: 'anthropic' as const, model: 'model', language: 'en' as const };
 const stored: WorkspaceSettings = { workspaceId: 'ws-1', ...required, monthlyBudgetUsd: 50 };
+
+/** A body that leaves the group members out: the client sends the one field it changed. */
+function partialBody(patch: Partial<Omit<SettingsUpdate, 'base'>>): Omit<SettingsUpdate, 'base'> {
+  return patch as Omit<SettingsUpdate, 'base'>;
+}
 
 describe('reconcileSettingsPatch', () => {
   it('drops unchanged optional fields and uses current required fields', () => {
@@ -100,6 +106,29 @@ describe('reconcileSettingsPatch', () => {
     const result = reconcileSettingsPatch({ ...required, ...heavy, heavyThresholdLines: 1000 }, { ...required, ...heavy }, previous);
     // The threshold sizes the diff, not the heavy model: it is written and the heavy model is not.
     expect(result).toEqual({ ...required, heavyThresholdLines: 1000 });
+    expect(result).not.toHaveProperty('heavyModel');
+  });
+
+  it('rejects a heavy effort patch when the store changed the heavy model the patch left out', () => {
+    const base = { ...required, heavyProvider: 'openai' as const, heavyModel: 'gpt-5', heavyEffort: null };
+    const previous = { ...stored, heavyProvider: 'openai' as const, heavyModel: 'gpt-6', heavyEffort: null };
+    // The patch changes the heavy effort only: the heavy model is not in the body.
+    expect(reconcileSettingsPatch({ ...required, heavyEffort: 'high' }, base, previous)).toBeNull();
+  });
+
+  it('rejects an effort patch when the store changed the model the patch left out', () => {
+    const base = { ...required, model: 'gpt-5', effort: null };
+    const previous = { ...stored, model: 'gpt-6' };
+    // The patch changes the effort only: the model is not in the body.
+    expect(reconcileSettingsPatch(partialBody({ effort: 'high' }), base, previous)).toBeNull();
+  });
+
+  it('keeps a heavy effort patch when the heavy model the patch left out did not move', () => {
+    const base = { ...required, heavyProvider: 'openai' as const, heavyModel: 'gpt-5', heavyEffort: null };
+    const previous = { ...stored, heavyProvider: 'openai' as const, heavyModel: 'gpt-5', heavyEffort: null };
+    const result = reconcileSettingsPatch({ ...required, heavyEffort: 'high' }, base, previous);
+    // The heavy model is not in the patch: it keeps its stored value.
+    expect(result).toEqual({ ...required, heavyEffort: 'high' });
     expect(result).not.toHaveProperty('heavyModel');
   });
 });
