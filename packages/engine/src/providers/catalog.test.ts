@@ -252,8 +252,28 @@ describe('listModels', () => {
       expect(calls[0]?.url).toBe('https://api.minimax.io/v1/models');
       expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
       expect(models).toEqual([
-        { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-        { id: 'MiniMax-M3', name: 'MiniMax M3', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        // The models that ignore `reasoning_effort` are offered none: a depth that does
+        // nothing is not a choice.
+        { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', efforts: [] },
+        { id: 'MiniMax-M3', name: 'MiniMax M3', efforts: [] },
+        { id: 'MiniMax-M3.1-Flash', name: 'MiniMax M3.1 Flash', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+      ]);
+    });
+
+    it('lists models for the MiniMax Coding Plan with the same efforts', async () => {
+      const body = {
+        data: [
+          { id: 'MiniMax-M3.1-Flash', name: 'MiniMax M3.1 Flash' },
+          { id: 'MiniMax-M3', name: 'MiniMax M3' },
+        ],
+      };
+      const { fetch, calls } = mockFetch(jsonResponse(body));
+      const models = await listModels('minimax-coding-plan', KEY, { fetch });
+
+      expect(calls[0]?.url).toBe('https://api.minimax.io/v1/models');
+      expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
+      expect(models).toEqual([
+        { id: 'MiniMax-M3', name: 'MiniMax M3', efforts: [] },
         { id: 'MiniMax-M3.1-Flash', name: 'MiniMax M3.1 Flash', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
       ]);
     });

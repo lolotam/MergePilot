@@ -189051,7 +189051,7 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
       const effortFields = compatibleEffortFields(this.#style, options.effort, options.model);
       const thinks = Object.keys(effortFields).length > 0 && !effortStopsThinking(this.#style, options.effort);
       const sized = sentEffort(this.#style, options.effort, options.model);
-      const headroom = thinks ? thinkingHeadroom(sized) || DEFAULT_THINKING_HEADROOM : 0;
+      const headroom = thinks ? thinkingHeadroom(sized) || defaultThinkingHeadroom(this.#style) : 0;
       return options.maxOutputTokens + headroom;
     }
     const thinksByDefault = isCompatibleReasoningModel(this.provider, options.model, this.#style);

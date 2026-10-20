@@ -10,7 +10,7 @@ import { LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { responseSchemaInstruction } from '../../llm/schema-instruction.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
-import { DEFAULT_THINKING_HEADROOM, compatibleEffortFields, defaultThinkingHeadroom, effortStopsThinking, isCompatibleReasoningModel, sentEffort, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
+import { compatibleEffortFields, defaultThinkingHeadroom, effortStopsThinking, isCompatibleReasoningModel, sentEffort, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
 import { bearerHeaders, failureFromResponse, failureFromThrown, redactKey, type FetchLike, type KeyInput } from '../http.js';
 import type { ApiProviderId } from '../ids.js';
 import { providerEntry, resolveBaseUrl } from '../registry.js';
@@ -130,11 +130,12 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
   override requestedOutputTokens(options: OutputTokenRequest): number {
     if (options.effort !== undefined) {
       const effortFields = compatibleEffortFields(this.#style, options.effort, options.model);
-      // `on` (GLM) and other non-graded switches enable thinking without a size: use the default.
-      // The headroom follows the effort the style really sends.
+      // `on` (GLM) and other non-graded switches enable thinking without a size: use the
+      // default of the style, the same one the connection test reserves. The headroom follows
+      // the effort the style really sends.
       const thinks = Object.keys(effortFields).length > 0 && !effortStopsThinking(this.#style, options.effort);
       const sized = sentEffort(this.#style, options.effort, options.model);
-      const headroom = thinks ? thinkingHeadroom(sized) || DEFAULT_THINKING_HEADROOM : 0;
+      const headroom = thinks ? thinkingHeadroom(sized) || defaultThinkingHeadroom(this.#style) : 0;
       return options.maxOutputTokens + headroom;
     }
     const thinksByDefault = isCompatibleReasoningModel(this.provider, options.model, this.#style);

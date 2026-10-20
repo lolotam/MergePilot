@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Secret } from '../credentials/secret.js';
+import { OpenAICompatibleAdapter } from './compatible/adapter.js';
 import { testConnection } from './connection.js';
 import { hangingFetch, jsonResponse, mockFetch, textResponse } from './fetch-mock.fixtures.js';
 
@@ -216,6 +217,24 @@ describe('testConnection', () => {
         max_tokens: 16 + 16384,
       });
       expect(calls[0]?.body).not.toHaveProperty('thinking');
+    });
+
+    it('asks MiniMax for the same room the review call asks for, when the effort carries no size', async () => {
+      const { fetch, calls } = mockFetch(
+        jsonResponse({
+          choices: [{ message: { content: 'OK' } }],
+        }),
+      );
+
+      // An effort MiniMax does not know is not sent, so the thinking has no size of its own:
+      // the room is MiniMax's default depth (`max`), in the connection test and in the review.
+      const result = await testConnection('minimax', KEY, 'MiniMax-M3.1-Flash', { fetch, effort: 'on' });
+
+      expect(result.ok).toBe(true);
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16 + 32000);
+
+      const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY });
+      expect(adapter.requestedOutputTokens({ model: 'MiniMax-M3.1-Flash', maxOutputTokens: 4096, effort: 'on' })).toBe(4096 + 32000);
     });
   });
 

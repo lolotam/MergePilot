@@ -2,7 +2,7 @@
  * Model list of an OpenAI-compatible endpoint. Ported from the owner's Browser-controle
  * extension (`listCompatibleModels` in `src/providers/openai-compatible.js`).
  */
-import { FALLBACK_EFFORTS } from '../effort.js';
+import { FALLBACK_EFFORTS, minimaxTakesEffort } from '../effort.js';
 import { bearerHeaders, failureFromResponse, failureFromThrown, type FetchLike, type KeyInput } from '../http.js';
 import type { ApiProviderId } from '../ids.js';
 import { chatModelsFor, providerEntry, resolveBaseUrl } from '../registry.js';
@@ -65,8 +65,13 @@ function effortsFromReasoningOptions(raw: RawCompatibleModel): string[] | undefi
   return [];
 }
 
-function effortsFor(provider: ApiProviderId, raw: RawCompatibleModel): string[] {
+/**
+ * The efforts a model really takes. A MiniMax model that does not read `reasoning_effort`
+ * ignores it, so it is offered none: a depth that changes nothing is not a choice to offer.
+ */
+function effortsFor(provider: ApiProviderId, raw: RawCompatibleModel, id: string): string[] {
   const style = providerEntry(provider).thinkingStyle;
+  if (style === 'minimax' && !minimaxTakesEffort(id)) return [];
   if (provider === 'vercel-gateway') {
     const listed = effortsFromReasoningOptions(raw);
     if (listed) return listed;
@@ -122,7 +127,7 @@ export async function listCompatibleModels(
       return {
         id,
         name: typeof raw.name === 'string' && raw.name && !raw.name.startsWith('models/') ? raw.name : id,
-        efforts: effortsFor(provider, raw),
+        efforts: effortsFor(provider, raw, id),
         ...(contextWindow !== undefined ? { contextWindow } : {}),
       };
     });
