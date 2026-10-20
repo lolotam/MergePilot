@@ -7,8 +7,8 @@ const MIN_KEY_LENGTH = 8;
 
 /**
  * Warns when the typed key looks like it belongs to the other MiniMax provider: a pay-as-you-go
- * key saved as a Coding Plan key answers HTTP 402 "insufficient balance" on every review, and a
- * Coding Plan key saved as pay-as-you-go cannot use the plan at all.
+ * key saved as a Coding Plan key does not use the plan and may fail with HTTP 402 "insufficient
+ * balance", and a Coding Plan key saved as pay-as-you-go cannot use the plan at all.
  */
 export function keyFormatHint(
   provider: string,
