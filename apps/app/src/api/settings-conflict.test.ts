@@ -104,21 +104,19 @@ describe('PUT /settings field-level concurrency', () => {
     expect(await snapshot()).toMatchObject({ model: 'claude-opus-5-5' });
   });
 
-  it('rejects a store race when the base leaves members of a touched model group unchecked', async () => {
+  it('refuses a model-group change whose base leaves a member out, without writing', async () => {
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('openai'), userId: 'u-admin' });
     expect((await put({ heavyProvider: 'openai', heavyModel: 'gpt-heavy' })).statusCode).toBe(200);
     const base = await snapshot();
-    const save = h.store.saveSettings.bind(h.store);
-    const spy = vi.spyOn(h.store, 'saveSettings').mockImplementationOnce(async () => {
-      await save({ ...base!, heavyModel: 'gpt-heavy-2' });
-      throw new SettingsChangedError('ws-1');
-    });
-    // Every sent field is baselined, but heavyProvider/heavyModel of the touched group are not.
+    // Another admin changed the heavy model before this request was read.
+    await h.store.saveSettings({ ...base!, heavyModel: 'gpt-heavy-2' });
+    const spy = vi.spyOn(h.store, 'saveSettings');
+    // heavyEffort changes, but heavyProvider/heavyModel of its group have no base.
     const res = await put({ heavyEffort: 'high', base: { ...required, heavyEffort: base!.heavyEffort ?? null } });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual(conflict);
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(await snapshot()).toMatchObject({ heavyModel: 'gpt-heavy-2' });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await snapshot()).toMatchObject({ heavyModel: 'gpt-heavy-2', heavyEffort: base!.heavyEffort });
   });
 
   it('rejects a same-field store race after re-reading without retrying the stale write', async () => {

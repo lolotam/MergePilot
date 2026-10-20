@@ -27,7 +27,7 @@ describe('reconcileSettingsPatch', () => {
   it.each([[undefined, null], [null, undefined]])('treats undefined and null as unchanged (%s, %s)', (value, base) => {
     expect(reconcileSettingsPatch({ ...required, effort: value }, { effort: base }, { ...stored, effort: 'high' }))
       .toEqual(required);
-    expect(reconcileSettingsPatch({ ...required, effort: 'high' }, { effort: base }, { ...stored, effort: value }))
+    expect(reconcileSettingsPatch({ ...required, effort: 'high' }, { ...required, effort: base }, { ...stored, effort: value }))
       .toEqual({ ...required, effort: 'high' });
   });
 
@@ -130,5 +130,15 @@ describe('reconcileSettingsPatch', () => {
     // The heavy model is not in the patch: it keeps its stored value.
     expect(result).toEqual({ ...required, heavyEffort: 'high' });
     expect(result).not.toHaveProperty('heavyModel');
+  });
+  it('rejects a change to a model group whose base leaves a member out', () => {
+    // heavyEffort changes, but heavyProvider/heavyModel have no base: a model changed before
+    // this request could not be detected, so the change is refused.
+    const previous = { ...stored, heavyProvider: 'openai', heavyModel: 'gpt-heavy-2', heavyEffort: null } as WorkspaceSettings;
+    expect(reconcileSettingsPatch(
+      { ...required, heavyEffort: 'high' },
+      { ...required, heavyEffort: null },
+      previous,
+    )).toBeNull();
   });
 });
