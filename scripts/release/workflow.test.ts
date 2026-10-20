@@ -18,9 +18,9 @@ describe('.github/workflows/release.yml', () => {
     expect(release).toMatch(/concurrency:\n {2}group: production-release\n {2}cancel-in-progress: false/);
   });
 
-  it('gives the job room for a full deploy plus rollback and tells the script the same limit', () => {
+  it('gives the job room for both release phases plus a rollback and tells the script the same limit', () => {
     const job = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(release)?.[1]);
-    expect(job).toBeGreaterThanOrEqual(2 * (35 + 10) + 20);
+    expect(job).toBeGreaterThanOrEqual(3 * (35 + 10) + 20);
     expect(release).toContain(`JOB_TIMEOUT_MINUTES: ${job}`);
   });
 

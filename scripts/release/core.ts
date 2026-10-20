@@ -128,17 +128,67 @@ export interface ImagePin {
 
 const PIN_LINE = /^x-image: &image (\S+)[ \t]*$/m;
 const PIN_LINES = /^x-image: &image \S+[ \t]*$/gm;
+const WORKER_PIN_LINE = /^x-worker-image: &worker-image (\S+)[ \t]*$/m;
+const WORKER_PIN_LINES = /^x-worker-image: &worker-image \S+[ \t]*$/gm;
 const REF = /^([a-z0-9./-]+):([A-Za-z0-9_.-]+)(?:@(sha256:[a-f0-9]{64}))?$/;
+
+function parseRef(ref: string, what: string): ImagePin {
+  const parts = REF.exec(ref);
+  if (!parts) throw new Error(`${what} is not "<repository>:<tag>[@sha256:<digest>]": ${ref}`);
+  const [, repository = '', tag = '', digest] = parts;
+  return { ref, repository, sha: /^[a-f0-9]{40}$/.test(tag) ? tag : null, digest: digest ?? null };
+}
 
 /** Reads the single release pin of a compose file. */
 export function readPin(compose: string): ImagePin {
   const lines = compose.match(PIN_LINES) ?? [];
   if (lines.length !== 1) throw new Error(`expected exactly one "x-image: &image" line, found ${lines.length}`);
-  const ref = PIN_LINE.exec(compose)?.[1] ?? '';
-  const parts = REF.exec(ref);
-  if (!parts) throw new Error(`x-image is not "<repository>:<tag>[@sha256:<digest>]": ${ref}`);
-  const [, repository = '', tag = '', digest] = parts;
-  return { ref, repository, sha: /^[a-f0-9]{40}$/.test(tag) ? tag : null, digest: digest ?? null };
+  return parseRef(PIN_LINE.exec(compose)?.[1] ?? '', 'x-image');
+}
+
+/**
+ * Reads the worker pin of a compose file. A file without one (older than the ADR-0025
+ * amendment) runs the worker from the web image, so then the web pin is the worker pin.
+ */
+export function readWorkerPin(compose: string): ImagePin {
+  const lines = compose.match(WORKER_PIN_LINES) ?? [];
+  if (lines.length === 0) return readPin(compose);
+  if (lines.length > 1) throw new Error(`expected at most one "x-worker-image: &worker-image" line, found ${lines.length}`);
+  return parseRef(WORKER_PIN_LINE.exec(compose)?.[1] ?? '', 'x-worker-image');
+}
+
+/** Whether the compose file pins the worker apart from the web (ADR-0025 amendment). */
+export function hasWorkerPin(compose: string): boolean {
+  return (compose.match(WORKER_PIN_LINES) ?? []).length > 0;
+}
+
+/** What a pin line becomes when two compose files are compared without their pins. */
+const PIN_PLACEHOLDER = 'x-image: &image <pin>';
+const WORKER_PIN_PLACEHOLDER = 'x-worker-image: &worker-image <pin>';
+
+/**
+ * The lines of a compose file with the release pins replaced by a placeholder, so two files can
+ * be compared without their pins. A file without a worker line keeps its own lines.
+ */
+function linesWithoutPins(compose: string): string[] {
+  return compose
+    .replace(/\r\n/g, '\n')
+    .replace(PIN_LINES, PIN_PLACEHOLDER)
+    .replace(WORKER_PIN_LINES, WORKER_PIN_PLACEHOLDER)
+    .split('\n');
+}
+
+/**
+ * Whether two compose files differ only in their release pins. The web phase of a release
+ * rewrites the pins of the candidate's whole compose file, so a change beyond the pins may
+ * recreate the worker too: its drain then keeps the new web from starting, the outage the two
+ * phases exist to prevent (ADR-0025).
+ */
+export function sameExceptPins(a: string, b: string): boolean {
+  const left = linesWithoutPins(a);
+  const right = linesWithoutPins(b);
+  if (left.length !== right.length) return false;
+  return left.every((line, index) => line === right[index]);
 }
 
 /** The immutable reference a release pins: the full-SHA tag for readers, the digest for the pull. */
@@ -148,22 +198,43 @@ export function pinRef(repository: string, sha: string, digest: string): string 
   return `${repository}:${sha}@${digest}`;
 }
 
-/** Returns the compose file with only its release pin replaced. */
-export function rewritePin(compose: string, ref: string): string {
+/**
+ * Returns the compose file with its release pins replaced. A file without a worker pin cannot
+ * run the worker from another image, so both refs must be the same then.
+ */
+export function rewritePins(compose: string, pins: { image: string; workerImage: string }): string {
   readPin(compose);
-  return compose.replace(PIN_LINE, `x-image: &image ${ref}`);
+  const workerLines = compose.match(WORKER_PIN_LINES) ?? [];
+  if (workerLines.length > 1) throw new Error(`expected at most one "x-worker-image: &worker-image" line, found ${workerLines.length}`);
+  const withImage = compose.replace(PIN_LINE, `x-image: &image ${pins.image}`);
+  if (workerLines.length === 0) {
+    if (pins.workerImage !== pins.image) {
+      throw new Error('the compose file has no "x-worker-image: &worker-image" line, so the worker cannot run another image');
+    }
+    return withImage;
+  }
+  return withImage.replace(WORKER_PIN_LINE, `x-worker-image: &worker-image ${pins.workerImage}`);
 }
 
 export interface ReleaseTrailers {
   sourceCommit: string;
   imageRef: string;
+  /** Commit of the worker image; equal to sourceCommit when the worker has no own pin. */
+  workerSourceCommit: string | null;
+  workerImageRef: string;
   previousSourceCommit: string | null;
   previousImageRef: string | null;
+  previousWorkerSourceCommit: string | null;
+  previousWorkerImageRef: string | null;
 }
 
+/** What a release commit is: the full release, the web phase of it, or a rollback. */
+export type ReleaseKind = 'release' | 'web' | 'rollback';
+
 /** Commit message of a release commit. Its trailers are the deployment record read back later. */
-export function releaseMessage(t: ReleaseTrailers, rollback: boolean): string {
-  const subject = `${RELEASE_SUBJECT_PREFIX}${t.sourceCommit.slice(0, 7)}${rollback ? ' (rollback)' : ''}`;
+export function releaseMessage(t: ReleaseTrailers, kind: ReleaseKind): string {
+  const suffix = kind === 'web' ? ' (web first)' : kind === 'rollback' ? ' (rollback)' : '';
+  const subject = `${RELEASE_SUBJECT_PREFIX}${t.sourceCommit.slice(0, 7)}${suffix}`;
   return [
     subject,
     '',
@@ -171,6 +242,10 @@ export function releaseMessage(t: ReleaseTrailers, rollback: boolean): string {
     `Image-Ref: ${t.imageRef}`,
     `Previous-Source-Commit: ${t.previousSourceCommit ?? 'none'}`,
     `Previous-Image-Ref: ${t.previousImageRef ?? 'none'}`,
+    `Worker-Source-Commit: ${t.workerSourceCommit ?? 'none'}`,
+    `Worker-Image-Ref: ${t.workerImageRef}`,
+    `Previous-Worker-Source-Commit: ${t.previousWorkerSourceCommit ?? 'none'}`,
+    `Previous-Worker-Image-Ref: ${t.previousWorkerImageRef ?? 'none'}`,
   ].join('\n');
 }
 
@@ -184,12 +259,34 @@ export function parseReleaseMessage(message: string): ReleaseTrailers | null {
   const sourceCommit = field('Source-Commit');
   const imageRef = field('Image-Ref');
   if (!sourceCommit || !imageRef) return null;
-  return { sourceCommit, imageRef, previousSourceCommit: field('Previous-Source-Commit'), previousImageRef: field('Previous-Image-Ref') };
+  const previousSourceCommit = field('Previous-Source-Commit');
+  const previousImageRef = field('Previous-Image-Ref');
+  // A release commit before the worker pin (ADR-0025 amendment) has no worker trailers: the
+  // worker then runs the web image, and so did the release before it. A worker trailer that is
+  // present keeps its own value, `none` included: an unknown worker commit is not the web's.
+  const workerField = (key: string, fallback: string | null): string | null =>
+    new RegExp(`^${key}: \\S+$`, 'm').test(message) ? field(key) : fallback;
+  return {
+    sourceCommit,
+    imageRef,
+    workerSourceCommit: workerField('Worker-Source-Commit', sourceCommit),
+    workerImageRef: field('Worker-Image-Ref') ?? imageRef,
+    previousSourceCommit,
+    previousImageRef,
+    previousWorkerSourceCommit: workerField('Previous-Worker-Source-Commit', previousSourceCommit),
+    previousWorkerImageRef: workerField('Previous-Worker-Image-Ref', previousImageRef),
+  };
 }
 
 /** A main commit that is itself a release commit is never released (loop guard). */
 export function isReleaseCommit(message: string): boolean {
   return message.startsWith(RELEASE_SUBJECT_PREFIX);
+}
+
+/** Whether a release commit is the web phase of a release: its subject ends in `(web first)`. */
+export function isWebPhaseCommit(message: string): boolean {
+  const subject = message.split('\n')[0] ?? '';
+  return subject.startsWith(RELEASE_SUBJECT_PREFIX) && subject.endsWith(' (web first)');
 }
 
 /** Automatic image rollback is safe only when no migration changed between the two releases. */

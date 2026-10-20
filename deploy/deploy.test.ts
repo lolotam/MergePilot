@@ -121,23 +121,28 @@ describe('Task F4: Docker and Deployment Configuration', () => {
       expect(content).toContain('traefik.http.services.mergepilot.loadbalancer.server.port=3000');
     });
 
-    it('pins one immutable release (full SHA tag, optional digest) and joins the external dokploy-network', () => {
+    it('pins one immutable release for the web and one for the worker, equal on main', () => {
       const content = readFileSync(dokployPath, 'utf8');
       const pins = content.match(/^x-image: &image \S+$/gm) ?? [];
+      const workerPins = content.match(/^x-worker-image: &worker-image \S+$/gm) ?? [];
       expect(pins).toHaveLength(1);
+      expect(workerPins).toHaveLength(1);
       expect(pins[0]).toMatch(/^x-image: &image ghcr\.io\/lolotam\/mergepilot:[a-f0-9]{40}(@sha256:[a-f0-9]{64})?$/);
+      expect(workerPins[0]).toMatch(/^x-worker-image: &worker-image ghcr\.io\/lolotam\/mergepilot:[a-f0-9]{40}(@sha256:[a-f0-9]{64})?$/);
+      expect(workerPins[0]?.replace('x-worker-image: &worker-image ', '')).toBe(pins[0]?.replace('x-image: &image ', ''));
       expect(content).not.toMatch(/mergepilot:latest/);
       expect(content).toMatch(/dokploy-network/);
       expect(content).toMatch(/external:\s*true/);
     });
 
-    it('runs migrate, web and worker from the same pinned image', () => {
+    it('runs migrate and web from the pinned image and the worker from its own pin', () => {
       const content = readFileSync(dokployPath, 'utf8').replace(/\r\n/g, '\n');
-      for (const service of ['migrate', 'web', 'worker']) {
-        const block = new RegExp(`\\n  ${service}:\\n([\\s\\S]*?)(?=\\n  [a-z-]+:\\n|\\nvolumes:)`).exec(content)?.[1] ?? '';
-        expect(block, service).toMatch(/^ {4}image: \*image$/m);
+      const block = (service: string) => new RegExp(`\\n  ${service}:\\n([\\s\\S]*?)(?=\\n  [a-z-]+:\\n|\\nvolumes:)`).exec(content)?.[1] ?? '';
+      for (const service of ['migrate', 'web']) {
+        expect(block(service), service).toMatch(/^ {4}image: \*image$/m);
       }
-      expect(content.match(/ghcr\.io\/lolotam\/mergepilot/g)).toHaveLength(1);
+      expect(block('worker')).toMatch(/^ {4}image: \*worker-image$/m);
+      expect(content.match(/ghcr\.io\/lolotam\/mergepilot/g)).toHaveLength(2);
     });
 
     it("gives the worker a stop grace period that defaults to Docker's current 10s", () => {

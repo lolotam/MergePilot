@@ -1,17 +1,23 @@
 // The gated release (ADR-0025): checks → order → image identity → release commit → deploy → verify → rollback.
 import {
   type CheckRun,
+  type ReleaseKind,
+  type ReleaseTrailers,
   evaluateChecks,
   decideRelease,
+  hasWorkerPin,
   isReleaseCommit,
+  isWebPhaseCommit,
   parseReleaseMessage,
   pinRef,
   readPin,
+  readWorkerPin,
   releaseMessage,
-  rewritePin,
+  rewritePins,
+  sameExceptPins,
   rollbackEligible,
 } from './core.ts';
-import { type Clock, type ContainerSnapshot, pollUntil, systemClock, verifyContainers, verifyHealthResponse } from './verify.ts';
+import { type Clock, type ContainerSnapshot, type ExpectedRelease, pollUntil, systemClock, verifyContainers, verifyHealthResponse } from './verify.ts';
 
 export interface GitHubPort {
   commitMessage(sha: string): Promise<string>;
@@ -74,42 +80,118 @@ export function exitCodeOf(outcome: ReleaseOutcome): number {
 }
 
 /**
- * Time kept free in the job beyond the poll timeouts: checkout, registry reads, the hold issue, and
- * the overrun of each of the four polls by at most one attempt (a verify attempt is at most three
- * sequential rounds of requests of REQUEST_TIMEOUT_MS each, so the four overruns stay under 12 minutes).
+ * Time kept free in the job beyond the poll timeouts: checkout, registry reads, the hold issue,
+ * and the overrun of each of the six polls by at most one attempt (a verify attempt is at most
+ * three sequential rounds of requests of REQUEST_TIMEOUT_MS each, so the six overruns stay under
+ * 18 minutes).
  */
 export const JOB_SETUP_RESERVE_MS = 20 * 60_000;
 
 /**
- * Throws when a release could outlast its job: a failed release deploys and verifies twice
- * (forward, then rollback), and a job cancelled mid-rollback would never open the hold issue.
+ * Throws when a release could outlast its job: a release deploys and verifies twice (the web
+ * phase and the worker phase), and a failed release does it a third time to roll back. A job
+ * cancelled mid-rollback would never open the hold issue.
  */
 export function assertFitsJob(cfg: Pick<ReleaseConfig, 'deployTimeoutMs' | 'verifyTimeoutMs'>, jobTimeoutMs: number): void {
-  const worst = 2 * (cfg.deployTimeoutMs + cfg.verifyTimeoutMs) + JOB_SETUP_RESERVE_MS;
+  const worst = 3 * (cfg.deployTimeoutMs + cfg.verifyTimeoutMs) + JOB_SETUP_RESERVE_MS;
   if (worst > jobTimeoutMs) {
     throw new Error(`deploy and verify timeouts need up to ${worst / 60_000} min with a rollback; the job allows ${jobTimeoutMs / 60_000} min`);
   }
 }
 
+/** What runs in production right now: the web image, the worker image and the release before it. */
 interface Deployed {
+  /** Commit of the image migrate and web run. */
   sourceSha: string | null;
+  /** Image migrate and web run. */
   imageRef: string;
+  /** Commit of the image the worker runs. */
+  workerSourceSha: string | null;
+  /** Image the worker runs; the same as imageRef when the worker has no own pin. */
+  workerImageRef: string;
+  /** The release before this one, as the record's own previous trailers name it. */
+  previousSourceCommit: string | null;
+  previousImageRef: string | null;
+  previousWorkerSourceCommit: string | null;
+  previousWorkerImageRef: string | null;
+  /** The head is the web phase of a release: a release stopped between its phases. */
+  webPhase: boolean;
   /** Head of the release branch, or null before its first release commit. */
   head: string | null;
+}
+
+/** One release as a rollback target: the web image and the worker image of that release. */
+interface ReleaseTarget {
+  sourceSha: string | null;
+  imageRef: string | null;
+  workerSourceSha: string | null;
+  workerImageRef: string | null;
+}
+
+/**
+ * The commit the worker image was built from, or null when the record does not know it; then
+ * verification checks the worker's image only. A record from before the worker pin already names
+ * the web commit here (parseReleaseMessage), so nothing is guessed.
+ */
+function commitOf(record: { workerSourceSha: string | null }): string | null {
+  return record.workerSourceSha;
+}
+
+/** The trailers of a release commit: what it releases, what the worker runs, what ran before it. */
+function trailersOf(release: { sourceCommit: string; imageRef: string; workerSourceCommit: string | null; workerImageRef: string }, previous: ReleaseTarget): ReleaseTrailers {
+  return {
+    sourceCommit: release.sourceCommit,
+    imageRef: release.imageRef,
+    workerSourceCommit: release.workerSourceCommit,
+    workerImageRef: release.workerImageRef,
+    previousSourceCommit: previous.sourceSha,
+    previousImageRef: previous.imageRef,
+    previousWorkerSourceCommit: previous.workerSourceSha,
+    previousWorkerImageRef: previous.workerImageRef,
+  };
 }
 
 async function currentDeployment(cfg: ReleaseConfig, gh: GitHubPort): Promise<Deployed | null> {
   const head = await gh.branchHead(cfg.releaseBranch);
   if (head) {
     const trailers = parseReleaseMessage(head.message);
-    if (trailers) return { sourceSha: trailers.sourceCommit, imageRef: trailers.imageRef, head: head.sha };
-    const pin = readPin(await gh.fileAt(head.sha, cfg.composePath));
-    return { sourceSha: pin.sha, imageRef: pin.ref, head: head.sha };
+    if (trailers) {
+      return {
+        sourceSha: trailers.sourceCommit,
+        imageRef: trailers.imageRef,
+        workerSourceSha: trailers.workerSourceCommit,
+        workerImageRef: trailers.workerImageRef,
+        previousSourceCommit: trailers.previousSourceCommit,
+        previousImageRef: trailers.previousImageRef,
+        previousWorkerSourceCommit: trailers.previousWorkerSourceCommit,
+        previousWorkerImageRef: trailers.previousWorkerImageRef,
+        webPhase: isWebPhaseCommit(head.message),
+        head: head.sha,
+      };
+    }
+    return deployedFromCompose(await gh.fileAt(head.sha, cfg.composePath), head.sha);
   }
   if (cfg.live) return null;
   // Dry run before the release branch exists: Dokploy still reads main, so main's pin is what runs.
-  const pin = readPin(await gh.fileAt('main', cfg.composePath));
-  return { sourceSha: pin.sha, imageRef: pin.ref, head: null };
+  return deployedFromCompose(await gh.fileAt('main', cfg.composePath), null);
+}
+
+/** The deployed state of a compose file that is not a release commit: its pins. */
+function deployedFromCompose(compose: string, head: string | null): Deployed {
+  const pin = readPin(compose);
+  const workerPin = readWorkerPin(compose);
+  return {
+    sourceSha: pin.sha,
+    imageRef: pin.ref,
+    workerSourceSha: workerPin.sha,
+    workerImageRef: workerPin.ref,
+    previousSourceCommit: null,
+    previousImageRef: null,
+    previousWorkerSourceCommit: null,
+    previousWorkerImageRef: null,
+    webPhase: false,
+    head,
+  };
 }
 
 /** Deploys the release branch head and waits until it is verified; returns the problems found. */
@@ -117,7 +199,7 @@ async function deployAndVerify(
   ports: ReleasePorts,
   cfg: ReleaseConfig,
   dokploy: DokployPort,
-  expected: { imageRef: string; sourceSha: string },
+  expected: ExpectedRelease,
   title: string,
 ): Promise<string[]> {
   const clock = ports.clock ?? systemClock;
@@ -126,7 +208,7 @@ async function deployAndVerify(
   // (and a rollback of the record), never in an exception that leaves the record ahead of production.
   try {
     const before = await dokploy.deploymentIds();
-    await dokploy.deploy(title, `Source-Commit: ${expected.sourceSha}`);
+    await dokploy.deploy(title, `Source-Commit: ${expected.web.sourceSha}`);
     finished = await pollUntil(
       async () => {
         const d = await dokploy.newDeployment(before);
@@ -172,42 +254,149 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
 
   const deployed = await currentDeployment(cfg, gh);
   if (!deployed) return { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
-  const deployedSha = deployed.sourceSha;
+  // A web-phase head is a release stopped between its phases: its web phase may never have been
+  // deployed or verified, so it is neither a finished release nor a safe rollback target. A person
+  // reconciles production; until the hold is closed every release stops at the hold check above.
+  if (deployed.webPhase) {
+    const short = (deployed.sourceSha ?? 'unknown').slice(0, 7);
+    // A dry run changes nothing, not even the hold issue: it only reports what a live run would do.
+    if (!cfg.live) return { kind: 'blocked', detail: `release ${short} stopped between its phases; a live run would open a hold` };
+    const hold = await gh.openHold(
+      `Release hold: ${short} stopped between its phases`,
+      [
+        `The release branch head is the web phase of \`${deployed.sourceSha ?? 'unknown'}\` (\`${deployed.imageRef}\`), and its worker phase never ran.`,
+        `The web phase may not have been deployed or verified; the worker should still run \`${deployed.workerImageRef}\`.`,
+        '',
+        'Check what production runs, then finish the release or roll it back by hand, and close this hold.',
+      ].join('\n'),
+    );
+    return { kind: 'failed', detail: `release ${short} stopped between its phases`, hold };
+  }
+
+  const candidateCompose = await gh.fileAt(sha, cfg.composePath);
   const decision = decideRelease({
     sourceSha: sha,
-    deployedSha,
+    deployedSha: deployed.sourceSha,
     onMain: true,
-    sourceIsAncestorOfDeployed: deployedSha !== null && (await gh.isAncestor(sha, deployedSha)),
-    deployedIsAncestorOfSource: deployedSha !== null && (await gh.isAncestor(deployedSha, sha)),
+    sourceIsAncestorOfDeployed: deployed.sourceSha !== null && (await gh.isAncestor(sha, deployed.sourceSha)),
+    deployedIsAncestorOfSource: deployed.sourceSha !== null && (await gh.isAncestor(deployed.sourceSha, sha)),
   });
   if (decision.kind !== 'deploy') return { kind: decision.kind === 'skip' ? 'skipped' : 'blocked', detail: decision.reason };
 
-  const repository = readPin(await gh.fileAt(sha, cfg.composePath)).repository;
+  // The compose file of what runs now: the release branch head, or main before the branch exists.
+  const deployedCompose = await gh.fileAt(deployed.head ? deployed.head : 'main', cfg.composePath);
+  // A compose file without a worker pin is older than the ADR-0025 amendment: it is released in
+  // one phase, with every service on the same image.
+  const workerPinned = hasWorkerPin(candidateCompose);
+  // The web phase takes the candidate's whole compose file and rewrites only the pins, so a
+  // change beyond the pins may recreate the worker in that phase too: its drain then keeps the
+  // new web from starting, the outage the two phases exist to prevent.
+  const pinsOnly = sameExceptPins(candidateCompose, deployedCompose);
+  const twoPhases = workerPinned && pinsOnly;
+
+  const repository = readPin(candidateCompose).repository;
   const image = await ports.registry.resolve(repository, sha);
   if (image.revision !== sha) {
     return { kind: 'blocked', detail: `image ${repository}:${sha} has revision ${image.revision ?? 'missing'}, not ${sha}` };
   }
   const imageRef = pinRef(repository, sha, image.digest);
-  const compose = rewritePin(await gh.fileAt(sha, cfg.composePath), imageRef);
-  const message = releaseMessage({ sourceCommit: sha, imageRef, previousSourceCommit: deployedSha, previousImageRef: deployed.imageRef }, false);
-  log(`plan: deploy ${imageRef} (replacing ${deployed.imageRef})`);
-  if (!cfg.live) return { kind: 'planned', detail: `would deploy ${imageRef} over ${deployed.imageRef}` };
+
+  // The release before this candidate: the rollback target and the "previous" trailers.
+  const previous: ReleaseTarget = {
+    sourceSha: deployed.sourceSha,
+    imageRef: deployed.imageRef,
+    workerSourceSha: deployed.workerSourceSha,
+    workerImageRef: deployed.workerImageRef,
+  };
+
+  // The release commit of one phase: the pinned compose file and the record of the release.
+  const commit = (input: { parentSha: string; expectedHead: string | null; content: string; trailers: ReleaseTrailers; kind: ReleaseKind }) =>
+    gh.writeReleaseCommit({ branch: cfg.releaseBranch, path: cfg.composePath, parentSha: input.parentSha, content: input.content, message: releaseMessage(input.trailers, input.kind), expectedHead: input.expectedHead });
+
+  if (!twoPhases) {
+    if (workerPinned && !pinsOnly) {
+      log('plan: the compose file changed beyond the image pins, so this release runs in one phase (the site waits for the worker drain)');
+    }
+    log(`plan: deploy ${imageRef} (replacing ${deployed.imageRef})`);
+    if (!cfg.live) return { kind: 'planned', detail: `would deploy ${imageRef} over ${deployed.imageRef}` };
+    if (!ports.dokploy) return { kind: 'blocked', detail: 'live mode needs DOKPLOY_URL, DOKPLOY_API_KEY and DOKPLOY_APP_NAME' };
+    const releaseCommit = await commit({
+      parentSha: sha,
+      expectedHead: deployed.head,
+      content: rewritePins(candidateCompose, { image: imageRef, workerImage: imageRef }),
+      trailers: trailersOf({ sourceCommit: sha, imageRef, workerSourceCommit: sha, workerImageRef: imageRef }, previous),
+      kind: 'release',
+    });
+    log(`release commit ${releaseCommit} on ${cfg.releaseBranch}`);
+    const problems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef, sourceSha: sha } }, `release ${sha.slice(0, 7)}`);
+    if (problems.length === 0) return { kind: 'deployed', detail: `${imageRef} is running and healthy` };
+    return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, workerImageRef: imageRef, workerSourceSha: sha, releaseCommit, problems, previous });
+  }
+
+  // Web phase: the new image on migrate and web, the worker on the image it runs today.
+  log(`plan: web phase deploys ${imageRef} (replacing ${deployed.imageRef}); the worker stays on ${deployed.workerImageRef}`);
+  log(`plan: worker phase deploys ${imageRef} for the worker`);
+  if (!cfg.live) {
+    return { kind: 'planned', detail: `would deploy ${imageRef} to the web first and then to the worker (the worker stays on ${deployed.workerImageRef} until the second phase)` };
+  }
   if (!ports.dokploy) return { kind: 'blocked', detail: 'live mode needs DOKPLOY_URL, DOKPLOY_API_KEY and DOKPLOY_APP_NAME' };
 
-  const releaseCommit = await gh.writeReleaseCommit({ branch: cfg.releaseBranch, parentSha: sha, path: cfg.composePath, content: compose, message, expectedHead: deployed.head });
-  log(`release commit ${releaseCommit} on ${cfg.releaseBranch}`);
-  const problems = await deployAndVerify(ports, cfg, ports.dokploy, { imageRef, sourceSha: sha }, `release ${sha.slice(0, 7)}`);
-  if (problems.length === 0) return { kind: 'deployed', detail: `${imageRef} is running and healthy` };
+  const webCommit = await commit({
+    parentSha: sha,
+    expectedHead: deployed.head,
+    content: rewritePins(candidateCompose, { image: imageRef, workerImage: deployed.workerImageRef }),
+    trailers: trailersOf({ sourceCommit: sha, imageRef, workerSourceCommit: deployed.workerSourceSha, workerImageRef: deployed.workerImageRef }, previous),
+    kind: 'web',
+  });
+  log(`release commit ${webCommit} on ${cfg.releaseBranch} (web phase)`);
+  const webProblems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef: deployed.workerImageRef, sourceSha: commitOf(deployed) } }, `release ${sha.slice(0, 7)} (web first)`);
+  if (webProblems.length > 0) {
+    return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, workerImageRef: deployed.workerImageRef, workerSourceSha: deployed.workerSourceSha, releaseCommit: webCommit, problems: webProblems, previous });
+  }
 
-  return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, releaseCommit, problems, deployed });
+  // Worker phase: the new image on the worker too, so only the worker is recreated and drains.
+  let workerCommit: string;
+  try {
+    workerCommit = await commit({
+      parentSha: sha,
+      expectedHead: webCommit,
+      content: rewritePins(candidateCompose, { image: imageRef, workerImage: imageRef }),
+      trailers: trailersOf({ sourceCommit: sha, imageRef, workerSourceCommit: sha, workerImageRef: imageRef }, previous),
+      kind: 'release',
+    });
+  } catch (err) {
+    // The web phase is deployed and verified, so nothing is rolled back: the record names the
+    // web phase, the worker still runs the old image, and a person finishes or rolls back.
+    const message = err instanceof Error ? err.message : String(err);
+    const hold = await ports.github.openHold(
+      `Release hold: ${sha.slice(0, 7)} stopped after the web phase`,
+      [
+        `The web phase of \`${sha}\` is deployed and verified.`,
+        `The worker still runs \`${deployed.workerImageRef}\`.`,
+        `The worker-phase release commit could not be written: ${message}`,
+        '',
+        'A person must finish the release or roll it back by hand.',
+      ].join('\n'),
+    );
+    return { kind: 'failed', detail: `the worker-phase commit could not be written: ${message}`, hold };
+  }
+  log(`release commit ${workerCommit} on ${cfg.releaseBranch} (worker phase)`);
+  const problems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef, sourceSha: sha } }, `release ${sha.slice(0, 7)} (worker)`);
+  if (problems.length === 0) return { kind: 'deployed', detail: `${imageRef} is running and healthy` };
+  return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, workerImageRef: imageRef, workerSourceSha: sha, releaseCommit: workerCommit, problems, previous });
 }
 
 interface FailedRelease {
   sha: string;
   imageRef: string;
+  /** Image the worker ran in the failed release. */
+  workerImageRef: string;
+  /** Commit of the worker image in the failed release. */
+  workerSourceSha: string | null;
   releaseCommit: string;
   problems: string[];
-  deployed: Deployed;
+  /** The release before the candidate: where a rollback returns to. */
+  previous: ReleaseTarget;
 }
 
 /** Outcome of the rollback attempt: not attempted (with why), or the problems of the rolled-back release. */
@@ -215,18 +404,37 @@ type RollbackResult = { attempted: false; reason: string } | { attempted: true; 
 
 async function attemptRollback(cfg: ReleaseConfig, ports: ReleasePorts, dokploy: DokployPort, failed: FailedRelease): Promise<RollbackResult> {
   const { github: gh, log } = ports;
-  const previousSha = failed.deployed.sourceSha;
-  if (!previousSha) return { attempted: false, reason: 'the previous release is unknown' };
-  const migrations = rollbackEligible(await gh.changedMigrations(previousSha, failed.sha));
+  const previous = failed.previous;
+  if (!previous.sourceSha || !previous.imageRef) return { attempted: false, reason: 'the previous release is unknown' };
+  const migrations = rollbackEligible(await gh.changedMigrations(previous.sourceSha, failed.sha));
   if (!migrations.eligible) {
     return { attempted: false, reason: `migrations changed (${migrations.migrations.join(', ')}). Decide manually; do not restore the database automatically` };
   }
 
-  const previousCompose = rewritePin(await gh.fileAt(previousSha, cfg.composePath), failed.deployed.imageRef);
-  const message = releaseMessage({ sourceCommit: previousSha, imageRef: failed.deployed.imageRef, previousSourceCommit: failed.sha, previousImageRef: failed.imageRef }, true);
-  await gh.writeReleaseCommit({ branch: cfg.releaseBranch, parentSha: previousSha, path: cfg.composePath, content: previousCompose, message, expectedHead: failed.releaseCommit });
-  log(`rolling back to ${failed.deployed.imageRef}`);
-  const problems = await deployAndVerify(ports, cfg, dokploy, { imageRef: failed.deployed.imageRef, sourceSha: previousSha }, `rollback to ${previousSha.slice(0, 7)}`);
+  const workerImageRef = previous.workerImageRef ?? previous.imageRef;
+  let previousCompose: string;
+  try {
+    previousCompose = rewritePins(await gh.fileAt(previous.sourceSha, cfg.composePath), { image: previous.imageRef, workerImage: workerImageRef });
+  } catch (err) {
+    // An old compose file without a worker pin cannot bring the worker back on its own image.
+    return { attempted: false, reason: `the previous compose file cannot pin the worker separately: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const message = releaseMessage(
+    trailersOf(
+      { sourceCommit: previous.sourceSha, imageRef: previous.imageRef, workerSourceCommit: previous.workerSourceSha, workerImageRef },
+      { sourceSha: failed.sha, imageRef: failed.imageRef, workerSourceSha: failed.workerSourceSha, workerImageRef: failed.workerImageRef },
+    ),
+    'rollback',
+  );
+  await gh.writeReleaseCommit({ branch: cfg.releaseBranch, parentSha: previous.sourceSha, path: cfg.composePath, content: previousCompose, message, expectedHead: failed.releaseCommit });
+  log(`rolling back to ${previous.imageRef}`);
+  const problems = await deployAndVerify(
+    ports,
+    cfg,
+    dokploy,
+    { web: { imageRef: previous.imageRef, sourceSha: previous.sourceSha }, worker: { imageRef: workerImageRef, sourceSha: commitOf(previous) } },
+    `rollback to ${previous.sourceSha.slice(0, 7)}`,
+  );
   return { attempted: true, problems };
 }
 
@@ -241,7 +449,7 @@ async function rollBack(cfg: ReleaseConfig, ports: ReleasePorts, dokploy: Dokplo
   try {
     result = await attemptRollback(cfg, ports, dokploy, failed);
     if (!result.attempted) report.push('', `Automatic rollback NOT attempted: ${result.reason}.`);
-    else if (result.problems.length === 0) report.push('', `Rolled back to \`${failed.deployed.imageRef}\`, verified healthy.`);
+    else if (result.problems.length === 0) report.push('', `Rolled back to \`${failed.previous.imageRef}\`, verified healthy.`);
     else report.push('', ['Rollback ALSO failed verification:', ...result.problems.map((p) => `- ${p}`)].join('\n'));
   } catch (err) {
     result = { attempted: true, problems: [`rollback aborted: ${err instanceof Error ? err.message : String(err)}`] };
