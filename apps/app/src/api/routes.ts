@@ -8,7 +8,7 @@ import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import { BotNameTakenError, SettingsChangedError, UnknownSkillError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
-import { reconcileSettingsPatch } from './settings-merge.js';
+import { canReplaySettingsPatch, reconcileSettingsPatch } from './settings-merge.js';
 import { isKeyListProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
 import { registerProviderAuthRoutes } from './provider-auth-routes.js';
 import { KeyOrderError, SingleKeyProviderError, TooManyKeysError, type CredentialService } from '../credentials/service.js';
@@ -149,7 +149,7 @@ export function registerDashboardApi(
       }
 
       const { base, ...submitted } = parsed.data;
-      const replayable = base !== undefined && Object.keys(submitted).every((key) => Object.hasOwn(base, key));
+      const replayable = canReplaySettingsPatch(submitted, base);
       for (let attempt = 0; attempt < 3; attempt++) {
         // A patch over the stored settings: fields left out keep their value, null clears them.
         const previous = await deps.store.getSettings(workspaceId);
@@ -169,8 +169,8 @@ export function registerDashboardApi(
           await deps.store.saveSettings(patch.skillId === undefined ? withoutSkillFields(merged) : merged, { expected: previous });
         } catch (error) {
           if (error instanceof SettingsChangedError) {
-            // A request can only be replayed when every field it sends has a base to check: a
-            // field without one would write its stale value over the writer that won the race.
+            // A request is replayed only when its base covers every field it sends and every
+            // member of a model group it touches (see canReplaySettingsPatch).
             if (!replayable) return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
             continue;
           }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsChangedError } from '../core/types.js';
-import { createProviderHarness, type ProviderHarness } from './provider-routes.fixtures.js';
+import { createProviderHarness, keyFor, type ProviderHarness } from './provider-routes.fixtures.js';
 
 describe('PUT /settings field-level concurrency', () => {
   let h: ProviderHarness;
@@ -102,6 +102,23 @@ describe('PUT /settings field-level concurrency', () => {
     expect(res.json()).toEqual(conflict);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(await snapshot()).toMatchObject({ model: 'claude-opus-5-5' });
+  });
+
+  it('rejects a store race when the base leaves members of a touched model group unchecked', async () => {
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('openai'), userId: 'u-admin' });
+    expect((await put({ heavyProvider: 'openai', heavyModel: 'gpt-heavy' })).statusCode).toBe(200);
+    const base = await snapshot();
+    const save = h.store.saveSettings.bind(h.store);
+    const spy = vi.spyOn(h.store, 'saveSettings').mockImplementationOnce(async () => {
+      await save({ ...base!, heavyModel: 'gpt-heavy-2' });
+      throw new SettingsChangedError('ws-1');
+    });
+    // Every sent field is baselined, but heavyProvider/heavyModel of the touched group are not.
+    const res = await put({ heavyEffort: 'high', base: { ...required, heavyEffort: base!.heavyEffort ?? null } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual(conflict);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await snapshot()).toMatchObject({ heavyModel: 'gpt-heavy-2' });
   });
 
   it('rejects a same-field store race after re-reading without retrying the stale write', async () => {

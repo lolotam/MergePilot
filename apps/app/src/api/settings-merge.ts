@@ -17,6 +17,22 @@ const SETTINGS_GROUPS: readonly (readonly SettingsField[])[] = [
 /** The fields every PUT body carries, so they keep their stored value instead of being left out. */
 const REQUIRED_FIELDS: readonly SettingsField[] = ['provider', 'model', 'language'];
 
+/**
+ * Whether a save that lost a store race can be merged again on the fresh settings: every field it
+ * sends, and every member of a model group it touches, must have a base to check. Otherwise the
+ * retry could write a stale value, or an effort for a model another writer changed meanwhile.
+ */
+export function canReplaySettingsPatch(
+  submitted: Omit<SettingsUpdate, 'base'>,
+  base: SettingsBase | undefined,
+): boolean {
+  if (!base) return false;
+  const sent = Object.keys(submitted);
+  if (!sent.every((key) => Object.hasOwn(base, key))) return false;
+  return SETTINGS_GROUPS.every((group) =>
+    !group.some((key) => sent.includes(key)) || group.every((key) => Object.hasOwn(base, key)));
+}
+
 function normalized(value: unknown): unknown {
   if (value === undefined) return null;
   if (Array.isArray(value)) return value.map(normalized);
