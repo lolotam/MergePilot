@@ -118,6 +118,14 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('mimo-v2.5');
   });
 
+  it('tests a MiniMax key with the registry default model', async () => {
+    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model: 'x', reply: 'OK' });
+    vi.mocked(listModels).mockRejectedValue(new Error('boom'));
+    const res = await test('minimax', h.adminCookie(), { apiKey: keyFor('mm') });
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('MiniMax-M3.1-Flash');
+  });
+
   it('without a model, tests the custom key with the model the workspace uses it for (heavy, then fallback)', async () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 2, model: 'x', reply: 'OK' });
     await h.credentials.saveKey({

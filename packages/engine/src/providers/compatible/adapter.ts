@@ -10,11 +10,12 @@ import { LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { responseSchemaInstruction } from '../../llm/schema-instruction.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
-import { DEFAULT_THINKING_HEADROOM, compatibleEffortFields, deepseekEffort, defaultThinkingHeadroom, isCompatibleReasoningModel, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
+import { compatibleEffortFields, defaultThinkingHeadroom, effortStopsThinking, isCompatibleReasoningModel, sentEffort, thinkingHeadroom, type ThinkingStyle } from '../effort.js';
 import { bearerHeaders, failureFromResponse, failureFromThrown, redactKey, type FetchLike, type KeyInput } from '../http.js';
 import type { ApiProviderId } from '../ids.js';
 import { providerEntry, resolveBaseUrl } from '../registry.js';
 import { readSse } from './sse.js';
+import { ThinkFilter } from './think.js';
 
 export interface OpenAICompatibleAdapterOptions {
   provider: ApiProviderId;
@@ -107,7 +108,7 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
   #thinks(model: string, effort: string | undefined): boolean {
     if (effort === undefined) return isCompatibleReasoningModel(this.provider, model, this.#style);
     const isOff = effort === 'off' || effort === 'none';
-    return !isOff && Object.keys(compatibleEffortFields(this.#style, effort)).length > 0;
+    return !isOff && Object.keys(compatibleEffortFields(this.#style, effort, model)).length > 0;
   }
 
   /**
@@ -118,6 +119,8 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
   #effortFor(options: Pick<GenerateOptions, 'model' | 'effort' | 'thinking'>): string | undefined {
     if (options.thinking !== 'off') return options.effort;
     if (this.#style === 'glm' || this.#style === 'deepseek') return 'off';
+    // MiniMax cannot turn its thinking off: the shallowest depth it accepts is sent instead.
+    if (this.#style === 'minimax') return LOWEST_REASONING_EFFORT;
     if (this.#style === 'reasoning_effort' && this.#thinks(options.model, options.effort)) {
       return LOWEST_REASONING_EFFORT;
     }
@@ -126,13 +129,13 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
     if (options.effort !== undefined) {
-      const isOff = options.effort === 'off' || options.effort === 'none';
-      const effortFields = compatibleEffortFields(this.#style, options.effort);
-      const thinks = Object.keys(effortFields).length > 0 && !isOff;
-      // `on` (GLM) and other non-graded switches enable thinking without a size: use the default.
-      // DeepSeek runs a mapped effort (medium -> high), so the headroom follows what is really sent.
-      const sized = this.#style === 'deepseek' ? deepseekEffort(options.effort) : options.effort;
-      const headroom = thinks ? thinkingHeadroom(sized) || DEFAULT_THINKING_HEADROOM : 0;
+      const effortFields = compatibleEffortFields(this.#style, options.effort, options.model);
+      // `on` (GLM) and other non-graded switches enable thinking without a size: use the
+      // default of the style, the same one the connection test reserves. The headroom follows
+      // the effort the style really sends.
+      const thinks = Object.keys(effortFields).length > 0 && !effortStopsThinking(this.#style, options.effort);
+      const sized = sentEffort(this.#style, options.effort, options.model);
+      const headroom = thinks ? thinkingHeadroom(sized) || defaultThinkingHeadroom(this.#style) : 0;
       return options.maxOutputTokens + headroom;
     }
     const thinksByDefault = isCompatibleReasoningModel(this.provider, options.model, this.#style);
@@ -155,7 +158,7 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
       else messages.unshift({ role: 'system', content: instruction });
     }
     const effort = this.#effortFor(options);
-    const effortFields = compatibleEffortFields(this.#style, effort);
+    const effortFields = compatibleEffortFields(this.#style, effort, options.model);
     return {
       model: options.model,
       messages,
@@ -184,6 +187,8 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
     let usage: TokenUsage | undefined;
     let finish: FinishReason | undefined;
     let done = false;
+    // MiniMax can leave its thinking in `content`; the answer must be the JSON after it.
+    const think = this.#style === 'minimax' ? new ThinkFilter() : undefined;
     try {
       for await (const { data } of readSse(response.body)) {
         if (options.signal?.aborted) {
@@ -196,7 +201,11 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
         const chunk = JSON.parse(data) as ChatChunk;
         if (chunk.error) throw this.#streamError(chunk.error);
         const choice = chunk.choices?.[0];
-        if (choice?.delta?.content) yield { type: 'text-delta', text: choice.delta.content };
+        const text = choice?.delta?.content;
+        if (text) {
+          const clean = think ? think.push(text) : text;
+          if (clean) yield { type: 'text-delta', text: clean };
+        }
         if (choice?.finish_reason) finish = mapFinish(choice.finish_reason);
         if (chunk.usage) usage = usageFrom(chunk.usage);
       }
@@ -208,6 +217,9 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
     }
 
     // Neither a finish reason nor [DONE]: the connection dropped mid-answer.
+    // Checked before the think block is settled: a connection that drops while the model is
+    // still thinking is a dropped connection, not a broken answer, and the retry rules act on
+    // a NETWORK failure rather than on a fatal one.
     if (!finish && !done) {
       throw new LlmFailure({
         code: 'NETWORK',
@@ -215,6 +227,14 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
         message: `${this.provider} stream ended before the answer was complete`,
       });
     }
+
+    const tail = think?.flush();
+    // Nothing comes out of an unterminated think block: the thinking is not the answer. The
+    // stream is not failed for it, so the usage the provider reported and billed stays in the
+    // accounting, and the review's own empty-answer recovery (one retry with thinking off)
+    // gets its chance with the answer that is missing.
+    if (tail && !tail.unterminated && tail.text) yield { type: 'text-delta', text: tail.text };
+
     yield { type: 'usage', usage: usage ?? { ...ZERO_USAGE } };
     yield { type: 'finish', reason: finish ?? 'stop' };
   }

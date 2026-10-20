@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Secret } from '../credentials/secret.js';
+import { OpenAICompatibleAdapter } from './compatible/adapter.js';
 import { testConnection } from './connection.js';
 import { hangingFetch, jsonResponse, mockFetch, textResponse } from './fetch-mock.fixtures.js';
 
@@ -162,6 +163,78 @@ describe('testConnection', () => {
 
       expect(result.ok).toBe(true);
       expect(calls[0]?.url).toBe('https://token-plan-sgp.xiaomimimo.com/v1/chat/completions');
+    });
+
+    it('tests MiniMax with the thinking split out and room left for it', async () => {
+      const { fetch, calls } = mockFetch(
+        jsonResponse({
+          choices: [{ message: { content: 'OK' } }],
+        }),
+      );
+
+      const result = await testConnection('minimax', KEY, 'MiniMax-M3.1-Flash', { fetch });
+
+      expect(result.ok).toBe(true);
+      expect(calls[0]?.url).toBe('https://api.minimax.io/v1/chat/completions');
+      expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
+      expect(calls[0]?.body).toMatchObject({ model: 'MiniMax-M3.1-Flash', reasoning_split: true });
+      expect(calls[0]?.body).not.toHaveProperty('thinking');
+      // MiniMax thinks at its default depth `max`, so the whole `max` budget is reserved.
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16 + 32000);
+    });
+
+    it('tests a MiniMax model that ignores the depth with the default room for its thinking', async () => {
+      const { fetch, calls } = mockFetch(
+        jsonResponse({
+          choices: [{ message: { content: 'OK' } }],
+        }),
+      );
+
+      const result = await testConnection('minimax', KEY, 'MiniMax-M3', { fetch, effort: 'high' });
+
+      expect(result.ok).toBe(true);
+      expect(calls[0]?.body).toMatchObject({ model: 'MiniMax-M3', reasoning_split: true });
+      expect(calls[0]?.body).not.toHaveProperty('reasoning_effort');
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16 + 32000);
+    });
+
+    it('tests the MiniMax Coding Plan on the same endpoint, with its own key', async () => {
+      const { fetch, calls } = mockFetch(
+        jsonResponse({
+          choices: [{ message: { content: 'OK' } }],
+        }),
+      );
+
+      const result = await testConnection('minimax-coding-plan', KEY, 'MiniMax-M3.1-Flash', { fetch, effort: 'high' });
+
+      expect(result.ok).toBe(true);
+      expect(calls[0]?.url).toBe('https://api.minimax.io/v1/chat/completions');
+      expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
+      expect(calls[0]?.body).toMatchObject({
+        model: 'MiniMax-M3.1-Flash',
+        reasoning_split: true,
+        reasoning_effort: 'high',
+        max_tokens: 16 + 16384,
+      });
+      expect(calls[0]?.body).not.toHaveProperty('thinking');
+    });
+
+    it('asks MiniMax for the same room the review call asks for, when the effort carries no size', async () => {
+      const { fetch, calls } = mockFetch(
+        jsonResponse({
+          choices: [{ message: { content: 'OK' } }],
+        }),
+      );
+
+      // An effort MiniMax does not know is not sent, so the thinking has no size of its own:
+      // the room is MiniMax's default depth (`max`), in the connection test and in the review.
+      const result = await testConnection('minimax', KEY, 'MiniMax-M3.1-Flash', { fetch, effort: 'on' });
+
+      expect(result.ok).toBe(true);
+      expect((calls[0]?.body as { max_tokens: number }).max_tokens).toBe(16 + 32000);
+
+      const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY });
+      expect(adapter.requestedOutputTokens({ model: 'MiniMax-M3.1-Flash', maxOutputTokens: 4096, effort: 'on' })).toBe(4096 + 32000);
     });
   });
 

@@ -3,9 +3,11 @@ import {
   anthropicThinking,
   anthropicThinkingHeadroom,
   compatibleEffortFields,
+  effortStopsThinking,
   FALLBACK_EFFORTS,
   geminiThinkingConfig,
   openAIReasoningEffort,
+  sentEffort,
   thinkingHeadroom,
 } from './effort.js';
 
@@ -17,6 +19,7 @@ describe('FALLBACK_EFFORTS', () => {
       deepseek: ['off', 'low', 'high', 'max'],
       gemini: ['minimal', 'low', 'medium', 'high'],
       anthropic: ['off', 'low', 'medium', 'high'],
+      minimax: ['low', 'medium', 'high', 'xhigh', 'max'],
       none: [],
     });
   });
@@ -40,6 +43,67 @@ describe('compatibleEffortFields', () => {
   it('never sends anything for thinkingStyle none, and ignores unknown efforts', () => {
     expect(compatibleEffortFields('none', 'high')).toEqual({});
     expect(compatibleEffortFields('reasoning_effort', 'turbo')).toEqual({});
+  });
+
+  it('sends MiniMax the depths it documents, always asks for the thinking to be split out, and never disables it', () => {
+    expect(compatibleEffortFields('minimax', 'low', 'MiniMax-M3.1-Flash')).toEqual({ reasoning_split: true, reasoning_effort: 'low' });
+    expect(compatibleEffortFields('minimax', 'medium', 'MiniMax-M3.1-Flash')).toEqual({ reasoning_split: true, reasoning_effort: 'medium' });
+    expect(compatibleEffortFields('minimax', 'high', 'MiniMax-M3.1-Flash')).toEqual({ reasoning_split: true, reasoning_effort: 'high' });
+    expect(compatibleEffortFields('minimax', 'xhigh', 'MiniMax-M3.1-Flash')).toEqual({ reasoning_split: true, reasoning_effort: 'xhigh' });
+    expect(compatibleEffortFields('minimax', 'max', 'MiniMax-M3.1-Flash')).toEqual({ reasoning_split: true, reasoning_effort: 'max' });
+    // The split is asked for even with no effort at all.
+    expect(compatibleEffortFields('minimax', undefined, 'MiniMax-M3.1-Flash')).toEqual({ reasoning_split: true });
+    // Thinking cannot be turned off: an effort that asks for none asks for the shallowest depth.
+    expect(compatibleEffortFields('minimax', 'off', 'MiniMax-M3.1-Flash')).toEqual({ reasoning_split: true, reasoning_effort: 'low' });
+    expect(compatibleEffortFields('minimax', 'none', 'MiniMax-M3.1-Flash')).toEqual({ reasoning_split: true, reasoning_effort: 'low' });
+    // `reasoning_effort: none` and `thinking: disabled` are rejected by MiniMax.
+    for (const effort of ['off', 'none', 'low', 'medium', 'high', 'xhigh', 'max', undefined]) {
+      const fields = compatibleEffortFields('minimax', effort, 'MiniMax-M3.1-Flash');
+      expect(fields.reasoning_effort).not.toBe('none');
+      expect(fields).not.toHaveProperty('thinking');
+    }
+  });
+
+  it('sends no depth to the MiniMax models that ignore `reasoning_effort`, but still asks for the split', () => {
+    for (const model of ['MiniMax-M3', 'MiniMax-M2.7']) {
+      expect(compatibleEffortFields('minimax', 'high', model)).toEqual({ reasoning_split: true });
+      expect(compatibleEffortFields('minimax', 'off', model)).toEqual({ reasoning_split: true });
+    }
+  });
+});
+
+describe('sentEffort', () => {
+  it('sizes a MiniMax effort the model does not know by the depth MiniMax really thinks at', () => {
+    // Nothing is sent for these, so MiniMax thinks at its default depth `max`.
+    expect(sentEffort('minimax', 'on', 'MiniMax-M3.1-Flash')).toBe('max');
+    expect(sentEffort('minimax', '', 'MiniMax-M3.1-Flash')).toBe('max');
+    expect(sentEffort('minimax', 'turbo', 'MiniMax-M3.1-Flash')).toBe('max');
+    // The depths MiniMax documents are sent as they are.
+    expect(sentEffort('minimax', 'high', 'MiniMax-M3.1-Flash')).toBe('high');
+    expect(sentEffort('minimax', 'max', 'MiniMax-M3.1-Flash')).toBe('max');
+    // An effort that asks for no thinking asks for the shallowest depth MiniMax accepts.
+    expect(sentEffort('minimax', 'off', 'MiniMax-M3.1-Flash')).toBe('low');
+    // A model that ignores the depth thinks at its default depth, whatever the effort.
+    expect(sentEffort('minimax', 'high', 'MiniMax-M2.7')).toBe('max');
+  });
+
+  it('leaves the other styles alone', () => {
+    expect(sentEffort('reasoning_effort', 'high', 'gpt-5')).toBe('high');
+    expect(sentEffort('deepseek', 'medium', 'deepseek-flash')).toBe('high');
+  });
+});
+
+describe('effortStopsThinking', () => {
+  it('reads the effort the way the request body reads it', () => {
+    expect(effortStopsThinking('reasoning_effort', 'off')).toBe(true);
+    expect(effortStopsThinking('reasoning_effort', 'none')).toBe(true);
+    expect(effortStopsThinking('reasoning_effort', ' OFF ')).toBe(true);
+    expect(effortStopsThinking('reasoning_effort', 'None')).toBe(true);
+    expect(effortStopsThinking('reasoning_effort', 'high')).toBe(false);
+    expect(effortStopsThinking('glm', ' OFF ')).toBe(true);
+    // MiniMax cannot stop thinking, whatever the effort asks for.
+    expect(effortStopsThinking('minimax', ' OFF ')).toBe(false);
+    expect(effortStopsThinking('minimax', 'none')).toBe(false);
   });
 });
 
@@ -187,6 +251,10 @@ describe('default thinking headroom (P0.1)', () => {
     expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2.10')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi', 'mimo-v3-pro')).toBe(true);
     expect(isCompatibleReasoningModel('xiaomi', 'mimo-v2.4')).toBe(false);
+    // MiniMax always thinks and cannot be told not to.
+    expect(isCompatibleReasoningModel('minimax', 'MiniMax-M3.1-Flash')).toBe(true);
+    expect(isCompatibleReasoningModel('minimax', 'MiniMax-M2.7')).toBe(true);
+    expect(isCompatibleReasoningModel('minimax-coding-plan', 'MiniMax-M3.1-Flash')).toBe(true);
   });
 
   it('adds default thinking headroom to requestedOutputTokens when effort is undefined', async () => {
@@ -231,5 +299,29 @@ describe('default thinking headroom (P0.1)', () => {
     expect(xiaomi.requestedOutputTokens({ model: 'mimo-v2-flash', maxOutputTokens: 4096 })).toBe(4096);
     const tokenPlan = new OpenAICompatibleAdapter({ provider: 'xiaomi-token-plan', apiKey: fakeKey });
     expect(tokenPlan.requestedOutputTokens({ model: 'mimo-v2.6-pro', maxOutputTokens: 4096 })).toBe(4096 + 8192);
+
+    const minimax = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: fakeKey });
+    // MiniMax thinks by default, at its own default depth `max`, and keeps room for it.
+    expect(minimax.requestedOutputTokens({ model: 'MiniMax-M3.1-Flash', maxOutputTokens: 4096 })).toBe(4096 + 32000);
+    // A configured depth sizes the room for the thinking.
+    expect(minimax.requestedOutputTokens({ model: 'MiniMax-M3.1-Flash', maxOutputTokens: 4096, effort: 'high' })).toBe(4096 + 16384);
+    // Thinking cannot be turned off, so an "off" effort still leaves room for it.
+    expect(minimax.requestedOutputTokens({ model: 'MiniMax-M3.1-Flash', maxOutputTokens: 4096, effort: 'off' })).toBe(4096 + 2048);
+    // The models that ignore `reasoning_effort` think at the default depth, whatever the effort.
+    expect(minimax.requestedOutputTokens({ model: 'MiniMax-M3', maxOutputTokens: 4096, effort: 'high' })).toBe(4096 + 32000);
+    expect(minimax.requestedOutputTokens({ model: 'MiniMax-M2.7', maxOutputTokens: 4096, effort: 'low' })).toBe(4096 + 32000);
   });
+
+  it.each(['on', '', 'turbo'])(
+    'reserves the max thinking budget for a MiniMax effort the model does not know (%s)',
+    async (effort) => {
+      const { OpenAICompatibleAdapter } = await import('./compatible/adapter.js');
+      const { Secret } = await import('../credentials/secret.js');
+      const minimax = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: new Secret('fake-test-key-12345') });
+
+      // Nothing is sent for an effort MiniMax does not know, so it thinks at its default depth
+      // `max`: the room must be the `max` budget, the same depth the connection test asks for.
+      expect(minimax.requestedOutputTokens({ model: 'MiniMax-M3.1-Flash', maxOutputTokens: 4096, effort })).toBe(4096 + 32000);
+    },
+  );
 });

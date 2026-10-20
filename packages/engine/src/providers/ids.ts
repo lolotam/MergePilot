@@ -21,6 +21,8 @@ export const API_PROVIDER_IDS = [
   'xiaomi',
   'xiaomi-token-plan',
   'xiaomi-token-plan-cn',
+  'minimax',
+  'minimax-coding-plan',
 ] as const;
 
 export type ApiProviderId = (typeof API_PROVIDER_IDS)[number];

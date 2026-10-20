@@ -153,6 +153,20 @@ describe('processReviewJob — API-equivalent cost of subscription and token-pla
     expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo((50 * 1.4 + 20 * 4.4) / 1_000_000, 9);
   });
 
+  it('prices a MiniMax Coding Plan run as the same model on the plain MiniMax provider', async () => {
+    const { run } = await review({
+      settings: { provider: 'minimax-coding-plan', model: 'MiniMax-M3.1-Flash' },
+      catalog: [
+        { provider: 'minimax-coding-plan', model: 'MiniMax-M3.1-Flash', inputPerMTok: 0, outputPerMTok: 0, source: 'models.dev' },
+        { provider: 'minimax', model: 'MiniMax-M3.1-Flash', inputPerMTok: 0.15, outputPerMTok: 0.6, source: 'models.dev' },
+      ],
+    });
+
+    expect(run?.costUsd).toBe(0);
+    expect(run?.result?.pricing).toMatchObject({ source: 'catalog:models.dev', inputPerMTok: 0, outputPerMTok: 0, apiEquivalentSource: 'catalog:models.dev' });
+    expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo((50 * 0.15 + 20 * 0.6) / 1_000_000, 9);
+  });
+
   it("computes the equivalent from the model's own usage, not the judge's tokens added to the run", async () => {
     const judge: JudgeSettings = { enabled: true, provider: 'opencode-zen', model: 'jev-1.13', uses: ['annotate', 'dedupe'], threshold: 0.35, fallback: [] };
     const finding = { path: 'src/main.ts', line: 2, side: 'RIGHT', title: 'Bug', body: 'Bug body', severity: 'medium', category: 'correctness', evidence: 'b', confidence: 0.9 };
