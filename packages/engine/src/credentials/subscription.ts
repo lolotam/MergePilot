@@ -14,6 +14,12 @@ export function isSubscriptionOnlyProvider(provider: string): provider is Subscr
 }
 export const SUBSCRIPTION_PREFIX = 'mergepilot:oauth:v1:';
 
+/**
+ * How long before `expires` the credential service refreshes and persists a subscription token. It must exceed
+ * pi-ai's own 5-minute refresh window, so pi-ai always receives a token it will not try to refresh itself.
+ */
+export const SUBSCRIPTION_REFRESH_MARGIN_MS = 10 * 60_000;
+
 const CredentialSchema = z.object({
   type: z.literal('oauth'),
   access: z.string().min(1),
@@ -25,6 +31,11 @@ const EnvelopeSchema = z.object({
   credential: CredentialSchema,
 });
 export type SubscriptionCredential = z.infer<typeof CredentialSchema>;
+
+/** True when the stored credential is inside the refresh margin and must be refreshed (and persisted) before use. */
+export function subscriptionNeedsRefresh(credential: Pick<SubscriptionCredential, 'expires'>, now = Date.now()): boolean {
+  return credential.expires <= now + SUBSCRIPTION_REFRESH_MARGIN_MS;
+}
 
 export function isSubscriptionProvider(provider: string): provider is SubscriptionProvider {
   return (SUBSCRIPTION_PROVIDERS as readonly string[]).includes(provider);

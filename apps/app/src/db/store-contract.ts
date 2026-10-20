@@ -276,6 +276,36 @@ export function describeStoreContract(
       }
     });
 
+    it('remembers a refused subscription refresh and clears it on the next save', async () => {
+      const store = await createStore();
+      try {
+        const flagged = new Date('2026-10-19T17:26:00.000Z');
+        const credential: StoredCredential = {
+          id: '33333333-3333-4333-8333-333333333333',
+          workspaceId: 'ws-cred-test',
+          provider: 'anthropic',
+          ciphertext: 'enc:secret-cipher-text-3',
+          keyVersion: 1,
+          last4: 'sk-3',
+          createdBy: 'user-1',
+          createdAt: new Date('2026-01-03T00:00:00.000Z'),
+          signInRequiredAt: flagged,
+        };
+        await store.saveCredential(credential);
+
+        const fetched = await store.getCredential('ws-cred-test', 'anthropic');
+        expect(fetched?.signInRequiredAt).toEqual(flagged);
+        const listed = (await store.listCredentials('ws-cred-test')).find((k) => k.provider === 'anthropic');
+        expect(listed?.signInRequiredAt).toEqual(flagged);
+
+        // A write without the flag clears it: a new sign-in replaces the row.
+        await store.saveCredential({ ...credential, signInRequiredAt: undefined });
+        expect((await store.getCredential('ws-cred-test', 'anthropic'))?.signInRequiredAt ?? null).toBeNull();
+      } finally {
+        await cleanup?.();
+      }
+    });
+
     it('manages review runs: create, list, finish and monthCostUsd', async () => {
       const store = await createStore();
       try {

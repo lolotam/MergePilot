@@ -107,6 +107,39 @@ describe('subscription model protocols', () => {
     expect(result.usage?.outputTokens).toBe(2);
   });
 
+  it('never refreshes in memory when the stored token expires inside pi-ai refresh window', async () => {
+    const model = subscriptionModels('anthropic')[0]!.id;
+    const access = ['claude', 'access', 'near-expiry'].join('-');
+    const refreshToken = ['claude', 'refresh', 'near-expiry'].join('-');
+    const secret = new Secret(encodeSubscription('anthropic', { type: 'oauth', access, refresh: refreshToken, expires: Date.now() + 2 * 60_000 }));
+    let tokenCalls = 0;
+    let requestHeaders: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/v1/oauth/token')) {
+        tokenCalls++;
+        return Response.json({ access_token: ['claude', 'access', 'rotated'].join('-'), refresh_token: ['claude', 'refresh', 'rotated'].join('-'), expires_in: 28800 });
+      }
+      const headers = new Headers(init?.headers);
+      requestHeaders = [];
+      headers.forEach((value) => requestHeaders.push(value));
+      return sse([
+        { type: 'message_start', message: { id: 'msg', type: 'message', role: 'assistant', content: [], model, stop_reason: null, usage: { input_tokens: 5, output_tokens: 0 } } },
+        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'OK' } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } },
+        { type: 'message_stop' },
+      ]);
+    }));
+
+    const result = await collectText(new SubscriptionAdapter('anthropic', secret).stream(request(model)));
+
+    expect(result.text).toBe('OK');
+    expect(tokenCalls).toBe(0);
+    expect(requestHeaders.some((value) => value.includes(access))).toBe(true);
+  });
+
   it.each(['openai', 'anthropic', 'xai'] as const)('classifies %s quota failures for fallback and redacts tokens echoed by the server', async (provider) => {
     const token = provider === 'anthropic' ? claudeAccess : access;
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: { message: `quota exceeded ${token} ${refresh}` } }, { status: 429 })));

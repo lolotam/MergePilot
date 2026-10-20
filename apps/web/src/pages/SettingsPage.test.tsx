@@ -237,6 +237,45 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     expect(screen.getAllByLabelText(/الطريقة الافتراضية/i)).toHaveLength(1);
   });
 
+  it('asks for a new sign-in when the provider refused the subscription refresh', () => {
+    setupMocks({
+      role: 'admin',
+      keys: [
+        {
+          provider: 'anthropic' as const,
+          last4: '9999',
+          createdAt: '2026-10-01',
+          createdBy: 'user-1',
+          hasSubscription: true,
+          defaultMethod: 'subscription' as const,
+          signInRequiredAt: '2026-10-19T17:26:00.000Z',
+        },
+      ],
+    });
+    renderComponent();
+    expect(screen.getByText(/تسجيل الدخول للاشتراك انتهى/)).toBeDefined();
+    expect(screen.getByRole('button', { name: /سجّل دخول تاني/ })).toBeDefined();
+  });
+
+  it('shows no sign-in alert while the subscription refresh is healthy', () => {
+    setupMocks({
+      role: 'admin',
+      keys: [
+        {
+          provider: 'anthropic' as const,
+          last4: '9999',
+          createdAt: '2026-10-01',
+          createdBy: 'user-1',
+          hasSubscription: true,
+          defaultMethod: 'subscription' as const,
+        },
+      ],
+    });
+    renderComponent();
+    expect(screen.queryByText(/تسجيل الدخول للاشتراك انتهى/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /سجّل دخول تاني/ })).toBeNull();
+  });
+
   it('add-key never shows the key after save', async () => {
     const user = userEvent.setup();
     const fakeSecret = 'sk-test-secret-99999999';

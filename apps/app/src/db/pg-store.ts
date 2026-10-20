@@ -24,7 +24,7 @@ import {
   deletePgAuthPreference, readPgAuthPreference, writePgAuthPreference,
 } from './pg-auth-preferences.js';
 import {
-  listStoredProviderKeys, listWorkspaceStoredProviderKeys, modifyStoredProviderKeys, readStoredKeyCursor,
+  listStoredProviderKeys, listWorkspaceStoredProviderKeys, mapCredentialRow, modifyStoredProviderKeys, readStoredKeyCursor,
   recordStoredProviderKeyTest, writeStoredKeyCursor,
 } from './pg-key-roster.js';
 import { deletePgReviewerBot, listPgReviewerBots, upsertPgReviewerBot } from './pg-bots.js';
@@ -241,17 +241,7 @@ export class PgStore implements AppStore {
       .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
     const row = rows[0];
     if (!row) return null;
-    return {
-      id: row.id,
-      workspaceId: row.workspaceId,
-      provider: row.provider as KeyProvider,
-      ciphertext: row.ciphertext,
-      keyVersion: row.keyVersion,
-      last4: row.last4,
-      createdBy: row.createdBy,
-      createdAt: new Date(row.createdAt),
-      baseUrl: row.baseUrl ?? null,
-    };
+    return mapCredentialRow(row);
   }
 
   async listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>> {
@@ -265,6 +255,7 @@ export class PgStore implements AppStore {
         createdBy: providerCredentials.createdBy,
         createdAt: providerCredentials.createdAt,
         baseUrl: providerCredentials.baseUrl,
+        signInRequiredAt: providerCredentials.signInRequiredAt,
       })
       .from(providerCredentials)
       .where(eq(providerCredentials.workspaceId, workspaceId));
@@ -277,6 +268,7 @@ export class PgStore implements AppStore {
       createdBy: row.createdBy,
       createdAt: new Date(row.createdAt),
       baseUrl: row.baseUrl ?? null,
+      signInRequiredAt: row.signInRequiredAt ?? null,
     }));
   }
 

@@ -47,6 +47,8 @@ export const en: I18nDictionary = {
   subscriptionSubmitCode: 'Continue',
   subscriptionRetry: 'Start a new sign-in',
   subscriptionConnected: 'Subscription connected',
+  subscriptionSignInRequired: 'The subscription sign-in expired and could not be renewed. Reviews use the bot’s fallback model until you sign in again.',
+  subscriptionSignInAgain: 'Sign in again',
   subscriptionModalTitle: 'Connect subscription',
   loading: 'Loading...',
   saving: 'Saving...',

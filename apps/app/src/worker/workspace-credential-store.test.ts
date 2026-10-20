@@ -33,7 +33,7 @@ describe('WorkspaceCredentialStore', () => {
     await expect(store.resolve(ref, 'review')).rejects.toBe(failure);
     await expect(store.resolve({ provider: 'anthropic' }, 'review')).rejects.toBe(failure);
     expect(credentials.resolve).toHaveBeenCalledOnce();
-    expect(onPrimaryUnavailable).toHaveBeenCalledExactlyOnceWith('sign-in');
+    expect(onPrimaryUnavailable).toHaveBeenCalledExactlyOnceWith('sign-in', {});
     expect(store.getKnownSecrets()).toContain(primary);
     expect(JSON.stringify(failure)).not.toContain(access);
     expect(JSON.stringify(failure)).not.toContain(refresh);

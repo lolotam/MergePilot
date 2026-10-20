@@ -79,17 +79,13 @@ export class SubscriptionAdapter extends LlmAdapter {
         message: 'Subscription credential could not be resolved; sign in again' });
     }
     if (!envelope) throw new LlmFailure({ provider: this.provider, code: 'INVALID_CREDENTIAL', message: 'Subscription login is required' });
-    // The SaaS resolves and persists refreshes under its database lock before reaching this adapter.
-    // Env-based consumers keep a refreshed value in memory for this call.
-    let credential = envelope.credential;
+    // Refreshes happen only in the credential service, under its database lock, where the rotated refresh token is persisted
+    // (SUBSCRIPTION_REFRESH_MARGIN_MS). A refresh here would rotate the token in memory and discard it, which revokes the sign-in.
+    const credential = envelope.credential;
     const store: CredentialStore = {
       read: async () => credential,
       list: async () => [{ providerId: subscriptionProvider(this.provider).id, type: 'oauth' }],
-      modify: async (_id, fn) => {
-        const next = await fn(credential);
-        if (next?.type === 'oauth') credential = next;
-        return credential;
-      },
+      modify: async () => credential,
       delete: async () => { throw new Error('Logout is owned by the credential service'); },
     };
     const models = createModels({ credentials: store, authContext: { env: async () => undefined, fileExists: async () => false } });

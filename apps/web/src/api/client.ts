@@ -67,6 +67,8 @@ export interface KeyItem {
   baseUrl?: string | null;
   hasSubscription?: boolean | undefined;
   defaultMethod?: ProviderAuthMethod | undefined;
+  /** ISO time the provider refused the subscription refresh; sign in again. */
+  signInRequiredAt?: string | undefined;
   /** Present for key-list providers. Never includes the secret. */
   keys?: KeySlotItem[] | undefined;
 }

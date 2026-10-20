@@ -25,7 +25,7 @@ export class WorkspaceCredentialStore implements CredentialStore {
     private readonly options: {
       subscriptionOnlyProviders?: ReadonlySet<string>;
       primaryFailure?: LlmFailure | undefined;
-      onPrimaryUnavailable?: ((reason: string) => void) | undefined;
+      onPrimaryUnavailable?: ((reason: string, details?: { status?: number; oauthError?: string }) => void) | undefined;
     } = {},
   ) {
     if (primarySecret) this.secrets.set(primaryProvider, primarySecret);
@@ -98,7 +98,11 @@ export class WorkspaceCredentialStore implements CredentialStore {
       }
       if (!this.primaryFailure) {
         this.primaryFailure = new LlmFailure({ code: 'INVALID_CREDENTIAL', provider, message: terminal.message });
-        this.options.onPrimaryUnavailable?.(terminal.reason);
+        // Only the token endpoint's HTTP status and OAuth error code, never a body or a token.
+        this.options.onPrimaryUnavailable?.(terminal.reason, {
+          ...(terminal.status !== undefined ? { status: terminal.status } : {}),
+          ...(terminal.oauthError ? { oauthError: terminal.oauthError } : {}),
+        });
       }
       throw this.primaryFailure;
     }

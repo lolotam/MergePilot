@@ -103,6 +103,8 @@ export const providerCredentials = pgTable(
       .notNull()
       .defaultNow(),
     baseUrl: text('base_url'),
+    /** Migration 0016: a refused subscription refresh; a new sign-in clears it (ADR-0037). */
+    signInRequiredAt: timestamp('sign_in_required_at', { withTimezone: true, mode: 'date' }),
   },
   (table) => [
     uniqueIndex('provider_credentials_workspace_provider_unique').on(

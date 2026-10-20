@@ -15,7 +15,8 @@ import { providerCredentials } from './schema.js';
 import { lockCredential, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 import type { StoredCredential } from '../core/types.js';
 
-function mapParent(row: typeof providerCredentials.$inferSelect): StoredCredential {
+/** A `provider_credentials` row as a StoredCredential. */
+export function mapCredentialRow(row: typeof providerCredentials.$inferSelect): StoredCredential {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
@@ -26,6 +27,7 @@ function mapParent(row: typeof providerCredentials.$inferSelect): StoredCredenti
     createdBy: row.createdBy,
     createdAt: new Date(row.createdAt),
     baseUrl: row.baseUrl ?? null,
+    signInRequiredAt: row.signInRequiredAt ?? null,
   };
 }
 
@@ -35,7 +37,7 @@ export async function readParentCredential(tx: AppTx, workspaceId: string, provi
     .from(providerCredentials)
     .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
   const row = rows[0];
-  return row ? mapParent(row) : null;
+  return row ? mapCredentialRow(row) : null;
 }
 
 /** Ordered slots for one provider. The secret stays in `ciphertext`. */

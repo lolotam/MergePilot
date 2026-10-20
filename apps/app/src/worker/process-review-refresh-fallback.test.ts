@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import pino from 'pino';
-import { refreshSubscription, SubscriptionRefreshError, type ReviewModel, type SubscriptionProvider } from '@mergepilot/engine';
+import { refreshSubscription, SubscriptionRefreshError, SUBSCRIPTION_REFRESH_MARGIN_MS, type ReviewModel, type SubscriptionProvider } from '@mergepilot/engine';
 import { CredentialService } from '../credentials/service.js';
 import type { JudgeSettings } from '../core/types.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
@@ -86,7 +86,7 @@ async function review(options: {
   } });
   const vault = new EnvelopeVault(Buffer.alloc(32, 29).toString('base64'));
   const credentials = new CredentialService({ store: h.store, vault });
-  const expires = Date.now() + 120_000;
+  const expires = Date.now() + SUBSCRIPTION_REFRESH_MARGIN_MS + 120_000;
   await credentials.saveSubscription(WORKSPACE_ID, provider, {
     type: 'oauth', access, refresh, expires: options.constructionRefresh ? expires : options.quota ? Date.now() + 3_600_000 : 0,
   }, 'owner');
