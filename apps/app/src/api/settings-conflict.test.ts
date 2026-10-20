@@ -89,6 +89,21 @@ describe('PUT /settings field-level concurrency', () => {
     expect(await snapshot()).toEqual({ ...base, monthlyBudgetUsd: 75 });
   });
 
+  it('rejects a store race when the base leaves sent fields unchecked', async () => {
+    const base = await snapshot();
+    const save = h.store.saveSettings.bind(h.store);
+    const spy = vi.spyOn(h.store, 'saveSettings').mockImplementationOnce(async () => {
+      await save({ ...base!, model: 'claude-opus-5-5' });
+      throw new SettingsChangedError('ws-1');
+    });
+    // Only maxFindings is baselined: the required provider/model/language are sent without one.
+    const res = await put({ maxFindings: 20, base: { maxFindings: base!.maxFindings ?? null } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual(conflict);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await snapshot()).toMatchObject({ model: 'claude-opus-5-5' });
+  });
+
   it('rejects a same-field store race after re-reading without retrying the stale write', async () => {
     const base = await snapshot();
     const read = vi.spyOn(h.store, 'getSettings');

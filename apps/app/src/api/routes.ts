@@ -149,6 +149,7 @@ export function registerDashboardApi(
       }
 
       const { base, ...submitted } = parsed.data;
+      const replayable = base !== undefined && Object.keys(submitted).every((key) => Object.hasOwn(base, key));
       for (let attempt = 0; attempt < 3; attempt++) {
         // A patch over the stored settings: fields left out keep their value, null clears them.
         const previous = await deps.store.getSettings(workspaceId);
@@ -168,9 +169,9 @@ export function registerDashboardApi(
           await deps.store.saveSettings(patch.skillId === undefined ? withoutSkillFields(merged) : merged, { expected: previous });
         } catch (error) {
           if (error instanceof SettingsChangedError) {
-            // Without a base the request cannot be replayed: the retry would write the stale
-            // values over the writer that won the race.
-            if (!base) return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
+            // A request can only be replayed when every field it sends has a base to check: a
+            // field without one would write its stale value over the writer that won the race.
+            if (!replayable) return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
             continue;
           }
           // A bot saved the same name between the check above and this write (the store re-checks it under a lock).
