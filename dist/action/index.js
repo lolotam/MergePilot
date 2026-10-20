@@ -138014,7 +138014,7 @@ function sentEffort(style, effort, model) {
   if (style === "minimax") {
     if (!minimaxTakesEffort(model))
       return "max";
-    return MINIMAX_EFFORTS[normalize(effort)] ?? effort;
+    return MINIMAX_EFFORTS[normalize(effort)] ?? "max";
   }
   return effort;
 }
@@ -189130,16 +189130,6 @@ ${instruction}`;
       }
       throw failureFromThrown(error62, this.provider, this.#key, options.signal);
     }
-    const tail = think?.flush();
-    if (tail?.unterminated) {
-      throw new LlmFailure({
-        code: "UNKNOWN",
-        provider: this.provider,
-        message: "MiniMax left an unterminated <think> block"
-      });
-    }
-    if (tail?.text)
-      yield { type: "text-delta", text: tail.text };
     if (!finish && !done) {
       throw new LlmFailure({
         code: "NETWORK",
@@ -189147,6 +189137,16 @@ ${instruction}`;
         message: `${this.provider} stream ended before the answer was complete`
       });
     }
+    const tail = think?.flush();
+    if (tail?.unterminated && finish !== "max-tokens") {
+      throw new LlmFailure({
+        code: "UNKNOWN",
+        provider: this.provider,
+        message: "MiniMax left an unterminated <think> block"
+      });
+    }
+    if (tail && !tail.unterminated && tail.text)
+      yield { type: "text-delta", text: tail.text };
     yield { type: "usage", usage: usage ?? { ...ZERO_USAGE } };
     yield { type: "finish", reason: finish ?? "stop" };
   }

@@ -183,6 +183,39 @@ describe('OpenAICompatibleAdapter', () => {
     expect(failure.message).toBe('MiniMax left an unterminated <think> block');
   });
 
+  it('reports a dropped connection as a network failure, even while the model is still thinking', async () => {
+    const { fetch } = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '<think>the model was still thinking' } }] },
+        { choices: [{ delta: { content: ' when the connection dropped' } }] },
+      ]),
+    );
+    const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
+    const failure = await failureOf(collectText(adapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' })));
+
+    // The connection dropped, so the retry rules can act on it; the unfinished think block is
+    // not what the call failed on.
+    expect(failure.code).toBe('NETWORK');
+    expect(failure.message).toContain('stream ended before the answer was complete');
+  });
+
+  it('keeps a MiniMax stream that ran out of tokens inside the think block, for the truncation recovery', async () => {
+    const { fetch } = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '<think>the model kept thinking' } }] },
+        { choices: [{ delta: { content: ' until the tokens ran out' }, finish_reason: 'length' }] },
+        { choices: [], usage: { prompt_tokens: 10, completion_tokens: 4096 } },
+        '[DONE]',
+      ]),
+    );
+    const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
+    const result = await collectText(adapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' }));
+
+    expect(result.text).toBe('');
+    expect(result.finishReason).toBe('max-tokens');
+    expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 4096, cacheReadTokens: 0, cacheWriteTokens: 0 });
+  });
+
   it('asks MiniMax for the usage in the stream and reads the final usage chunk', async () => {
     const { fetch, calls } = mockFetch(
       sseResponse([

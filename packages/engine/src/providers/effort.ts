@@ -149,13 +149,17 @@ export function compatibleEffortFields(
  * The effort a style really sends, so the headroom follows what is sent: DeepSeek maps its
  * names onto the ones it documents, and MiniMax asks for the shallowest depth it accepts
  * when the effort asks for no thinking. A MiniMax model that ignores `reasoning_effort`
- * thinks at its own default depth (`max`), so the headroom follows that.
+ * thinks at its own default depth (`max`), so the headroom follows that. So does a model
+ * that reads `reasoning_effort` when the effort is one MiniMax does not know: nothing is
+ * sent, the model runs at its default depth (`max`), and the headroom must size that.
  */
 export function sentEffort(style: ThinkingStyle, effort: string | undefined, model?: string): string | undefined {
   if (style === 'deepseek') return deepseekEffort(effort);
   if (style === 'minimax') {
     if (!minimaxTakesEffort(model)) return 'max';
-    return MINIMAX_EFFORTS[normalize(effort)] ?? effort;
+    // An effort MiniMax does not know is not sent at all, so the model thinks at its own
+    // default depth `max`.
+    return MINIMAX_EFFORTS[normalize(effort)] ?? 'max';
   }
   return effort;
 }

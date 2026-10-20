@@ -215,8 +215,23 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
       throw failureFromThrown(error, this.provider, this.#key, options.signal);
     }
 
+    // Neither a finish reason nor [DONE]: the connection dropped mid-answer.
+    // Checked before the think block is settled: a connection that drops while the model is
+    // still thinking is a dropped connection, not a broken answer, and the retry rules act on
+    // a NETWORK failure rather than on a fatal one.
+    if (!finish && !done) {
+      throw new LlmFailure({
+        code: 'NETWORK',
+        provider: this.provider,
+        message: `${this.provider} stream ended before the answer was complete`,
+      });
+    }
+
     const tail = think?.flush();
-    if (tail?.unterminated) {
+    // A stream that ran out of output tokens inside the thinking block is a truncation, not a
+    // broken answer: the dropped thinking is not the answer, so nothing is yielded, and the
+    // `max-tokens` finish is what the review's own recovery (more room, thinking off) reacts to.
+    if (tail?.unterminated && finish !== 'max-tokens') {
       // The thinking never closed, so the answer is not the text the model meant to give.
       // The call fails instead of returning an empty answer, so the retry rules see it.
       throw new LlmFailure({
@@ -225,16 +240,9 @@ export class OpenAICompatibleAdapter extends LlmAdapter {
         message: 'MiniMax left an unterminated <think> block',
       });
     }
-    if (tail?.text) yield { type: 'text-delta', text: tail.text };
+    // Nothing comes out of an unterminated block: the thinking is not the answer.
+    if (tail && !tail.unterminated && tail.text) yield { type: 'text-delta', text: tail.text };
 
-    // Neither a finish reason nor [DONE]: the connection dropped mid-answer.
-    if (!finish && !done) {
-      throw new LlmFailure({
-        code: 'NETWORK',
-        provider: this.provider,
-        message: `${this.provider} stream ended before the answer was complete`,
-      });
-    }
     yield { type: 'usage', usage: usage ?? { ...ZERO_USAGE } };
     yield { type: 'finish', reason: finish ?? 'stop' };
   }

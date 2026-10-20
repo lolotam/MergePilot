@@ -7,6 +7,7 @@ import {
   FALLBACK_EFFORTS,
   geminiThinkingConfig,
   openAIReasoningEffort,
+  sentEffort,
   thinkingHeadroom,
 } from './effort.js';
 
@@ -68,6 +69,27 @@ describe('compatibleEffortFields', () => {
       expect(compatibleEffortFields('minimax', 'high', model)).toEqual({ reasoning_split: true });
       expect(compatibleEffortFields('minimax', 'off', model)).toEqual({ reasoning_split: true });
     }
+  });
+});
+
+describe('sentEffort', () => {
+  it('sizes a MiniMax effort the model does not know by the depth MiniMax really thinks at', () => {
+    // Nothing is sent for these, so MiniMax thinks at its default depth `max`.
+    expect(sentEffort('minimax', 'on', 'MiniMax-M3.1-Flash')).toBe('max');
+    expect(sentEffort('minimax', '', 'MiniMax-M3.1-Flash')).toBe('max');
+    expect(sentEffort('minimax', 'turbo', 'MiniMax-M3.1-Flash')).toBe('max');
+    // The depths MiniMax documents are sent as they are.
+    expect(sentEffort('minimax', 'high', 'MiniMax-M3.1-Flash')).toBe('high');
+    expect(sentEffort('minimax', 'max', 'MiniMax-M3.1-Flash')).toBe('max');
+    // An effort that asks for no thinking asks for the shallowest depth MiniMax accepts.
+    expect(sentEffort('minimax', 'off', 'MiniMax-M3.1-Flash')).toBe('low');
+    // A model that ignores the depth thinks at its default depth, whatever the effort.
+    expect(sentEffort('minimax', 'high', 'MiniMax-M2.7')).toBe('max');
+  });
+
+  it('leaves the other styles alone', () => {
+    expect(sentEffort('reasoning_effort', 'high', 'gpt-5')).toBe('high');
+    expect(sentEffort('deepseek', 'medium', 'deepseek-flash')).toBe('high');
   });
 });
 
@@ -289,4 +311,17 @@ describe('default thinking headroom (P0.1)', () => {
     expect(minimax.requestedOutputTokens({ model: 'MiniMax-M3', maxOutputTokens: 4096, effort: 'high' })).toBe(4096 + 32000);
     expect(minimax.requestedOutputTokens({ model: 'MiniMax-M2.7', maxOutputTokens: 4096, effort: 'low' })).toBe(4096 + 32000);
   });
+
+  it.each(['on', '', 'turbo'])(
+    'reserves the max thinking budget for a MiniMax effort the model does not know (%s)',
+    async (effort) => {
+      const { OpenAICompatibleAdapter } = await import('./compatible/adapter.js');
+      const { Secret } = await import('../credentials/secret.js');
+      const minimax = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: new Secret('fake-test-key-12345') });
+
+      // Nothing is sent for an effort MiniMax does not know, so it thinks at its default depth
+      // `max`: the room must be the `max` budget, the same depth the connection test asks for.
+      expect(minimax.requestedOutputTokens({ model: 'MiniMax-M3.1-Flash', maxOutputTokens: 4096, effort })).toBe(4096 + 32000);
+    },
+  );
 });
