@@ -128,9 +128,13 @@ interface ReleaseTarget {
   workerImageRef: string | null;
 }
 
-/** The commit an image was built from; a record without one names the web commit (same image). */
-function commitOf(record: { sourceSha: string | null; workerSourceSha: string | null }): string {
-  return record.workerSourceSha ?? record.sourceSha ?? '';
+/**
+ * The commit the worker image was built from, or null when the record does not know it; then
+ * verification checks the worker's image only. A record from before the worker pin already names
+ * the web commit here (parseReleaseMessage), so nothing is guessed.
+ */
+function commitOf(record: { workerSourceSha: string | null }): string | null {
+  return record.workerSourceSha;
 }
 
 /** The trailers of a release commit: what it releases, what the worker runs, what ran before it. */

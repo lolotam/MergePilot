@@ -41,6 +41,13 @@ describe('verifyContainers', () => {
     expect(problems).toContain(`worker image revision is ${OLD_SHA}, expected ${NEW_SHA}`);
   });
 
+  it('checks only the image of a worker whose commit the record does not know', () => {
+    const unknownWorker: ExpectedRelease = { ...webPhase, worker: { imageRef: OLD_REF, sourceSha: null } };
+    expect(verifyContainers(containers({ image: NEW_REF, sha: NEW_SHA }, { image: OLD_REF, sha: OLD_SHA }), unknownWorker)).toEqual([]);
+    const wrongImage = verifyContainers(containers({ image: NEW_REF, sha: NEW_SHA }, { image: NEW_REF, sha: NEW_SHA }), unknownWorker);
+    expect(wrongImage).toEqual([`worker runs ${NEW_REF}, expected ${OLD_REF}`]);
+  });
+
   it('fails when the web runs another image than the one expected', () => {
     const problems = verifyContainers(containers({ image: OLD_REF, sha: OLD_SHA }, { image: NEW_REF, sha: NEW_SHA }), webPhase);
     expect(problems).toContain(`web runs ${OLD_REF}, expected ${NEW_REF}`);

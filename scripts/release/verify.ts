@@ -17,8 +17,11 @@ export interface ContainerSnapshot {
 export interface ExpectedRelease {
   /** What migrate and web must run. */
   web: { imageRef: string; sourceSha: string };
-  /** What the worker must run; the old image between the two release phases. */
-  worker: { imageRef: string; sourceSha: string };
+  /**
+   * What the worker must run; the old image between the two release phases. A null commit means
+   * the record does not know it (a worker pin without a full-SHA tag): then only the image is checked.
+   */
+  worker: { imageRef: string; sourceSha: string | null };
 }
 
 const APP_SERVICES = ['web', 'worker'] as const;
@@ -32,9 +35,9 @@ const DATA_SERVICES = ['postgres', 'redis'] as const;
 export function verifyContainers(containers: readonly ContainerSnapshot[], expected: ExpectedRelease): string[] {
   const problems: string[] = [];
   const byService = new Map(containers.map((c) => [c.service, c]));
-  const identity = (c: ContainerSnapshot, want: { imageRef: string; sourceSha: string }) => {
+  const identity = (c: ContainerSnapshot, want: { imageRef: string; sourceSha: string | null }) => {
     if (c.image !== want.imageRef) problems.push(`${c.service} runs ${c.image}, expected ${want.imageRef}`);
-    if (c.revision !== want.sourceSha) {
+    if (want.sourceSha !== null && c.revision !== want.sourceSha) {
       problems.push(`${c.service} image revision is ${c.revision ?? 'missing'}, expected ${want.sourceSha}`);
     }
   };
