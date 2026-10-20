@@ -13,6 +13,8 @@ export const arSettings = {
   providerXiaomi: 'شاومي MiMo',
   providerXiaomiTokenPlan: 'شاومي MiMo Token Plan (سنغافورة)',
   providerXiaomiTokenPlanCn: 'شاومي MiMo Token Plan (الصين)',
+  providerMinimax: 'ميني ماكس',
+  providerMinimaxCodingPlan: 'ميني ماكس Coding Plan',
   testModelLabel: 'نموذج الاختبار',
   testModelAuto: 'تلقائي',
 

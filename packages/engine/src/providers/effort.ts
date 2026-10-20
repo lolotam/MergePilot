@@ -15,9 +15,18 @@
  * - `anthropic`: Claude extended / adaptive thinking.
  * - `deepseek`: DeepSeek V4 thinks by default (effort high); `thinking: {type: enabled|disabled}`
  *   switches it and `reasoning_effort` (low / high / max) grades it.
+ * - `minimax`: MiniMax always thinks; `reasoning_split` moves the thinking out of the answer and
+ *   `reasoning_effort` (low / medium / high / xhigh / max) grades it on the models that read it.
  * - `none`: the API rejects reasoning parameters, so nothing is ever sent.
  */
-export type ThinkingStyle = 'reasoning_effort' | 'glm' | 'deepseek' | 'gemini' | 'anthropic' | 'none';
+export type ThinkingStyle =
+  | 'reasoning_effort'
+  | 'glm'
+  | 'deepseek'
+  | 'gemini'
+  | 'anthropic'
+  | 'minimax'
+  | 'none';
 
 /** Efforts offered when a model list does not say which efforts a model takes. */
 export const FALLBACK_EFFORTS: Readonly<Record<ThinkingStyle, readonly string[]>> = Object.freeze({
@@ -26,6 +35,7 @@ export const FALLBACK_EFFORTS: Readonly<Record<ThinkingStyle, readonly string[]>
   deepseek: ['off', 'low', 'high', 'max'],
   gemini: ['minimal', 'low', 'medium', 'high'],
   anthropic: ['off', 'low', 'medium', 'high'],
+  minimax: ['low', 'medium', 'high', 'xhigh', 'max'],
   none: [],
 });
 
@@ -80,12 +90,47 @@ export function openAIReasoningEffort(model: string, effort: string | undefined)
   return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : undefined;
 }
 
+/**
+ * The `reasoning_effort` values MiniMax accepts. `none` is rejected and the thinking cannot be
+ * turned off, so an "off" effort asks for the shallowest depth instead.
+ */
+const MINIMAX_EFFORTS: Readonly<Record<string, string>> = Object.freeze({
+  minimal: 'low',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+  off: 'low',
+  none: 'low',
+});
+
+/** The only MiniMax model that honours `reasoning_effort`; the others ignore it. */
+const MINIMAX_EFFORT_MODEL = /minimax-m3\.1-flash/i;
+
+/**
+ * Whether this MiniMax model takes `reasoning_effort`. The other MiniMax models ignore it and
+ * think at their own default depth, so nothing is sent to them.
+ */
+export function minimaxTakesEffort(model: string | undefined): boolean {
+  return model !== undefined && MINIMAX_EFFORT_MODEL.test(model);
+}
+
 /** OpenAI-compatible presets: the extra request-body fields for this effort and thinking style. */
 export function compatibleEffortFields(
   style: ThinkingStyle,
   effort: string | undefined,
+  model?: string,
 ): Record<string, unknown> {
   const value = normalize(effort);
+  if (style === 'minimax') {
+    // MiniMax keeps the thinking inside the answer unless the request asks for it out, and
+    // `MiniMax-M3.1-Flash` rejects a request that asks it to stay in, so the split is always
+    // asked for. The depth it takes is one of the values it documents; `none` is not one, and
+    // only `MiniMax-M3.1-Flash` reads `reasoning_effort` at all.
+    const graded = minimaxTakesEffort(model) ? MINIMAX_EFFORTS[value] : undefined;
+    return { reasoning_split: true, ...(graded ? { reasoning_effort: graded } : {}) };
+  }
   if (!value || style === 'none') return {};
   if (style === 'glm') {
     if (value === 'off') return { thinking: { type: 'disabled' } };
@@ -98,6 +143,33 @@ export function compatibleEffortFields(
     return graded ? { thinking: { type: 'enabled' }, reasoning_effort: graded } : {};
   }
   return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
+}
+
+/**
+ * The effort a style really sends, so the headroom follows what is sent: DeepSeek maps its
+ * names onto the ones it documents, and MiniMax asks for the shallowest depth it accepts
+ * when the effort asks for no thinking. A MiniMax model that ignores `reasoning_effort`
+ * thinks at its own default depth (`max`), so the headroom follows that.
+ */
+export function sentEffort(style: ThinkingStyle, effort: string | undefined, model?: string): string | undefined {
+  if (style === 'deepseek') return deepseekEffort(effort);
+  if (style === 'minimax') {
+    if (!minimaxTakesEffort(model)) return 'max';
+    return MINIMAX_EFFORTS[normalize(effort)] ?? effort;
+  }
+  return effort;
+}
+
+/**
+ * Whether an effort really stops the model from thinking. MiniMax cannot: it rejects
+ * `reasoning_effort: none` and `thinking: { type: 'disabled' }`, so an effort that asks for
+ * no thinking asks for the shallowest depth it accepts instead. The effort is read the same
+ * way the request body reads it, so ` OFF ` asks for no thinking as well.
+ */
+export function effortStopsThinking(style: ThinkingStyle, effort: string | undefined): boolean {
+  if (style === 'minimax') return false;
+  const value = normalize(effort);
+  return value === 'off' || value === 'none';
 }
 
 /** DeepSeek grades thinking as low / high / max; other names map to the nearest one it documents. */
@@ -117,10 +189,13 @@ export function deepseekEffort(effort: string | undefined): string | undefined {
 
 /**
  * Output tokens reserved when a model thinks by default and no effort is configured. DeepSeek V4
- * defaults to effort `high`, whose reasoning outgrows the generic headroom on large diffs.
+ * defaults to effort `high`, whose reasoning outgrows the generic headroom on large diffs, and
+ * MiniMax thinks at its default depth `max`, which needs the whole `max` budget.
  */
 export function defaultThinkingHeadroom(style: ThinkingStyle | undefined): number {
-  return style === 'deepseek' ? (THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM) : DEFAULT_THINKING_HEADROOM;
+  if (style === 'deepseek') return THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM;
+  if (style === 'minimax') return THINKING_BUDGET_TOKENS.max ?? DEFAULT_THINKING_HEADROOM;
+  return DEFAULT_THINKING_HEADROOM;
 }
 
 export type AnthropicThinking =
@@ -229,6 +304,10 @@ export function isCompatibleReasoningModel(
     return true;
   }
   if (style === 'glm' || provider === 'zai' || provider === 'zai-coding') {
+    return true;
+  }
+  // MiniMax always thinks and cannot be told not to; only the split of the thinking differs.
+  if (style === 'minimax' || provider === 'minimax' || provider === 'minimax-coding-plan') {
     return true;
   }
   // DeepSeek V4 and later think by default on the official API.

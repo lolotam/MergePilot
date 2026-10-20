@@ -863,3 +863,20 @@
 **إجابة صاحب المشروع (بنصّها):** «حطة 10 usd and amke this edited from the sesstings dashboard and make 0.5 as base least amount so the user can put his limit this integrated with budget»
 
 **التنفيذ المحدد في طلب المالك:** حد قابل للتعديل من إعدادات مساحة العمل من 0.50 لـ 1000 دولار بالسنت، وافتراضي 0.50 للحفاظ على السلوك الحالي. قيمة 10 دولار ممكن تتحدد من الداشبورد. لو فيه ميزانية شهرية، الحد ما يزيدش عنها. ملف المستودع لو بيحدد `budget.perReviewUsd` فقيمته ليها الأولوية. [ADR-0036](adr/0036-workspace-per-review-spending-limit.md).
+
+## الدفعة 22 — 2026-10-20
+
+### س55: إضافة MiniMax كمزوّد بمفتاح API
+
+**طلب صاحب المشروع (بنصّه):** «ADD MINIMAX CODING AGEN MINIMAX.AI WITH API WAY AS NEW PROVIDER»
+
+**الاختيارات:**
+1. مزوّدين زي Xiaomi: `minimax` (مفتاح API عادي، الصرف بيتحسب ويدخل الميزانية) و `minimax-coding-plan` (مفتاح الـ Coding/Token Plan، صرف إضافي صفر وبيظهر رقم «لو كان API» بس).
+2. الـ Coding Plan بس.
+3. الـ API العادي بس.
+
+والمنطقة: الدولي بس (`api.minimax.io`)، أو الدولي والصين (`api.minimaxi.com`).
+
+**إجابة صاحب المشروع (اختياره):** «اتنين زي Xiaomi (Recommended)» و «الدولي بس (Recommended)».
+
+**التنفيذ:** المزوّدين `minimax` و `minimax-coding-plan` على `https://api.minimax.io/v1` (متوافق مع OpenAI)، والموديل الافتراضي `MiniMax-M3.1-Flash`. الطلب بيبعت دايمًا `reasoning_split: true` علشان التفكير يطلع بره الرد، و `stream_options.include_usage` علشان الاستهلاك الحقيقي يتحسب. كتلة `<think>` في أول الرد (موديلات M2.x) بتتشال قبل قراءة الـ JSON. `minimax-coding-plan` بيتعامل زي `zai-coding`: صرف إضافي صفر، ورقم «لو كان API» محسوب من نفس الموديل تحت `minimax` ([ADR-0024](adr/0024-api-equivalent-cost.md)). مفيش migration.

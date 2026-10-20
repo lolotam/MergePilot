@@ -97,6 +97,149 @@ describe('OpenAICompatibleAdapter', () => {
     expect(deepseek.requestBody({ ...base, effort: 'off' })).not.toHaveProperty('reasoning_effort');
   });
 
+  it('asks MiniMax for the thinking to be split out, and never sends an effort it rejects', () => {
+    const minimax = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY });
+    const body = minimax.requestBody({ ...base, model: 'MiniMax-M3.1-Flash', effort: 'high' });
+    expect(body).toMatchObject({ model: 'MiniMax-M3.1-Flash', reasoning_split: true, reasoning_effort: 'high' });
+    expect(body).not.toHaveProperty('thinking');
+
+    // The split is asked for even with no effort at all.
+    const plain = minimax.requestBody({ ...base, model: 'MiniMax-M3.1-Flash' });
+    expect(plain).toMatchObject({ reasoning_split: true });
+    expect(plain).not.toHaveProperty('reasoning_effort');
+    expect(plain).not.toHaveProperty('thinking');
+
+    // `reasoning_effort: none` and `thinking: disabled` are rejected by MiniMax.
+    for (const effort of ['off', 'none', 'low', 'medium', 'high', 'xhigh', 'max']) {
+      const sent = minimax.requestBody({ ...base, model: 'MiniMax-M3.1-Flash', effort });
+      expect(sent.reasoning_effort).not.toBe('none');
+      expect(sent).not.toHaveProperty('thinking');
+    }
+    const plan = new OpenAICompatibleAdapter({ provider: 'minimax-coding-plan', apiKey: KEY });
+    expect(plan.requestBody({ ...base, model: 'MiniMax-M3.1-Flash', effort: 'medium' })).toMatchObject({
+      reasoning_split: true,
+      reasoning_effort: 'medium',
+    });
+  });
+
+  it('drops a leading think block from a MiniMax answer, so the JSON after it is what is read', async () => {
+    const { fetch } = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '<think>' } }] },
+        { choices: [{ delta: { content: 'the diff has {"a": 1} in it' } }] },
+        { choices: [{ delta: { content: '</think>' } }] },
+        { choices: [{ delta: { content: '{"summary":"ok","findings":[]}' }, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]),
+    );
+    const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
+    const result = await collectText(adapter.stream({ ...base, model: 'MiniMax-M2.7' }));
+
+    expect(result.text).toBe('{"summary":"ok","findings":[]}');
+    expect(result.finishReason).toBe('stop');
+  });
+
+  it('keeps the answer when the closing tag is split across the chunk that opened the block', async () => {
+    const { fetch } = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '<think>reasoning</thi' } }] },
+        { choices: [{ delta: { content: 'nk>{"summary":"ok","findings":[]}' }, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]),
+    );
+    const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
+    const result = await collectText(adapter.stream({ ...base, model: 'MiniMax-M2.7' }));
+
+    expect(result.text).toBe('{"summary":"ok","findings":[]}');
+  });
+
+  it('keeps a think tag quoted later in the answer, when a chunk starts with it', async () => {
+    const { fetch } = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '{"summary":"ok","body":"the diff writes ' } }] },
+        { choices: [{ delta: { content: '<think>x</think>"' } }] },
+        { choices: [{ delta: { content: '}' }, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]),
+    );
+    const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
+    const result = await collectText(adapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' }));
+
+    expect(result.text).toBe('{"summary":"ok","body":"the diff writes <think>x</think>"}');
+  });
+
+  it('fails the call when the think block is never closed', async () => {
+    const { fetch } = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '<think>the model kept thinking' } }] },
+        { choices: [{ delta: { content: ' and never stopped' }, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]),
+    );
+    const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
+    const failure = await failureOf(collectText(adapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' })));
+
+    expect(failure.code).toBe('UNKNOWN');
+    expect(failure.message).toBe('MiniMax left an unterminated <think> block');
+  });
+
+  it('asks MiniMax for the usage in the stream and reads the final usage chunk', async () => {
+    const { fetch, calls } = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '{"summary":"ok"}' }, finish_reason: 'stop' }] },
+        { choices: [], usage: { prompt_tokens: 120, completion_tokens: 34 } },
+        '[DONE]',
+      ]),
+    );
+    const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
+    const result = await collectText(adapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' }));
+
+    expect(calls[0]?.body).toMatchObject({ stream_options: { include_usage: true } });
+    expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 34, cacheReadTokens: 0, cacheWriteTokens: 0 });
+
+    const plan = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '{"summary":"ok"}' }, finish_reason: 'stop' }] },
+        { choices: [], usage: { prompt_tokens: 10, completion_tokens: 2 } },
+        '[DONE]',
+      ]),
+    );
+    const planAdapter = new OpenAICompatibleAdapter({ provider: 'minimax-coding-plan', apiKey: KEY, fetch: plan.fetch });
+    const planResult = await collectText(planAdapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' }));
+
+    expect(plan.calls[0]?.body).toMatchObject({ stream_options: { include_usage: true } });
+    expect(planResult.usage).toEqual({ inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 });
+  });
+
+  it('sends reasoning_effort only to the MiniMax model that honours it', () => {
+    const minimax = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY });
+
+    expect(minimax.requestBody({ ...base, model: 'MiniMax-M3.1-Flash', effort: 'high' })).toMatchObject({
+      reasoning_split: true,
+      reasoning_effort: 'high',
+    });
+    // The other MiniMax models ignore `reasoning_effort`, so it is not sent to them.
+    for (const model of ['MiniMax-M3', 'MiniMax-M2.7']) {
+      const body = minimax.requestBody({ ...base, model, effort: 'high' });
+      expect(body).toMatchObject({ reasoning_split: true });
+      expect(body).not.toHaveProperty('reasoning_effort');
+    }
+  });
+
+  it('keeps the answer of a MiniMax call that starts with anything but a think block', async () => {
+    const { fetch } = mockFetch(
+      sseResponse([
+        { choices: [{ delta: { content: '{"summary":' } }] },
+        { choices: [{ delta: { content: '"ok","findings":[]}' }, finish_reason: 'stop' }] },
+        '[DONE]',
+      ]),
+    );
+    const adapter = new OpenAICompatibleAdapter({ provider: 'minimax', apiKey: KEY, fetch });
+    const result = await collectText(adapter.stream({ ...base, model: 'MiniMax-M3.1-Flash' }));
+
+    expect(result.text).toBe('{"summary":"ok","findings":[]}');
+  });
+
   it('adds response_format: { type: "json_object" } for supported presets and keeps prompt instruction', () => {
     const openrouter = new OpenAICompatibleAdapter({ provider: 'openrouter', apiKey: KEY });
     const openrouterBody = openrouter.requestBody({ ...base, responseSchema: { type: 'object' } });

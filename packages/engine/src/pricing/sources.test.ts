@@ -147,6 +147,8 @@ describe('parseModelsDevPrices', () => {
       xiaomi: 'xiaomi',
       'xiaomi-token-plan': 'xiaomi-token-plan-sgp',
       'xiaomi-token-plan-cn': 'xiaomi-token-plan-cn',
+      minimax: 'minimax',
+      'minimax-coding-plan': 'minimax-coding-plan',
     });
     expect(PRICE_SOURCE_URLS).toEqual({
       openrouter: 'https://openrouter.ai/api/v1/models',

@@ -187,6 +187,24 @@ const ENTRIES: Record<ApiProviderId, EntryInit> = {
     defaultModel: 'mimo-v2.5',
     envName: 'XIAOMI_TOKEN_PLAN_API_KEY',
   },
+  minimax: {
+    label: 'MiniMax',
+    kind: 'openai-compatible',
+    baseUrl: 'https://api.minimax.io/v1',
+    thinkingStyle: 'minimax',
+    defaultModel: 'MiniMax-M3.1-Flash',
+    envName: 'MINIMAX_API_KEY',
+    streamUsage: true,
+  },
+  'minimax-coding-plan': {
+    label: 'MiniMax Coding Plan',
+    kind: 'openai-compatible',
+    baseUrl: 'https://api.minimax.io/v1',
+    thinkingStyle: 'minimax',
+    defaultModel: 'MiniMax-M3.1-Flash',
+    envName: 'MINIMAX_CODING_PLAN_API_KEY',
+    streamUsage: true,
+  },
 };
 
 export const PROVIDER_REGISTRY: Readonly<Record<ApiProviderId, Readonly<ProviderEntry>>> = Object.freeze(

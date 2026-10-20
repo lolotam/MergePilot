@@ -117081,7 +117081,9 @@ var API_PROVIDER_IDS = [
   "custom",
   "xiaomi",
   "xiaomi-token-plan",
-  "xiaomi-token-plan-cn"
+  "xiaomi-token-plan-cn",
+  "minimax",
+  "minimax-coding-plan"
 ];
 var PROVIDER_IDS = [...API_PROVIDER_IDS, "claude-code"];
 function isApiProviderId(value) {
@@ -117242,6 +117244,24 @@ var ENTRIES = {
     thinkingStyle: "none",
     defaultModel: "mimo-v2.5",
     envName: "XIAOMI_TOKEN_PLAN_API_KEY"
+  },
+  minimax: {
+    label: "MiniMax",
+    kind: "openai-compatible",
+    baseUrl: "https://api.minimax.io/v1",
+    thinkingStyle: "minimax",
+    defaultModel: "MiniMax-M3.1-Flash",
+    envName: "MINIMAX_API_KEY",
+    streamUsage: true
+  },
+  "minimax-coding-plan": {
+    label: "MiniMax Coding Plan",
+    kind: "openai-compatible",
+    baseUrl: "https://api.minimax.io/v1",
+    thinkingStyle: "minimax",
+    defaultModel: "MiniMax-M3.1-Flash",
+    envName: "MINIMAX_CODING_PLAN_API_KEY",
+    streamUsage: true
   }
 };
 var PROVIDER_REGISTRY = Object.freeze(Object.fromEntries(API_PROVIDER_IDS.map((id) => [
@@ -137923,6 +137943,7 @@ var FALLBACK_EFFORTS = Object.freeze({
   deepseek: ["off", "low", "high", "max"],
   gemini: ["minimal", "low", "medium", "high"],
   anthropic: ["off", "low", "medium", "high"],
+  minimax: ["low", "medium", "high", "xhigh", "max"],
   none: []
 });
 var REASONING_EFFORT_VALUES = /* @__PURE__ */ new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -137950,8 +137971,26 @@ function openAIReasoningEffort(model, effort) {
   const value = normalize(effort);
   return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : void 0;
 }
-function compatibleEffortFields(style, effort) {
+var MINIMAX_EFFORTS = Object.freeze({
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "max",
+  off: "low",
+  none: "low"
+});
+var MINIMAX_EFFORT_MODEL = /minimax-m3\.1-flash/i;
+function minimaxTakesEffort(model) {
+  return model !== void 0 && MINIMAX_EFFORT_MODEL.test(model);
+}
+function compatibleEffortFields(style, effort, model) {
   const value = normalize(effort);
+  if (style === "minimax") {
+    const graded = minimaxTakesEffort(model) ? MINIMAX_EFFORTS[value] : void 0;
+    return { reasoning_split: true, ...graded ? { reasoning_effort: graded } : {} };
+  }
   if (!value || style === "none")
     return {};
   if (style === "glm") {
@@ -137969,6 +138008,22 @@ function compatibleEffortFields(style, effort) {
   }
   return REASONING_EFFORT_VALUES.has(value) ? { reasoning_effort: value } : {};
 }
+function sentEffort(style, effort, model) {
+  if (style === "deepseek")
+    return deepseekEffort(effort);
+  if (style === "minimax") {
+    if (!minimaxTakesEffort(model))
+      return "max";
+    return MINIMAX_EFFORTS[normalize(effort)] ?? effort;
+  }
+  return effort;
+}
+function effortStopsThinking(style, effort) {
+  if (style === "minimax")
+    return false;
+  const value = normalize(effort);
+  return value === "off" || value === "none";
+}
 var DEEPSEEK_EFFORTS = Object.freeze({
   minimal: "low",
   low: "low",
@@ -137981,7 +138036,11 @@ function deepseekEffort(effort) {
   return DEEPSEEK_EFFORTS[normalize(effort)];
 }
 function defaultThinkingHeadroom(style) {
-  return style === "deepseek" ? THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM : DEFAULT_THINKING_HEADROOM;
+  if (style === "deepseek")
+    return THINKING_BUDGET_TOKENS.high ?? DEFAULT_THINKING_HEADROOM;
+  if (style === "minimax")
+    return THINKING_BUDGET_TOKENS.max ?? DEFAULT_THINKING_HEADROOM;
+  return DEFAULT_THINKING_HEADROOM;
 }
 var ADAPTIVE_CLAUDE = /^claude-(?:opus|sonnet|haiku|fable|mythos)-(?:[5-9]|4-[6-9])(?:\b|-)/;
 var ANTHROPIC_EFFORTS = /* @__PURE__ */ new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -138038,6 +138097,9 @@ function isCompatibleReasoningModel(provider, model, style) {
     return true;
   }
   if (style === "glm" || provider === "zai" || provider === "zai-coding") {
+    return true;
+  }
+  if (style === "minimax" || provider === "minimax" || provider === "minimax-coding-plan") {
     return true;
   }
   if ((style === "deepseek" || provider === "deepseek") && /deepseek-(?:v(?:[4-9]|\d{2})|flash|pro)\b/.test(lowerModel)) {
@@ -188845,6 +188907,73 @@ async function* readSse(body) {
   }
 }
 
+var THINK_OPEN = "<think>";
+var THINK_CLOSE = "</think>";
+var THINK_CLOSE_TAG = /<\/think>/i;
+var CARRY_LENGTH = THINK_CLOSE.length - 1;
+var ThinkFilter = class {
+  #pending = "";
+  #dropping = false;
+  /** The tail of the dropped text that may still open the closing tag. */
+  #carry = "";
+  /** Set once the leading block is settled: every later text belongs to the answer. */
+  #settled = false;
+  /** The text that can be handed on now; empty while the block may still open. */
+  push(text) {
+    if (this.#settled)
+      return text;
+    if (this.#dropping)
+      return this.#drop(text);
+    this.#pending += text;
+    const trimmed = this.#pending.trimStart();
+    if (trimmed === "")
+      return "";
+    if (trimmed.toLowerCase().startsWith(THINK_OPEN)) {
+      const end = THINK_CLOSE_TAG.exec(trimmed);
+      if (!end) {
+        this.#dropping = true;
+        this.#carry = trimmed.slice(THINK_OPEN.length).slice(-CARRY_LENGTH);
+        this.#pending = "";
+        return "";
+      }
+      this.#pending = "";
+      this.#settled = true;
+      return trimmed.slice(end.index + end[0].length);
+    }
+    if (THINK_OPEN.startsWith(trimmed.toLowerCase()))
+      return "";
+    const out = this.#pending;
+    this.#pending = "";
+    this.#settled = true;
+    return out;
+  }
+  /**
+   * The text left when the stream ends. `unterminated` says the stream ended while the block
+   * was still open, so the answer was never complete and the caller must not use it.
+   */
+  flush() {
+    const text = this.#pending;
+    this.#pending = "";
+    const unterminated = this.#dropping;
+    this.#dropping = false;
+    this.#carry = "";
+    return { text, unterminated };
+  }
+  /** The text after the closing tag, dropping everything the block covered. */
+  #drop(text) {
+    const window2 = this.#carry + text;
+    const end = THINK_CLOSE_TAG.exec(window2);
+    if (!end) {
+      this.#carry = window2.slice(-CARRY_LENGTH);
+      return "";
+    }
+    this.#dropping = false;
+    this.#carry = "";
+    this.#settled = true;
+    return window2.slice(end.index + end[0].length);
+  }
+};
+
 var JSON_MODE_REJECTED = /response[_ ]format|json[_ ]object|json mode|unsupported (?:parameter|field|argument)|unknown (?:parameter|field|argument)|unrecognized|not supported|extra (?:inputs|fields)|additional properties/i;
 var JSON_OBJECT_SUPPORTED_PRESETS = /* @__PURE__ */ new Set([
   "openrouter",
@@ -188898,7 +189027,7 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
     if (effort === void 0)
       return isCompatibleReasoningModel(this.provider, model, this.#style);
     const isOff = effort === "off" || effort === "none";
-    return !isOff && Object.keys(compatibleEffortFields(this.#style, effort)).length > 0;
+    return !isOff && Object.keys(compatibleEffortFields(this.#style, effort, model)).length > 0;
   }
   /**
    * The effort one call really uses. A per-call `thinking: 'off'` (the retry after an empty,
@@ -188910,6 +189039,8 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
       return options.effort;
     if (this.#style === "glm" || this.#style === "deepseek")
       return "off";
+    if (this.#style === "minimax")
+      return LOWEST_REASONING_EFFORT;
     if (this.#style === "reasoning_effort" && this.#thinks(options.model, options.effort)) {
       return LOWEST_REASONING_EFFORT;
     }
@@ -188917,10 +189048,9 @@ var OpenAICompatibleAdapter = class extends LlmAdapter {
   }
   requestedOutputTokens(options) {
     if (options.effort !== void 0) {
-      const isOff = options.effort === "off" || options.effort === "none";
-      const effortFields = compatibleEffortFields(this.#style, options.effort);
-      const thinks = Object.keys(effortFields).length > 0 && !isOff;
-      const sized = this.#style === "deepseek" ? deepseekEffort(options.effort) : options.effort;
+      const effortFields = compatibleEffortFields(this.#style, options.effort, options.model);
+      const thinks = Object.keys(effortFields).length > 0 && !effortStopsThinking(this.#style, options.effort);
+      const sized = sentEffort(this.#style, options.effort, options.model);
       const headroom = thinks ? thinkingHeadroom(sized) || DEFAULT_THINKING_HEADROOM : 0;
       return options.maxOutputTokens + headroom;
     }
@@ -188942,7 +189072,7 @@ ${instruction}`;
         messages.unshift({ role: "system", content: instruction });
     }
     const effort = this.#effortFor(options);
-    const effortFields = compatibleEffortFields(this.#style, effort);
+    const effortFields = compatibleEffortFields(this.#style, effort, options.model);
     return {
       model: options.model,
       messages,
@@ -188969,6 +189099,7 @@ ${instruction}`;
     let usage;
     let finish;
     let done = false;
+    const think = this.#style === "minimax" ? new ThinkFilter() : void 0;
     try {
       for await (const { data } of readSse(response.body)) {
         if (options.signal?.aborted) {
@@ -188982,8 +189113,12 @@ ${instruction}`;
         if (chunk.error)
           throw this.#streamError(chunk.error);
         const choice = chunk.choices?.[0];
-        if (choice?.delta?.content)
-          yield { type: "text-delta", text: choice.delta.content };
+        const text = choice?.delta?.content;
+        if (text) {
+          const clean = think ? think.push(text) : text;
+          if (clean)
+            yield { type: "text-delta", text: clean };
+        }
         if (choice?.finish_reason)
           finish = mapFinish(choice.finish_reason);
         if (chunk.usage)
@@ -188995,6 +189130,16 @@ ${instruction}`;
       }
       throw failureFromThrown(error62, this.provider, this.#key, options.signal);
     }
+    const tail = think?.flush();
+    if (tail?.unterminated) {
+      throw new LlmFailure({
+        code: "UNKNOWN",
+        provider: this.provider,
+        message: "MiniMax left an unterminated <think> block"
+      });
+    }
+    if (tail?.text)
+      yield { type: "text-delta", text: tail.text };
     if (!finish && !done) {
       throw new LlmFailure({
         code: "NETWORK",

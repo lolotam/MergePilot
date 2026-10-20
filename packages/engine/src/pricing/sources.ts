@@ -31,6 +31,8 @@ export const MODELS_DEV_PROVIDER_KEYS: Readonly<Record<string, string>> = {
   xiaomi: 'xiaomi',
   'xiaomi-token-plan': 'xiaomi-token-plan-sgp',
   'xiaomi-token-plan-cn': 'xiaomi-token-plan-cn',
+  minimax: 'minimax',
+  'minimax-coding-plan': 'minimax-coding-plan',
 };
 
 /** Prices above this many USD per million tokens are treated as garbage and dropped. */

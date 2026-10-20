@@ -25,6 +25,8 @@ describe('provider registry', () => {
         'xiaomi',
         'xiaomi-token-plan',
         'xiaomi-token-plan-cn',
+        'minimax',
+        'minimax-coding-plan',
       ].sort(),
     );
     expect(Object.keys(PROVIDER_REGISTRY).sort()).toEqual([...API_PROVIDER_IDS].sort());
@@ -34,6 +36,8 @@ describe('provider registry', () => {
     expect(isApiProviderId('xai')).toBe(true);
     expect(isApiProviderId('xiaomi')).toBe(true);
     expect(isApiProviderId('xiaomi-token-plan')).toBe(true);
+    expect(isApiProviderId('minimax')).toBe(true);
+    expect(isApiProviderId('minimax-coding-plan')).toBe(true);
   });
 
   it('gives every entry its id, label, kind, base URL, thinking style and env name', () => {
@@ -60,6 +64,35 @@ describe('provider registry', () => {
     expect(providerEntry('xiaomi-token-plan').keyHint).toBe('tp-');
     expect(providerEntry('xiaomi').label).toBe('Xiaomi MiMo');
     expect(providerEntry('xiaomi-token-plan').label).toBe('Xiaomi MiMo Token Plan (Singapore)');
+    expect(providerEntry('minimax').label).toBe('MiniMax');
+    expect(providerEntry('minimax-coding-plan').label).toBe('MiniMax Coding Plan');
+    expect(providerEntry('minimax').thinkingStyle).toBe('minimax');
+    expect(providerEntry('minimax-coding-plan').thinkingStyle).toBe('minimax');
+  });
+
+  it('gives both MiniMax providers the international endpoint and their own default model', () => {
+    expect(providerEntry('minimax')).toEqual({
+      id: 'minimax',
+      label: 'MiniMax',
+      kind: 'openai-compatible',
+      baseUrl: 'https://api.minimax.io/v1',
+      thinkingStyle: 'minimax',
+      defaultModel: 'MiniMax-M3.1-Flash',
+      envName: 'MINIMAX_API_KEY',
+      requiresBaseUrl: false,
+      streamUsage: true,
+    });
+    expect(providerEntry('minimax-coding-plan')).toEqual({
+      id: 'minimax-coding-plan',
+      label: 'MiniMax Coding Plan',
+      kind: 'openai-compatible',
+      baseUrl: 'https://api.minimax.io/v1',
+      thinkingStyle: 'minimax',
+      defaultModel: 'MiniMax-M3.1-Flash',
+      envName: 'MINIMAX_CODING_PLAN_API_KEY',
+      requiresBaseUrl: false,
+      streamUsage: true,
+    });
   });
 
   it('adds Vercel AI Gateway as an OpenAI-compatible preset with a fixed URL (ADR-0008 amendment)', () => {
@@ -97,6 +130,10 @@ describe('provider registry', () => {
     expect(resolveBaseUrl('xiaomi-token-plan', 'https://proxy.example/v1')).toBe('https://token-plan-sgp.xiaomimimo.com/v1');
     expect(resolveBaseUrl('xiaomi-token-plan-cn')).toBe('https://token-plan-cn.xiaomimimo.com/v1');
     expect(resolveBaseUrl('xiaomi-token-plan-cn', 'https://proxy.example/v1')).toBe('https://token-plan-cn.xiaomimimo.com/v1');
+    expect(resolveBaseUrl('minimax')).toBe('https://api.minimax.io/v1');
+    expect(resolveBaseUrl('minimax', 'https://proxy.example/v1')).toBe('https://api.minimax.io/v1');
+    expect(resolveBaseUrl('minimax-coding-plan')).toBe('https://api.minimax.io/v1');
+    expect(resolveBaseUrl('minimax-coding-plan', 'https://proxy.example/v1')).toBe('https://api.minimax.io/v1');
   });
 
   it('drops OpenCode model families that are not served on /chat/completions', () => {
@@ -113,6 +150,8 @@ describe('provider registry', () => {
     expect(credentialEnvName('xiaomi')).toBe('XIAOMI_API_KEY');
     expect(credentialEnvName('xiaomi-token-plan')).toBe('XIAOMI_TOKEN_PLAN_API_KEY');
     expect(credentialEnvName('xiaomi-token-plan-cn')).toBe('XIAOMI_TOKEN_PLAN_API_KEY');
+    expect(credentialEnvName('minimax')).toBe('MINIMAX_API_KEY');
+    expect(credentialEnvName('minimax-coding-plan')).toBe('MINIMAX_CODING_PLAN_API_KEY');
     const store = new EnvCredentialStore({ DEEPSEEK_API_KEY: 'k1' });
     expect(await store.info({ provider: 'deepseek' })).toEqual({
       provider: 'deepseek',

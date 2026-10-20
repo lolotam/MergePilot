@@ -8,13 +8,16 @@ import { failureKind, LlmFailure, type FailureKind } from '../llm/failure.js';
 import {
   anthropicThinking,
   compatibleEffortFields,
-  DEFAULT_THINKING_HEADROOM,
+  defaultThinkingHeadroom,
+  effortStopsThinking,
   geminiThinkingConfig,
   geminiThinksByDefault,
   isCompatibleReasoningModel,
   openAIReasoningEffort,
   openAIThinksByDefault,
+  sentEffort,
   thinkingHeadroom,
+  type ThinkingStyle,
 } from './effort.js';
 import {
   bearerHeaders,
@@ -51,11 +54,18 @@ const MAX_OUTPUT_TOKENS = 16;
 /**
  * Room for thinking on top of the tiny answer. Models that think by default (Gemini 2.5+/3.x,
  * OpenAI reasoning, DeepSeek reasoner, GLM) spend their output budget on thinking first, so a
- * bare 16 tokens comes back with no reply text and the test wrongly reports a failure.
+ * bare 16 tokens comes back with no reply text and the test wrongly reports a failure. The
+ * room follows the same function the review call uses, so the test asks for what a call asks.
  */
-function testHeadroom(effort: string | undefined, thinks: boolean, thinksByDefault: boolean): number {
-  if (thinks) return thinkingHeadroom(effort) || DEFAULT_THINKING_HEADROOM;
-  return thinksByDefault && !effort ? DEFAULT_THINKING_HEADROOM : 0;
+function testHeadroom(
+  effort: string | undefined,
+  thinks: boolean,
+  thinksByDefault: boolean,
+  style: ThinkingStyle,
+  model?: string,
+): number {
+  if (thinks) return thinkingHeadroom(sentEffort(style, effort, model)) || defaultThinkingHeadroom(style);
+  return thinksByDefault && !effort ? defaultThinkingHeadroom(style) : 0;
 }
 const DEFAULT_TIMEOUT_MS = 30000;
 
@@ -115,7 +125,7 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
       headers: { ...json, 'x-api-key': keyValue(key) ?? '', 'anthropic-version': '2023-06-01' },
       body: {
         model,
-        max_tokens: MAX_OUTPUT_TOKENS + testHeadroom(options.effort, thinking !== undefined, false),
+        max_tokens: MAX_OUTPUT_TOKENS + testHeadroom(options.effort, thinking !== undefined, false, 'anthropic'),
         messages,
         ...(thinking ?? {}),
       },
@@ -134,7 +144,7 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
       body: {
         contents: [{ role: 'user', parts: [{ text: PROMPT }] }],
         generationConfig: {
-          maxOutputTokens: MAX_OUTPUT_TOKENS + testHeadroom(options.effort, thinkingConfig !== undefined, geminiThinksByDefault(model)),
+          maxOutputTokens: MAX_OUTPUT_TOKENS + testHeadroom(options.effort, thinkingConfig !== undefined, geminiThinksByDefault(model), 'gemini'),
           ...(thinkingConfig ? { thinkingConfig } : {}),
         },
       },
@@ -152,18 +162,25 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
       body: {
         model,
         messages,
-        max_completion_tokens: MAX_OUTPUT_TOKENS + testHeadroom(effort, effort !== undefined, openAIThinksByDefault(model)),
+        max_completion_tokens: MAX_OUTPUT_TOKENS + testHeadroom(effort, effort !== undefined, openAIThinksByDefault(model), 'reasoning_effort'),
         ...(effort ? { reasoning_effort: effort } : {}),
       },
       reply: chatReply,
     };
   }
   const style = providerEntry(provider).thinkingStyle;
-  const effortFields = compatibleEffortFields(style, options.effort);
-  const disablesThinking = options.effort === 'off' || options.effort === 'none';
+  const effortFields = compatibleEffortFields(style, options.effort, model);
+  // MiniMax cannot turn its thinking off, so an effort that asks for none still leaves room.
+  const disablesThinking = effortStopsThinking(style, options.effort);
   const compatibleHeadroom = disablesThinking
     ? 0
-    : testHeadroom(options.effort, Object.keys(effortFields).length > 0, isCompatibleReasoningModel(provider, model, style));
+    : testHeadroom(
+        options.effort,
+        Object.keys(effortFields).length > 0,
+        isCompatibleReasoningModel(provider, model, style),
+        style,
+        model,
+      );
   return {
     url: `${base}/chat/completions`,
     headers: {

@@ -4,7 +4,10 @@ import type { ModelPriceStore, PricingSource, RunPricing } from '../core/price-t
 import type { WorkspaceSettings } from '../core/types.js';
 
 /** Flat-rate token plans priced $0 in the catalog, and the plain API provider of the same models. */
-const TOKEN_PLAN_API_PROVIDER: Record<string, string> = { 'zai-coding': 'zai' };
+const TOKEN_PLAN_API_PROVIDER: Record<string, string> = {
+  'zai-coding': 'zai',
+  'minimax-coding-plan': 'minimax',
+};
 
 /**
  * Google Antigravity serves other vendors' models (decisions log س47-ز): the API price is the same

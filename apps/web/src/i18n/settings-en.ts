@@ -13,6 +13,8 @@ export const enSettings = {
   providerXiaomi: 'Xiaomi MiMo',
   providerXiaomiTokenPlan: 'Xiaomi MiMo Token Plan (Singapore)',
   providerXiaomiTokenPlanCn: 'Xiaomi MiMo Token Plan (China)',
+  providerMinimax: 'MiniMax',
+  providerMinimaxCodingPlan: 'MiniMax Coding Plan',
   testModelLabel: 'Model to test',
   testModelAuto: 'Auto',
 

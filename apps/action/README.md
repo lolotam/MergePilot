@@ -83,6 +83,8 @@ Set `provider` and `model` in `.mergepilot.yml` (`model` is optional only for `c
 | `zai`, `zai-coding` | `glm-4.6` | `ZAI_API_KEY` |
 | `xiaomi` | `mimo-v2.5` | `XIAOMI_API_KEY` |
 | `xiaomi-token-plan`, `xiaomi-token-plan-cn` | `mimo-v2.5` | `XIAOMI_TOKEN_PLAN_API_KEY` |
+| `minimax` | `MiniMax-M3.1-Flash` | `MINIMAX_API_KEY` |
+| `minimax-coding-plan` | `MiniMax-M3.1-Flash` | `MINIMAX_CODING_PLAN_API_KEY` |
 | `custom` | your server's model id | `CUSTOM_LLM_API_KEY` |
 | `claude-code` | optional: the CLI picks its model | `CLAUDE_CODE_OAUTH_TOKEN` |
 

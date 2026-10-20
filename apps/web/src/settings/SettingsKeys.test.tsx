@@ -82,6 +82,30 @@ describe('key test icon and "test before saving" (J2)', () => {
     expect(await screen.findByText(/Connected successfully/)).toBeDefined();
   });
 
+  it('AddKeyModal offers both MiniMax providers with their English labels', async () => {
+    const { container } = renderSettings(
+      <AddKeyModal isOpen onClose={vi.fn()} onSubmit={vi.fn()} isPending={false} workspaceId="ws-1" />,
+      'en',
+    );
+    const select = container.querySelector('#key-provider-select') as HTMLSelectElement;
+    const labels = Array.from(select.options).map((option) => option.textContent);
+
+    expect(labels).toContain('MiniMax');
+    expect(labels).toContain('MiniMax Coding Plan');
+  });
+
+  it('AddKeyModal offers both MiniMax providers with their Arabic labels', async () => {
+    const { container } = renderSettings(
+      <AddKeyModal isOpen onClose={vi.fn()} onSubmit={vi.fn()} isPending={false} workspaceId="ws-1" />,
+      'ar',
+    );
+    const select = container.querySelector('#key-provider-select') as HTMLSelectElement;
+    const labels = Array.from(select.options).map((option) => option.textContent);
+
+    expect(labels).toContain('ميني ماكس');
+    expect(labels).toContain('ميني ماكس Coding Plan');
+  });
+
   it('AddKeyModal tests a custom key with its base URL against the first listed model', async () => {
     vi.mocked(api.testModelsUnsaved).mockResolvedValueOnce({ models: [{ id: 'llama-3.3', name: 'Llama', efforts: [] }] });
     vi.mocked(api.testConnection).mockResolvedValueOnce({ ok: false, code: 'auth', message: 'denied' });

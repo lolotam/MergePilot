@@ -22,6 +22,8 @@ export const SAAS_PROVIDERS: readonly ApiProvider[] = [
   'xiaomi',
   'xiaomi-token-plan',
   'xiaomi-token-plan-cn',
+  'minimax',
+  'minimax-coding-plan',
   'custom',
 ];
 
@@ -54,6 +56,8 @@ const LABEL_KEYS: Record<KeyProvider, I18nKey> = {
   xiaomi: 'providerXiaomi',
   'xiaomi-token-plan': 'providerXiaomiTokenPlan',
   'xiaomi-token-plan-cn': 'providerXiaomiTokenPlanCn',
+  minimax: 'providerMinimax',
+  'minimax-coding-plan': 'providerMinimaxCodingPlan',
   custom: 'providerCustom',
   typesafe: 'providerTypesafe',
   'vercel-gateway': 'providerVercelGateway',

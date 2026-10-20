@@ -237,6 +237,26 @@ describe('listModels', () => {
         { id: 'mimo-v2-pro', name: 'MiMo v2 Pro', efforts: [] },
       ]);
     });
+
+    it('lists models for the MiniMax endpoint with bearer auth', async () => {
+      const body = {
+        data: [
+          { id: 'MiniMax-M3.1-Flash', name: 'MiniMax M3.1 Flash' },
+          { id: 'MiniMax-M3', name: 'MiniMax M3' },
+          { id: 'MiniMax-M2.7', name: 'MiniMax M2.7' },
+        ],
+      };
+      const { fetch, calls } = mockFetch(jsonResponse(body));
+      const models = await listModels('minimax', KEY, { fetch });
+
+      expect(calls[0]?.url).toBe('https://api.minimax.io/v1/models');
+      expect(calls[0]?.headers.authorization).toBe(`Bearer ${KEY.reveal()}`);
+      expect(models).toEqual([
+        { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        { id: 'MiniMax-M3', name: 'MiniMax M3', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        { id: 'MiniMax-M3.1-Flash', name: 'MiniMax M3.1 Flash', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+      ]);
+    });
   });
 
   describe('Deduplication and sorting', () => {
