@@ -261,6 +261,10 @@ export const ar = {
   keySecretLabel: 'المفتاح السري (API Key)',
   keySecretPlaceholder: 'sk-...',
   keySecretHelp: 'لن يتم إظهار المفتاح مجددًا بعد حفظه.',
+  minimaxCodingPlanKeyHint:
+    'ده شكله مش مفتاح MiniMax Coding Plan. مفاتيح الـ Coding Plan بتبدأ بـ sk-cp-، ومفتاح الدفع حسب الاستخدام هنا هيفشل برسالة "الرصيد مش كفاية".',
+  minimaxPayAsYouGoKeyHint:
+    'ده شكله مفتاح MiniMax Coding Plan (بيبدأ بـ sk-cp-). ضيفه تحت "ميني ماكس Coding Plan" علشان المراجعات تستخدم اشتراكك.',
   keySecretMinLength: 'يجب ألا يقل المفتاح عن 8 أحرف',
   saveKeyButton: 'حفظ المفتاح',
   savingKey: 'جاري التحقق والحفظ...',

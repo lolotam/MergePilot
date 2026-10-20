@@ -264,6 +264,10 @@ export const en: I18nDictionary = {
   keySecretLabel: 'Secret API Key',
   keySecretPlaceholder: 'sk-...',
   keySecretHelp: 'The key will never be shown again after saving.',
+  minimaxCodingPlanKeyHint:
+    'This doesn\'t look like a MiniMax Coding Plan key. Coding Plan keys start with sk-cp-. A pay-as-you-go key here fails with "insufficient balance".',
+  minimaxPayAsYouGoKeyHint:
+    'This looks like a MiniMax Coding Plan key (sk-cp-). Add it under "MiniMax Coding Plan" so reviews use your plan.',
   keySecretMinLength: 'Key must be at least 8 characters',
   saveKeyButton: 'Save key',
   savingKey: 'Verifying and saving...',
