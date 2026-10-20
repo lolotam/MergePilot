@@ -12,6 +12,7 @@ import { runConnectionTest, useTestReason } from '../settings/TestKeyButton.js';
 import { Modal } from './Modal.js';
 import { AddKeyModalDualSubscription } from './AddKeyModalDualSubscription.js';
 import { AddKeyModalFooter } from './AddKeyModalFooter.js';
+import { KeyFormatHint } from './KeyFormatHint.js';
 import { blankField, outcomeColor, quotaOutcome, type KeyField } from './add-key-modal-utils.js';
 import { SubscriptionSignIn } from '../settings/SubscriptionSignIn.js';
 import { isSubscriptionOnlyProvider } from '../settings/subscription-only.js';
@@ -310,6 +311,7 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
                       </button>
                     )}
                   </div>
+                  <KeyFormatHint provider={keyProvider} value={field.value} />
                   {field.result && (
                     <p
                       role="status"
@@ -325,24 +327,27 @@ export function AddKeyModal({ isOpen, onClose, onSubmit, isPending, workspaceId 
               )}
             </div>
           ) : (
-            <input
-              id="key-secret-input"
-              type="password"
-              required
-              autoComplete="off"
-              value={apiKeyInput}
-              onChange={(e) => {
-                setApiKeyInput(e.target.value);
-                setTestResult(null);
-                if (keyError) setKeyError('');
-              }}
-              placeholder={t('keySecretPlaceholder')}
-              className={`w-full px-3.5 py-2 rounded-full border text-xs font-mono focus:ring-2 focus:outline-hidden ${
-                keyError
-                  ? 'border-red-500 focus:ring-red-500'
-                  : 'border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 focus:ring-brand-500'
-              }`}
-            />
+            <>
+              <input
+                id="key-secret-input"
+                type="password"
+                required
+                autoComplete="off"
+                value={apiKeyInput}
+                onChange={(e) => {
+                  setApiKeyInput(e.target.value);
+                  setTestResult(null);
+                  if (keyError) setKeyError('');
+                }}
+                placeholder={t('keySecretPlaceholder')}
+                className={`w-full px-3.5 py-2 rounded-full border text-xs font-mono focus:ring-2 focus:outline-hidden ${
+                  keyError
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-ink-300 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 focus:ring-brand-500'
+                }`}
+              />
+              <KeyFormatHint provider={keyProvider} value={apiKeyInput} />
+            </>
           )}
           {keyError ? (
             <p className="text-xs text-red-500 mt-1 ms-2">{keyError}</p>
