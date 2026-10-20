@@ -271,16 +271,19 @@ export function parseReleaseMessage(message: string): ReleaseTrailers | null {
   const previousSourceCommit = field('Previous-Source-Commit');
   const previousImageRef = field('Previous-Image-Ref');
   // A release commit before the worker pin (ADR-0025 amendment) has no worker trailers: the
-  // worker then runs the web image, and so did the release before it.
+  // worker then runs the web image, and so did the release before it. A worker trailer that is
+  // present keeps its own value, `none` included: an unknown worker commit is not the web's.
+  const workerField = (key: string, fallback: string | null): string | null =>
+    new RegExp(`^${key}: \\S+$`, 'm').test(message) ? field(key) : fallback;
   return {
     sourceCommit,
     imageRef,
-    workerSourceCommit: field('Worker-Source-Commit') ?? sourceCommit,
+    workerSourceCommit: workerField('Worker-Source-Commit', sourceCommit),
     workerImageRef: field('Worker-Image-Ref') ?? imageRef,
     previousSourceCommit,
     previousImageRef,
-    previousWorkerSourceCommit: field('Previous-Worker-Source-Commit') ?? previousSourceCommit,
-    previousWorkerImageRef: field('Previous-Worker-Image-Ref') ?? previousImageRef,
+    previousWorkerSourceCommit: workerField('Previous-Worker-Source-Commit', previousSourceCommit),
+    previousWorkerImageRef: workerField('Previous-Worker-Image-Ref', previousImageRef),
   };
 }
 

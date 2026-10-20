@@ -244,6 +244,11 @@ describe('release commits', () => {
     expect(releaseMessage({ ...trailers, workerSourceCommit: null, previousWorkerSourceCommit: null }, 'release')).toContain('Worker-Source-Commit: none');
   });
 
+  it('keeps a worker commit recorded as none instead of taking the web commit', () => {
+    const message = releaseMessage({ ...trailers, workerSourceCommit: null, previousWorkerSourceCommit: null }, 'web');
+    expect(parseReleaseMessage(message)).toMatchObject({ workerSourceCommit: null, previousWorkerSourceCommit: null });
+  });
+
   it('reads a message without worker trailers as a release where the worker runs the web image', () => {
     const legacy = [
       `chore(release): deploy ${SHA.slice(0, 7)}`,
