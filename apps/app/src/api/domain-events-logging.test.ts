@@ -223,6 +223,18 @@ describe('Domain events logging - Core API', () => {
     expect(again.statusCode).toBe(200);
     const second = lines.filter((l) => l.event === 'settings.changed')[1];
     expect(second?.changedFields).toEqual(['language']);
+
+    const base = await store.getSettings(workspaceId);
+    await store.saveSettings({ ...base!, model: 'changed-elsewhere' });
+    const third = await app.inject({
+      method: 'PUT', url: `/api/workspaces/${workspaceId}/settings`, headers: { cookie },
+      payload: { ...base, language: 'ar', base },
+    });
+    expect(third.statusCode).toBe(200);
+    expect(third.json().settings.model).toBe('changed-elsewhere');
+    const thirdLog = lines.filter((l) => l.event === 'settings.changed')[2];
+    expect(thirdLog?.changedFields).toEqual(['language']);
+    expect(thirdLog).not.toHaveProperty('base');
   });
 
   it('logs retention / repo color changes and bulk deletes by field names and counts only', async () => {

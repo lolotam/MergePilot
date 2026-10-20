@@ -1,4 +1,5 @@
-import { DEFAULT_WORKSPACE_MAX_FINDINGS, InstallationAlreadyLinkedError, WorkspaceDeletedError } from './types.js';
+import { isDeepStrictEqual } from 'node:util';
+import { DEFAULT_WORKSPACE_MAX_FINDINGS, InstallationAlreadyLinkedError, type SaveSettingsOptions, SettingsChangedError, WorkspaceDeletedError } from './types.js';
 import { findActiveRun } from './memory-runs.js';
 import {
   memoryCreateReviewRun,
@@ -114,6 +115,10 @@ export class MemoryStore implements AppStore {
   }
 
   async getSettings(workspaceId: string): Promise<WorkspaceSettings | null> {
+    return this.readSettings(workspaceId);
+  }
+
+  private readSettings(workspaceId: string): WorkspaceSettings | null {
     const s = this.settings.get(workspaceId);
     if (!s) return null;
     return withSetSkillFields({
@@ -131,8 +136,11 @@ export class MemoryStore implements AppStore {
     });
   }
 
-  async saveSettings(settings: WorkspaceSettings): Promise<void> {
+  async saveSettings(settings: WorkspaceSettings, options?: SaveSettingsOptions): Promise<void> {
     this.assertLive(settings.workspaceId);
+    if (options?.expected !== undefined && !isDeepStrictEqual(this.readSettings(settings.workspaceId), options.expected)) {
+      throw new SettingsChangedError(settings.workspaceId);
+    }
     // Like the Postgres store: undefined keeps the stored retention, colors, judge and price overrides,
     // and only a renamed main bot is checked against the extra bots' names.
     const stored = this.settings.get(settings.workspaceId);

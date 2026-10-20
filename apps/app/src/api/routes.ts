@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Auth } from '../auth/auth.js';
 import { isUserPlatformAdmin } from '../admin/guard.js';
@@ -6,7 +7,8 @@ import { isSubscriptionOnlyProvider, SUBSCRIPTION_PREFIX, type FetchLike, type S
 import type { AppConfig } from '../core/config.js';
 import { createSafeFetch } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
-import { BotNameTakenError, UnknownSkillError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
+import { BotNameTakenError, SettingsChangedError, UnknownSkillError, type AppStore, type KeyProvider, type ReviewQueue } from '../core/types.js';
+import { canReplaySettingsPatch, reconcileSettingsPatch } from './settings-merge.js';
 import { isKeyListProvider, MAX_PROVIDER_KEYS } from '../credentials/multi-key.js';
 import { registerProviderAuthRoutes } from './provider-auth-routes.js';
 import { KeyOrderError, SingleKeyProviderError, TooManyKeysError, type CredentialService } from '../credentials/service.js';
@@ -146,44 +148,59 @@ export function registerDashboardApi(
         );
       }
 
-      // A patch over the stored settings: fields left out keep their value, null clears them.
-      const previous = await deps.store.getSettings(workspaceId);
-      const merged = mergeSettings(workspaceId, previous, parsed.data);
-      const problem = unavailableProviderProblem(merged, previous, subscriptionAvailability(deps))
-        ?? await validateSettings(deps.store, workspaceId, merged)
-        ?? await unknownSkillProblem(deps.store, workspaceId, parsed.data.skillId);
-      if (problem) return sendError(reply, 400, problem.code, problem.message);
-      // The main bot's name must differ from every extra bot's (ADR-0017).
-      if (parsed.data.botName !== undefined && (await botNameTakenByExtraBot(deps.store, workspaceId, parsed.data.botName))) {
-        return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
-      }
-
-      try {
-        await deps.store.saveSettings(parsed.data.skillId === undefined ? withoutSkillFields(merged) : merged);
-      } catch (error) {
-        // A bot saved the same name between the check above and this write (the store re-checks it under a lock).
-        if (error instanceof BotNameTakenError) {
+      const { base, ...submitted } = parsed.data;
+      const replayable = canReplaySettingsPatch(submitted, base);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        // A patch over the stored settings: fields left out keep their value, null clears them.
+        const previous = await deps.store.getSettings(workspaceId);
+        const patch = reconcileSettingsPatch(submitted, base, previous);
+        if (!patch) return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
+        const merged = mergeSettings(workspaceId, previous, patch);
+        const problem = unavailableProviderProblem(merged, previous, subscriptionAvailability(deps))
+          ?? await validateSettings(deps.store, workspaceId, merged)
+          ?? await unknownSkillProblem(deps.store, workspaceId, patch.skillId);
+        if (problem) return sendError(reply, 400, problem.code, problem.message);
+        // The main bot's name must differ from every extra bot's (ADR-0017).
+        if (patch.botName !== undefined && (await botNameTakenByExtraBot(deps.store, workspaceId, patch.botName))) {
           return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
         }
-        // The skill was deleted between the check above and this write.
-        if (error instanceof UnknownSkillError) return sendError(reply, 400, 'unknown_skill', error.message);
-        throw error;
+
+        try {
+          await deps.store.saveSettings(patch.skillId === undefined ? withoutSkillFields(merged) : merged, { expected: previous });
+        } catch (error) {
+          if (error instanceof SettingsChangedError) {
+            // A request is replayed only when its base covers every field it sends and every
+            // member of a model group it touches (see canReplaySettingsPatch).
+            if (!replayable) return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
+            continue;
+          }
+          // A bot saved the same name between the check above and this write (the store re-checks it under a lock).
+          if (error instanceof BotNameTakenError) {
+            return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
+          }
+          // The skill was deleted between the check above and this write.
+          if (error instanceof UnknownSkillError) return sendError(reply, 400, 'unknown_skill', error.message);
+          throw error;
+        }
+        const stored = await deps.store.getSettings(workspaceId);
+        request.log.info(
+          {
+            event: 'settings.changed',
+            workspaceId,
+            // Only fields whose stored value really changed (forms resend unchanged values).
+            changedFields: Object.keys(patch).filter((key) => {
+              const before = (previous as Record<string, unknown> | null)?.[key] ?? null;
+              const applied = (merged as unknown as Record<string, unknown>)[key] ?? null;
+              const after = (stored as Record<string, unknown> | null)?.[key] ?? null;
+              return !isDeepStrictEqual(before, applied) && !isDeepStrictEqual(before, after);
+            }),
+          },
+          'Workspace settings updated',
+        );
+        const { workspaceId: _ws, ...settings } = stored ?? merged;
+        return reply.status(200).send({ settings: stored ? settings : null });
       }
-      request.log.info(
-        {
-          event: 'settings.changed',
-          workspaceId,
-          // Only fields whose stored value really changed (forms resend unchanged values).
-          changedFields: Object.keys(parsed.data).filter(
-            (key) =>
-              JSON.stringify((previous as Record<string, unknown> | null)?.[key] ?? null) !==
-              JSON.stringify((merged as unknown as Record<string, unknown>)[key] ?? null),
-          ),
-        },
-        'Workspace settings updated',
-      );
-      const { workspaceId: _ws, ...settings } = merged;
-      return reply.status(200).send({ settings });
+      return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
     },
   );
 

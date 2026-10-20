@@ -11,7 +11,7 @@ import {
 } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { reviewerBots, reviewSkills, workspaceSettings } from './schema.js';
-import { lockBotNames, withLiveWorkspace, type AppTx, type PgBase } from './workspace-lock.js';
+import { lockBotNames, lockSettings, withLiveWorkspace, type AppTx, type PgBase } from './workspace-lock.js';
 
 // Review skills (ADR-0034). Bots reference a skill through composite foreign keys
 // (workspace_id, skill_id), so a bot can only use a skill of its own workspace.
@@ -163,7 +163,9 @@ export async function updateSkill(
 export async function deletePgReviewSkill(db: AppDb, workspaceId: string, skillId: string): Promise<DeletedReviewSkill | null> {
   if (!SKILL_ID_PATTERN.test(skillId)) return null;
   return db.transaction(async (lockedTx) => {
-    // The bot-name lock first, like a restore and a bot save: they touch the same settings and bot
+    // The settings lock before the bot-name lock, like a restore and a settings save.
+    await lockSettings(lockedTx, workspaceId);
+    // The bot-name lock before the rows, like a restore and a bot save: they touch the same settings and bot
     // rows, so all of them take the rows in the same order and cannot deadlock.
     await lockBotNames(lockedTx, workspaceId);
     // Widened: `returning({...})` does not resolve on the node-postgres | PGlite union.

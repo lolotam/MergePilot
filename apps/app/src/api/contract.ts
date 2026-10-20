@@ -109,18 +109,26 @@ export const SettingsSchema = z.object({
   skillRemovedName: z.string().nullable().optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
+export const SettingsBaseSchema = z.record(z.string(), z.unknown());
+export type SettingsBase = z.infer<typeof SettingsBaseSchema>;
 
 /**
  * PUT body: provider, model and language are required; every other field is a patch. Left out
  * (undefined) keeps the stored value, so an older client that only sends the budget does not
  * wipe the J2 fields; an explicit `null` clears it (fallback → [], minSeverity → medium).
+ * Without `base` there is nothing to compare: the save writes every field it sends (last write
+ * wins for those fields) and only a race inside the request answers 409. The dashboard does not
+ * send `base` yet, so its saves keep these semantics until it does.
  */
 export const SettingsUpdateSchema = SettingsSchema.extend({
+  /** Field values from the snapshot used to build this patch. */
+  base: SettingsBaseSchema.optional(),
   fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).nullable().optional(),
   minSeverity: SeveritySchema.nullable().optional(),
 });
 export type SettingsUpdate = z.infer<typeof SettingsUpdateSchema>;
 export const SettingsResponseSchema = z.object({ settings: SettingsSchema.nullable() });
+export type SettingsResponse = z.infer<typeof SettingsResponseSchema>;
 
 export const KeyQuotaStatusSchema = z.enum(['valid', 'invalid', 'quota-exhausted']);
 

@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
-import { InstallationAlreadyLinkedError } from '../core/types.js';
+import { InstallationAlreadyLinkedError, type SaveSettingsOptions } from '../core/types.js';
 import { deleteWorkspaceInTx, lockCredential, withLiveWorkspace } from './workspace-lock.js';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
@@ -180,8 +180,8 @@ export class PgStore implements AppStore {
     return getPgSettings(this.db, workspaceId);
   }
 
-  async saveSettings(settings: WorkspaceSettings): Promise<void> {
-    return savePgSettings(this.db, settings);
+  async saveSettings(settings: WorkspaceSettings, options?: SaveSettingsOptions): Promise<void> {
+    return savePgSettings(this.db, settings, options);
   }
 
   async listReviewerBots(workspaceId: string): Promise<ReviewerBot[]> {

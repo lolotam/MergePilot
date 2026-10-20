@@ -160,13 +160,18 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
         heavyProvider: null,
         heavyModel: null,
         heavyEffort: null,
-        heavyThresholdLines: null,
+        heavyThresholdLines: 800,
         fallback: [],
         minSeverity: 'medium',
+        maxFindings: 5,
         runRetentionDays: 30,
         repoColors: {},
         judge: null,
         priceOverrides: [],
+        botName: 'MergePilot',
+        botLogo: 'pilot',
+        panelMode: 'separate',
+        panelMinAgreement: 1,
       },
     });
 
@@ -178,6 +183,7 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     });
     expect(getRes.statusCode).toBe(200);
     expect(getRes.json().settings?.monthlyBudgetUsd).toBe(150);
+    expect(getRes.json()).not.toHaveProperty('settingsVersion');
   });
 
   it('keys routes: GET/PUT/DELETE enforce admin, 422 on validation failure, never leak plaintext/ciphertext', async () => {

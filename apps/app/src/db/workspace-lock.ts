@@ -20,6 +20,14 @@ export type AppTx = Parameters<Parameters<AppDb['transaction']>[0]>[0];
 /** Namespace (first key) of the two-key advisory locks guarding bot names; other locks never use it. */
 export const BOT_NAMES_LOCK_NAMESPACE = 17001;
 
+/** Namespace (first key) of the two-key advisory locks guarding workspace settings. */
+export const SETTINGS_LOCK_NAMESPACE = 17004;
+
+/** Serializes settings comparisons and writes; take this before lockBotNames and any settings row lock. */
+export async function lockSettings(tx: AppTx, workspaceId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(${SETTINGS_LOCK_NAMESPACE}, hashtext(${workspaceId}))`);
+}
+
 /** Prevents refresh-token rotation races between the web process and worker processes. */
 export async function lockCredential(tx: AppTx, workspaceId: string, provider: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(17002, hashtext(${workspaceId + ':' + provider}))`);

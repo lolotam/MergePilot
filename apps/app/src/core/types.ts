@@ -40,6 +40,19 @@ export class WorkspaceDeletedError extends Error {
   }
 }
 
+/** `expected` makes saveSettings a compare-and-write: it writes only if the stored settings still equal it (null = no row). */
+export interface SaveSettingsOptions {
+  expected?: WorkspaceSettings | null;
+}
+
+/** Thrown when settings no longer match the expected value supplied to saveSettings. */
+export class SettingsChangedError extends Error {
+  constructor(workspaceId: string) {
+    super(`settings for workspace ${workspaceId} changed while saving`);
+    this.name = 'SettingsChangedError';
+  }
+}
+
 /**
  * Thrown by AppStore.createReviewRun when another run for the same workspace, repo, PR, head
  * commit and bot slot is already `queued` or `running` (one active run per head and bot; ADR-0009
@@ -343,7 +356,8 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
   setInstallationSuspended(installationId: number, suspended: boolean): Promise<void>;
 
   getSettings(workspaceId: string): Promise<WorkspaceSettings | null>;
-  saveSettings(settings: WorkspaceSettings): Promise<void>;
+  /** With expected, writes only if the stored settings still match; null expects no row. */
+  saveSettings(settings: WorkspaceSettings, options?: SaveSettingsOptions): Promise<void>;
 
   saveCredential(credential: StoredCredential): Promise<void>;
   /** Serialized across processes in Postgres, including login, deletion and OAuth refresh. Null deletes. */

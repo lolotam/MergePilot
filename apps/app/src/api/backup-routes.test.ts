@@ -84,7 +84,9 @@ describe('settings backup: export and restore (ADR-0018)', { timeout: 60000 }, (
         .map((provider) => ({ provider, last4: fakeKey(provider).slice(-4), action: 'add' })),
     });
 
-    expect(await get('settings', 'ws-2')).toEqual({ settings: { ...(await get('settings', 'ws-1')).settings, workspaceId: 'ws-2' } });
+    const restored = await get('settings', 'ws-2');
+    expect(restored.settings).toEqual({ ...(await get('settings', 'ws-1')).settings, workspaceId: 'ws-2' });
+    expect(restored).not.toHaveProperty('settingsVersion');
     expect((await get('settings', 'ws-2')).settings.maxFindings).toBe(25);
     expect((await get('bots', 'ws-2')).bots).toEqual((await get('bots', 'ws-1')).bots);
     // The decrypted keys equal the originals (checked server-side, through the vault).

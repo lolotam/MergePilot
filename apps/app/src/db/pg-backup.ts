@@ -22,7 +22,7 @@ import {
   countSkills, insertSkill, isConstraintViolation, isSkillNameConflict, lockSkills, SKILL_FOREIGN_KEYS, updateSkill,
 } from './pg-skills.js';
 import { providerCredentials, reviewerBots, reviewSkills, workspaceSettings } from './schema.js';
-import { lockBotNames, lockCredential, withLiveWorkspace, type AppTx } from './workspace-lock.js';
+import { lockBotNames, lockCredential, lockSettings, withLiveWorkspace, type AppTx } from './workspace-lock.js';
 
 // Settings restore (ADR-0018): settings, extra bots and keys in one transaction.
 
@@ -131,6 +131,7 @@ export async function restorePgWorkspace(db: AppDb, workspaceId: string, restore
 
 async function writeRestore(db: AppDb, workspaceId: string, restore: WorkspaceRestore): Promise<void> {
   await withLiveWorkspace(db, workspaceId, async (tx) => {
+    await lockSettings(tx, workspaceId);
     await lockBotNames(tx, workspaceId);
     // Skills first: the restored settings and bots may name them (ADR-0034).
     if (restore.skills) await writePgSkills(tx, workspaceId, restore.skills);
