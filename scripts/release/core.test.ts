@@ -6,13 +6,15 @@ import {
   IMAGE_PATHS,
   decideRelease,
   evaluateChecks,
+  hasWorkerPin,
   isReleaseCommit,
   parseReleaseMessage,
   pinRef,
   producesImage,
   readPin,
+  readWorkerPin,
   releaseMessage,
-  rewritePin,
+  rewritePins,
   rollbackEligible,
 } from './core.ts';
 
@@ -112,15 +114,16 @@ describe('decideRelease', () => {
 
 describe('pins', () => {
   const compose = `# comment\nx-image: &image ghcr.io/lolotam/mergepilot:${OLD}\n\nservices:\n  web:\n    image: *image\n`;
+  const workerCompose = `# comment\nx-image: &image ghcr.io/lolotam/mergepilot:${OLD}\nx-worker-image: &worker-image ghcr.io/lolotam/mergepilot:${OLD}\n\nservices:\n  web:\n    image: *image\n  worker:\n    image: *worker-image\n`;
 
   it('reads the full-SHA tag pin and an optional digest', () => {
     expect(readPin(compose)).toEqual({ ref: `ghcr.io/lolotam/mergepilot:${OLD}`, repository: 'ghcr.io/lolotam/mergepilot', sha: OLD, digest: null });
-    const pinned = rewritePin(compose, pinRef('ghcr.io/lolotam/mergepilot', SHA, DIGEST));
+    const pinned = rewritePins(compose, { image: pinRef('ghcr.io/lolotam/mergepilot', SHA, DIGEST), workerImage: pinRef('ghcr.io/lolotam/mergepilot', SHA, DIGEST) });
     expect(readPin(pinned)).toMatchObject({ sha: SHA, digest: DIGEST });
   });
 
   it('rewrites only the pin line', () => {
-    const out = rewritePin(compose, pinRef('ghcr.io/lolotam/mergepilot', SHA, DIGEST));
+    const out = rewritePins(compose, { image: pinRef('ghcr.io/lolotam/mergepilot', SHA, DIGEST), workerImage: pinRef('ghcr.io/lolotam/mergepilot', SHA, DIGEST) });
     expect(out.replace(/^x-image.*$/m, '')).toBe(compose.replace(/^x-image.*$/m, ''));
   });
 
@@ -134,18 +137,109 @@ describe('pins', () => {
   it('does not take a "latest" tag for a commit', () => {
     expect(readPin('x-image: &image ghcr.io/a/b:latest\n').sha).toBeNull();
   });
+
+  it('reads the worker pin of a compose file that has one', () => {
+    expect(readWorkerPin(workerCompose)).toEqual({ ref: `ghcr.io/lolotam/mergepilot:${OLD}`, repository: 'ghcr.io/lolotam/mergepilot', sha: OLD, digest: null });
+    expect(hasWorkerPin(workerCompose)).toBe(true);
+  });
+
+  it('takes the web pin as the worker pin when the file has no worker line', () => {
+    expect(readWorkerPin(compose)).toEqual(readPin(compose));
+    expect(hasWorkerPin(compose)).toBe(false);
+  });
+
+  it('refuses a compose file with two worker pins', () => {
+    expect(() => readWorkerPin(`${workerCompose}x-worker-image: &worker-image ghcr.io/a/b:latest\n`)).toThrow(/at most one/);
+  });
+});
+
+describe('rewritePins', () => {
+  const oldCompose = `x-image: &image ghcr.io/lolotam/mergepilot:${OLD}\nservices:\n  web:\n    image: *image\n`;
+  const newCompose = `x-image: &image ghcr.io/lolotam/mergepilot:${OLD}\nx-worker-image: &worker-image ghcr.io/lolotam/mergepilot:${OLD}\nservices:\n  web:\n    image: *image\n  worker:\n    image: *worker-image\n`;
+  const webRef = `ghcr.io/lolotam/mergepilot:${SHA}`;
+  const workerRef = `ghcr.io/lolotam/mergepilot:${OLD}`;
+
+  it('rewrites both pins of a compose file that has a worker line', () => {
+    const out = rewritePins(newCompose, { image: webRef, workerImage: workerRef });
+    expect(readPin(out).ref).toBe(webRef);
+    expect(readWorkerPin(out).ref).toBe(workerRef);
+  });
+
+  it('rewrites the web pin only when the file has no worker line and both refs are equal', () => {
+    const out = rewritePins(oldCompose, { image: webRef, workerImage: webRef });
+    expect(readPin(out).ref).toBe(webRef);
+    expect(out).not.toMatch(/x-worker-image/);
+  });
+
+  it('refuses to give the worker another image in a file without a worker line', () => {
+    expect(() => rewritePins(oldCompose, { image: webRef, workerImage: workerRef })).toThrow(/cannot run another image/);
+  });
+
+  it('refuses a compose file without exactly one web pin', () => {
+    expect(() => rewritePins('services: {}', { image: webRef, workerImage: webRef })).toThrow(/exactly one/);
+    expect(() => rewritePins(`${oldCompose}x-image: &image ghcr.io/a/b:latest\n`, { image: webRef, workerImage: webRef })).toThrow(/exactly one/);
+  });
 });
 
 describe('release commits', () => {
+  const trailers = {
+    sourceCommit: SHA,
+    imageRef: `ghcr.io/a/b:${SHA}@${DIGEST}`,
+    workerSourceCommit: OLD,
+    workerImageRef: `ghcr.io/a/b:${OLD}`,
+    previousSourceCommit: OLD,
+    previousImageRef: `ghcr.io/a/b:${OLD}`,
+    previousWorkerSourceCommit: OLD,
+    previousWorkerImageRef: `ghcr.io/a/b:${OLD}`,
+  };
+
   it('round-trips the deployment record in the trailers', () => {
-    const t = { sourceCommit: SHA, imageRef: `ghcr.io/a/b:${SHA}@${DIGEST}`, previousSourceCommit: OLD, previousImageRef: `ghcr.io/a/b:${OLD}` };
-    const message = releaseMessage(t, false);
-    expect(parseReleaseMessage(message)).toEqual(t);
-    expect(parseReleaseMessage(releaseMessage({ ...t, previousSourceCommit: null, previousImageRef: null }, true))).toMatchObject({ previousSourceCommit: null });
+    const message = releaseMessage(trailers, 'release');
+    expect(parseReleaseMessage(message)).toEqual(trailers);
+    expect(parseReleaseMessage(releaseMessage({ ...trailers, previousSourceCommit: null, previousImageRef: null }, 'release'))).toMatchObject({ previousSourceCommit: null });
+  });
+
+  it('names the phase in the subject and keeps the release prefix', () => {
+    expect(releaseMessage(trailers, 'release').split('\n')[0]).toBe(`chore(release): deploy ${SHA.slice(0, 7)}`);
+    expect(releaseMessage(trailers, 'web').split('\n')[0]).toBe(`chore(release): deploy ${SHA.slice(0, 7)} (web first)`);
+    expect(releaseMessage(trailers, 'rollback').split('\n')[0]).toBe(`chore(release): deploy ${SHA.slice(0, 7)} (rollback)`);
+    for (const kind of ['release', 'web', 'rollback'] as const) {
+      expect(releaseMessage(trailers, kind).startsWith('chore(release): deploy ')).toBe(true);
+    }
+  });
+
+  it('writes the worker trailers next to the web ones', () => {
+    const message = releaseMessage(trailers, 'web');
+    expect(message).toContain(`Worker-Source-Commit: ${OLD}`);
+    expect(message).toContain(`Worker-Image-Ref: ${trailers.workerImageRef}`);
+    expect(message).toContain(`Previous-Worker-Source-Commit: ${OLD}`);
+    expect(message).toContain(`Previous-Worker-Image-Ref: ${trailers.previousWorkerImageRef}`);
+    expect(releaseMessage({ ...trailers, workerSourceCommit: null, previousWorkerSourceCommit: null }, 'release')).toContain('Worker-Source-Commit: none');
+  });
+
+  it('reads a message without worker trailers as a release where the worker runs the web image', () => {
+    const legacy = [
+      `chore(release): deploy ${SHA.slice(0, 7)}`,
+      '',
+      `Source-Commit: ${SHA}`,
+      `Image-Ref: ${trailers.imageRef}`,
+      `Previous-Source-Commit: ${OLD}`,
+      `Previous-Image-Ref: ${trailers.previousImageRef}`,
+    ].join('\n');
+    expect(parseReleaseMessage(legacy)).toEqual({
+      sourceCommit: SHA,
+      imageRef: trailers.imageRef,
+      workerSourceCommit: SHA,
+      workerImageRef: trailers.imageRef,
+      previousSourceCommit: OLD,
+      previousImageRef: trailers.previousImageRef,
+      previousWorkerSourceCommit: OLD,
+      previousWorkerImageRef: trailers.previousImageRef,
+    });
   });
 
   it('recognises its own commits so a release never releases itself', () => {
-    expect(isReleaseCommit(releaseMessage({ sourceCommit: SHA, imageRef: 'x:y', previousSourceCommit: null, previousImageRef: null }, false))).toBe(true);
+    expect(isReleaseCommit(releaseMessage(trailers, 'release'))).toBe(true);
     expect(isReleaseCommit('fix(app): something (#131)')).toBe(false);
     expect(parseReleaseMessage('fix(app): something')).toBeNull();
   });

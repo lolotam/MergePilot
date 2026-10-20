@@ -9,6 +9,7 @@ const REPO = 'ghcr.io/lolotam/mergepilot';
 const DIGEST = `sha256:${'d'.repeat(64)}`;
 const OLD_REF = `${REPO}:${OLD}`;
 const NEW_REF = `${REPO}:${NEW}@${DIGEST}`;
+// A compose file without a worker pin: older than the ADR-0025 amendment, released in one phase.
 const compose = (ref: string) => `x-image: &image ${ref}\nservices:\n  web:\n    image: *image\n`;
 const green = (sha: string): CheckRun[] =>
   ['check', 'integration', 'Build and Push Docker Image'].map((name, i) => ({ id: i + 1, name, head_sha: sha, status: 'completed', conclusion: 'success' }));
@@ -28,7 +29,27 @@ const healthy = (ref: string, sha: string): ContainerSnapshot[] => [
 ];
 
 function setup(opts: { releaseBranch?: boolean; deploymentStatus?: string; containers?: (ref: string) => ContainerSnapshot[]; migrations?: string[] } = {}) {
-  const branch = { head: opts.releaseBranch === false ? null : { sha: 'r1', message: releaseMessage({ sourceCommit: OLD, imageRef: OLD_REF, previousSourceCommit: null, previousImageRef: null }, false) } };
+  const branch = {
+    head:
+      opts.releaseBranch === false
+        ? null
+        : {
+            sha: 'r1',
+            message: releaseMessage(
+              {
+                sourceCommit: OLD,
+                imageRef: OLD_REF,
+                workerSourceCommit: OLD,
+                workerImageRef: OLD_REF,
+                previousSourceCommit: null,
+                previousImageRef: null,
+                previousWorkerSourceCommit: null,
+                previousWorkerImageRef: null,
+              },
+              'release',
+            ),
+          },
+  };
   const commits: { parentSha: string; content: string; message: string }[] = [];
   const github: GitHubPort = {
     commitMessage: vi.fn(async () => 'feat: something (#132)'),
@@ -44,7 +65,7 @@ function setup(opts: { releaseBranch?: boolean; deploymentStatus?: string; conta
     writeReleaseCommit: vi.fn(async (input) => {
       if ((branch.head?.sha ?? null) !== input.expectedHead) throw new Error('branch moved');
       commits.push(input);
-      const sha = `r${commits.length + 1}`;
+      const sha = `r${commits.length + 2}`;
       branch.head = { sha, message: input.message };
       return sha;
     }),
@@ -95,7 +116,12 @@ describe('runRelease gates', () => {
 
   it('never releases a release commit (loop guard)', async () => {
     const { cfg, ports, github } = setup();
-    vi.mocked(github.commitMessage).mockResolvedValue(releaseMessage({ sourceCommit: NEW, imageRef: NEW_REF, previousSourceCommit: null, previousImageRef: null }, false));
+    vi.mocked(github.commitMessage).mockResolvedValue(
+      releaseMessage(
+        { sourceCommit: NEW, imageRef: NEW_REF, workerSourceCommit: NEW, workerImageRef: NEW_REF, previousSourceCommit: null, previousImageRef: null, previousWorkerSourceCommit: null, previousWorkerImageRef: null },
+        'release',
+      ),
+    );
     expect(await runRelease(cfg, ports)).toMatchObject({ kind: 'skipped' });
     expect(github.checkRuns).not.toHaveBeenCalled();
   });
@@ -162,7 +188,16 @@ describe('runRelease deploy, verification and rollback', () => {
     expect(exitCodeOf(outcome)).toBe(0);
     expect(commits).toHaveLength(1);
     expect(commits[0]).toMatchObject({ parentSha: NEW, content: compose(NEW_REF) });
-    expect(parseReleaseMessage(commits[0]?.message ?? '')).toEqual({ sourceCommit: NEW, imageRef: NEW_REF, previousSourceCommit: OLD, previousImageRef: OLD_REF });
+    expect(parseReleaseMessage(commits[0]?.message ?? '')).toEqual({
+      sourceCommit: NEW,
+      imageRef: NEW_REF,
+      workerSourceCommit: NEW,
+      workerImageRef: NEW_REF,
+      previousSourceCommit: OLD,
+      previousImageRef: OLD_REF,
+      previousWorkerSourceCommit: OLD,
+      previousWorkerImageRef: OLD_REF,
+    });
     expect(dokploy.deploy).toHaveBeenCalledTimes(1);
   });
 
@@ -257,12 +292,12 @@ describe('runRelease deploy, verification and rollback', () => {
 
 describe('assertFitsJob', () => {
   const min = 60_000;
-  it('accepts the default timeouts in the 120-minute job: 2 x (35 + 10) + 20 = 110 min', () => {
-    expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 120 * min)).not.toThrow();
+  it('accepts the default timeouts in the 180-minute job: 3 x (35 + 10) + 20 = 170 min', () => {
+    expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 180 * min)).not.toThrow();
   });
 
-  it('refuses timeouts whose forward deploy plus rollback could outlast the job', () => {
-    expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 60 * min)).toThrow(/need up to 110 min .* allows 60 min/);
-    expect(() => assertFitsJob({ deployTimeoutMs: 50 * min, verifyTimeoutMs: 10 * min }, 120 * min)).toThrow(/140 min/);
+  it('refuses timeouts whose two phases plus a rollback could outlast the job', () => {
+    expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 120 * min)).toThrow(/need up to 155 min .* allows 120 min/);
+    expect(() => assertFitsJob({ deployTimeoutMs: 50 * min, verifyTimeoutMs: 10 * min }, 180 * min)).toThrow(/200 min/);
   });
 });

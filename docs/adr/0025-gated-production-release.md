@@ -19,6 +19,19 @@ Production (Dokploy compose on musalam-2) reads `deploy/docker-compose.dokploy.y
 9. **Worker drain.** On SIGTERM the worker calls `worker.close()`; the compose file sets `stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-10s}` so the drain length is an operator setting (Docker's default stays until the owner chooses one).
 10. **Disabled by default.** Live mode only when the repository variable `MERGEPILOT_AUTO_RELEASE` is `enabled`; otherwise the workflow is a dry run that commits and deploys nothing. Deleting the variable disables releases again. Credentials are named, never logged: secret `DOKPLOY_API_KEY`; variables `DOKPLOY_URL`, `DOKPLOY_COMPOSE_ID`, `DOKPLOY_APP_NAME`, optional `RELEASE_BRANCH`, `PRODUCTION_URL`, `DEPLOY_TIMEOUT_MINUTES`, `VERIFY_TIMEOUT_MINUTES`. Response bodies of Dokploy are not logged because they contain the compose environment.
 
+## Amendment (2026-10-20): web first, worker second
+
+**Problem.** `docker compose up` recreates every changed service first and starts them only after all recreations finish. Recreating the worker waits for its drain (`WORKER_STOP_GRACE_PERIOD`, 25 minutes in production), so the old `web` was already stopped while nothing new was started: the site answered 404 for the whole drain (about 3 to 9 minutes on 2026-10-19/20, every release). The Dokploy logs show the order: `migrate`, `worker` and `web` Recreate, then Starting only after `worker` is Recreated.
+
+**Decision.** The compose file pins two images: `x-image: &image` for `migrate` and `web`, and `x-worker-image: &worker-image` for `worker`. A release deploys in two phases, each a release commit plus a Compose deploy plus verification:
+
+1. **Web phase:** the new image on `migrate` and `web`, the deployed worker image unchanged. Compose recreates only `migrate` and `web` (an unchanged service stays `Running`), so the site is down for seconds. Verification expects `web` and `migrate` on the new image and `worker` still on the deployed one.
+2. **Worker phase:** the new image on `worker` too. Only `worker` is recreated and drains while the new `web` keeps serving. Compose also runs the one-shot `migrate` again, which is a no-op. Verification expects every service on the new image.
+
+The release commits carry `Worker-Source-Commit` and `Worker-Image-Ref` (and their `Previous-` forms) next to the existing trailers; a commit without them means the worker equals the web image. A record whose worker differs from its web image is a release stopped between the phases: the next run for the same commit resumes with the worker phase, and a newer commit starts its web phase with the worker left where it is. A failure in either phase rolls back both images to the previous release, under the unchanged migration rule. A rollback after the web phase recreates only `migrate` and `web`; a rollback after the worker phase changes both pins in one deploy, so the site waits for the new worker's drain once more (rare, and a failing worker seldom holds running reviews). A compose file without the worker pin (a commit older than this amendment) is released in one phase as before. The worst case is now three deploy-and-verify rounds (two phases, then a rollback), so the job allows 180 minutes: 3 × (35 + 10) plus the 20-minute reserve.
+
+**Still true.** The worker drain itself is unchanged, and the new `web` serves next to the draining old worker for up to the grace period. Migrations run in the web phase, before the old worker stops, which was already the case. Dokploy's autoDeploy must stay off for `production` (rule 1): it was found on on 2026-10-20, which made every release commit start a second, duplicate deploy.
+
 ## Pending owner decisions (before activation)
 
 - Switch the Dokploy compose source branch from `main` to `production` with autoDeploy off (in one update, before anything is pushed to `production`), after bootstrapping `production`. The bootstrap commit is chosen by what its compose file **pins**, not by its own SHA: before the first release commit the release reads the deployed release from the `x-image` tag of the branch head (`currentDeployment`), and that release is the rollback target. It must be a `main` commit whose pin is the running image and an ancestor of every candidate. On 2026-10-15 that is `4991976334911c832ac8bb0eddec4585855267a2`, which pins the running `4c32dee68dcc08d4626995d755054c9bc3971cbc`; `4c32dee` itself pins `4915c26` and would make the release record and roll back to the wrong image.
@@ -31,7 +44,7 @@ Production (Dokploy compose on musalam-2) reads `deploy/docker-compose.dokploy.y
 
 - No deploy happens without the three green checks on the same SHA and a pushed image whose revision matches it.
 - A failed release stops the pipeline until a person closes the hold issue.
-- Deploys are not zero-downtime: Compose recreates `web` and `worker`, and a drain longer than the grace period interrupts running reviews.
+- Deploys are not zero-downtime: recreating `web` takes the site down for seconds (the 2026-10-20 amendment keeps the worker drain out of that window), and a drain longer than the grace period interrupts running reviews.
 - Not verifiable before merge: `workflow_run` and `workflow_dispatch` fire only once the workflow is on the default branch, and the live Dokploy calls need the key. The first live release is the acceptance test.
 
 ## Activation (2026-10-15)

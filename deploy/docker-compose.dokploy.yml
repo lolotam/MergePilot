@@ -9,6 +9,11 @@
 # independent of the secrets kept in Dokploy's Environment tab.
 x-image: &image ghcr.io/lolotam/mergepilot:4c32dee68dcc08d4626995d755054c9bc3971cbc
 
+# The worker runs its own pin (x-worker-image) so a release can update the web first and the
+# worker in a second phase: recreating the worker waits for its drain, which must not keep the
+# site down (ADR-0025 amendment). Both pins name the same image until a release splits them.
+x-worker-image: &worker-image ghcr.io/lolotam/mergepilot:4c32dee68dcc08d4626995d755054c9bc3971cbc
+
 x-app-env: &app-env
   NODE_ENV: production
   MERGEPILOT_BASE_URL: ${MERGEPILOT_BASE_URL:-https://mergepilot.walidmohamed.com}
@@ -128,7 +133,7 @@ services:
     networks: [backend, egress, dokploy-network]
 
   worker:
-    image: *image
+    image: *worker-image
     restart: unless-stopped
     command: ["node", "dist/worker/main.js"]
     # On SIGTERM the worker stops taking jobs and waits for the running reviews to finish

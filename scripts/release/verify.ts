@@ -15,8 +15,10 @@ export interface ContainerSnapshot {
 }
 
 export interface ExpectedRelease {
-  imageRef: string;
-  sourceSha: string;
+  /** What migrate and web must run. */
+  web: { imageRef: string; sourceSha: string };
+  /** What the worker must run; the old image between the two release phases. */
+  worker: { imageRef: string; sourceSha: string };
 }
 
 const APP_SERVICES = ['web', 'worker'] as const;
@@ -30,17 +32,17 @@ const DATA_SERVICES = ['postgres', 'redis'] as const;
 export function verifyContainers(containers: readonly ContainerSnapshot[], expected: ExpectedRelease): string[] {
   const problems: string[] = [];
   const byService = new Map(containers.map((c) => [c.service, c]));
-  const identity = (c: ContainerSnapshot) => {
-    if (c.image !== expected.imageRef) problems.push(`${c.service} runs ${c.image}, expected ${expected.imageRef}`);
-    if (c.revision !== expected.sourceSha) {
-      problems.push(`${c.service} image revision is ${c.revision ?? 'missing'}, expected ${expected.sourceSha}`);
+  const identity = (c: ContainerSnapshot, want: { imageRef: string; sourceSha: string }) => {
+    if (c.image !== want.imageRef) problems.push(`${c.service} runs ${c.image}, expected ${want.imageRef}`);
+    if (c.revision !== want.sourceSha) {
+      problems.push(`${c.service} image revision is ${c.revision ?? 'missing'}, expected ${want.sourceSha}`);
     }
   };
 
   const migrate = byService.get('migrate');
   if (!migrate) problems.push('migrate container not found');
   else {
-    identity(migrate);
+    identity(migrate, expected.web);
     if (migrate.state !== 'exited') problems.push(`migrate is ${migrate.state}, expected exited`);
     else if (migrate.exitCode !== 0) problems.push(`migrate exited with code ${migrate.exitCode}`);
   }
@@ -51,7 +53,8 @@ export function verifyContainers(containers: readonly ContainerSnapshot[], expec
       problems.push(`${service} container not found`);
       continue;
     }
-    if ((APP_SERVICES as readonly string[]).includes(service)) identity(c);
+    if (service === 'web') identity(c, expected.web);
+    if (service === 'worker') identity(c, expected.worker);
     if (c.state !== 'running') problems.push(`${service} is ${c.state}, expected running`);
     else if (c.health !== 'healthy') problems.push(`${service} health is ${c.health ?? 'unknown'}, expected healthy`);
   }
