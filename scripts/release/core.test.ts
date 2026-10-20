@@ -8,6 +8,7 @@ import {
   evaluateChecks,
   hasWorkerPin,
   isReleaseCommit,
+  isWebPhaseCommit,
   parseReleaseMessage,
   pinRef,
   producesImage,
@@ -15,6 +16,7 @@ import {
   readWorkerPin,
   releaseMessage,
   rewritePins,
+  sameExceptPins,
   rollbackEligible,
 } from './core.ts';
 
@@ -181,6 +183,31 @@ describe('rewritePins', () => {
   });
 });
 
+describe('sameExceptPins', () => {
+  const ref = (sha: string) => `ghcr.io/lolotam/mergepilot:${sha}`;
+  const compose = (sha: string) =>
+    `x-image: &image ${ref(sha)}\nx-worker-image: &worker-image ${ref(sha)}\nx-app-env: &app-env\n  LOG_LEVEL: info\nservices:\n  web:\n    image: *image\n  worker:\n    image: *worker-image\n    stop_grace_period: 25m\n`;
+  const oldCompose = (sha: string) => `x-image: &image ${ref(sha)}\nx-app-env: &app-env\n  LOG_LEVEL: info\nservices:\n  web:\n    image: *image\n`;
+
+  it('is true when only the pin values differ', () => {
+    expect(sameExceptPins(compose(OLD), compose(SHA))).toBe(true);
+    expect(sameExceptPins(oldCompose(OLD), oldCompose(SHA))).toBe(true);
+  });
+
+  it('is true for the same file with CRLF and LF line endings', () => {
+    expect(sameExceptPins(compose(OLD).replace(/\n/g, '\r\n'), compose(SHA))).toBe(true);
+  });
+
+  it('is false when any other line differs', () => {
+    expect(sameExceptPins(compose(OLD), compose(SHA).replace('LOG_LEVEL: info', 'LOG_LEVEL: debug'))).toBe(false);
+    expect(sameExceptPins(compose(OLD), compose(SHA).replace('stop_grace_period: 25m', 'stop_grace_period: 10s'))).toBe(false);
+  });
+
+  it('is false when one file has a worker line and the other has not', () => {
+    expect(sameExceptPins(compose(OLD), oldCompose(SHA))).toBe(false);
+  });
+});
+
 describe('release commits', () => {
   const trailers = {
     sourceCommit: SHA,
@@ -242,6 +269,13 @@ describe('release commits', () => {
     expect(isReleaseCommit(releaseMessage(trailers, 'release'))).toBe(true);
     expect(isReleaseCommit('fix(app): something (#131)')).toBe(false);
     expect(parseReleaseMessage('fix(app): something')).toBeNull();
+  });
+
+  it('tells a web-phase commit from a full release and from a rollback', () => {
+    expect(isWebPhaseCommit(releaseMessage(trailers, 'web'))).toBe(true);
+    expect(isWebPhaseCommit(releaseMessage(trailers, 'release'))).toBe(false);
+    expect(isWebPhaseCommit(releaseMessage(trailers, 'rollback'))).toBe(false);
+    expect(isWebPhaseCommit('fix(app): something (#131)')).toBe(false);
   });
 });
 

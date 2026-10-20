@@ -5,9 +5,11 @@ import type { Clock, ContainerSnapshot } from './verify.ts';
 
 const NEW = 'a'.repeat(40);
 const OLD = 'b'.repeat(40);
+const MID = 'c'.repeat(40);
 const REPO = 'ghcr.io/lolotam/mergepilot';
 const DIGEST = `sha256:${'d'.repeat(64)}`;
 const OLD_REF = `${REPO}:${OLD}`;
+const MID_REF = `${REPO}:${MID}`;
 const NEW_REF = `${REPO}:${NEW}@${DIGEST}`;
 
 /** A compose file with the worker pin: the two-phase release (ADR-0025 amendment). */
@@ -47,6 +49,8 @@ interface Options {
   head?: { sha: string; message: string };
   /** The service that must fail its health check once it runs the new image. */
   fail?: 'web' | 'worker';
+  /** A line the candidate's compose file changed beyond the image pins. */
+  changedLine?: string;
 }
 
 function setup(opts: Options = {}) {
@@ -81,6 +85,7 @@ function setup(opts: Options = {}) {
   const commits: { parentSha: string; content: string; message: string }[] = [];
   const deployments: { title: string; web: string; worker: string }[] = [];
   const deployed: string[] = [];
+  const logs: string[] = [];
 
   const github: GitHubPort = {
     commitMessage: vi.fn(async () => 'feat: something (#132)'),
@@ -90,7 +95,12 @@ function setup(opts: Options = {}) {
     // History: OLD -> NEW on main.
     isAncestor: vi.fn(async (a: string, b: string) => a === b || (a === OLD && (b === NEW || b === 'main')) || (a === NEW && b === 'main')),
     branchHead: vi.fn(async () => branch.head),
-    fileAt: vi.fn(async (ref: string) => (workerPin ? compose(`${REPO}:${ref}`) : oldCompose(`${REPO}:${ref}`))),
+    // The compose file of a ref: the candidate's own file, or the file of what runs now (the
+    // deployed one), which is the same file with the pins of the running release.
+    fileAt: vi.fn(async (ref: string) => {
+      const file = workerPin ? compose(`${REPO}:${ref}`) : oldCompose(`${REPO}:${ref}`);
+      return ref === NEW && opts.changedLine ? `${file}${opts.changedLine}\n` : file;
+    }),
     openHolds: vi.fn(async () => []),
     openHold: vi.fn(async () => 77),
     writeReleaseCommit: vi.fn(async (input) => {
@@ -134,11 +144,13 @@ function setup(opts: Options = {}) {
     registry: { resolve: vi.fn(async (_repo: string, sha: string) => ({ digest: DIGEST, revision: sha })) },
     dokploy,
     health: vi.fn(async () => ({ status: 200, body: '{"ok":true}' })),
-    log: () => undefined,
+    log: (line: string) => {
+      logs.push(line);
+    },
     clock: fakeClock(),
   };
   const cfg: ReleaseConfig = { sha: NEW, live: true, repository: 'lolotam/MergePilot', releaseBranch: 'production', composePath: 'deploy/docker-compose.dokploy.yml', deployTimeoutMs: 35 * 60_000, verifyTimeoutMs: 10 * 60_000, intervalMs: 15_000 };
-  return { cfg, ports, github, dokploy, commits, deployments };
+  return { cfg, ports, github, dokploy, commits, deployments, logs };
 }
 
 describe('the two-phase release', () => {
@@ -184,7 +196,7 @@ describe('the two-phase release', () => {
     expect(deployments.map((d) => d.worker)).toEqual([OLD_REF, NEW_REF, OLD_REF]);
   });
 
-  it('resumes an incomplete record of the same commit with the worker phase only', async () => {
+  it('resumes an incomplete record of the same commit with the web phase again and then the worker phase', async () => {
     const webPhase = releaseMessage(
       {
         sourceCommit: NEW,
@@ -201,10 +213,90 @@ describe('the two-phase release', () => {
     const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: webPhase } });
     const outcome = await runRelease(cfg, ports);
     expect(outcome).toMatchObject({ kind: 'deployed' });
+    // One new commit only: the worker phase. The web phase is deployed again, not written again.
     expect(commits).toHaveLength(1);
     expect(commits[0]?.message.split('\n')[0]).toBe(`chore(release): deploy ${NEW.slice(0, 7)}`);
     expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${NEW_REF}`);
-    expect(deployments).toEqual([{ title: `release ${NEW.slice(0, 7)} (worker)`, web: NEW_REF, worker: NEW_REF }]);
+    // Two deploys: the recorded web phase again (the worker stays on the old image), then the worker.
+    expect(deployments).toEqual([
+      { title: `release ${NEW.slice(0, 7)} (web first, resumed)`, web: NEW_REF, worker: OLD_REF },
+      { title: `release ${NEW.slice(0, 7)} (worker)`, web: NEW_REF, worker: NEW_REF },
+    ]);
+  });
+
+  it('rolls back to the recorded previous release when the resumed web phase fails to verify', async () => {
+    const webPhase = releaseMessage(
+      {
+        sourceCommit: NEW,
+        imageRef: NEW_REF,
+        workerSourceCommit: OLD,
+        workerImageRef: OLD_REF,
+        previousSourceCommit: OLD,
+        previousImageRef: OLD_REF,
+        previousWorkerSourceCommit: OLD,
+        previousWorkerImageRef: OLD_REF,
+      },
+      'web',
+    );
+    const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhase }, fail: 'web' });
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'rolled-back', hold: 77 });
+    // The rollback commit is the only one: the worker phase never runs.
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.message.split('\n')[0]).toBe(`chore(release): deploy ${OLD.slice(0, 7)} (rollback)`);
+    expect(commits[0]?.content).toContain(`x-image: &image ${OLD_REF}`);
+    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${OLD_REF}`);
+    expect(deployments[1]).toEqual({ title: `rollback to ${OLD.slice(0, 7)}`, web: OLD_REF, worker: OLD_REF });
+    expect(github.openHold).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips a split rollback record of the same commit as already deployed', async () => {
+    const rollback = releaseMessage(
+      {
+        sourceCommit: NEW,
+        imageRef: NEW_REF,
+        workerSourceCommit: OLD,
+        workerImageRef: OLD_REF,
+        previousSourceCommit: NEW,
+        previousImageRef: NEW_REF,
+        previousWorkerSourceCommit: OLD,
+        previousWorkerImageRef: OLD_REF,
+      },
+      'rollback',
+    );
+    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: rollback } });
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'skipped', detail: expect.stringContaining('already deployed') });
+    expect(commits).toHaveLength(0);
+    expect(deployments).toHaveLength(0);
+  });
+
+  it('rolls a newer candidate back to the pair a split rollback record runs', async () => {
+    const rollback = releaseMessage(
+      {
+        sourceCommit: OLD,
+        imageRef: MID_REF,
+        workerSourceCommit: OLD,
+        workerImageRef: OLD_REF,
+        previousSourceCommit: NEW,
+        previousImageRef: NEW_REF,
+        previousWorkerSourceCommit: NEW,
+        previousWorkerImageRef: NEW_REF,
+      },
+      'rollback',
+    );
+    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: rollback }, fail: 'web' });
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'rolled-back', hold: 77 });
+    // The web phase leaves the worker on the image the record runs.
+    expect(commits[0]?.message.split('\n')[0]).toBe(`chore(release): deploy ${NEW.slice(0, 7)} (web first)`);
+    expect(commits[0]?.content).toContain(`x-image: &image ${NEW_REF}`);
+    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${OLD_REF}`);
+    // The rollback returns to the record's own pair, not to the failed release its trailers name.
+    expect(commits[1]?.message.split('\n')[0]).toBe(`chore(release): deploy ${OLD.slice(0, 7)} (rollback)`);
+    expect(commits[1]?.content).toContain(`x-image: &image ${MID_REF}`);
+    expect(commits[1]?.content).toContain(`x-worker-image: &worker-image ${OLD_REF}`);
+    expect(deployments[1]).toEqual({ title: `rollback to ${OLD.slice(0, 7)}`, web: MID_REF, worker: OLD_REF });
   });
 
   it('releases a compose file without a worker pin in one phase', async () => {
@@ -214,6 +306,19 @@ describe('the two-phase release', () => {
     expect(commits).toHaveLength(1);
     expect(commits[0]?.content).not.toMatch(/x-worker-image/);
     expect(deployments).toEqual([{ title: `release ${NEW.slice(0, 7)}`, web: NEW_REF, worker: NEW_REF }]);
+  });
+
+  it('releases in one phase when the compose file changed beyond the image pins', async () => {
+    const { cfg, ports, commits, deployments, logs } = setup({ changedLine: '    stop_grace_period: 25m' });
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'deployed' });
+    // One release commit and one deploy: the change may recreate the worker, so the site waits
+    // for its drain instead of running the web phase.
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.content).toContain('stop_grace_period: 25m');
+    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${NEW_REF}`);
+    expect(deployments).toEqual([{ title: `release ${NEW.slice(0, 7)}`, web: NEW_REF, worker: NEW_REF }]);
+    expect(logs).toContain('plan: the compose file changed beyond the image pins, so this release runs in one phase (the site waits for the worker drain)');
   });
 
   it('dry run plans both phases and changes nothing', async () => {

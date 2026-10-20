@@ -162,6 +162,35 @@ export function hasWorkerPin(compose: string): boolean {
   return (compose.match(WORKER_PIN_LINES) ?? []).length > 0;
 }
 
+/** What a pin line becomes when two compose files are compared without their pins. */
+const PIN_PLACEHOLDER = 'x-image: &image <pin>';
+const WORKER_PIN_PLACEHOLDER = 'x-worker-image: &worker-image <pin>';
+
+/**
+ * The lines of a compose file with the release pins replaced by a placeholder, so two files can
+ * be compared without their pins. A file without a worker line keeps its own lines.
+ */
+function linesWithoutPins(compose: string): string[] {
+  return compose
+    .replace(/\r\n/g, '\n')
+    .replace(PIN_LINES, PIN_PLACEHOLDER)
+    .replace(WORKER_PIN_LINES, WORKER_PIN_PLACEHOLDER)
+    .split('\n');
+}
+
+/**
+ * Whether two compose files differ only in their release pins. The web phase of a release
+ * rewrites the pins of the candidate's whole compose file, so a change beyond the pins may
+ * recreate the worker too: its drain then keeps the new web from starting, the outage the two
+ * phases exist to prevent (ADR-0025).
+ */
+export function sameExceptPins(a: string, b: string): boolean {
+  const left = linesWithoutPins(a);
+  const right = linesWithoutPins(b);
+  if (left.length !== right.length) return false;
+  return left.every((line, index) => line === right[index]);
+}
+
 /** The immutable reference a release pins: the full-SHA tag for readers, the digest for the pull. */
 export function pinRef(repository: string, sha: string, digest: string): string {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error(`not a full commit SHA: ${sha}`);
@@ -218,6 +247,15 @@ export function releaseMessage(t: ReleaseTrailers, kind: ReleaseKind): string {
     `Previous-Worker-Source-Commit: ${t.previousWorkerSourceCommit ?? 'none'}`,
     `Previous-Worker-Image-Ref: ${t.previousWorkerImageRef ?? 'none'}`,
   ].join('\n');
+}
+
+/**
+ * Whether a commit message is the web phase of a release: its subject names the web phase. A
+ * rollback record may pin two different images too, so only the subject tells the two apart.
+ */
+export function isWebPhaseCommit(message: string): boolean {
+  const subject = message.split('\n')[0] ?? '';
+  return subject.startsWith(RELEASE_SUBJECT_PREFIX) && subject.endsWith(' (web first)');
 }
 
 /** Reads the trailers of a release commit; null when the message is not one. */

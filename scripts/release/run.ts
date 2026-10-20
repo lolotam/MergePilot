@@ -7,12 +7,14 @@ import {
   decideRelease,
   hasWorkerPin,
   isReleaseCommit,
+  isWebPhaseCommit,
   parseReleaseMessage,
   pinRef,
   readPin,
   readWorkerPin,
   releaseMessage,
   rewritePins,
+  sameExceptPins,
   rollbackEligible,
 } from './core.ts';
 import { type Clock, type ContainerSnapshot, type ExpectedRelease, pollUntil, systemClock, verifyContainers, verifyHealthResponse } from './verify.ts';
@@ -112,6 +114,8 @@ interface Deployed {
   previousImageRef: string | null;
   previousWorkerSourceCommit: string | null;
   previousWorkerImageRef: string | null;
+  /** The head is the web phase of a release: a release stopped between its phases. */
+  webPhase: boolean;
   /** Head of the release branch, or null before its first release commit. */
   head: string | null;
 }
@@ -157,6 +161,7 @@ async function currentDeployment(cfg: ReleaseConfig, gh: GitHubPort): Promise<De
         previousImageRef: trailers.previousImageRef,
         previousWorkerSourceCommit: trailers.previousWorkerSourceCommit,
         previousWorkerImageRef: trailers.previousWorkerImageRef,
+        webPhase: isWebPhaseCommit(head.message),
         head: head.sha,
       };
     }
@@ -180,6 +185,7 @@ function deployedFromCompose(compose: string, head: string | null): Deployed {
     previousImageRef: null,
     previousWorkerSourceCommit: null,
     previousWorkerImageRef: null,
+    webPhase: false,
     head,
   };
 }
@@ -246,12 +252,11 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   if (!deployed) return { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
 
   const candidateCompose = await gh.fileAt(sha, cfg.composePath);
-  // A compose file without a worker pin is older than the ADR-0025 amendment: it is released in
-  // one phase, with every service on the same image.
-  const twoPhases = hasWorkerPin(candidateCompose);
-  // A release stopped between its phases left a record whose worker differs from its web image.
-  // The next run for the same commit resumes with the worker phase instead of skipping it.
-  const resume = deployed.sourceSha === sha && deployed.workerImageRef !== deployed.imageRef;
+  // A release stopped between its phases left a web-phase commit on the branch: the next run for
+  // the same commit deploys and verifies that web phase again, then runs the worker phase. A
+  // rollback record may pin two images too, but it is an ordinary deployed state: what it pins
+  // runs and is the rollback target of the next release.
+  const resume = deployed.webPhase && deployed.sourceSha === sha;
   if (!resume) {
     const decision = decideRelease({
       sourceSha: sha,
@@ -262,6 +267,17 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
     });
     if (decision.kind !== 'deploy') return { kind: decision.kind === 'skip' ? 'skipped' : 'blocked', detail: decision.reason };
   }
+
+  // The compose file of what runs now: the release branch head, or main before the branch exists.
+  const deployedCompose = await gh.fileAt(deployed.head ? deployed.head : 'main', cfg.composePath);
+  // A compose file without a worker pin is older than the ADR-0025 amendment: it is released in
+  // one phase, with every service on the same image.
+  const workerPinned = hasWorkerPin(candidateCompose);
+  // The web phase takes the candidate's whole compose file and rewrites only the pins, so a
+  // change beyond the pins may recreate the worker in that phase too: its drain then keeps the
+  // new web from starting, the outage the two phases exist to prevent.
+  const pinsOnly = sameExceptPins(candidateCompose, deployedCompose);
+  const twoPhases = resume || (workerPinned && pinsOnly);
 
   const repository = readPin(candidateCompose).repository;
   const image = await ports.registry.resolve(repository, sha);
@@ -280,6 +296,9 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
     gh.writeReleaseCommit({ branch: cfg.releaseBranch, path: cfg.composePath, parentSha: input.parentSha, content: input.content, message: releaseMessage(input.trailers, input.kind), expectedHead: input.expectedHead });
 
   if (!twoPhases) {
+    if (workerPinned && !pinsOnly) {
+      log('plan: the compose file changed beyond the image pins, so this release runs in one phase (the site waits for the worker drain)');
+    }
     log(`plan: deploy ${imageRef} (replacing ${deployed.imageRef})`);
     if (!cfg.live) return { kind: 'planned', detail: `would deploy ${imageRef} over ${deployed.imageRef}` };
     if (!ports.dokploy) return { kind: 'blocked', detail: 'live mode needs DOKPLOY_URL, DOKPLOY_API_KEY and DOKPLOY_APP_NAME' };
@@ -305,7 +324,18 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   if (!ports.dokploy) return { kind: 'blocked', detail: 'live mode needs DOKPLOY_URL, DOKPLOY_API_KEY and DOKPLOY_APP_NAME' };
 
   let head = deployed.head;
-  if (!resume) {
+  if (resume) {
+    // The web-phase commit is already the branch head and Dokploy deploys the branch head, so the
+    // web phase is deployed again and verified: the worker phase must never run on top of a web
+    // phase that never reached production.
+    const resumeCommit = deployed.head;
+    if (!resumeCommit) return { kind: 'blocked', detail: `the release branch ${cfg.releaseBranch} has no head to resume the web phase from` };
+    log(`plan: resuming the web phase of ${sha.slice(0, 7)} (the recorded web phase)`);
+    const problems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef: deployed.workerImageRef, sourceSha: commitOf(deployed) } }, `release ${sha.slice(0, 7)} (web first, resumed)`);
+    if (problems.length > 0) {
+      return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, workerImageRef: deployed.workerImageRef, workerSourceSha: deployed.workerSourceSha, releaseCommit: resumeCommit, problems, previous });
+    }
+  } else {
     const webCommit = await commit({
       parentSha: sha,
       expectedHead: deployed.head,

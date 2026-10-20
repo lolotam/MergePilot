@@ -292,7 +292,7 @@ describe('runRelease deploy, verification and rollback', () => {
 
 describe('assertFitsJob', () => {
   const min = 60_000;
-  it('accepts the default timeouts in the 180-minute job: 3 x (35 + 10) + 20 = 170 min', () => {
+  it('accepts the default timeouts in the 180-minute job: 3 x (35 + 10) + 20 = 155 min', () => {
     expect(() => assertFitsJob({ deployTimeoutMs: 35 * min, verifyTimeoutMs: 10 * min }, 180 * min)).not.toThrow();
   });
 
