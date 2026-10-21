@@ -430,16 +430,19 @@ export class CredentialService {
     return readCredentialForRedaction(this.#store, this.#vault, workspaceId, provider);
   }
 
+  /** The credential and its URL from one row read. `refresh: false` returns the stored value as is (backup export): no refresh, even after a refused one. */
   async resolveCredential(
     workspaceId: string,
     provider: KeyProvider,
+    options: { refresh?: boolean } = {},
   ): Promise<{ secret: Secret; baseUrl?: string | null }> {
     const cred = await this.#store.getCredential(workspaceId, provider);
     if (!cred) {
       throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
     }
 
-    return { secret: await this.resolve(workspaceId, provider), baseUrl: cred.baseUrl ?? null };
+    const secret = options.refresh === false ? new Secret(await this.#vault.decrypt(cred.ciphertext, { workspaceId, provider })) : await this.resolve(workspaceId, provider);
+    return { secret, baseUrl: cred.baseUrl ?? null };
   }
 
   async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {

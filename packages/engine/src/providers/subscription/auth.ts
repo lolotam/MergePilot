@@ -79,6 +79,8 @@ export async function refreshSubscription(provider: SubscriptionProvider, creden
     return await subscriptionProvider(provider).auth.oauth!.refresh(credential, signal);
   } catch (error) {
     if (error instanceof SubscriptionRefreshError) throw error;
+    // Our own deadline fired: pi-ai may rethrow it as plain text without a status, but it is not a refused sign-in.
+    if (signal.aborted) throw new SubscriptionRefreshError('unreachable');
     // Upstream errors may contain token-response bodies; never return them to the dashboard or logs.
     throw classifyPiRefreshFailure(error);
   }
@@ -88,8 +90,8 @@ export async function refreshSubscription(provider: SubscriptionProvider, creden
 const PI_REFRESH_STATUS = /status=(\d{3})\b|failed \((\d{3})\)|\(HTTP (\d{3})\)/;
 /** The OAuth error code in the token response body, e.g. `"error":"invalid_grant"`. */
 const PI_REFRESH_OAUTH_ERROR = /"error"\s*:\s*"([a-z_]{1,64})"/;
-/** A network failure or a timeout in pi-ai's error text. */
-const PI_REFRESH_NETWORK = /TimeoutError|AbortError|fetch failed/;
+/** A network failure, a timeout or an abort in pi-ai's error text. */
+const PI_REFRESH_NETWORK = /TimeoutError|AbortError|fetch failed|aborted due to timeout/;
 
 /**
  * The message of an error and of its causes, joined for classification only. The text is never

@@ -211,6 +211,31 @@ describe('Anthropic refresh ownership', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('reads the stored subscription as is after a refused refresh (ADR-0018)', async () => {
+    const { service, store } = fixture();
+    await service.saveSubscription('ws', provider, credential(Date.now() + 8 * 60_000), 'user');
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // The provider refuses the refresh, so the row asks for a new sign-in.
+    const failure = await service.resolve('ws', provider).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    expect((failure as SubscriptionRefreshError).reason).toBe('sign-in');
+    expect((await store.getCredential('ws', provider))?.signInRequiredAt).toBeInstanceOf(Date);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The export reads the stored value: no refresh, no refusal, no provider call.
+    const resolved = await service.resolveCredential('ws', provider, { refresh: false });
+    expect(decodeSubscription(resolved.secret.reveal(), provider)?.credential.refresh).toBe(credential().refresh);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The default path still refuses, as a review does.
+    const again = await service.resolveCredential('ws', provider).catch((error: unknown) => error);
+    expect(again).toBeInstanceOf(SubscriptionRefreshError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a transient failure retryable and stores no flag', async () => {
     const { service, store } = fixture();
     await service.saveSubscription('ws', provider, credential(Date.now() + 8 * 60_000), 'user');

@@ -2,6 +2,7 @@ import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai/
 import type { CredentialStore, Message, ThinkingLevel } from '@earendil-works/pi-ai';
 import { decodeSubscription, type PiSubscriptionProvider, type SubscriptionProvider } from '../../credentials/subscription.js';
 import type { Secret } from '../../credentials/secret.js';
+import { MissingCredentialError } from '../../credentials/store.js';
 import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY } from '../../llm/retry.js';
@@ -52,6 +53,23 @@ function withResponseSchema(options: GenerateOptions): GenerateOptions['messages
   return [{ role: 'system', content: instruction }, ...options.messages];
 }
 
+/**
+ * Why the credential could not be resolved before a call: a failure the credential layer already classified passes through, only a
+ * refused refresh means "sign in again", and a refresh the provider may answer later or a database/lock error while loading is retryable.
+ */
+function resolveFailure(provider: PiSubscriptionProvider, error: unknown, signal: AbortSignal | undefined): LlmFailure {
+  if (signal?.aborted) return new LlmFailure({ provider, code: 'ABORTED', message: 'Subscription credential could not be resolved; sign in again' });
+  if (error instanceof LlmFailure) return error;
+  if (error instanceof SubscriptionRefreshError) {
+    if (error.transient) return new LlmFailure({ provider, code: 'NETWORK', message: 'Could not refresh the subscription sign-in; try again' });
+    return new LlmFailure({ provider, code: 'INVALID_CREDENTIAL', message: 'Subscription credential could not be resolved; sign in again' });
+  }
+  if (error instanceof MissingCredentialError) {
+    return new LlmFailure({ provider, code: 'INVALID_CREDENTIAL', message: 'Subscription credential could not be resolved; sign in again' });
+  }
+  return new LlmFailure({ provider, code: 'SERVER', message: 'Could not load the subscription credential; try again' });
+}
+
 /** Streams only model text; no agent tools or subprocesses are enabled. */
 export class SubscriptionAdapter extends LlmAdapter {
   override readonly retryPolicy = DEFAULT_RETRY_POLICY;
@@ -72,17 +90,17 @@ export class SubscriptionAdapter extends LlmAdapter {
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     let envelope;
-    try {
-      if (this.resolveSecret) this.secret = await this.resolveSecret();
-      envelope = decodeSubscription(this.secret.reveal(), this.provider);
-    } catch (error) {
-      if (options.signal?.aborted) throw new LlmFailure({ provider: this.provider, code: 'ABORTED',
-        message: 'Subscription credential could not be resolved; sign in again' });
-      // A refresh the provider may answer later (408, 429, 5xx, no answer) stays retryable; it is not a lost sign-in.
-      if (error instanceof SubscriptionRefreshError && error.transient) {
-        throw new LlmFailure({ provider: this.provider, code: 'NETWORK', message: 'Could not refresh the subscription sign-in; try again' });
+    if (this.resolveSecret) {
+      try {
+        this.secret = await this.resolveSecret();
+      } catch (error) {
+        throw resolveFailure(this.provider, error, options.signal);
       }
-      throw new LlmFailure({ provider: this.provider, code: 'INVALID_CREDENTIAL',
+    }
+    try {
+      envelope = decodeSubscription(this.secret.reveal(), this.provider);
+    } catch {
+      throw new LlmFailure({ provider: this.provider, code: options.signal?.aborted ? 'ABORTED' : 'INVALID_CREDENTIAL',
         message: 'Subscription credential could not be resolved; sign in again' });
     }
     if (!envelope) throw new LlmFailure({ provider: this.provider, code: 'INVALID_CREDENTIAL', message: 'Subscription login is required' });

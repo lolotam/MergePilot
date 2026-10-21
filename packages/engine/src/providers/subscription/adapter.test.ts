@@ -156,8 +156,9 @@ describe('subscription model protocols', () => {
   });
 });
 
-// A refresh the provider may answer later (408, 429, 5xx, no answer) is not a lost sign-in:
-// the call fails transiently instead of sending the review into the sign-in fallback path.
+// A refresh the provider may answer later (408, 429, 5xx, no answer) is not a lost sign-in, and a
+// database or lock error while loading the credential is retryable too: the call fails transiently
+// instead of sending the review into the sign-in fallback path.
 describe('subscription refresh failures at stream time', () => {
   const model = () => subscriptionModels('anthropic')[0]!.id;
 
@@ -186,6 +187,34 @@ describe('subscription refresh failures at stream time', () => {
 
     expect(failure).toBeInstanceOf(LlmFailure);
     expect(failure).toMatchObject({ code: 'INVALID_CREDENTIAL' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails transiently when the credential could not be loaded at all', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'), async () => {
+      throw new Error('connection terminated unexpectedly');
+    });
+
+    const failure = await collectText(adapter.stream(request(model()))).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(LlmFailure);
+    expect(failure).toMatchObject({ code: 'SERVER' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('passes a failure the credential layer already classified through', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const classified = new LlmFailure({ provider: 'anthropic', code: 'INVALID_CREDENTIAL', message: 'x' });
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'), async () => {
+      throw classified;
+    });
+
+    const failure = await collectText(adapter.stream(request(model()))).catch((error: unknown) => error);
+
+    expect(failure).toBe(classified);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

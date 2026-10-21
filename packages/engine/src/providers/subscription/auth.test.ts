@@ -200,6 +200,34 @@ describe('pi-ai refresh failure formats', () => {
     expect(error.status).toBe(503);
     expect(error.transient).toBe(true);
   });
+
+  // Our own 30-second deadline: pi-ai rethrows the abort without a status, so the failure must not
+  // look like a refused sign-in the credential service would remember as `sign_in_required_at`.
+  it('treats a refresh our own deadline cut short as a retryable failure', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      controller.abort();
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }));
+
+    const failure = await refreshSubscription('xai', xaiCredential, controller.signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.transient).toBe(true);
+  });
+
+  it('treats a refresh pi-ai cut short by its own timeout as a retryable failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('The operation was aborted due to timeout'); }));
+
+    const failure = await refreshSubscription('openai', codexCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.transient).toBe(true);
+  });
 });
 
 describe('Google Antigravity availability', () => {

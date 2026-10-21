@@ -73,7 +73,8 @@ export async function buildBackupFile(
         );
         const effectiveDefault = isDualMethodProvider(meta.provider) ? meta.defaultMethod : undefined;
         if (isDualMethodProvider(meta.provider) && meta.hasSubscription) {
-          const resolved = await deps.credentials.resolveCredential(workspace.id, meta.provider);
+          // The stored value as is: an export never refreshes, and a refused sign-in is exported for a new sign-in after restore (ADR-0018).
+          const resolved = await deps.credentials.resolveCredential(workspace.id, meta.provider, { refresh: false });
           const subSealed = sealBackupKey(resolved.secret.reveal(), fileKey, salt, { provider: meta.provider, baseUrl: null });
           credentials.push({
             provider: meta.provider,
@@ -95,7 +96,7 @@ export async function buildBackupFile(
       }
       // The key and its URL come from ONE read, so a custom key rotated with a new URL during the
       // export can never be sealed (and later restored) against the old endpoint.
-      const resolved = await deps.credentials.resolveCredential(workspace.id, meta.provider);
+      const resolved = await deps.credentials.resolveCredential(workspace.id, meta.provider, { refresh: false });
       const baseUrl = meta.provider === 'custom' ? (resolved.baseUrl ?? null) : null;
       credentials.push({
         provider: meta.provider,

@@ -138487,6 +138487,21 @@ function withResponseSchema(options) {
 ${instruction}` }, ...rest];
   return [{ role: "system", content: instruction }, ...options.messages];
 }
+function resolveFailure2(provider, error62, signal) {
+  if (signal?.aborted)
+    return new LlmFailure({ provider, code: "ABORTED", message: "Subscription credential could not be resolved; sign in again" });
+  if (error62 instanceof LlmFailure)
+    return error62;
+  if (error62 instanceof SubscriptionRefreshError) {
+    if (error62.transient)
+      return new LlmFailure({ provider, code: "NETWORK", message: "Could not refresh the subscription sign-in; try again" });
+    return new LlmFailure({ provider, code: "INVALID_CREDENTIAL", message: "Subscription credential could not be resolved; sign in again" });
+  }
+  if (error62 instanceof MissingCredentialError) {
+    return new LlmFailure({ provider, code: "INVALID_CREDENTIAL", message: "Subscription credential could not be resolved; sign in again" });
+  }
+  return new LlmFailure({ provider, code: "SERVER", message: "Could not load the subscription credential; try again" });
+}
 var SubscriptionAdapter = class extends LlmAdapter {
   provider;
   secret;
@@ -138511,23 +138526,19 @@ var SubscriptionAdapter = class extends LlmAdapter {
   }
   async *stream(options) {
     let envelope;
-    try {
-      if (this.resolveSecret)
+    if (this.resolveSecret) {
+      try {
         this.secret = await this.resolveSecret();
-      envelope = decodeSubscription(this.secret.reveal(), this.provider);
-    } catch (error62) {
-      if (options.signal?.aborted)
-        throw new LlmFailure({
-          provider: this.provider,
-          code: "ABORTED",
-          message: "Subscription credential could not be resolved; sign in again"
-        });
-      if (error62 instanceof SubscriptionRefreshError && error62.transient) {
-        throw new LlmFailure({ provider: this.provider, code: "NETWORK", message: "Could not refresh the subscription sign-in; try again" });
+      } catch (error62) {
+        throw resolveFailure2(this.provider, error62, options.signal);
       }
+    }
+    try {
+      envelope = decodeSubscription(this.secret.reveal(), this.provider);
+    } catch {
       throw new LlmFailure({
         provider: this.provider,
-        code: "INVALID_CREDENTIAL",
+        code: options.signal?.aborted ? "ABORTED" : "INVALID_CREDENTIAL",
         message: "Subscription credential could not be resolved; sign in again"
       });
     }
