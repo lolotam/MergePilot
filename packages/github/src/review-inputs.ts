@@ -37,6 +37,8 @@ export interface ReviewInputsParams {
   rulesFiles: FileContent[];
   /** The files this review covers. */
   files: readonly ReviewedFile[];
+  /** The pull request description: scanned for citations only (ADR-0041). */
+  prBody?: string | null | undefined;
   /** Set on an incremental run only: the rest of the PR and the open findings (ADR-0030). */
   followUp?: FollowUpParams | undefined;
   log?: ((message: string) => void) | undefined;
@@ -88,6 +90,7 @@ export async function gatherReviewInputs(client: GitHubClient, params: ReviewInp
       contextTokens,
       contextReads: config.review.contextReads,
       contextTokensPerFile: config.review.contextTokensPerFile,
+      prBody: params.prBody,
     }),
     followUp
       ? gatherOpenFindings(client, {
