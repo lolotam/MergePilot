@@ -261,6 +261,24 @@ CHECKLIST: where the change touches them, also check:
 - secret redaction order: redact before truncating, normalising or logging;
 - config and CI regressions: timeouts, a gate that stops running a test, environment-specific wiring.`;
 
+/** One defect, every place it appears: the bots used to stop after the first example. */
+const PATTERN_SWEEP = `\
+PATTERN SWEEP: when a defect comes from a pattern (a broken rule, a missing check, a missing log or \
+audit write, a missing ownership or tenant filter, unvalidated input), look for every other place \
+in the shown diff where the same pattern occurs before you conclude. Report one finding for the \
+root cause, anchored on the first place, and end its body with a line that starts with "Also at:" \
+followed by the other places as "path:line" (numbers printed in the patches), separated by commas; \
+the label "Also at:" stays in English whatever language the body uses. Do not stop after the first example, and do not report each place as its own finding.`;
+
+/** The owner's rules apply to every changed file they cover, not to the first one. */
+const RULES_CHECK = `\
+RULES CHECK: before you conclude, take each concrete, checkable rule in the REVIEW_CRITERIA blocks \
+(required or banned patterns, required logging or audit rows, ownership or tenant scoping, import \
+and layer boundaries, required comments or tests) and check it against every changed file it \
+applies to, not only the first one. Report a broken rule with "category": "project-rule" and the \
+rule's place in "ruleRef"; use one finding per broken rule, with "Also at:" for the other places. \
+Skip only rules too vague to check against the code.`;
+
 const REPORTING_RULES = `\
 REPORTING: reason across every file shown, not one hunk at a time. One finding per root cause, \
 placed on the line where the defect shows in this diff. "line" must be a number printed in the \
@@ -298,6 +316,7 @@ function buildSystemPrompt(
   batched: boolean,
   followUp: FollowUp | undefined,
   skill: ReviewSkill | undefined,
+  hasCriteria: boolean,
   designReview: boolean,
 ): string {
   const isArabic = language === 'ar';
@@ -317,6 +336,9 @@ function buildSystemPrompt(
     '',
     CHECKLIST,
     '',
+    PATTERN_SWEEP,
+    '',
+    ...(hasCriteria ? [RULES_CHECK, ''] : []),
     SEVERITY_SCALE,
     '',
     CONFIDENCE_SCALE,
@@ -395,6 +417,10 @@ function buildUserPrompt(input: PromptInput): string {
  * Builds the `{ system, user }` prompt pair for a review call.
  */
 export function buildReviewPrompt(input: PromptInput): BuiltPrompt {
+  // The rules check only matters when the prompt carries at least one REVIEW_CRITERIA block.
+  const filePaths = input.files.map((f) => f.path);
+  const hasCriteria =
+    input.rulesFiles.length > 0 || matchingPathInstructions(input.pathInstructions, filePaths).length > 0;
   return {
     system: buildSystemPrompt(
       input.language,
@@ -402,6 +428,7 @@ export function buildReviewPrompt(input: PromptInput): BuiltPrompt {
       input.batch !== undefined,
       input.pr.followUp,
       input.pr.skill,
+      hasCriteria,
       isDesignReview(input.files),
     ),
     user: buildUserPrompt(input),
