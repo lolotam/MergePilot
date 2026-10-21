@@ -287,3 +287,72 @@ describe('buildReviewPrompt — review skill (ADR-0034)', () => {
     expect(system.indexOf('BATCHES:')).toBeLessThan(system.indexOf('REVIEW SKILL'));
   });
 });
+
+// ADR-0039: the bots stopped after the first example of a defect and checked the owner's rules
+// against the first changed file only.
+
+describe('buildReviewPrompt — pattern sweep and rules check (ADR-0039)', () => {
+  const skill = { name: 'Security', content: '- check every new route for authorization' };
+
+  it.each(['en', 'ar'])('in %s, asks for every place of the pattern, not only the first', (language) => {
+    // The sections stay English in both languages (ADR-0023).
+    const { system } = buildReviewPrompt({ ...MINIMAL_INPUT, language });
+    expect(system).toContain('PATTERN SWEEP:');
+    expect(system).toContain('"Also at:"');
+    expect(system).toContain('Do not stop after the first example');
+    expect(system).toContain('the label "Also at:" stays in English whatever language the body uses');
+  });
+
+  it('checks the owner rules against every changed file they apply to', () => {
+    const { system } = buildReviewPrompt({
+      ...MINIMAL_INPUT,
+      rulesFiles: [{ path: 'AGENTS.md', content: 'Every refusal writes a log row.' }],
+    });
+    expect(system).toContain('RULES CHECK:');
+    expect(system).toContain('every changed file it applies to');
+  });
+
+  it('adds the rules check when a path instruction matches a changed file', () => {
+    const { system } = buildReviewPrompt({
+      ...MINIMAL_INPUT,
+      pathInstructions: [{ path: 'src/**', instructions: 'Never log a token.' }],
+      files: [makeFile('src/a.ts', '@@ -1 +1 @@\n+const x = 1;')],
+    });
+    expect(system).toContain('RULES CHECK:');
+  });
+
+  it('leaves the rules check out when no rule reaches the prompt', () => {
+    const { system } = buildReviewPrompt({
+      ...MINIMAL_INPUT,
+      pathInstructions: [{ path: 'docs/**', instructions: 'Docs only.' }],
+      files: [makeFile('src/a.ts', '@@ -1 +1 @@\n+const x = 1;')],
+    });
+    expect(system).not.toContain('RULES CHECK:');
+    // The pattern sweep is always there.
+    expect(system).toContain('PATTERN SWEEP:');
+  });
+
+  it('keeps the sections in order and the skill last', () => {
+    const { system } = buildReviewPrompt({
+      ...MINIMAL_INPUT,
+      rulesFiles: [{ path: 'AGENTS.md', content: 'Every refusal writes a log row.' }],
+      pr: { ...MINIMAL_INPUT.pr, skill },
+    });
+    const checklist = system.indexOf('CHECKLIST:');
+    const sweep = system.indexOf('PATTERN SWEEP:');
+    const rules = system.indexOf('RULES CHECK:');
+    const severity = system.indexOf('SEVERITY is impact');
+    expect(checklist).toBeLessThan(sweep);
+    expect(sweep).toBeLessThan(rules);
+    expect(rules).toBeLessThan(severity);
+    expect(rules).toBeLessThan(system.indexOf('REVIEW SKILL'));
+  });
+
+  it('keeps the pattern sweep in a batched call', () => {
+    const { system } = buildReviewPrompt({
+      ...MINIMAL_INPUT,
+      batch: { number: 1, count: 2, manifest: 'x' },
+    });
+    expect(system).toContain('PATTERN SWEEP:');
+  });
+});

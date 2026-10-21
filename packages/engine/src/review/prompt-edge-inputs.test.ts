@@ -46,6 +46,8 @@ describe('edge inputs and fix re-check (ADR-0043)', () => {
   it('puts the edge-inputs section after the checklist and before the severity scale', () => {
     const prompt = system('en');
     expect(prompt.indexOf('CHECKLIST:')).toBeLessThan(prompt.indexOf('EDGE INPUTS:'));
+    // After ADR-0039's pattern sweep, so the sweep still reads as part of the method.
+    expect(prompt.indexOf('PATTERN SWEEP:')).toBeLessThan(prompt.indexOf('EDGE INPUTS:'));
     expect(prompt.indexOf('EDGE INPUTS:')).toBeLessThan(prompt.indexOf('SEVERITY is impact'));
   });
 
