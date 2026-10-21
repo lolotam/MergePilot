@@ -322,15 +322,24 @@ export function alsoAtPlaces(body: string, paths: readonly string[]): Array<{ pa
 
 /**
  * Flags the hunks within NEAR_LINES of a finding line in its own file, and of every place its
- * "Also at:" line lists: they are shown first, so each listed place reaches the verifier.
+ * "Also at:" line lists: they are shown first, so each listed place reaches the verifier. A path
+ * can be shown twice, as its hunks and as its full version, so every block of that path is flagged.
  */
 function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string, ShownFile>): void {
-  const paths = [...new Set([...files.values()].map((file) => file.path))];
+  // The same path sits under two keys when it is shown as hunks and as its full version (ADR-0030).
+  // The lookup is by path, so both blocks are flagged, not only the one the map is keyed by.
+  const byPath = new Map<string, ShownFile[]>();
+  for (const file of files.values()) {
+    byPath.set(file.path, [...(byPath.get(file.path) ?? []), file]);
+  }
   for (const finding of findings) {
-    for (const place of [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body, paths)]) {
-      for (const chunk of files.get(place.path)?.chunks ?? []) {
-        if (chunk.ranges.some(([from, to]) => place.line >= from - NEAR_LINES && place.line <= to + NEAR_LINES)) {
-          chunk.findingLines.push(place.line);
+    const places = [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body, [...byPath.keys()])];
+    for (const place of places) {
+      for (const file of byPath.get(place.path) ?? []) {
+        for (const chunk of file.chunks) {
+          if (chunk.ranges.some(([from, to]) => place.line >= from - NEAR_LINES && place.line <= to + NEAR_LINES)) {
+            chunk.findingLines.push(place.line);
+          }
         }
       }
     }

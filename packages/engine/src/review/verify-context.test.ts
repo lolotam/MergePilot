@@ -215,6 +215,24 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).not.toContain('filler0 ');
   });
 
+  it('shows an "Also at:" place that sits in the full version of a changed file (ADR-0039)', () => {
+    // The path is sent both as its hunks and as its head file: the place sits in the head file, so
+    // the block keyed by the path is not the one that holds it.
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/big.ts:401' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/big.ts', patch: '@@ -1,1 +1,2 @@\n const first = 0;\n+const second = 1;' },
+      ],
+      contextFiles: [{ path: 'src/big.ts', reason: 'x', content: `${filler}\nunlogged();` }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('401   unlogged();');
+    expect(user).not.toContain('filler0 ');
+  });
+
   it('reads the "Also at:" places of a body', () => {
     const paths = ['src/a.ts', 'lib/b.ts', 'c.ts', 'src/my file.ts', 'src/a,b.ts'];
     expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.', paths)).toEqual([
