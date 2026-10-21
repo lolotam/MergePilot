@@ -227,12 +227,29 @@ function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFi
   return { files: [...files.values()], pathsByFinding };
 }
 
-/** Flags the hunks within NEAR_LINES of a finding line in its own file: they are shown first. */
+const ALSO_AT_RE = /^[ \t]*Also at:(.*)$/m;
+const PLACE_RE = /^`?([^\s`,:]+):(\d+)(?:-\d+)?`?$/;
+
+/** The `path:line` places a finding lists on its "Also at:" line (ADR-0039 pattern sweep). */
+export function alsoAtPlaces(body: string): Array<{ path: string; line: number }> {
+  const list = ALSO_AT_RE.exec(body)?.[1] ?? '';
+  return list.split(',').flatMap((part) => {
+    const place = PLACE_RE.exec(part.trim().replace(/[.;]$/, ''));
+    return place ? [{ path: place[1]!, line: Number(place[2]) }] : [];
+  });
+}
+
+/**
+ * Flags the hunks within NEAR_LINES of a finding line in its own file, and of every place its
+ * "Also at:" line lists: they are shown first, so each listed place reaches the verifier.
+ */
 function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string, ShownFile>): void {
   for (const finding of findings) {
-    for (const chunk of files.get(finding.path)?.chunks ?? []) {
-      if (chunk.ranges.some(([from, to]) => finding.line >= from - NEAR_LINES && finding.line <= to + NEAR_LINES)) {
-        chunk.findingLines.push(finding.line);
+    for (const place of [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body)]) {
+      for (const chunk of files.get(place.path)?.chunks ?? []) {
+        if (chunk.ranges.some(([from, to]) => place.line >= from - NEAR_LINES && place.line <= to + NEAR_LINES)) {
+          chunk.findingLines.push(place.line);
+        }
       }
     }
   }

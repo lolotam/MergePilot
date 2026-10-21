@@ -141876,11 +141876,22 @@ function collectFiles(input2) {
   markNearChunks(input2.findings, files);
   return { files: [...files.values()], pathsByFinding };
 }
+var ALSO_AT_RE = /^[ \t]*Also at:(.*)$/m;
+var PLACE_RE = /^`?([^\s`,:]+):(\d+)(?:-\d+)?`?$/;
+function alsoAtPlaces(body) {
+  const list = ALSO_AT_RE.exec(body)?.[1] ?? "";
+  return list.split(",").flatMap((part) => {
+    const place = PLACE_RE.exec(part.trim().replace(/[.;]$/, ""));
+    return place ? [{ path: place[1], line: Number(place[2]) }] : [];
+  });
+}
 function markNearChunks(findings, files) {
   for (const finding of findings) {
-    for (const chunk of files.get(finding.path)?.chunks ?? []) {
-      if (chunk.ranges.some(([from, to]) => finding.line >= from - NEAR_LINES && finding.line <= to + NEAR_LINES)) {
-        chunk.findingLines.push(finding.line);
+    for (const place of [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body)]) {
+      for (const chunk of files.get(place.path)?.chunks ?? []) {
+        if (chunk.ranges.some(([from, to]) => place.line >= from - NEAR_LINES && place.line <= to + NEAR_LINES)) {
+          chunk.findingLines.push(place.line);
+        }
       }
     }
   }

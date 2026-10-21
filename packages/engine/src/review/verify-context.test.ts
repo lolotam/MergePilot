@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Finding } from './types.js';
 import { applyVerdicts, buildVerifyPrompt } from './verify.js';
+import { alsoAtPlaces } from './verify-prompt.js';
 
 // ADR-0028: the verifier sees the code a finding rests on, across files, and no longer rejects a
 // finding only because the code that would prove it is not shown.
@@ -144,6 +145,34 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).toContain('402 + bad1();');
     expect(user).toContain('1301 + bad2();');
     expect(user).not.toContain('filler0 ');
+  });
+
+  it('shows a window around every "Also at:" place before filling whole hunks (ADR-0039)', () => {
+    // The finding's own line is in src/api.ts; the same pattern sits at the end of a 400-line hunk
+    // of src/big.ts. Without its own window the cap would be spent before that line.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const bigPatch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+unlogged();`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: `src/big.ts:402`, src/missing.ts:9.' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/big.ts', patch: bigPatch },
+      ],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('2 + await unlock();');
+    expect(user).toContain('402 + unlogged();');
+    expect(user).not.toContain('filler0 ');
+  });
+
+  it('reads the "Also at:" places of a body', () => {
+    expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.')).toEqual([
+      { path: 'src/a.ts', line: 3 },
+      { path: 'lib/b.ts', line: 10 },
+      { path: 'c.ts', line: 7 },
+    ]);
+    expect(alsoAtPlaces('No list here: src/a.ts:3')).toEqual([]);
   });
 
   it.each(['en', 'ar'])('in %s, no longer rejects a finding only for depending on code not shown', (language) => {
