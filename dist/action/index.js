@@ -142346,8 +142346,8 @@ var RULE_NOTES = {
   "not-shown": " (no REVIEW_CRITERIA block shown here has this name)"
 };
 function ruleLine(finding, criteria) {
-  const ref = finding.ruleRef ?? "";
-  if (ref.trim() === "")
+  const ref = (finding.ruleRef ?? "").replace(/\s+/g, " ").trim();
+  if (ref === "")
     return [];
   const note = RULE_NOTES[citedRule(ref, criteria)];
   return [`Rule: ${escapeDelimiters(ref)}${note}`];
@@ -142486,7 +142486,7 @@ function applyVerdicts(findings, verdicts) {
   return { kept, rejected };
 }
 
-function buildFittingVerifyPrompt(input2) {
+function buildFittingVerifyPrompt(input2, limit5) {
   const base = {
     language: input2.language,
     findings: input2.findings,
@@ -142498,7 +142498,6 @@ function buildFittingVerifyPrompt(input2) {
   };
   const prompt = buildVerifyPrompt(base);
   const promptTokens = estimateTokens(prompt.system + prompt.user);
-  const limit5 = input2.maxInputTokens;
   if (limit5 === void 0 || promptTokens <= limit5)
     return { prompt, promptTokens };
   const withoutRules = buildVerifyPrompt({ ...base, rulesFiles: void 0, pathInstructions: void 0 });
@@ -142507,7 +142506,7 @@ function buildFittingVerifyPrompt(input2) {
   const withoutRulesTokens = estimateTokens(withoutRules.system + withoutRules.user);
   const hasRules = (input2.rulesFiles?.length ?? 0) > 0 || (input2.pathInstructions?.length ?? 0) > 0;
   if (hasRules) {
-    const shortened = shortenRules(base, promptTokens, limit5);
+    const shortened = shortenRules(base, promptTokens, withoutRulesTokens, limit5);
     if (shortened && shortened.system !== withoutRules.system) {
       return {
         prompt: shortened,
@@ -142516,16 +142515,19 @@ function buildFittingVerifyPrompt(input2) {
       };
     }
   }
-  return {
-    prompt: withoutRules,
-    promptTokens: withoutRulesTokens,
-    note: "verification shown without the owner rules to fit maxInputTokens"
-  };
+  if (withoutRulesTokens <= limit5) {
+    return {
+      prompt: withoutRules,
+      promptTokens: withoutRulesTokens,
+      note: "verification shown without the owner rules to fit maxInputTokens"
+    };
+  }
+  return { prompt: withoutRules, promptTokens: withoutRulesTokens };
 }
 var SHORTEN_ATTEMPTS = 5;
 var SHORTEN_MIN_STEP = 50;
-function shortenRules(base, promptTokens, limit5) {
-  let cap = VERIFY_CRITERIA_TOKENS;
+function shortenRules(base, promptTokens, withoutRulesTokens, limit5) {
+  let cap = Math.min(VERIFY_CRITERIA_TOKENS, promptTokens - withoutRulesTokens);
   let tokens = promptTokens;
   for (let attempt = 0; attempt < SHORTEN_ATTEMPTS; attempt++) {
     cap -= Math.max(tokens - limit5, SHORTEN_MIN_STEP);
@@ -142542,7 +142544,8 @@ async function runVerifyPass(input2) {
   const { model, spend, signal } = input2;
   let totalUsage = input2.totalUsage;
   const incompleteReasons = [];
-  const fitted = buildFittingVerifyPrompt(input2);
+  const inputLimit = input2.maxInputTokens === void 0 ? void 0 : input2.maxInputTokens - estimateTokens(JSON_ONLY_REMINDER);
+  const fitted = buildFittingVerifyPrompt(input2, inputLimit);
   if (fitted.note)
     incompleteReasons.push(fitted.note);
   const unchanged = (reason) => ({
@@ -142560,8 +142563,8 @@ async function runVerifyPass(input2) {
   if (input2.deadline?.expired) {
     return unchanged("time limit reached");
   }
-  if (input2.maxInputTokens !== void 0) {
-    const tokenBudget = checkBudget({ promptTokens, maxInputTokens: input2.maxInputTokens });
+  if (inputLimit !== void 0) {
+    const tokenBudget = checkBudget({ promptTokens, maxInputTokens: inputLimit });
     if (!tokenBudget.ok)
       return unchanged(tokenBudget.reason);
   }

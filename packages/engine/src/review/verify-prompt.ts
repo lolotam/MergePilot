@@ -480,8 +480,10 @@ const RULE_NOTES: Record<'shown' | 'cut' | 'not-shown', string> = {
 
 /** The `Rule:` line of a finding: the rule it cites and whether a shown block carries that name. */
 function ruleLine(finding: Finding, criteria: VerifyCriteria): string[] {
-  const ref = finding.ruleRef ?? '';
-  if (ref.trim() === '') return [];
+  // The ruleRef is free text the review model wrote: it is held to one line, so a newline in it
+  // cannot start a field line of its own.
+  const ref = (finding.ruleRef ?? '').replace(/\s+/g, ' ').trim();
+  if (ref === '') return [];
   const note = RULE_NOTES[citedRule(ref, criteria)];
   return [`Rule: ${escapeDelimiters(ref)}${note}`];
 }
