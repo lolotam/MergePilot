@@ -231,6 +231,25 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(alsoAtPlaces('No list here: src/a.ts:3', paths)).toEqual([]);
   });
 
+  it('reads a known path that sits inside a longer one as part of that longer place', () => {
+    const paths = ['src/my file.ts', 'file.ts'];
+    expect(alsoAtPlaces('Also at: `src/my file.ts:402`', paths)).toEqual([{ path: 'src/my file.ts', line: 402 }]);
+    expect(alsoAtPlaces('Also at: file.ts:3, src/my file.ts:4', paths)).toEqual([
+      { path: 'file.ts', line: 3 },
+      { path: 'src/my file.ts', line: 4 },
+    ]);
+  });
+
+  it('reads the places of a list the model wrapped over several lines', () => {
+    const paths = ['src/a.ts', 'lib/b.ts', 'c.ts'];
+    const body = 'Body.\nAlso at: src/a.ts:3,\n  lib/b.ts:10\n- c.ts:7\n\nlater src/a.ts:99';
+    expect(alsoAtPlaces(body, paths)).toEqual([
+      { path: 'src/a.ts', line: 3 },
+      { path: 'lib/b.ts', line: 10 },
+      { path: 'c.ts', line: 7 },
+    ]);
+  });
+
   it('shows the owner rule of a finding, so a rule about naming is not a style nit (ADR-0039)', () => {
     const withRule = buildVerifyPrompt({
       language: 'en',
