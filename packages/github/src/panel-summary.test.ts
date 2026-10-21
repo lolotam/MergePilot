@@ -150,7 +150,7 @@ describe('renderPanelSummary — withheld problems (ADR-0042)', () => {
 
     expect(body).toContain('_Noticed but not reported (2):_');
     expect(body).toContain('- Null deref — below the confidence bar');
-    // Every model text is neutralized: a mention never notifies anyone.
+    // Every model text is escaped as inline text: a mention never notifies anyone.
     expect(body).toContain('- @\u200bsomeone race — out of scope');
     expect(body).not.toMatch(/(^|\s)@someone/);
     // The list is inside the «Bot summaries» details, never an inline comment.
@@ -175,5 +175,20 @@ describe('renderPanelSummary — withheld problems (ADR-0042)', () => {
 
     expect(body).not.toContain('Noticed but not reported');
     expect(body).toContain('**MergePilot**\n\nMain summary');
+  });
+
+  it('escapes a withheld title, so it cannot close the folded section', async () => {
+    const evil: PanelBotRow[] = [
+      {
+        ...bots[0]!,
+        withheld: [{ title: '</details><h1>x</h1>', reason: 'out of scope' }],
+      },
+    ];
+    const body = renderPanelSummary({
+      language: 'en', baseUrl: BASE, bots: evil, merge: await merged(), minAgreement: 2, inlineCount: 1,
+    });
+
+    expect(body).not.toContain('</details><h1>');
+    expect(body).toContain('&lt;/details&gt;');
   });
 });

@@ -169,6 +169,7 @@ export async function executeReview(
       outcome: 'completed',
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       verifyRejected: reviewResult.verifyRejected,
+      withheld: reviewResult.withheld,
       rulesLeftOut: run.rulesLeftOut,
       context: run.context,
       outputLimit: reviewResult.outputLimit,

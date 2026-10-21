@@ -265,6 +265,9 @@ describe('buildReviewPrompt', () => {
     const { system } = buildReviewPrompt({ ...MINIMAL_INPUT, language });
     expect(system).toContain('"withheld"');
     expect(system).toContain('it must be a finding or appear in "withheld" with a reason');
+    if (language === 'ar') {
+      expect(system).toContain('وsuggestion وwithheld)');
+    }
   });
 });
 

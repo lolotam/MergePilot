@@ -54,4 +54,24 @@ describe('runReview — withheld (ADR-0042)', () => {
     if (result.status !== 'completed') return;
     expect('withheld' in result).toBe(false);
   });
+
+  it('redacts a known secret that contains a line break', async () => {
+    const secretValue = 'known value  with\nbreak-1234567';
+    const secret = new Secret(secretValue);
+    const model = makeModel(
+      JSON.stringify({
+        summary: 'Looks good.',
+        findings: [],
+        withheld: [{ title: `hardcoded ${secretValue}`, reason: `it leaks ${secretValue}` }],
+      }),
+    );
+
+    const result = await runReview(input(model, [secret]));
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.withheld?.[0]?.title).toContain('[REDACTED:known]');
+    expect(result.withheld?.[0]?.reason).toContain('[REDACTED:known]');
+    expect(JSON.stringify(result.withheld)).not.toContain('break-1234567');
+  });
 });

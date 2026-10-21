@@ -1,4 +1,4 @@
-import type { ContextDisclosure, Finding, OutputLimitDisclosure } from '@mergepilot/engine';
+import type { ContextDisclosure, Finding, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
 import type { FallbackReason } from './fallback-reason.js';
 import { renderBotIdentity, type BotIdentity } from './bot-identity.js';
 import type { JudgeSummaryInput } from './judge-summary.js';
@@ -7,6 +7,7 @@ import {
   renderOutputLimitNote,
   renderRulesLeftOut,
   renderVerifyRejected,
+  renderWithheld,
   type VerifyRejectedItem,
 } from './review-notes.js';
 import { neutralize } from './text-safety.js';
@@ -45,6 +46,8 @@ export interface ReviewSummaryInput {
   identity?: BotIdentity | undefined;
   /** Findings the verification pass rejected (ADR-0028), listed folded. */
   verifyRejected?: readonly VerifyRejectedItem[] | undefined;
+  /** What the model noticed and did not report (ADR-0042), listed folded. */
+  withheld?: readonly WithheldItem[] | undefined;
   /** Nested rules files left out of the review (ADR-0028). */
   rulesLeftOut?: readonly string[] | undefined;
   /** Repository context sent and left out (ADR-0029). */
@@ -279,6 +282,8 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
 
   const rejected = renderVerifyRejected(input.verifyRejected ?? [], isArabic);
   if (rejected) sections.push(rejected);
+  const withheld = renderWithheld(input.withheld, isArabic);
+  if (withheld) sections.push(withheld);
   const rulesLeftOut = renderRulesLeftOut(input.rulesLeftOut ?? [], isArabic);
   if (rulesLeftOut) sections.push(rulesLeftOut);
   const contextNote = renderContextNote(input.context, isArabic);

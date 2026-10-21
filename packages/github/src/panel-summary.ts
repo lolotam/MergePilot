@@ -9,6 +9,7 @@ import {
   renderOutputLimitNote,
   renderRulesLeftOut,
   renderVerifyRejected,
+  renderWithheldLine,
   type VerifyRejectedItem,
 } from './review-notes.js';
 import { neutralize } from './text-safety.js';
@@ -203,7 +204,7 @@ function botSummary(bot: PanelBotRow, labels: Labels): string {
   const text = `**${escapeInline(bot.name)}**\n\n${neutralize(bot.summary!.trim())}`;
   const withheld = bot.withheld ?? [];
   if (withheld.length === 0) return text;
-  const lines = withheld.map((item) => `- ${neutralize(item.title)} — ${neutralize(item.reason)}`);
+  const lines = withheld.map((item) => renderWithheldLine(item));
   return `${text}\n\n_${labels.withheld(withheld.length)}_\n${lines.join('\n')}`;
 }
 

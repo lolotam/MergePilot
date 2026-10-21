@@ -1,4 +1,5 @@
-import type { ContextDisclosure, ContextPaths, OutputLimitDisclosure } from '@mergepilot/engine';
+import type { ContextDisclosure, ContextPaths, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
+import { escapeInline } from './bot-identity.js';
 import { neutralize } from './text-safety.js';
 
 /** A finding the verification pass rejected; `bot` names the panel bot that reported it. */
@@ -20,6 +21,26 @@ export function renderVerifyRejected(items: readonly VerifyRejectedItem[], isAra
     const bot = item.bot ? ` · _${neutralize(item.bot)}_` : '';
     return `- ${neutralize(item.title.trim())} · \`${neutralize(item.path)}:${item.line}\`${bot}`;
   });
+  return `<details>\n<summary>${label}</summary>\n\n${lines.join('\n')}\n</details>`;
+}
+
+/**
+ * One withheld item as a markdown list line: the model's text is escaped as inline text, so
+ * neither a tag nor markdown can break the folded section (ADR-0042).
+ */
+export function renderWithheldLine(item: WithheldItem): string {
+  return `- ${escapeInline(item.title)} — ${escapeInline(item.reason)}`;
+}
+
+/**
+ * «Noticed but not reported (N)»: the problems the model noticed and did not report, folded
+ * like the rejected list (ADR-0042). They were never findings, so they are never inline
+ * comments and are never counted as one.
+ */
+export function renderWithheld(items: readonly WithheldItem[] | undefined, isArabic: boolean): string | undefined {
+  if (!items || items.length === 0) return undefined;
+  const label = isArabic ? `رصدها ولم ينشرها كملاحظات (${items.length})` : `Noticed but not reported (${items.length})`;
+  const lines = items.map((item) => renderWithheldLine(item));
   return `<details>\n<summary>${label}</summary>\n\n${lines.join('\n')}\n</details>`;
 }
 

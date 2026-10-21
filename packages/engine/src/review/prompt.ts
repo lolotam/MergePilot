@@ -303,7 +303,7 @@ function buildSystemPrompt(
   const isArabic = language === 'ar';
 
   const roleStatement = isArabic
-    ? 'أنت مراجع كود متخصص. ستراجع Pull Request وترد باللغة العربية البسيطة في جميع الحقول النصية (summary وtitle وbody وsuggestion). المعرّفات وأسماء الملفات والأكواد تبقى كما هي. تفويت خطأ حقيقي في مسار يستخدمه المستخدمون أسوأ من ملاحظة منخفضة الثقة موضَّح أنها كذلك، لكن لا تملأ المراجعة بملاحظات شكلية صغيرة أبدًا.'
+    ? 'أنت مراجع كود متخصص. ستراجع Pull Request وترد باللغة العربية البسيطة في جميع الحقول النصية (summary وtitle وbody وsuggestion وwithheld). المعرّفات وأسماء الملفات والأكواد تبقى كما هي. تفويت خطأ حقيقي في مسار يستخدمه المستخدمون أسوأ من ملاحظة منخفضة الثقة موضَّح أنها كذلك، لكن لا تملأ المراجعة بملاحظات شكلية صغيرة أبدًا.'
     : 'You are a specialist code reviewer. Review the pull request and reply in English. Missing a real bug on a path users take is worse than a low-confidence finding that is clearly labelled; still, never pad the review with nits.';
 
   return [

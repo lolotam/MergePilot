@@ -32,9 +32,9 @@ describe('parseWithheld', () => {
     ]);
   });
 
-  it('trims the texts and puts each on one line', () => {
-    const items = parseWithheld([{ title: '  Null\n## deref  ', reason: '  out of\r\n\tscope  ' }]);
-    expect(items[0]).toEqual({ title: 'Null ## deref', reason: 'out of scope' });
+  it('keeps the raw text, so a secret that spans a line break is still matched later', () => {
+    const items = parseWithheld([{ title: 'Null\n## deref', reason: '  out of\r\n\tscope  ' }]);
+    expect(items[0]).toEqual({ title: 'Null\n## deref', reason: '  out of\r\n\tscope  ' });
   });
 
   it('keeps at most ten items', () => {
@@ -59,6 +59,16 @@ describe('mergeWithheld', () => {
     const many = Array.from({ length: MAX_WITHHELD_ITEMS + 5 }, (_, i) => [{ title: `T${i}`, reason: 'r' }]);
     expect(mergeWithheld(many)).toHaveLength(MAX_WITHHELD_ITEMS);
   });
+
+  it('drops a title that only differs in its line breaks', () => {
+    const merged = mergeWithheld([
+      [{ title: 'a\nb', reason: 'first' }],
+      [{ title: 'a b', reason: 'second' }],
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.reason).toBe('first');
+  });
 });
 
 describe('redactWithheld', () => {
@@ -75,6 +85,26 @@ describe('redactWithheld', () => {
     expect(items[0]?.reason).toContain('[REDACTED:known]');
   });
 
+  it('puts the text on one line after the redaction', () => {
+    const [item] = redactWithheld([{ title: 'Null\n## deref', reason: 'out of\r\nscope' }], []);
+
+    expect(item?.title).toBe('Null ## deref');
+    expect(item?.reason).toBe('out of scope');
+  });
+
+  it('redacts a known secret that contains a line break and repeated spaces', () => {
+    const secret = new Secret('known value  with\nbreak-1234567');
+    const [item] = redactWithheld(
+      [{ title: `leak ${secret.reveal()} here`, reason: `and ${secret.reveal()} again` }],
+      [secret],
+    );
+
+    expect(item?.title).not.toContain('break-1234567');
+    expect(item?.reason).not.toContain('break-1234567');
+    expect(item?.title).toContain('[REDACTED:known]');
+    expect(item?.reason).toContain('[REDACTED:known]');
+  });
+
   it('cuts a long title and a long reason after redaction, so a cut never splits a secret', () => {
     const secret = new Secret('known-test-value-1234567');
     const title = `${'a'.repeat(WITHHELD_TITLE_MAX_CHARS - 5)}${secret.reveal()}`;
@@ -83,5 +113,12 @@ describe('redactWithheld', () => {
     expect(item?.title).toHaveLength(WITHHELD_TITLE_MAX_CHARS);
     expect(item?.title).not.toContain('known-te');
     expect(item?.reason).toHaveLength(WITHHELD_REASON_MAX_CHARS);
+  });
+
+  it('cuts by code points, never inside a surrogate pair', () => {
+    const [item] = redactWithheld([{ title: `${'a'.repeat(WITHHELD_TITLE_MAX_CHARS - 1)}😀😀`, reason: 'r' }], []);
+
+    expect(Array.from(item?.title ?? '')).toHaveLength(WITHHELD_TITLE_MAX_CHARS);
+    expect(item?.title?.endsWith('😀')).toBe(true);
   });
 });
