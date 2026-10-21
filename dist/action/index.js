@@ -141926,6 +141926,9 @@ function alsoAtPlaces(body, paths) {
   }
   return kept.map((match3) => ({ path: match3.path, line: match3.line }));
 }
+function holdsPlace(chunk, line) {
+  return chunk.ranges.some(([from, to]) => line >= from - NEAR_LINES && line <= to + NEAR_LINES);
+}
 function markNearChunks(findings, files) {
   const byPath = /* @__PURE__ */ new Map();
   for (const file2 of files.values()) {
@@ -141934,11 +141937,24 @@ function markNearChunks(findings, files) {
   for (const finding of findings) {
     const places = [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body, [...byPath.keys()])];
     for (const place of places) {
-      for (const file2 of byPath.get(place.path) ?? []) {
+      const pathFiles = byPath.get(place.path) ?? [];
+      const diffs = pathFiles.filter((file2) => file2.kind !== "REPOSITORY_CONTEXT");
+      const heads = pathFiles.filter((file2) => file2.kind === "REPOSITORY_CONTEXT");
+      let marked = false;
+      for (const file2 of diffs) {
         for (const chunk of file2.chunks) {
-          if (chunk.ranges.some(([from, to]) => place.line >= from - NEAR_LINES && place.line <= to + NEAR_LINES)) {
+          if (holdsPlace(chunk, place.line)) {
             chunk.findingLines.push(place.line);
+            marked ||= chunk.ranges.some(([from, to]) => place.line >= from && place.line <= to);
           }
+        }
+      }
+      if (marked)
+        continue;
+      for (const file2 of heads) {
+        for (const chunk of file2.chunks) {
+          if (holdsPlace(chunk, place.line))
+            chunk.findingLines.push(place.line);
         }
       }
     }

@@ -253,6 +253,22 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).not.toContain('filler0 ');
   });
 
+  it('does not mark the full version of a changed file when its hunks already hold the place', () => {
+    // The path is sent both as its hunks and as its head file. The hunk holds the finding's line,
+    // so the head file is not marked near: it gets no window of its own, and the cap the hunks
+    // leave is too small for it, so none of it reaches the verifier.
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'The lock is released before the write.' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+      contextFiles: [{ path: 'src/api.ts', reason: 'x', content: filler }],
+      maxCodeTokens: 100,
+    });
+    expect(user).toContain('2 + await unlock();');
+    expect(user).not.toContain('filler0 ');
+  });
+
   it('reads the "Also at:" places of a body', () => {
     const paths = ['src/a.ts', 'lib/b.ts', 'c.ts', 'src/my file.ts', 'src/a,b.ts'];
     expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.', paths)).toEqual([

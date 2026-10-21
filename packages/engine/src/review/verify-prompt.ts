@@ -322,10 +322,17 @@ export function alsoAtPlaces(body: string, paths: readonly string[]): Array<{ pa
   return kept.map((match) => ({ path: match.path, line: match.line }));
 }
 
+/** True when the chunk covers the place, or a line within NEAR_LINES of it. */
+function holdsPlace(chunk: Chunk, line: number): boolean {
+  return chunk.ranges.some(([from, to]) => line >= from - NEAR_LINES && line <= to + NEAR_LINES);
+}
+
 /**
  * Flags the hunks within NEAR_LINES of a finding line in its own file, and of every place its
  * "Also at:" line lists: they are shown first, so each listed place reaches the verifier. A path
- * can be shown twice, as its hunks and as its full version, so every block of that path is flagged.
+ * can be shown twice, as its hunks and as its full version; the hunks (or the PR diff of the path)
+ * are flagged first, and the full version only for a place none of them holds, since it covers
+ * every line and would otherwise be shown near every finding.
  */
 function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string, ShownFile>): void {
   // The same path sits under two keys when it is shown as hunks and as its full version (ADR-0030).
@@ -337,11 +344,27 @@ function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string,
   for (const finding of findings) {
     const places = [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body, [...byPath.keys()])];
     for (const place of places) {
-      for (const file of byPath.get(place.path) ?? []) {
+      const pathFiles = byPath.get(place.path) ?? [];
+      // The hunks and the PR diff of the path hold the lines the pull request touched; the full
+      // version of the path covers every line of it.
+      const diffs = pathFiles.filter((file) => file.kind !== 'REPOSITORY_CONTEXT');
+      const heads = pathFiles.filter((file) => file.kind === 'REPOSITORY_CONTEXT');
+      let marked = false;
+      for (const file of diffs) {
         for (const chunk of file.chunks) {
-          if (chunk.ranges.some(([from, to]) => place.line >= from - NEAR_LINES && place.line <= to + NEAR_LINES)) {
+          if (holdsPlace(chunk, place.line)) {
             chunk.findingLines.push(place.line);
+            // Only a block that holds the line itself spares the full version, not one merely near it.
+            marked ||= chunk.ranges.some(([from, to]) => place.line >= from && place.line <= to);
           }
+        }
+      }
+      // A place the hunks already cover never marks the full version: its window would show the
+      // whole file again, and the whole file would go ahead of the other findings' hunks.
+      if (marked) continue;
+      for (const file of heads) {
+        for (const chunk of file.chunks) {
+          if (holdsPlace(chunk, place.line)) chunk.findingLines.push(place.line);
         }
       }
     }
