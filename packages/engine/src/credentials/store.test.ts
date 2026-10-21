@@ -140,7 +140,8 @@ describe('EnvCredentialStore', () => {
     });
 
     it('rejects on the prefix alone, without decoding the rest', async () => {
-      const store = new EnvCredentialStore({ ANTHROPIC_API_KEY: `${SUBSCRIPTION_PREFIX}not-json` });
+      const malformedEnvelope = SUBSCRIPTION_PREFIX + 'not-json';
+      const store = new EnvCredentialStore({ ANTHROPIC_API_KEY: malformedEnvelope });
 
       await expect(store.resolve({ provider: 'anthropic' }, 'review')).rejects.toBeInstanceOf(SubscriptionEnvelopeError);
     });
@@ -152,9 +153,9 @@ describe('EnvCredentialStore', () => {
     });
 
     it('leaves the raw claude-code token alone', async () => {
-      const store = new EnvCredentialStore({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test-000' });
+      const store = new EnvCredentialStore(sampleEnv);
 
-      expect((await store.resolve({ provider: 'claude-code' }, 'review')).reveal()).toBe('sk-ant-oat01-test-000');
+      expect((await store.resolve({ provider: 'claude-code' }, 'review')).reveal()).toBe(sampleEnv.CLAUDE_CODE_OAUTH_TOKEN);
     });
   });
 
