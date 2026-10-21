@@ -11,7 +11,7 @@ import { REVIEW_LIMIT_DEFAULTS } from '../config/schema.js';
 import { estimateTokens } from './budget.js';
 import { ESCAPED_MARKER_NOTE, escapeDelimiters, escapeLabel } from './delimiters.js';
 import { renderContextFile, type ContextFile } from './prompt.js';
-import type { Finding } from './types.js';
+import type { DiffSide, Finding } from './types.js';
 
 export interface VerifyReviewableFile {
   path: string;
@@ -328,21 +328,28 @@ function holdsPlace(chunk: Chunk, line: number): boolean {
 }
 
 /**
- * The number a rendered line prints, when the line is an added line ("  <n> + text") or a
- * context line ("  <n>   text"). A removed line prints "  <n> - text": its number is the
- * old-side one, a line the model does not read, so it does not count.
+ * The number a rendered line prints, and the marker that says which side of the diff the line is
+ * on: an added line ("  <n> + text"), a removed line ("  <n> - text") or a context line
+ * ("  <n>   text"). A removed line carries the old-side number, the side a LEFT finding anchors
+ * on.
  */
-const RENDERED_LINE_RE = /^\s*(\d+) (?:\+ | {2})/;
+const RENDERED_LINE_RE = /^\s*(\d+) (\+|-| {2})/;
 
 /**
- * True when the chunk renders a line with that number. The ranges of a hunk cover its old side
- * as well, and a line can live on the old side only: no rendered line carries that number, so
- * the chunk does not hold the place.
+ * True when the chunk renders a line with that number on that side of the diff. A RIGHT place
+ * names an added line ("  <n> + text") or a context line ("  <n>   text"); a LEFT place names a
+ * removed line ("  <n> - text"), whose number is the old-side one, or a context line. The ranges
+ * of a hunk cover its old side as well, and a line can live on the old side only: no rendered
+ * line carries that number, so the chunk does not hold the place.
  */
-function rendersLine(chunk: Chunk, line: number): boolean {
+function rendersLine(chunk: Chunk, line: number, side: DiffSide): boolean {
   return chunk.text.split('\n').some((text) => {
     const match = RENDERED_LINE_RE.exec(text);
-    return match !== null && Number(match[1]) === line;
+    if (match === null || Number(match[1]) !== line) return false;
+    // A context line is on both sides; an added line is on the new side, a removed one on the old.
+    const marker = match[2];
+    if (marker === '  ') return true;
+    return side === 'LEFT' ? marker === '-' : marker === '+';
   });
 }
 
@@ -352,6 +359,11 @@ function rendersLine(chunk: Chunk, line: number): boolean {
  * can be shown twice, as its hunks and as its full version; the hunks (or the PR diff of the path)
  * are flagged first, and the full version only for a place none of them holds, since it covers
  * every line and would otherwise be shown near every finding.
+ *
+ * Every place carries the side of the diff it names: the side of the line the finding anchors on,
+ * or the new side for an "Also at:" place. The full version of a file is numbered on the new
+ * side, so it never holds a LEFT place (a removed line, numbered on the old side): it is not
+ * flagged with that number.
  */
 function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string, ShownFile>): void {
   // The same path sits under two keys when it is shown as hunks and as its full version (ADR-0030).
@@ -361,7 +373,11 @@ function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string,
     byPath.set(file.path, [...(byPath.get(file.path) ?? []), file]);
   }
   for (const finding of findings) {
-    const places = [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body, [...byPath.keys()])];
+    const places: Array<{ path: string; line: number; side: DiffSide }> = [
+      { path: finding.path, line: finding.line, side: finding.side ?? 'RIGHT' },
+      // An "Also at:" place names a line printed in a patch, so it is on the new side.
+      ...alsoAtPlaces(finding.body, [...byPath.keys()]).map((place) => ({ ...place, side: 'RIGHT' as const })),
+    ];
     for (const place of places) {
       const pathFiles = byPath.get(place.path) ?? [];
       // The hunks and the PR diff of the path hold the lines the pull request touched; the full
@@ -374,10 +390,13 @@ function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string,
           if (holdsPlace(chunk, place.line)) {
             chunk.findingLines.push(place.line);
             // Only a block that renders the line itself spares the full version, not one merely near it.
-            marked ||= rendersLine(chunk, place.line);
+            marked ||= rendersLine(chunk, place.line, place.side);
           }
         }
       }
+      // The full version of a file is numbered on the new side, so a LEFT place (a removed line)
+      // is never in it: flagging it with that number would put unrelated head lines first.
+      if (place.side === 'LEFT') continue;
       // A place the hunks already cover never marks the full version: its window would show the
       // whole file again, and the whole file would go ahead of the other findings' hunks.
       if (marked) continue;

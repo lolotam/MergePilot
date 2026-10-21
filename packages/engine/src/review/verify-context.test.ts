@@ -289,6 +289,24 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).toContain('100   cited();');
   });
 
+  it('shows a removed line a LEFT finding anchors on, and not the head file around it', () => {
+    // The finding anchors on a removed line, so its number is an old-side one and the hunk
+    // renders it as "101 - gone();". The full version of the file is numbered on the new side,
+    // so it holds no such line: no window opens around its line 101 (filler100). What is left of
+    // the cap still fills the head file from the top, as for any file no place points into.
+    const shiftPatch = '@@ -100,2 +50,2 @@\n kept();\n-gone();\n+added();';
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ path: 'src/shift.ts', line: 101, side: 'LEFT', evidence: 'gone();', body: 'b' })],
+      files: [{ path: 'src/shift.ts', patch: shiftPatch }],
+      contextFiles: [{ path: 'src/shift.ts', reason: 'x', content: filler }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('101 - gone();');
+    expect(user).not.toContain('const filler100 = 100;');
+  });
+
   it('reads the "Also at:" places of a body', () => {
     const paths = ['src/a.ts', 'lib/b.ts', 'c.ts', 'src/my file.ts', 'src/a,b.ts'];
     expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.', paths)).toEqual([

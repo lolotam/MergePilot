@@ -141929,11 +141929,16 @@ function alsoAtPlaces(body, paths) {
 function holdsPlace(chunk, line) {
   return chunk.ranges.some(([from, to]) => line >= from - NEAR_LINES && line <= to + NEAR_LINES);
 }
-var RENDERED_LINE_RE = /^\s*(\d+) (?:\+ | {2})/;
-function rendersLine(chunk, line) {
+var RENDERED_LINE_RE = /^\s*(\d+) (\+|-| {2})/;
+function rendersLine(chunk, line, side) {
   return chunk.text.split("\n").some((text) => {
     const match3 = RENDERED_LINE_RE.exec(text);
-    return match3 !== null && Number(match3[1]) === line;
+    if (match3 === null || Number(match3[1]) !== line)
+      return false;
+    const marker = match3[2];
+    if (marker === "  ")
+      return true;
+    return side === "LEFT" ? marker === "-" : marker === "+";
   });
 }
 function markNearChunks(findings, files) {
@@ -141942,7 +141947,11 @@ function markNearChunks(findings, files) {
     byPath.set(file2.path, [...byPath.get(file2.path) ?? [], file2]);
   }
   for (const finding of findings) {
-    const places = [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body, [...byPath.keys()])];
+    const places = [
+      { path: finding.path, line: finding.line, side: finding.side ?? "RIGHT" },
+      // An "Also at:" place names a line printed in a patch, so it is on the new side.
+      ...alsoAtPlaces(finding.body, [...byPath.keys()]).map((place) => ({ ...place, side: "RIGHT" }))
+    ];
     for (const place of places) {
       const pathFiles = byPath.get(place.path) ?? [];
       const diffs = pathFiles.filter((file2) => file2.kind !== "REPOSITORY_CONTEXT");
@@ -141952,10 +141961,12 @@ function markNearChunks(findings, files) {
         for (const chunk of file2.chunks) {
           if (holdsPlace(chunk, place.line)) {
             chunk.findingLines.push(place.line);
-            marked ||= rendersLine(chunk, place.line);
+            marked ||= rendersLine(chunk, place.line, place.side);
           }
         }
       }
+      if (place.side === "LEFT")
+        continue;
       if (marked)
         continue;
       for (const file2 of heads) {
