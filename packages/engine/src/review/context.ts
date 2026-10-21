@@ -2,8 +2,9 @@
  * Repository context for reviews (ADR-0029): files outside the diff that the caller read at the PR
  * head. Here they are filtered by the review's own skip rules, secret-redacted, cut to a per-file
  * cap, and fitted to each review call's token cap in priority order: the full version of a changed
- * file, then its sibling test or implementation, then cited files and local imports. A plan records
- * what was sent across every call, so the summary can say how many files went and how many did not.
+ * file, then the files it cites or names, then its sibling test or implementation and its local
+ * imports (ADR-0041). A plan records what was sent across every call, so the summary can say how
+ * many files went and how many did not.
  *
  * Pure engine code: the content arrives through `RunReviewInput.contextFiles`.
  */
@@ -16,22 +17,26 @@ import { estimateTokens } from './budget.js';
 import { renderContextFile, type ContextFile } from './prompt.js';
 
 /**
- * Why a file is context: the changed file's full version, its test/implementation, a citation, an import, the
- * build and CI wiring of a PR that changes scripts, tests or CI (ADR-0029), or, on a follow-up
- * review, another file the pull request changes (ADR-0030).
+ * Why a file is context: the changed file's full version, its test/implementation, a citation, an
+ * import, the build and CI wiring of a PR that changes scripts, tests or CI (ADR-0029), or, on a
+ * follow-up review, another file the pull request changes (ADR-0030). `referenced` is a file named
+ * in a hunk's context line, in the pull request description, or a code file a changed doc names
+ * (ADR-0041).
  */
-export type ContextKind = 'changed-file' | 'test-pair' | 'cited' | 'import' | 'build-config' | 'pr-change';
+export type ContextKind = 'changed-file' | 'test-pair' | 'cited' | 'referenced' | 'import' | 'build-config' | 'pr-change';
 
 /**
- * ADR-0029 priority: changed > test > cited > import > build. PR files are planned apart (ADR-0030).
+ * ADR-0041 priority: changed > cited > referenced > test > import > build. PR files are planned
+ * apart (ADR-0030).
  */
 const KIND_ORDER: Readonly<Record<ContextKind, number>> = {
   'changed-file': 0,
-  'test-pair': 1,
-  cited: 2,
-  import: 3,
-  'build-config': 4,
-  'pr-change': 5,
+  cited: 1,
+  referenced: 2,
+  'test-pair': 3,
+  import: 4,
+  'build-config': 5,
+  'pr-change': 6,
 };
 
 /** One repository file offered as context, as the caller gathered it. */
@@ -62,6 +67,11 @@ export interface ContextPaths {
  */
 export interface ContextDisclosure extends ContextPaths {
   pr?: ContextPaths | undefined;
+  /**
+   * The repository paths sent that came in by citation or reference (kinds `cited` and
+   * `referenced`).
+   */
+  cited?: string[] | undefined;
   /**
    * Ids of the open findings shown; `total` how many were open when that is more than were shown;
    * `unchecked` when their thread status could not be read.
@@ -207,6 +217,8 @@ const shownOf = (file: PreparedContextFile): ContextFile => ({
 export class ContextPlan {
   private readonly files: PreparedContextFile[];
   private readonly prFiles: PreparedContextFile[];
+  /** The offered paths that came in by citation or reference (ADR-0041). */
+  private readonly citedPaths: Set<string>;
   private batchContext: { files: PreparedContextFile[]; prFiles: PreparedContextFile[] } | undefined;
   private readonly sent = new Map<string, ContextFile>();
   /** Context skipped because the file's own patch was in the call: shown, so never left out. */
@@ -219,6 +231,9 @@ export class ContextPlan {
     const on = opts.contextTokens > 0;
     this.files = on ? prepareRepository(offered, { ...opts, contextTokens: this.wholeCap() }) : [];
     this.prFiles = on ? preparePullRequest(offered, opts) : [];
+    this.citedPaths = new Set(
+      this.files.filter((f) => f.kind === 'cited' || f.kind === 'referenced').map((f) => f.path),
+    );
   }
 
   /**
@@ -314,9 +329,11 @@ export class ContextPlan {
     const sentRepositoryPaths = sent.filter((f) => f.source !== 'pull-request').map((f) => f.path);
     const leftOutOf = (files: readonly PreparedContextFile[]): string[] =>
       files.filter((f) => !this.sent.has(blockKey(f)) && !this.shownAsPatch.has(f.path)).map((f) => f.path);
+    const cited = sentRepositoryPaths.filter((p) => this.citedPaths.has(p));
     return {
       sent: sentRepositoryPaths,
       leftOut: leftOutOf(this.files),
+      ...(cited.length > 0 ? { cited } : {}),
       ...(this.prFiles.length > 0 ? { pr: { sent: sentPrPaths, leftOut: leftOutOf(this.prFiles) } } : {}),
     };
   }
