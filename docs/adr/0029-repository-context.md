@@ -1,6 +1,6 @@
 # ADR-0029: Repository context for reviews — code outside the diff, read at the PR head
 
-**Date:** 2026-10-16 · **Status:** accepted (owner, س44) · **Amends:** ADR-0028 (`REPOSITORY_CONTEXT` is read at the head commit, not the base), ADR-0013 (the size guard, `budget.maxInputTokens` and the cost preflight count context tokens)
+**Date:** 2026-10-16 · **Status:** accepted (owner, س44) · **Amends:** ADR-0028 (`REPOSITORY_CONTEXT` is read at the head commit, not the base), ADR-0013 (the size guard, `budget.maxInputTokens` and the cost preflight count context tokens) · **Amended by:** ADR-0041 (reference-first order, context-line and PR-description citations, spec ids)
 
 ## Context
 

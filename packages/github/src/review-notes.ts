@@ -77,8 +77,8 @@ export function renderRulesLeftOut(paths: readonly string[], isArabic: boolean):
 /**
  * «Repository context: N files sent, M left out»: how much code outside the diff the review saw
  * (ADR-0029); on a follow-up review also how much of the rest of the PR it saw and how many open
- * findings it re-checked (ADR-0030). A disclosure, not an incomplete review: the diff itself was
- * fully reviewed.
+ * findings it re-checked (ADR-0030). The files the change cites or names are named here
+ * (ADR-0041). A disclosure, not an incomplete review: the diff itself was fully reviewed.
  */
 export function renderContextNote(context: ContextDisclosure | undefined, isArabic: boolean): string | undefined {
   if (!context) return undefined;
@@ -90,16 +90,33 @@ export function renderContextNote(context: ContextDisclosure | undefined, isArab
   return lines.length > 0 ? lines.join('\n>\n') : undefined;
 }
 
-function repositoryContextLine(context: ContextPaths, isArabic: boolean): string | undefined {
+/** The cited files of a disclosure: at most five names, the rest counted (ADR-0041). */
+function citedOf(context: ContextDisclosure, isArabic: boolean): { count: number; names: string } | undefined {
+  const unique = [...new Set(context.cited ?? [])];
+  if (unique.length === 0) return undefined;
+  const separator = isArabic ? '، ' : ', ';
+  // A cited path may come from a directory listing the author controls, so it is neutralized.
+  const shown = unique.slice(0, 5).map((path) => `\`${neutralize(path.replace(/`/g, ''))}\``);
+  const rest = unique.length - shown.length;
+  const names = rest > 0
+    ? `${shown.join(separator)}${isArabic ? ` و ${rest} غيرها` : ` +${rest} more`}`
+    : shown.join(separator);
+  return { count: unique.length, names };
+}
+
+function repositoryContextLine(context: ContextDisclosure, isArabic: boolean): string | undefined {
   const sent = new Set(context.sent).size;
   const leftOut = new Set(context.leftOut).size;
   if (sent === 0 && leftOut === 0) return undefined;
+  const cited = citedOf(context, isArabic);
   if (isArabic) {
+    const named = cited ? ` (منها ${cited.count} مذكورة في التغييرات أو وصف الـ PR: ${cited.names})` : '';
     const left = leftOut > 0 ? `، وغير المُرسلة ${leftOut} (تجاوزت \`review.contextTokens\` أو حد القراءة)` : '';
-    return `> ℹ️ سياق المستودع: الملفات المُرسلة ${sent}${left}.`;
+    return `> ℹ️ سياق المستودع: الملفات المُرسلة ${sent}${named}${left}.`;
   }
+  const named = cited ? ` (${cited.count} cited by the change or the PR description: ${cited.names})` : '';
   const left = leftOut > 0 ? `, ${leftOut} left out (over \`review.contextTokens\` or the read limit)` : '';
-  return `> ℹ️ Repository context: ${sent} ${sent === 1 ? 'file' : 'files'} sent${left}.`;
+  return `> ℹ️ Repository context: ${sent} ${sent === 1 ? 'file' : 'files'} sent${named}${left}.`;
 }
 
 /** «Rest of the pull request: N other changed files sent» on a follow-up review (ADR-0030). */
@@ -142,6 +159,9 @@ export function mergeContextDisclosures(items: ReadonlyArray<ContextDisclosure |
   const present = items.filter((c): c is ContextDisclosure => c !== undefined);
   if (present.length === 0) return undefined;
   const merged: ContextDisclosure = mergePaths(present);
+  // A cited file is cited only when a bot sent it (ADR-0041).
+  const cited = [...new Set(present.flatMap((c) => c.cited ?? []))].filter((p) => merged.sent.includes(p));
+  if (cited.length > 0) merged.cited = cited;
   const prs = present.map((c) => c.pr).filter((p): p is ContextPaths => p !== undefined);
   if (prs.length > 0) merged.pr = mergePaths(prs);
   const opens = present.map((c) => c.openFindings).filter((o) => o !== undefined);
