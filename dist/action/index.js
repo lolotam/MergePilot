@@ -141880,7 +141880,7 @@ function collectFiles(input2) {
   return { files: [...files.values()], pathsByFinding };
 }
 var ALSO_AT_RE = /^[ \t]*Also at:(.*)$/m;
-var PLACE_RE = /^`?([^\s`,:]+):(\d+)(?:-\d+)?`?$/;
+var PLACE_RE = /^`?([^`,]+?):(\d+)(?:-\d+)?`?$/;
 function alsoAtPlaces(body) {
   const list = ALSO_AT_RE.exec(body)?.[1] ?? "";
   return list.split(",").flatMap((part) => {

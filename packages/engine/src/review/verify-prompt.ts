@@ -233,7 +233,8 @@ function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFi
 }
 
 const ALSO_AT_RE = /^[ \t]*Also at:(.*)$/m;
-const PLACE_RE = /^`?([^\s`,:]+):(\d+)(?:-\d+)?`?$/;
+// The path may hold spaces (`src/my file.ts:9`); a place whose path is not a shown file is ignored.
+const PLACE_RE = /^`?([^`,]+?):(\d+)(?:-\d+)?`?$/;
 
 /** The `path:line` places a finding lists on its "Also at:" line (ADR-0039 pattern sweep). */
 export function alsoAtPlaces(body: string): Array<{ path: string; line: number }> {

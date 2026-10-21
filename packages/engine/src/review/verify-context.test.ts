@@ -191,6 +191,10 @@ describe('verify prompt — code across files (ADR-0028)', () => {
       { path: 'lib/b.ts', line: 10 },
       { path: 'c.ts', line: 7 },
     ]);
+    expect(alsoAtPlaces('Also at: `src/my file.ts:9`, docs/a b.md:4')).toEqual([
+      { path: 'src/my file.ts', line: 9 },
+      { path: 'docs/a b.md', line: 4 },
+    ]);
     expect(alsoAtPlaces('No list here: src/a.ts:3')).toEqual([]);
   });
 

@@ -31,4 +31,5 @@ Option A.
 - About 200 more words in every system prompt, on every call and every batch.
 - A finding carries an `Also at:` line, so the findings limit covers more places: one finding can now stand for many places.
 - The `RULES CHECK` section only appears when there is a rule to apply, so a review without owner rules keeps the prompt size it had.
+- The verifier still gives one verdict per finding: it sees every `Also at:` place, but it cannot confirm the first place and reject another. A listed place without the defect is published with the finding, and a wrong place can sink a true finding. Per-place verdicts need a structured locations field and a per-place verdict contract; that is a follow-up, to be taken up if the comparison shows wrong `Also at:` places.
 - Measured by re-running the same 48-hour comparison after the release. The targets: Codex P1 matched 40% or more; plain misses under 40% of the misses; false positives at 10% or less.
