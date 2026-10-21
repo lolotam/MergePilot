@@ -242,7 +242,7 @@ describe('createOctokitClient', () => {
     });
     const client = createOctokitClient(secretToken);
     const params = { owner: 'org', repo: 'repo', path: '.github/workflows', ref: 'head' };
-    expect(await client.listDirectoryFiles!(params)).toEqual(['.github/workflows/ci.yml']);
+    expect(await client.listDirectoryFiles!(params)).toEqual(['.github/workflows/ci.yml', '.github/workflows/shared/']);
 
     const notFound = Object.assign(new Error('Not Found'), { status: 404 });
     mockGetContent.mockRejectedValueOnce(notFound);

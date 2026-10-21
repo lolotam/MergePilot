@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { GitHubClient } from './client.js';
-import { readFilesAtRef } from './contents.js';
+import { directoryFilesOf, readFilesAtRef } from './contents.js';
+
+describe('directoryFilesOf', () => {
+  it('lists the files of a directory and its subdirectories, and leaves the other entries out', () => {
+    expect(directoryFilesOf([
+      { path: 'docs/guide.md', type: 'file' },
+      { path: 'docs/specs', type: 'dir' },
+      { path: 'docs/link.md', type: 'symlink' },
+    ])).toEqual(['docs/guide.md', 'docs/specs/']);
+    expect(directoryFilesOf({ type: 'file', content: '' })).toBeNull();
+  });
+});
 
 describe('readFilesAtRef', () => {
   it('reads requested files and returns path and content', async () => {

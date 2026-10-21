@@ -18,14 +18,17 @@ export function isNotFoundError(error: unknown): boolean {
 }
 
 /**
- * The paths of the files a contents-API response lists for a directory (subdirectories, links and
- * submodules are left out); null when the response is a single file, not a directory.
+ * The files of a directory listing, plus its subdirectories with a trailing '/'; null when `data`
+ * is not a listing.
  */
 export function directoryFilesOf(data: unknown): string[] | null {
   if (!Array.isArray(data)) return null;
   return data.flatMap((item: unknown) => {
     const entry = item as { type?: unknown; path?: unknown };
-    return entry.type === 'file' && typeof entry.path === 'string' ? [entry.path] : [];
+    if (typeof entry.path !== 'string') return [];
+    if (entry.type === 'file') return [entry.path];
+    if (entry.type === 'dir') return [`${entry.path}/`];
+    return [];
   });
 }
 
