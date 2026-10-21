@@ -122,12 +122,15 @@ function lineNumberOf(line: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-/** The hunk header and the lines within NEAR_LINES of a finding line; the rest is marked as cut. */
-function windowOf(chunk: Chunk): string {
+/** The first, narrow window: a few lines around each place, so every listed place fits first. */
+const PLACE_LINES = 3;
+
+/** The hunk header and the lines within `radius` of a finding line; the rest is marked as cut. */
+function windowOf(chunk: Chunk, radius: number): string {
   const [header = '', ...body] = chunk.text.split('\n');
   const kept = body.filter((line) => {
     const number = lineNumberOf(line);
-    return number !== undefined && chunk.findingLines.some((at) => Math.abs(at - number) <= NEAR_LINES);
+    return number !== undefined && chunk.findingLines.some((at) => Math.abs(at - number) <= radius);
   });
   return kept.length === body.length ? chunk.text : [header, ...kept, CUT_MARKER].join('\n');
 }
@@ -148,14 +151,16 @@ function show(chunk: Chunk, text: string, left: number): number {
 }
 
 /**
- * Fills the cap in three passes: first a window around every finding line, so one large hunk cannot
- * use up the budget and leave another finding without its own evidence; then the whole hunks near a
- * finding; then everything else in file order.
+ * Fills the cap in four passes: first a few lines around every finding line and "Also at:" place,
+ * so no listed place is cut because another one sits earlier in the same hunk; then a wider window
+ * around each, so one large hunk cannot use up the budget and leave another finding without its own
+ * evidence; then the whole hunks near a finding; then everything else in file order.
  */
 function fitChunks(chunks: Chunk[], maxTokens: number): void {
   let left = maxTokens;
   const near = chunks.filter((c) => c.findingLines.length > 0);
-  for (const chunk of near) left -= show(chunk, windowOf(chunk), left);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk, PLACE_LINES), left);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk, NEAR_LINES), left);
   for (const chunk of near) left -= show(chunk, chunk.text, left);
   for (const chunk of chunks.filter((c) => c.findingLines.length === 0)) left -= show(chunk, chunk.text, left);
 }
@@ -227,12 +232,33 @@ function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFi
   return { files: [...files.values()], pathsByFinding };
 }
 
-/** Flags the hunks within NEAR_LINES of a finding line in its own file: they are shown first. */
+const ALSO_AT_RE = /^[ \t]*Also at:(.*)$/m;
+
+/**
+ * The `path:line` places a finding lists on its "Also at:" line (ADR-0039 pattern sweep). Only known
+ * paths count, matched whole, so a path holding spaces or commas is read as one place.
+ */
+export function alsoAtPlaces(body: string, paths: readonly string[]): Array<{ path: string; line: number }> {
+  const list = ALSO_AT_RE.exec(body)?.[1] ?? '';
+  return paths.flatMap((path) => {
+    const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const places = list.matchAll(new RegExp(`(?<![\\w./-])${escaped}:(\\d+)`, 'g'));
+    return [...places].map((place) => ({ path, line: Number(place[1]) }));
+  });
+}
+
+/**
+ * Flags the hunks within NEAR_LINES of a finding line in its own file, and of every place its
+ * "Also at:" line lists: they are shown first, so each listed place reaches the verifier.
+ */
 function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string, ShownFile>): void {
+  const paths = [...new Set([...files.values()].map((file) => file.path))];
   for (const finding of findings) {
-    for (const chunk of files.get(finding.path)?.chunks ?? []) {
-      if (chunk.ranges.some(([from, to]) => finding.line >= from - NEAR_LINES && finding.line <= to + NEAR_LINES)) {
-        chunk.findingLines.push(finding.line);
+    for (const place of [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body, paths)]) {
+      for (const chunk of files.get(place.path)?.chunks ?? []) {
+        if (chunk.ranges.some(([from, to]) => place.line >= from - NEAR_LINES && place.line <= to + NEAR_LINES)) {
+          chunk.findingLines.push(place.line);
+        }
       }
     }
   }
