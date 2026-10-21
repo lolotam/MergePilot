@@ -214,6 +214,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     content: redactSecrets(rf.content, knownSecrets).text,
   }));
 
+  // Path instructions are workspace text too: redacted like the rules files, for every call.
+  const redactedPathInstructions = reviewCfg.pathInstructions.map((pi) => ({
+    path: redactSecrets(pi.path, knownSecrets).text,
+    instructions: redactSecrets(pi.instructions, knownSecrets).text,
+  }));
+  const promptConfig = { ...config, review: { ...reviewCfg, pathInstructions: redactedPathInstructions } };
+
   // Redact patches; a secret on an added line becomes a security finding.
   const { files: redactedReviewableFiles, securityFindings } = redactPatches(reviewableFiles, knownSecrets);
 
@@ -236,7 +243,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     maxFindings: reviewCfg.maxFindings,
     pr: promptPr,
     rulesFiles: redactedRulesFiles,
-    pathInstructions: reviewCfg.pathInstructions,
+    pathInstructions: redactedPathInstructions,
     files: redactedReviewableFiles,
     ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
   };
@@ -276,7 +283,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     context.markSent(wholeContext);
   }
   const promptArgs = {
-    config,
+    config: promptConfig,
     pr: promptPr,
     rulesFiles: redactedRulesFiles,
     libraryDocs: input.libraryDocs,
@@ -329,7 +336,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   // ── Steps d + e: model call(s), parse, recovery ────────────────────────
   const passContext: ReviewPassContext = {
-    config,
+    config: promptConfig,
     model,
     spend,
     knownSecrets,
@@ -386,7 +393,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       contextFiles: context.sentFiles(),
       maxCodeTokens: limits.batchTokens,
       rulesFiles: redactedRulesFiles,
-      pathInstructions: reviewCfg.pathInstructions,
+      pathInstructions: redactedPathInstructions,
       model,
       spend,
       knownSecrets,
