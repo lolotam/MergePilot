@@ -131,3 +131,72 @@ describe('renderPanelSummary — review skills (ADR-0034)', () => {
     expect(arabic).toContain('| المراجع | النموذج | المهارة | الحالة |');
   });
 });
+
+describe('renderPanelSummary — withheld problems (ADR-0042)', () => {
+  const withWithheld: PanelBotRow[] = [
+    {
+      ...bots[0]!,
+      withheld: [
+        { title: 'Null deref', reason: 'below the confidence bar' },
+        { title: '@someone race', reason: 'out of scope' },
+      ],
+    },
+  ];
+
+  it('lists what a bot noticed and did not report under its summary, in the folded section', async () => {
+    const body = renderPanelSummary({
+      language: 'en', baseUrl: BASE, bots: withWithheld, merge: await merged(), minAgreement: 2, inlineCount: 1,
+    });
+
+    expect(body).toContain('_Noticed but not reported (2):_');
+    expect(body).toContain('- Null deref — below the confidence bar');
+    // Every model text is escaped as inline text: a mention never notifies anyone.
+    expect(body).toContain('- @\u200bsomeone race — out of scope');
+    expect(body).not.toMatch(/(^|\s)@someone/);
+    // The list is inside the «Bot summaries» details, never an inline comment.
+    const opened = body.indexOf('<summary>Bot summaries</summary>');
+    const closed = body.indexOf('</details>', opened);
+    const withheldAt = body.indexOf('_Noticed but not reported (2):_');
+    expect(withheldAt).toBeGreaterThan(opened);
+    expect(withheldAt).toBeLessThan(closed);
+  });
+
+  it('names the withheld list in Arabic', async () => {
+    const body = renderPanelSummary({
+      language: 'ar', baseUrl: BASE, bots: withWithheld, merge: await merged(), minAgreement: 2, inlineCount: 1,
+    });
+
+    expect(body).toContain('رصدها ولم ينشرها كملاحظات (2):');
+    expect(body).toContain('- Null deref — below the confidence bar');
+  });
+
+  it('lists a bot whose summary is blank when it withheld problems', async () => {
+    const blank: PanelBotRow[] = [{ ...withWithheld[0]!, summary: '   ' }];
+    const body = renderPanelSummary({ language: 'en', baseUrl: BASE, bots: blank, merge: await merged(), minAgreement: 2, inlineCount: 1 });
+
+    expect(body).toContain('<summary>Bot summaries</summary>');
+    expect(body).toContain('**MergePilot**\n\n_Noticed but not reported (2):_');
+  });
+
+  it('renders a bot without withheld problems exactly as before', async () => {
+    const body = renderPanelSummary({ language: 'en', baseUrl: BASE, bots, merge: await merged(), minAgreement: 2, inlineCount: 1 });
+
+    expect(body).not.toContain('Noticed but not reported');
+    expect(body).toContain('**MergePilot**\n\nMain summary');
+  });
+
+  it('escapes a withheld title, so it cannot close the folded section', async () => {
+    const evil: PanelBotRow[] = [
+      {
+        ...bots[0]!,
+        withheld: [{ title: '</details><h1>x</h1>', reason: 'out of scope' }],
+      },
+    ];
+    const body = renderPanelSummary({
+      language: 'en', baseUrl: BASE, bots: evil, merge: await merged(), minAgreement: 2, inlineCount: 1,
+    });
+
+    expect(body).not.toContain('</details><h1>');
+    expect(body).toContain('&lt;/details&gt;');
+  });
+});

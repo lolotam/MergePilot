@@ -134,6 +134,33 @@ describe('processReviewJob — reviewer panel orchestration', () => {
     expect(h.calledModels.sort()).toEqual(['bot3-model', 'main-model']);
   });
 
+  it('publishes what a bot noticed and did not report under its summary in the panel summary (ADR-0042)', async () => {
+    const h = await panelSetup({ settings: { panelMode: 'consensus' }, bots: [{ slot: 2, name: 'Owl' }] });
+    h.createModelForProvider.mockImplementation(async (config) => ({
+      label: `${config.provider}:${config.model ?? ''}`,
+      generate: async () => ({
+        text: JSON.stringify({
+          summary: `${config.model ?? ''} summary`,
+          findings: [],
+          withheld: [{ title: 'Hardcoded token', reason: 'below the confidence bar' }],
+          verdicts: [],
+        }),
+        finishReason: 'stop' as const,
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      }),
+    }));
+    await processReviewJob(h.job, h.deps);
+
+    expect(h.created).toHaveLength(1);
+    const body = h.created[0]!.body;
+    const opened = body.indexOf('<summary>Bot summaries</summary>');
+    const closed = body.indexOf('</details>', opened);
+    const withheldAt = body.indexOf('- Hardcoded token — below the confidence bar');
+    expect(opened).toBeGreaterThan(-1);
+    expect(withheldAt).toBeGreaterThan(opened);
+    expect(withheldAt).toBeLessThan(closed);
+  });
+
   it('a paused PR skips every bot', async () => {
     const h = await panelSetup({ bots: [{ slot: 2 }] });
     h.client.getPullRequest = async () => ({ head: { sha: HEAD }, labels: [{ name: 'mergepilot:paused' }] });

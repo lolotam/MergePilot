@@ -30,6 +30,7 @@ import {
   type SpendTracker,
 } from './spend.js';
 import type { Finding } from './types.js';
+import { mergeWithheld, type WithheldItem } from './withheld.js';
 
 /** Parses one review call's response into findings (finish reason and output tokens included). */
 export function parseReviewResponse(response: ReviewModelResponse): ParseReviewAnswerResult {
@@ -66,7 +67,7 @@ export interface ExecuteBatchedReviewInput {
 
 export interface ExecuteBatchedReviewResult {
   /** Merged answer, or null when no batch produced one. */
-  merged: { summary: string; findings: Finding[] } | null;
+  merged: { summary: string; findings: Finding[]; withheld?: WithheldItem[] | undefined } | null;
   totalUsage?: TokenUsage | undefined;
   incompleteReasons: string[];
 }
@@ -178,6 +179,8 @@ export async function executeBatchedReview(
   let totalUsage = input.initialUsage;
   const batchSummaries: string[] = [];
   const batchFindings: Finding[] = [];
+  // What each batch noticed and did not report, merged when the batches answer (ADR-0042).
+  const batchWithheld: Array<WithheldItem[] | undefined> = [];
   const incompleteReasons: string[] = [];
   let answered = 0;
   const labelOf = (index: number): string =>
@@ -215,6 +218,7 @@ export async function executeBatchedReview(
         answered++;
         if (outcome.parsed.summary.trim().length > 0) batchSummaries.push(outcome.parsed.summary.trim());
         batchFindings.push(...outcome.parsed.findings);
+        batchWithheld.push(outcome.parsed.withheld);
         if (outcome.parsed.findingsMissing && !outcome.parsed.acceptedAsEmpty) incompleteReasons.push(`${label}: ${FINDINGS_MISSING_REASON}`);
       } else {
         incompleteReasons.push(`${label}: ${outcome.parsed.error}`);
@@ -226,12 +230,14 @@ export async function executeBatchedReview(
     }
   }
 
+  const withheld = mergeWithheld(batchWithheld);
   const merged =
     answered === 0
       ? null
       : {
           summary: batchSummaries.join('\n\n') || 'Review completed across file batches.',
           findings: dedupeFindings(batchFindings),
+          ...(withheld.length > 0 ? { withheld } : {}),
         };
   return { merged, totalUsage, incompleteReasons };
 }

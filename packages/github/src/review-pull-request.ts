@@ -273,6 +273,7 @@ export async function reviewPullRequest(
       outcome: 'completed',
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       verifyRejected: reviewResult.verifyRejected,
+      withheld: reviewResult.withheld,
       rulesLeftOut: inputs.rulesLeftOut,
       context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut, inputs.openFindings),
       outputLimit: reviewResult.outputLimit,

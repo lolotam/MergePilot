@@ -105,7 +105,7 @@ export function describePaths(paths: readonly string[], max = 10, maxLength = 60
   return paths.length > max ? `${shown} +${paths.length - max} more` : shown;
 }
 
-type ParsedAnswer = { ok: true; summary?: string; findingsMissing?: true; otherCandidatesRejected?: true; acceptedAsEmpty?: true } | { ok: false; code: string; error: string };
+type ParsedAnswer = { ok: true; summary?: string; findingsMissing?: true; otherCandidatesRejected?: true; acceptedAsEmpty?: true; withheld?: unknown } | { ok: false; code: string; error: string };
 
 export interface EmptyRetryInput<P extends ParsedAnswer> {
   parsed: P;
@@ -214,7 +214,16 @@ async function retryForFindingsList<P extends ParsedAnswer>(input: EmptyRetryInp
     }
     const acceptedAsEmpty = retried.findingsMissing && !retried.otherCandidatesRejected && response.finishReason === 'stop' &&
       typeof retried.summary === 'string' && retried.summary.trim().length > 0;
-    return { parsed: acceptedAsEmpty ? { ...retried, acceptedAsEmpty: true } : retried, response, usage: response.usage, thinkingOff: false };
+    // ADR-0042: the reminder's answer may leave the withheld list out; the first answer's list is
+    // kept then, so what the model noticed is not lost by the retry.
+    const firstWithheld: unknown = parsed.ok ? parsed.withheld : undefined;
+    const keepsFirstWithheld = retried.withheld === undefined && firstWithheld !== undefined;
+    const kept = {
+      ...retried,
+      ...(acceptedAsEmpty ? { acceptedAsEmpty: true as const } : {}),
+      ...(keepsFirstWithheld ? { withheld: firstWithheld } : {}),
+    };
+    return { parsed: kept, response, usage: response.usage, thinkingOff: false };
   } catch (err) {
     spend.record(promptTokens, requestedOutputTokens, undefined);
     return { parsed, note: `findings-list retry failed: ${describeCallError(err, input.knownSecrets)}`, thinkingOff: false };

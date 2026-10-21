@@ -208,9 +208,11 @@ reply starts with "{" and ends with "}", with no markdown fence around it.
       "confidence": <number in [0,1] — see CONFIDENCE below>
     }
   ],
-  "summary": "<string — 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>"
+  "summary": "<string — 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>",
+  "withheld": [{ "title": "<string — under 15 words: a problem you noticed but did not report as a finding>", "reason": "<string — a few words: below the confidence bar, out of scope, already open, or over the findings limit>" }]
 }
-If you found nothing to report, return "findings": [] — never omit the key.
+If you found nothing to report, return "findings": [] — never omit the key. "withheld" is optional (at most 5 items); if \
+your summary names a problem, it must be a finding or appear in "withheld" with a reason.
 Keys and the severity, category and side values are spelled exactly as above, whatever language the text fields use.`;
 
 const WHAT_YOU_SEE = `\
@@ -329,7 +331,7 @@ function buildSystemPrompt(
   const isArabic = language === 'ar';
 
   const roleStatement = isArabic
-    ? 'أنت مراجع كود متخصص. ستراجع Pull Request وترد باللغة العربية البسيطة في جميع الحقول النصية (summary وtitle وbody وsuggestion). المعرّفات وأسماء الملفات والأكواد تبقى كما هي. تفويت خطأ حقيقي في مسار يستخدمه المستخدمون أسوأ من ملاحظة منخفضة الثقة موضَّح أنها كذلك، لكن لا تملأ المراجعة بملاحظات شكلية صغيرة أبدًا.'
+    ? 'أنت مراجع كود متخصص. ستراجع Pull Request وترد باللغة العربية البسيطة في جميع الحقول النصية (summary وtitle وbody وsuggestion وwithheld). المعرّفات وأسماء الملفات والأكواد تبقى كما هي. تفويت خطأ حقيقي في مسار يستخدمه المستخدمون أسوأ من ملاحظة منخفضة الثقة موضَّح أنها كذلك، لكن لا تملأ المراجعة بملاحظات شكلية صغيرة أبدًا.'
     : 'You are a specialist code reviewer. Review the pull request and reply in English. Missing a real bug on a path users take is worse than a low-confidence finding that is clearly labelled; still, never pad the review with nits.';
 
   return [
