@@ -1,5 +1,6 @@
 import { PROVIDER_REGISTRY } from '../providers/registry.js';
 import { Secret } from './secret.js';
+import { SUBSCRIPTION_PREFIX } from './subscription.js';
 import type {
   AnyCredentialProvider,
   CredentialInfo,
@@ -15,6 +16,21 @@ export class MissingCredentialError extends Error {
     super(message ?? `Missing credential: ${envName} is not set or is blank`);
     this.name = 'MissingCredentialError';
     this.envName = envName;
+  }
+}
+
+/**
+ * The variable holds a dashboard subscription envelope (ADR-0038). The Action cannot persist a rotated
+ * refresh token, so it accepts API keys only. The message is fixed text and never includes the value.
+ */
+export class SubscriptionEnvelopeError extends MissingCredentialError {
+  constructor(envName: string) {
+    super(
+      envName,
+      `${envName} holds a MergePilot dashboard subscription sign-in, which the GitHub Action does not accept. ` +
+        'Use an API key, or provider: claude-code with CLAUDE_CODE_OAUTH_TOKEN; subscriptions run through the GitHub App.',
+    );
+    this.name = 'SubscriptionEnvelopeError';
   }
 }
 
@@ -75,6 +91,10 @@ export class EnvCredentialStore implements CredentialStore<AnyCredentialProvider
 
     if (trimmed.length === 0) {
       throw new MissingCredentialError(envName);
+    }
+    // A prefix check only: the envelope is never decoded, so its tokens are never handled here.
+    if (trimmed.startsWith(SUBSCRIPTION_PREFIX)) {
+      throw new SubscriptionEnvelopeError(envName);
     }
 
     return new Secret(trimmed);

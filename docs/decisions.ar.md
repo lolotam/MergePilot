@@ -880,3 +880,18 @@
 **إجابة صاحب المشروع (اختياره):** «اتنين زي Xiaomi (Recommended)» و «الدولي بس (Recommended)».
 
 **التنفيذ:** المزوّدين `minimax` و `minimax-coding-plan` على `https://api.minimax.io/v1` (متوافق مع OpenAI)، والموديل الافتراضي `MiniMax-M3.1-Flash`. الطلب بيبعت دايمًا `reasoning_split: true` علشان التفكير يطلع بره الرد، و `stream_options.include_usage` علشان الاستهلاك الحقيقي يتحسب. كتلة `<think>` في أول الرد (موديلات M2.x) بتتشال قبل قراءة الـ JSON. `minimax-coding-plan` بيتعامل زي `zai-coding`: صرف إضافي صفر، ورقم «لو كان API» محسوب من نفس الموديل تحت `minimax` ([ADR-0024](adr/0024-api-equivalent-cost.md)). مفيش migration.
+
+## الدفعة 23 — 2026-10-21
+
+### س56: الـ GitHub Action يعمل إيه مع بيانات دخول اشتراك من الداشبورد؟
+
+**الخلفية:** بعد [ADR-0037](adr/0037-subscription-refresh-ownership.md) مفيش حد بيجدّد توكن الاشتراك جوه الـ Action، لأن الـ Action مالوش مكان يحفظ فيه الـ refresh token الجديد. فلو حد حط envelope الاشتراك (`mergepilot:oauth:v1:...`) في متغيّر زي `ANTHROPIC_API_KEY`، كان بيشتغل لحد ما التوكن يخلص (حوالي 8 ساعات لـ Claude) وبعدين يقع بخطأ 401 مش واضح.
+
+**الاختيارات:**
+1. يرفضها برسالة واضحة: الـ Action بياخد مفاتيح API بس، أو `claude-code` بـ `CLAUDE_CODE_OAUTH_TOKEN`، والاشتراكات مكانها الـ GitHub App. Google Antigravity مش هيشتغل في الـ Action خالص.
+2. توثيق بس من غير كود.
+3. تقبلها لحد ما التوكن ينتهي، وبعدها رسالة واضحة.
+
+**إجابة صاحب المشروع (اختياره):** «يرفضها برسالة واضحة (مُقترح)»
+
+**التنفيذ:** `EnvCredentialStore.resolve` بيرفض أي قيمة بتبدأ بـ `mergepilot:oauth:v1:` من غير ما يفك الـ envelope، برسالة ثابتة فيها اسم المتغيّر والبدائل ومن غير القيمة. الـ fallback اللي متغيّره فيه envelope بيتخطّى بنفس السبب. [ADR-0038](adr/0038-action-rejects-subscription-envelopes.md).

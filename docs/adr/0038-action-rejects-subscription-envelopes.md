@@ -1,6 +1,6 @@
 # ADR-0038: The GitHub Action rejects subscription envelopes
 
-**Date:** 2026-10-21 · **Status:** proposed · **Follows:** ADR-0037 (subscription refresh ownership) · **Amends:** ADR-0032 item 12 · **Related:** ADR-0006, ADR-0020
+**Date:** 2026-10-21 · **Status:** accepted (decisions log س56) · **Follows:** ADR-0037 (subscription refresh ownership) · **Amends:** ADR-0032 item 12 · **Related:** ADR-0006, ADR-0020
 
 ## Context
 

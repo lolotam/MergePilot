@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MergePilotConfigSchema, type MergePilotConfig } from '../config/schema.js';
-import { EnvCredentialStore } from '../credentials/store.js';
+import { EnvCredentialStore, SubscriptionEnvelopeError } from '../credentials/store.js';
+import { encodeSubscription } from '../credentials/subscription.js';
 import type { GenerateOptions, StreamChunk } from '../llm/types.js';
 import { FallbackChain } from '../review/fallback.js';
 import { modelFromAdapter, type ReviewModel } from '../review/model.js';
@@ -8,11 +9,14 @@ import { runReview } from '../review/pipeline.js';
 import { OpenAICompatibleAdapter } from './compatible/adapter.js';
 import { createReviewModel, CUSTOM_BASE_URL_MISSING, resolveReviewSecrets } from './factory.js';
 import { OpenAIAdapter } from './openai/adapter.js';
+import { SubscriptionAdapter } from './subscription/adapter.js';
 
 const CWD = '/test/workspace';
 const ANSWER = '{"summary":"ok","findings":[]}';
 /** An exact fallback key in a format no pattern recognises, built at runtime. */
 const FALLBACK_KEY = ['zq', 'x9'.repeat(8), 'mn'].join('');
+/** An unexpired subscription credential, as the dashboard vault stores it. */
+const OAUTH = { type: 'oauth' as const, access: 'access-tok-000', refresh: 'refresh-tok-000', expires: Date.now() + 3_600_000 };
 
 function config(input: Record<string, unknown>): MergePilotConfig {
   return MergePilotConfigSchema.parse({ language: 'en', ...input });
@@ -88,6 +92,34 @@ describe('fallback keys take part in redaction', () => {
     if (result.status === 'completed') {
       expect(result.skippedFallbacks).toEqual([{ label: 'xai:grok-4', reason: expect.stringContaining('XAI_API_KEY') }]);
     }
+  });
+
+  it('fails a review whose primary variable holds a subscription envelope, before any model call (ADR-0038)', async () => {
+    const stream = vi.spyOn(SubscriptionAdapter.prototype, 'stream');
+    const store = new EnvCredentialStore({ ANTHROPIC_API_KEY: encodeSubscription('anthropic', OAUTH) });
+    const cfg = config({ provider: 'anthropic', model: 'claude-sonnet-4-5' });
+
+    await expect(resolveReviewSecrets(cfg, store)).rejects.toThrow(/ANTHROPIC_API_KEY holds a MergePilot dashboard subscription sign-in/);
+    await expect(createReviewModel(cfg, store, { cwd: CWD })).rejects.toBeInstanceOf(SubscriptionEnvelopeError);
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it('skips a fallback whose variable holds a subscription envelope and discloses the envelope reason', async () => {
+    vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(() => answer());
+    const store = new EnvCredentialStore({ OPENAI_API_KEY: 'k1', XAI_API_KEY: encodeSubscription('xai', OAUTH) });
+    const cfg = config({
+      provider: 'openai',
+      model: 'gpt-5',
+      fallback: [{ provider: 'xai', model: 'grok-4' }],
+      review: { verify: false },
+    });
+    const model = await createReviewModel(cfg, store, { cwd: CWD });
+
+    expect(model.fallbacks).toBeUndefined();
+    expect(model.skippedFallbacks).toEqual([
+      { label: 'xai:grok-4', reason: expect.stringMatching(/^XAI_API_KEY holds a MergePilot dashboard subscription sign-in/) },
+    ]);
+    expect(model.skippedFallbacks?.[0]?.reason).not.toContain(OAUTH.refresh);
   });
 
   it('resolveReviewSecrets returns the primary and present fallback keys, and allows a keyless custom primary', async () => {

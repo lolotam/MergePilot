@@ -1,6 +1,6 @@
 import type { MergePilotConfig } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
-import { credentialEnvName, type AnyCredentialStore } from '../credentials/store.js';
+import { credentialEnvName, SubscriptionEnvelopeError, type AnyCredentialStore } from '../credentials/store.js';
 import { isSubscriptionProvider } from '../credentials/subscription.js';
 import { failureKind, LlmFailure } from '../llm/failure.js';
 import type { ReviewModel, SkippedFallback } from '../review/model.js';
@@ -119,8 +119,11 @@ export async function resolveFallbacks(
     let key: Secret | undefined;
     try {
       key = await resolveKey(store, entry.provider);
-    } catch {
-      resolved.skipped.push({ label, reason: `no API key is configured (${credentialEnvName(entry.provider)})` });
+    } catch (error) {
+      const reason = error instanceof SubscriptionEnvelopeError
+        ? error.message
+        : `no API key is configured (${credentialEnvName(entry.provider)})`;
+      resolved.skipped.push({ label, reason });
       continue;
     }
     if (key) resolved.secrets.push(key);
