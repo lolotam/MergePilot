@@ -140675,7 +140675,7 @@ var DESIGN_REVIEW_SECTION = `DESIGN REVIEW: most changed lines in this call are 
 - contradictions between sections of the document, or with an ADR it cites;
 - an API or projection field that a later section relies on but no section defines;
 - an open question that another section already treats as decided.
-Anchor each finding on the changed line that states or omits the rule. A design gap that will ship as a data-integrity or money bug is "high", even though no code exists yet.`;
+Anchor each finding on the changed line that states or omits the rule. A design gap that will ship as a data-integrity or money bug is "high" when the quoted document text shows the gap, even though no code exists yet.`;
 
 var OPEN_FINDINGS_MAX = 30;
 var OPEN_FINDING_BODY_MAX_CHARS = 300;

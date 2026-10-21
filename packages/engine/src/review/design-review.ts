@@ -75,5 +75,6 @@ unique key on every foreign-key target;
 - an API or projection field that a later section relies on but no section defines;
 - an open question that another section already treats as decided.
 Anchor each finding on the changed line that states or omits the rule. A design gap that will \
-ship as a data-integrity or money bug is "high", even though no code exists yet.`;
+ship as a data-integrity or money bug is "high" when the quoted document text shows the gap, even \
+though no code exists yet.`;
 
