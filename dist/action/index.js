@@ -195982,12 +195982,12 @@ async function runCitedLookups(reader, reviewed, exclude, prBody) {
       }
     }
     await reader.run(paths);
-    const named = [];
     for (const id of ids) {
+      const named = [];
       for (const path12 of await resolveId(id))
         await select(path12, id.source, named);
+      await reader.run(named);
     }
-    await reader.run(named);
   };
   const patches = reviewed.map((file2) => ({ file: file2, lines: hunkLines(file2.patch ?? "") }));
   await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.added, source: { kind: "added-line", file: file2 } })));

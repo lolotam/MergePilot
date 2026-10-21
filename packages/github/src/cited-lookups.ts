@@ -182,9 +182,10 @@ export async function runCitedLookups(
   };
 
   /**
-   * One source tier: its explicit paths are read first, then its ADR and spec ids are resolved and
-   * read, so the listings an id needs never take the read an explicit path needs. A bare root name
-   * keeps its place in citation order (and in the lookup limit) and checks the one root listing.
+   * One source tier: its explicit paths are read first, then its ADR and spec ids are resolved one
+   * by one, each id's file read right after its own listing and before the next id is resolved, so
+   * a listing never takes the read an explicit path or an earlier id needs. A bare root name keeps
+   * its place in citation order (and in the lookup limit) and checks the one root listing.
    */
   const runTier = async (texts: ReadonlyArray<{ text: string; source: CitationSource }>): Promise<void> => {
     const paths: Lookup[] = [];
@@ -210,11 +211,11 @@ export async function runCitedLookups(
       }
     }
     await reader.run(paths);
-    const named: Lookup[] = [];
     for (const id of ids) {
+      const named: Lookup[] = [];
       for (const path of await resolveId(id)) await select(path, id.source, named);
+      await reader.run(named);
     }
-    await reader.run(named);
   };
 
   const patches = reviewed.map((file) => ({ file, lines: hunkLines(file.patch ?? '') }));
