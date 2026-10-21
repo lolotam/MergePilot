@@ -153,6 +153,7 @@ export async function recoverReviewTruncation(
         summary: batchResult.merged.summary,
         findings: batchResult.merged.findings,
         droppedInvalid: 0,
+        ...(batchResult.merged.withheld?.length ? { withheld: batchResult.merged.withheld } : {}),
       };
     }
   }

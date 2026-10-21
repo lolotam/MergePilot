@@ -20,6 +20,7 @@ import { combineUsage, reviewJsonSchema, type ReviewableFileWithPatch, type Rule
 import type { SpendTracker } from './spend.js';
 import { recoverReviewTruncation } from './truncation.js';
 import type { Finding } from './types.js';
+import type { WithheldItem } from './withheld.js';
 
 export interface ReviewPassContext {
   config: MergePilotConfig;
@@ -50,6 +51,8 @@ export type ReviewPassResult =
       ok: true;
       summary: string;
       findings: Finding[];
+      /** What the model noticed and did not report (ADR-0042); absent when it withheld nothing. */
+      withheld?: WithheldItem[] | undefined;
       droppedInvalid: number;
       totalUsage: TokenUsage | undefined;
       incompleteReasons: string[];
@@ -175,6 +178,7 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     ok: true,
     summary: parsed.summary,
     findings: parsed.findings,
+    ...(parsed.withheld ? { withheld: parsed.withheld } : {}),
     droppedInvalid: parsed.droppedInvalid,
     totalUsage: recovery.totalUsage,
     incompleteReasons: parsed.findingsMissing && !parsed.acceptedAsEmpty
@@ -221,6 +225,7 @@ export async function runBatchedPass(
     ok: true,
     summary: result.merged.summary,
     findings: result.merged.findings,
+    ...(result.merged.withheld ? { withheld: result.merged.withheld } : {}),
     droppedInvalid: 0,
     totalUsage: result.totalUsage,
     incompleteReasons: result.incompleteReasons,

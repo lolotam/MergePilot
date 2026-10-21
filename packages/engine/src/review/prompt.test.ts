@@ -258,6 +258,14 @@ describe('buildReviewPrompt', () => {
     expect(user).toContain('### a.ts');
     expect(user).toContain('### b.ts');
   });
+
+  // ── Withheld problems (ADR-0042) ─────────────────────────────────────────
+
+  it.each(['en', 'ar'])('in %s, names the withheld list and what a summary must do with a problem it names', (language) => {
+    const { system } = buildReviewPrompt({ ...MINIMAL_INPUT, language });
+    expect(system).toContain('"withheld"');
+    expect(system).toContain('it must be a finding or appear in "withheld" with a reason');
+  });
 });
 
 describe('buildReviewPrompt — review skill (ADR-0034)', () => {
