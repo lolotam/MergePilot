@@ -300,6 +300,7 @@ describe('buildReviewPrompt — pattern sweep and rules check (ADR-0039)', () =>
     expect(system).toContain('PATTERN SWEEP:');
     expect(system).toContain('"Also at:"');
     expect(system).toContain('Do not stop after the first example');
+    expect(system).toContain('the label "Also at:" stays in English whatever language the body uses');
   });
 
   it('checks the owner rules against every changed file they apply to', () => {

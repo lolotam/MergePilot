@@ -266,8 +266,8 @@ PATTERN SWEEP: when a defect comes from a pattern (a broken rule, a missing chec
 audit write, a missing ownership or tenant filter, unvalidated input), look for every other place \
 in the shown diff where the same pattern occurs before you conclude. Report one finding for the \
 root cause, anchored on the first place, and end its body with a line that starts with "Also at:" \
-followed by the other places as "path:line" (numbers printed in the patches), separated by commas. \
-Do not stop after the first example, and do not report each place as its own finding.`;
+followed by the other places as "path:line" (numbers printed in the patches), separated by commas; \
+the label "Also at:" stays in English whatever language the body uses. Do not stop after the first example, and do not report each place as its own finding.`;
 
 /** The owner's rules apply to every changed file they cover, not to the first one. */
 const RULES_CHECK = `\
