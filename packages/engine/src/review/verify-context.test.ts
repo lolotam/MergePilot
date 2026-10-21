@@ -166,6 +166,25 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).not.toContain('filler0 ');
   });
 
+  it('keeps every "Also at:" place of one large hunk when their wide windows do not all fit', () => {
+    // Three places far apart in one 402-line hunk: their wide windows together pass the cap, and
+    // one window cut from the top would drop the last place.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const bigPatch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+unlogged();`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/big.ts:50, src/big.ts:200, src/big.ts:402' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/big.ts', patch: bigPatch },
+      ],
+      maxCodeTokens: 400,
+    });
+    expect(user).toContain('50 + const filler48 = 48;');
+    expect(user).toContain('200 + const filler198 = 198;');
+    expect(user).toContain('402 + unlogged();');
+  });
+
   it('reads the "Also at:" places of a body', () => {
     expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.')).toEqual([
       { path: 'src/a.ts', line: 3 },

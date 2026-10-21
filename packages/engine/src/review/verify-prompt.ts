@@ -122,12 +122,15 @@ function lineNumberOf(line: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-/** The hunk header and the lines within NEAR_LINES of a finding line; the rest is marked as cut. */
-function windowOf(chunk: Chunk): string {
+/** The first, narrow window: a few lines around each place, so every listed place fits first. */
+const PLACE_LINES = 3;
+
+/** The hunk header and the lines within `radius` of a finding line; the rest is marked as cut. */
+function windowOf(chunk: Chunk, radius: number): string {
   const [header = '', ...body] = chunk.text.split('\n');
   const kept = body.filter((line) => {
     const number = lineNumberOf(line);
-    return number !== undefined && chunk.findingLines.some((at) => Math.abs(at - number) <= NEAR_LINES);
+    return number !== undefined && chunk.findingLines.some((at) => Math.abs(at - number) <= radius);
   });
   return kept.length === body.length ? chunk.text : [header, ...kept, CUT_MARKER].join('\n');
 }
@@ -148,14 +151,16 @@ function show(chunk: Chunk, text: string, left: number): number {
 }
 
 /**
- * Fills the cap in three passes: first a window around every finding line, so one large hunk cannot
- * use up the budget and leave another finding without its own evidence; then the whole hunks near a
- * finding; then everything else in file order.
+ * Fills the cap in four passes: first a few lines around every finding line and "Also at:" place,
+ * so no listed place is cut because another one sits earlier in the same hunk; then a wider window
+ * around each, so one large hunk cannot use up the budget and leave another finding without its own
+ * evidence; then the whole hunks near a finding; then everything else in file order.
  */
 function fitChunks(chunks: Chunk[], maxTokens: number): void {
   let left = maxTokens;
   const near = chunks.filter((c) => c.findingLines.length > 0);
-  for (const chunk of near) left -= show(chunk, windowOf(chunk), left);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk, PLACE_LINES), left);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk, NEAR_LINES), left);
   for (const chunk of near) left -= show(chunk, chunk.text, left);
   for (const chunk of chunks.filter((c) => c.findingLines.length === 0)) left -= show(chunk, chunk.text, left);
 }

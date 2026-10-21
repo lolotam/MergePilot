@@ -141798,11 +141798,12 @@ function lineNumberOf(line) {
   const match3 = /^\s+(\d+) /.exec(line);
   return match3 ? Number(match3[1]) : void 0;
 }
-function windowOf(chunk) {
+var PLACE_LINES = 3;
+function windowOf(chunk, radius) {
   const [header2 = "", ...body] = chunk.text.split("\n");
   const kept = body.filter((line) => {
     const number4 = lineNumberOf(line);
-    return number4 !== void 0 && chunk.findingLines.some((at) => Math.abs(at - number4) <= NEAR_LINES);
+    return number4 !== void 0 && chunk.findingLines.some((at) => Math.abs(at - number4) <= radius);
   });
   return kept.length === body.length ? chunk.text : [header2, ...kept, CUT_MARKER].join("\n");
 }
@@ -141823,7 +141824,9 @@ function fitChunks(chunks, maxTokens) {
   let left = maxTokens;
   const near = chunks.filter((c) => c.findingLines.length > 0);
   for (const chunk of near)
-    left -= show(chunk, windowOf(chunk), left);
+    left -= show(chunk, windowOf(chunk, PLACE_LINES), left);
+  for (const chunk of near)
+    left -= show(chunk, windowOf(chunk, NEAR_LINES), left);
   for (const chunk of near)
     left -= show(chunk, chunk.text, left);
   for (const chunk of chunks.filter((c) => c.findingLines.length === 0))
