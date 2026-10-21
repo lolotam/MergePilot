@@ -22,7 +22,7 @@ import {
   retryAddsAnswerRoom,
   type SpendTracker,
 } from './spend.js';
-import type { ContextFile } from './prompt.js';
+import type { ContextFile, PathInstruction } from './prompt.js';
 import type { Finding } from './types.js';
 import {
   applyVerdicts,
@@ -39,6 +39,14 @@ export interface VerifyPassInput {
   contextFiles?: readonly ContextFile[] | undefined;
   /** Estimated tokens of code the verifier is shown in total (ADR-0028: `review.batchTokens`). */
   maxCodeTokens?: number | undefined;
+  /**
+   * The owner's rules files, already redacted, shown when a finding carries a ruleRef (ADR-0044).
+   */
+  rulesFiles?: readonly { path: string; content: string }[] | undefined;
+  /**
+   * Path instructions; those whose glob matches a changed file are shown with the rules files.
+   */
+  pathInstructions?: readonly PathInstruction[] | undefined;
   model: ReviewModel;
   spend: SpendTracker;
   knownSecrets: readonly Secret[];
@@ -73,6 +81,8 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     files: input.files,
     contextFiles: input.contextFiles,
     maxCodeTokens: input.maxCodeTokens,
+    rulesFiles: input.rulesFiles,
+    pathInstructions: input.pathInstructions,
   });
   const promptTokens = estimateTokens(verifyPrompt.system + verifyPrompt.user);
   // The answer has one verdict per finding, so its budget grows with them (ADR-0033).

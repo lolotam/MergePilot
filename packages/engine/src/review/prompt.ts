@@ -113,7 +113,7 @@ function wrapUntrusted(label: string, content: string): string {
  * `.mergepilot.yml`), so the model must apply them — unlike PR text and patches, which it must
  * never obey. They still cannot change the output contract or the findings limit.
  */
-function wrapCriteria(label: string, content: string): string {
+export function wrapCriteria(label: string, content: string): string {
   const safeLabel = escapeLabel(label);
   return `<<<REVIEW_CRITERIA:${safeLabel}>>>\n${escapeDelimiters(content)}\n<<<END REVIEW_CRITERIA:${safeLabel}>>>`;
 }
@@ -172,7 +172,7 @@ export function numberLines(content: string): string {
 }
 
 /** Path instructions whose glob matches at least one changed file. */
-function matchingPathInstructions(
+export function matchingPathInstructions(
   pathInstructions: PathInstruction[],
   filePaths: string[],
 ): PathInstruction[] {

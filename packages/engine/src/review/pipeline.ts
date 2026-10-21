@@ -385,6 +385,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       files: redactedReviewableFiles,
       contextFiles: context.sentFiles(),
       maxCodeTokens: limits.batchTokens,
+      rulesFiles: redactedRulesFiles,
+      pathInstructions: reviewCfg.pathInstructions,
       model,
       spend,
       knownSecrets,
