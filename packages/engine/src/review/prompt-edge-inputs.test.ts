@@ -6,12 +6,17 @@ import { buildReviewPrompt, type PromptInput } from './prompt.js';
 
 const FOLLOW_UP: FollowUp = { sinceSha: 'abcdef1', openFindings: [] };
 
-function system(language: string, followUp?: FollowUp, batch?: PromptInput['batch']): string {
+function system(
+  language: string,
+  followUp?: FollowUp,
+  batch?: PromptInput['batch'],
+  rulesFiles: PromptInput['rulesFiles'] = [],
+): string {
   const input: PromptInput = {
     language,
     maxFindings: 5,
     pr: { title: 'T', body: 'B', ...(followUp ? { followUp } : {}) },
-    rulesFiles: [],
+    rulesFiles,
     pathInstructions: [],
     files: [{ path: 'src/a.ts', patch: '@@ -1,1 +1,2 @@\n a\n+b' }],
     ...(batch ? { batch } : {}),
@@ -43,12 +48,14 @@ describe('edge inputs and fix re-check (ADR-0043)', () => {
     expect(system('en', undefined, { number: 1, count: 2, manifest: 'x' })).toContain('EDGE INPUTS:');
   });
 
-  it('puts the edge-inputs section after the checklist and before the severity scale', () => {
-    const prompt = system('en');
-    expect(prompt.indexOf('CHECKLIST:')).toBeLessThan(prompt.indexOf('EDGE INPUTS:'));
-    // After ADR-0039's pattern sweep, so the sweep still reads as part of the method.
-    expect(prompt.indexOf('PATTERN SWEEP:')).toBeLessThan(prompt.indexOf('EDGE INPUTS:'));
-    expect(prompt.indexOf('EDGE INPUTS:')).toBeLessThan(prompt.indexOf('SEVERITY is impact'));
+  it('puts the edge-inputs section after the checklist, the pattern sweep and the rules check', () => {
+    // A rules file makes the prompt carry RULES CHECK (ADR-0039), so every marker below is present.
+    const prompt = system('en', undefined, undefined, [{ path: 'AGENTS.md', content: 'Every refusal writes a log row.' }]);
+    const order = ['CHECKLIST:', 'PATTERN SWEEP:', 'RULES CHECK:', 'EDGE INPUTS:', 'SEVERITY is impact'].map((marker) =>
+      prompt.indexOf(marker),
+    );
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
   it('gives a follow-up review the edge-inputs section too', () => {
