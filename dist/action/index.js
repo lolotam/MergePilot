@@ -141228,11 +141228,12 @@ async function executeBatchedReview(input2) {
 
 var KIND_ORDER = {
   "changed-file": 0,
-  "test-pair": 1,
-  cited: 2,
-  import: 3,
-  "build-config": 4,
-  "pr-change": 5
+  cited: 1,
+  referenced: 2,
+  "test-pair": 3,
+  import: 4,
+  "build-config": 5,
+  "pr-change": 6
 };
 var CONTEXT_FILE_MAX_TOKENS = 8e3;
 var MAX_SCALED_CONTEXT_TOKENS = 4e5;
@@ -141327,6 +141328,8 @@ var ContextPlan = class {
   opts;
   files;
   prFiles;
+  /** The offered paths that came in by citation or reference (ADR-0041). */
+  citedPaths;
   batchContext;
   sent = /* @__PURE__ */ new Map();
   /** Context skipped because the file's own patch was in the call: shown, so never left out. */
@@ -141337,6 +141340,7 @@ var ContextPlan = class {
     const on = opts.contextTokens > 0;
     this.files = on ? prepareRepository(offered, { ...opts, contextTokens: this.wholeCap() }) : [];
     this.prFiles = on ? preparePullRequest(offered, opts) : [];
+    this.citedPaths = new Set(offered.filter((f3) => f3.kind === "cited" || f3.kind === "referenced").map((f3) => f3.path));
   }
   /**
    * The context of a call reviewing `paths`, in send order, within `maxTokens`; not recorded. PR
@@ -141417,9 +141421,13 @@ var ContextPlan = class {
     const sentPrPaths = sent.filter((f3) => f3.source === "pull-request").map((f3) => f3.path);
     const sentRepositoryPaths = sent.filter((f3) => f3.source !== "pull-request").map((f3) => f3.path);
     const leftOutOf = (files) => files.filter((f3) => !this.sent.has(blockKey(f3)) && !this.shownAsPatch.has(f3.path)).map((f3) => f3.path);
+    const reviewed = new Set(this.opts.reviewedPaths);
+    const citedSent = sentRepositoryPaths.filter((p) => this.citedPaths.has(p));
+    const cited = [...citedSent.filter((p) => !reviewed.has(p)), ...citedSent.filter((p) => reviewed.has(p))];
     return {
       sent: sentRepositoryPaths,
       leftOut: leftOutOf(this.files),
+      ...cited.length > 0 ? { cited } : {},
       ...this.prFiles.length > 0 ? { pr: { sent: sentPrPaths, leftOut: leftOutOf(this.prFiles) } } : {}
     };
   }
@@ -194201,7 +194209,13 @@ function directoryFilesOf(data) {
     return null;
   return data.flatMap((item) => {
     const entry = item;
-    return entry.type === "file" && typeof entry.path === "string" ? [entry.path] : [];
+    if (typeof entry.path !== "string")
+      return [];
+    if (entry.type === "file")
+      return [entry.path];
+    if (entry.type === "dir")
+      return [`${entry.path}/`];
+    return [];
   });
 }
 var MAX_FILE_BYTES = 100 * 1024;
@@ -195431,17 +195445,30 @@ function renderContextNote(context, isArabic) {
   ].filter((line) => line !== void 0);
   return lines.length > 0 ? lines.join("\n>\n") : void 0;
 }
+function citedOf(context, isArabic) {
+  const unique = [...new Set(context.cited ?? [])];
+  if (unique.length === 0)
+    return void 0;
+  const separator = isArabic ? "\u060C " : ", ";
+  const shown2 = unique.slice(0, 5).map((path12) => `\`${neutralize2(path12.replace(/`/g, ""))}\``);
+  const rest = unique.length - shown2.length;
+  const names = rest > 0 ? `${shown2.join(separator)}${isArabic ? ` \u0648 ${rest} \u063A\u064A\u0631\u0647\u0627` : ` +${rest} more`}` : shown2.join(separator);
+  return { count: unique.length, names };
+}
 function repositoryContextLine(context, isArabic) {
   const sent = new Set(context.sent).size;
   const leftOut = new Set(context.leftOut).size;
   if (sent === 0 && leftOut === 0)
     return void 0;
+  const cited = citedOf(context, isArabic);
   if (isArabic) {
+    const named2 = cited ? ` (\u0645\u0646\u0647\u0627 ${cited.count} \u0645\u0630\u0643\u0648\u0631\u0629 \u0641\u064A \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A \u0623\u0648 \u0648\u0635\u0641 \u0627\u0644\u0640 PR: ${cited.names})` : "";
     const left2 = leftOut > 0 ? `\u060C \u0648\u063A\u064A\u0631 \u0627\u0644\u0645\u064F\u0631\u0633\u0644\u0629 ${leftOut} (\u062A\u062C\u0627\u0648\u0632\u062A \`review.contextTokens\` \u0623\u0648 \u062D\u062F \u0627\u0644\u0642\u0631\u0627\u0621\u0629)` : "";
-    return `> \u2139\uFE0F \u0633\u064A\u0627\u0642 \u0627\u0644\u0645\u0633\u062A\u0648\u062F\u0639: \u0627\u0644\u0645\u0644\u0641\u0627\u062A \u0627\u0644\u0645\u064F\u0631\u0633\u0644\u0629 ${sent}${left2}.`;
+    return `> \u2139\uFE0F \u0633\u064A\u0627\u0642 \u0627\u0644\u0645\u0633\u062A\u0648\u062F\u0639: \u0627\u0644\u0645\u0644\u0641\u0627\u062A \u0627\u0644\u0645\u064F\u0631\u0633\u0644\u0629 ${sent}${named2}${left2}.`;
   }
+  const named = cited ? ` (${cited.count} cited by the change or the PR description: ${cited.names})` : "";
   const left = leftOut > 0 ? `, ${leftOut} left out (over \`review.contextTokens\` or the read limit)` : "";
-  return `> \u2139\uFE0F Repository context: ${sent} ${sent === 1 ? "file" : "files"} sent${left}.`;
+  return `> \u2139\uFE0F Repository context: ${sent} ${sent === 1 ? "file" : "files"} sent${named}${left}.`;
 }
 function pullRequestContextLine(pr, isArabic) {
   if (!pr)
@@ -195820,8 +195847,157 @@ function isCitedPath(path12) {
   return segments.every((segment) => segment !== "." && segment !== ".." && (/^[\p{L}\p{N}_@.-]+$/u.test(segment) || /^\([\p{L}\p{N}_@.-]+\)$/u.test(segment) || /^\[(?:\.\.\.)?[\p{L}\p{N}_-]+\]$/u.test(segment) || /^\[\[\.\.\.[\p{L}\p{N}_-]+\]\]$/u.test(segment)));
 }
 
-var MAX_CONTEXT_READS = 120;
 var MAX_CITED_LOOKUPS = 20;
+var MAX_PR_BODY_CITATION_CHARS = 4e3;
+var DOC_EXTENSIONS2 = /* @__PURE__ */ new Set(["md", "mdx", "txt", "rst", "adoc"]);
+var CODE_EXTENSIONS = /* @__PURE__ */ new Set([
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "py",
+  "go",
+  "rs",
+  "java",
+  "kt",
+  "rb",
+  "php",
+  "cs",
+  "swift",
+  "sql"
+]);
+var CITATION_RE = /\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])|\b[Ss]pecs?[- /#]{0,2}(\d{3})(?!\d)/gu;
+var isSafeListedPath = (path12) => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>`]/u.test(path12);
+var extensionOf = (path12) => {
+  const base = path12.split("/").pop() ?? "";
+  return base.includes(".") ? (base.split(".").pop() ?? "").toLowerCase() : "";
+};
+function isSpecDirOf(dir, id) {
+  if (!dir.endsWith("/"))
+    return false;
+  const name = dir.split("/").filter(Boolean).pop() ?? "";
+  return name.startsWith(`${id}-`);
+}
+function citationKind(source, path12) {
+  if (source.kind === "pr-body") {
+    return { kind: "referenced", reason: "cited by the pull request description" };
+  }
+  const file2 = source.file;
+  if (DOC_EXTENSIONS2.has(extensionOf(file2.path)) && CODE_EXTENSIONS.has(extensionOf(path12))) {
+    return { kind: "referenced", reason: `named in ${file2.path}` };
+  }
+  if (source.kind === "context-line") {
+    return { kind: "referenced", reason: `named near the change in ${file2.path}` };
+  }
+  return { kind: "cited", reason: `cited by ${file2.path}` };
+}
+function hunkLines(patch) {
+  const added = [];
+  const context = [];
+  let inHunk = false;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@ "))
+      inHunk = true;
+    if (!inHunk)
+      continue;
+    if (line.startsWith("+"))
+      added.push(line.slice(1));
+    else if (line.startsWith(" "))
+      context.push(line.slice(1));
+  }
+  return { added: added.join("\n"), context: context.join("\n") };
+}
+async function runCitedLookups(reader, reviewed, exclude, prBody) {
+  const selected = /* @__PURE__ */ new Set();
+  const omitted = /* @__PURE__ */ new Set();
+  let adrs;
+  let docsSpecs;
+  let rootSpecs;
+  let rootFiles;
+  const select = async (path12, source, lookups) => {
+    if (!isContextPathAllowed(path12, { exclude, isSensitivePath }))
+      return;
+    if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
+      if (!omitted.has(path12) && (path12.includes("/") || rootFiles?.has(path12))) {
+        omitted.add(path12);
+        reader.leftOut.push(`${path12} (cited lookup limit)`);
+      }
+      return;
+    }
+    if (!path12.includes("/")) {
+      rootFiles ??= new Set(await reader.list(""));
+      if (!rootFiles.has(path12))
+        return;
+    }
+    selected.add(path12);
+    const { kind, reason } = citationKind(source, path12);
+    lookups.push({
+      candidates: [path12],
+      kind,
+      reason,
+      forPath: source.kind === "pr-body" ? reviewed[0].path : source.file.path,
+      ...source.kind === "pr-body" ? { forPaths: reviewed.map((f3) => f3.path) } : {},
+      disclose: true
+    });
+  };
+  const resolveId = async (id) => {
+    if (id.adr !== void 0) {
+      adrs ??= (await reader.list("docs/adr")).sort();
+      return adrs.filter((path12) => path12.startsWith(`docs/adr/${id.adr}-`) && path12.endsWith(".md") && isSafeListedPath(path12));
+    }
+    const specFilesIn = (dirs) => dirs.filter((dir) => isSpecDirOf(dir, id.spec)).map((dir) => `${dir}spec.md`).filter(isSafeListedPath);
+    docsSpecs ??= (await reader.list("docs/specs")).sort();
+    const found = specFilesIn(docsSpecs);
+    if (found.length > 0)
+      return found;
+    rootSpecs ??= (await reader.list("specs")).sort();
+    return specFilesIn(rootSpecs);
+  };
+  const runTier = async (texts) => {
+    const paths = [];
+    const ids = [];
+    for (const { text, source } of texts) {
+      for (const match3 of text.matchAll(CITATION_RE)) {
+        if (match3[1] !== void 0) {
+          ids.push({ adr: match3[1], source });
+          continue;
+        }
+        if (match3[3] !== void 0) {
+          ids.push({ spec: match3[3], source });
+          continue;
+        }
+        if (text[match3.index + match3[0].length] === "(")
+          continue;
+        let path12 = match3[2].split("](").pop();
+        for (const [open4, close] of [["(", ")"], ["[", "]"]]) {
+          while (path12.startsWith(open4) && path12.split(open4).length > path12.split(close).length)
+            path12 = path12.slice(1);
+        }
+        if (isCitedPath(path12))
+          await select(path12, source, paths);
+      }
+    }
+    await reader.run(paths);
+    for (const id of ids) {
+      const named = [];
+      for (const path12 of await resolveId(id))
+        await select(path12, id.source, named);
+      await reader.run(named);
+    }
+  };
+  const patches = reviewed.map((file2) => ({ file: file2, lines: hunkLines(file2.patch ?? "") }));
+  await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.added, source: { kind: "added-line", file: file2 } })));
+  await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.context, source: { kind: "context-line", file: file2 } })));
+  if (reviewed.length > 0) {
+    await runTier([{ text: (prBody ?? "").slice(0, MAX_PR_BODY_CITATION_CHARS), source: { kind: "pr-body" } }]);
+  }
+}
+
+var MAX_CONTEXT_READS = 120;
 var READ_CONCURRENCY2 = 8;
 var JS_EXTENSIONS = /* @__PURE__ */ new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
 var SOURCE_FOR_EMITTED = {
@@ -195943,58 +196119,6 @@ function importLookups(path12, content) {
     disclose: true
   }));
 }
-async function citedLookups(reader, reviewed, exclude) {
-  const lookups = [];
-  const selected = /* @__PURE__ */ new Set();
-  const omitted = /* @__PURE__ */ new Set();
-  let adrs;
-  let rootFiles;
-  for (const file2 of reviewed) {
-    let inHunk = false;
-    const added = (file2.patch ?? "").split("\n").filter((line) => {
-      if (line.startsWith("@@ "))
-        inHunk = true;
-      return inHunk && line.startsWith("+");
-    }).map((line) => line.slice(1)).join("\n");
-    const references = added.matchAll(/\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])/gu);
-    for (const match3 of references) {
-      let candidates;
-      if (match3[1]) {
-        if (adrs === void 0)
-          adrs = (await reader.list("docs/adr")).sort();
-        candidates = adrs.filter((path12) => path12.startsWith(`docs/adr/${match3[1]}-`) && path12.endsWith(".md"));
-      } else {
-        if (added[match3.index + match3[0].length] === "(")
-          continue;
-        let path12 = match3[2].split("](").pop();
-        for (const [open4, close] of [["(", ")"], ["[", "]"]]) {
-          while (path12.startsWith(open4) && path12.split(open4).length > path12.split(close).length)
-            path12 = path12.slice(1);
-        }
-        candidates = isCitedPath(path12) ? [path12] : [];
-      }
-      for (const path12 of candidates) {
-        if (!isContextPathAllowed(path12, { exclude, isSensitivePath }))
-          continue;
-        if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
-          if (!omitted.has(path12) && (path12.includes("/") || rootFiles?.has(path12))) {
-            omitted.add(path12);
-            reader.leftOut.push(`${path12} (cited lookup limit)`);
-          }
-          continue;
-        }
-        if (!path12.includes("/")) {
-          rootFiles ??= new Set(await reader.list(""));
-          if (!rootFiles.has(path12))
-            continue;
-        }
-        selected.add(path12);
-        lookups.push({ candidates: [path12], kind: "cited", reason: `cited by ${file2.path}`, forPath: file2.path, disclose: true });
-      }
-    }
-  }
-  return lookups;
-}
 async function inChunks(items, fn) {
   for (let i2 = 0; i2 < items.length; i2 += READ_CONCURRENCY2) {
     await Promise.all(items.slice(i2, i2 + READ_CONCURRENCY2).map(fn));
@@ -196067,7 +196191,7 @@ var ContextReader = class {
   }
   async lookUp(lookup) {
     for (const path12 of lookup.candidates) {
-      if (path12 === lookup.forPath)
+      if (path12 === lookup.forPath && (lookup.forPaths ?? []).every((p) => p === path12))
         return;
       if (this.known.has(path12)) {
         const content = this.known.get(path12);
@@ -196098,7 +196222,13 @@ var ContextReader = class {
       this.add(lookup, path12, content);
   }
   add(lookup, path12, content) {
-    this.found.push({ path: path12, content, reason: lookup.reason, kind: lookup.kind, forPaths: [lookup.forPath] });
+    this.found.push({
+      path: path12,
+      content,
+      reason: lookup.reason,
+      kind: lookup.kind,
+      forPaths: lookup.forPaths ?? [lookup.forPath]
+    });
   }
 };
 function isTestPath(path12) {
@@ -196162,8 +196292,8 @@ async function gatherRepositoryContext(client, params) {
     return pair ? [{ ...pair, kind: "test-pair", forPath: file2.path, disclose: false }] : [];
   });
   const imports = reviewed.flatMap((file2) => importLookups(file2.path, reader.known.get(file2.path) ?? patchNewSide(file2.patch ?? "")));
+  await runCitedLookups(reader, reviewed, params.exclude, params.prBody);
   await reader.run(pairs);
-  await reader.run(await citedLookups(reader, reviewed, params.exclude));
   await reader.run(imports);
   await reader.run(await buildWiringLookups(reader, reviewed));
   return { files: reader.found, leftOut: reader.leftOut };
@@ -196175,6 +196305,7 @@ function contextDisclosureOf(engine, gathererLeftOut, openFindings) {
     sent: engine?.sent ?? [],
     leftOut: [...engine?.leftOut ?? [], ...gathererLeftOut],
     ...engine?.pr ? { pr: engine.pr } : {},
+    ...engine?.cited && engine.cited.length > 0 ? { cited: engine.cited } : {},
     ...openFindings ? { openFindings } : {}
   };
 }
@@ -196298,7 +196429,8 @@ async function gatherReviewInputs(client, params) {
       exclude: config2.review.exclude,
       contextTokens,
       contextReads: config2.review.contextReads,
-      contextTokensPerFile: config2.review.contextTokensPerFile
+      contextTokensPerFile: config2.review.contextTokensPerFile,
+      prBody: params.prBody
     }),
     followUp ? gatherOpenFindings(client, {
       owner,
@@ -196425,7 +196557,7 @@ async function reviewPullRequest(ctx) {
     return { outcome: "skipped", detail: NOTHING_NEW_DETAIL, publish: { status: "skipped-no-changes" } };
   }
   const followUp = selection.mode === "incremental" ? { sinceSha: selection.sinceSha, prFiles, pullNumber, publisherLogin } : void 0;
-  const inputs = await gatherReviewInputs(client, { owner, repo, baseSha, headSha, config: config2, rulesFiles, files: filesToReview, followUp, log });
+  const inputs = await gatherReviewInputs(client, { owner, repo, baseSha, headSha, config: config2, rulesFiles, files: filesToReview, prBody, followUp, log });
   log?.("Running review...");
   const reviewResult = await runReview({
     config: config2,

@@ -74,7 +74,7 @@ describe('cited repository context', () => {
       ...modified('src/a.ts'), status: 'added',
       patch: `@@ -0,0 +1,3 @@\n+${junk.map((s) => `\`${s}\``).join(' ')}\n+docs/real.md\n+import './dep.js';`,
     }], { contextReads: 5 }));
-    expect(reads.map((r) => r.path)).toEqual(['src/a.test.ts', 'src/a.spec.ts', 'src/__tests__/a.test.ts', 'docs/real.md', 'src/dep.ts']);
+    expect(reads.map((r) => r.path)).toEqual(['docs/real.md', 'src/a.test.ts', 'src/a.spec.ts', 'src/__tests__/a.test.ts', 'src/dep.ts']);
     expect(result.files.map((f) => [f.path, f.kind])).toEqual([['docs/real.md', 'cited'], ['src/dep.ts', 'import']]);
     expect(result.leftOut).toEqual([]);
   });

@@ -112,10 +112,12 @@ describe('gatherRepositoryContext', () => {
       ...modified('src/a.ts'),
       patch: '@@ -1,2 +1,2 @@\n-docs/removed.md\n docs/unchanged.md\n+docs/ref.md ADR-0029 ADR 0029',
     }]));
-    expect(result.files.map((f) => f.kind)).toEqual(['changed-file', 'test-pair', 'cited', 'cited', 'cited', 'import']);
+    expect(result.files.map((f) => f.kind)).toEqual(['changed-file', 'cited', 'cited', 'cited', 'test-pair', 'import']);
     expect(result.files.find((f) => f.path === 'docs/ref.md')?.reason).toBe('cited by src/a.ts');
     expect(listings).toBe(1);
-    expect(reads.some((r) => /removed|unchanged|head-only/.test(r.path))).toBe(false);
+    // A removed line and a head-only reference are still not read; a context line is (ADR-0041).
+    expect(reads.some((r) => /removed|head-only/.test(r.path))).toBe(false);
+    expect(reads.findIndex((r) => r.path === 'docs/ref.md')).toBeLessThan(reads.findIndex((r) => r.path === 'docs/unchanged.md'));
     expect(reads.findIndex((r) => r.path === 'docs/ref.md')).toBeLessThan(reads.findIndex((r) => r.path === 'src/dep.ts'));
   });
 
