@@ -488,13 +488,17 @@ function ruleLine(finding: Finding, criteria: VerifyCriteria): string[] {
 
 /** The owner's rules for the verifier: shown only when a finding cites one (ADR-0044). */
 function buildCriteria(input: VerifyPromptInput): VerifyCriteria {
-  if (!input.findings.some((finding) => (finding.ruleRef ?? '').trim() !== '')) return noCriteria();
-  return buildVerifyCriteria(
-    input.rulesFiles ?? [],
-    input.pathInstructions ?? [],
-    input.files.map((f) => f.path),
-    input.maxCriteriaTokens ?? VERIFY_CRITERIA_TOKENS,
-  );
+  const ruleRefs = input.findings
+    .map((finding) => (finding.ruleRef ?? '').trim())
+    .filter((ruleRef) => ruleRef !== '');
+  if (ruleRefs.length === 0) return noCriteria();
+  return buildVerifyCriteria({
+    rulesFiles: input.rulesFiles ?? [],
+    pathInstructions: input.pathInstructions ?? [],
+    filePaths: input.files.map((f) => f.path),
+    ruleRefs,
+    maxTokens: input.maxCriteriaTokens ?? VERIFY_CRITERIA_TOKENS,
+  });
 }
 
 function buildVerifyUserPrompt(input: VerifyPromptInput, criteria: VerifyCriteria): string {

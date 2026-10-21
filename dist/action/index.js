@@ -141750,12 +141750,12 @@ var MIN_CUT_TOKENS = 200;
 function noCriteria() {
   return { blocks: [], files: [], cutFiles: [], globs: [], cutGlobs: [] };
 }
-function buildVerifyCriteria(rulesFiles, pathInstructions, filePaths, maxTokens) {
+function buildVerifyCriteria(input2) {
   const sources = [];
-  for (const rf of rulesFiles) {
+  for (const rf of input2.rulesFiles) {
     sources.push({ label: `RULES_FILE:${rf.path}`, content: rf.content, name: rf.path, kind: "file" });
   }
-  for (const pi of matchingPathInstructions([...pathInstructions], filePaths)) {
+  for (const pi of matchingPathInstructions([...input2.pathInstructions], input2.filePaths)) {
     sources.push({
       label: `PATH_INSTRUCTIONS:${pi.path}`,
       content: pi.instructions,
@@ -141768,8 +141768,8 @@ function buildVerifyCriteria(rulesFiles, pathInstructions, filePaths, maxTokens)
   const cutFiles = [];
   const globs = [];
   const cutGlobs = [];
-  let left = maxTokens;
-  for (const source of sources) {
+  let left = input2.maxTokens;
+  for (const source of citedFirst(sources, input2.ruleRefs)) {
     const full = wrapCriteria(source.label, source.content);
     const cost = estimateTokens(full);
     if (cost <= left) {
@@ -141784,12 +141784,21 @@ function buildVerifyCriteria(rulesFiles, pathInstructions, filePaths, maxTokens)
     const cutText = cutToTokens(source.content, left - overhead, CRITERIA_CUT_MARKER);
     const kept = cutText.split("\n").filter((line) => line !== CRITERIA_CUT_MARKER && line.trim() !== "");
     if (kept.length === 0)
-      break;
+      continue;
     blocks.push(wrapCriteria(source.label, cutText));
     (source.kind === "file" ? cutFiles : cutGlobs).push(source.name);
     break;
   }
   return { blocks, files, cutFiles, globs, cutGlobs };
+}
+function citedFirst(sources, ruleRefs) {
+  const cited = [];
+  const rest = [];
+  for (const source of sources) {
+    const isCited = ruleRefs.some((ruleRef) => source.kind === "file" ? refNamesFile(ruleRef, source.name) : refNamesGlob(ruleRef, source.name));
+    (isCited ? cited : rest).push(source);
+  }
+  return [...cited, ...rest];
 }
 function namesRulesFile(token, paths) {
   const name = token.toLowerCase();
@@ -141801,17 +141810,22 @@ function namesRulesFile(token, paths) {
   });
 }
 function fileNames(ruleRef) {
-  return ruleRef.split(/[\s,;()]+/).map((token) => token.replace(/[:.]+$/, "")).filter((token) => token.includes("."));
+  return ruleRef.split(/[\s,;()[\]`"']+/).map((token) => token.replace(/[#:].*$/, "").replace(/\.+$/, "")).filter((token) => token.includes("."));
+}
+function refNamesFile(ruleRef, path12) {
+  return fileNames(ruleRef).some((name) => namesRulesFile(name, [path12]));
+}
+function refNamesGlob(ruleRef, glob3) {
+  return ruleRef.includes(glob3);
 }
 function citedRule(ruleRef, criteria) {
-  const names = fileNames(ruleRef);
-  if (names.some((name) => namesRulesFile(name, criteria.files)))
+  if (criteria.files.some((path12) => refNamesFile(ruleRef, path12)))
     return "shown";
-  if (criteria.globs.some((glob3) => ruleRef.includes(glob3)))
+  if (criteria.globs.some((glob3) => refNamesGlob(ruleRef, glob3)))
     return "shown";
-  if (names.some((name) => namesRulesFile(name, criteria.cutFiles)))
+  if (criteria.cutFiles.some((path12) => refNamesFile(ruleRef, path12)))
     return "cut";
-  if (criteria.cutGlobs.some((glob3) => ruleRef.includes(glob3)))
+  if (criteria.cutGlobs.some((glob3) => refNamesGlob(ruleRef, glob3)))
     return "cut";
   return "not-shown";
 }
@@ -142144,9 +142158,16 @@ function ruleLine(finding, criteria) {
   return [`Rule: ${escapeDelimiters(ref)}${note}`];
 }
 function buildCriteria(input2) {
-  if (!input2.findings.some((finding) => (finding.ruleRef ?? "").trim() !== ""))
+  const ruleRefs = input2.findings.map((finding) => (finding.ruleRef ?? "").trim()).filter((ruleRef) => ruleRef !== "");
+  if (ruleRefs.length === 0)
     return noCriteria();
-  return buildVerifyCriteria(input2.rulesFiles ?? [], input2.pathInstructions ?? [], input2.files.map((f3) => f3.path), input2.maxCriteriaTokens ?? VERIFY_CRITERIA_TOKENS);
+  return buildVerifyCriteria({
+    rulesFiles: input2.rulesFiles ?? [],
+    pathInstructions: input2.pathInstructions ?? [],
+    filePaths: input2.files.map((f3) => f3.path),
+    ruleRefs,
+    maxTokens: input2.maxCriteriaTokens ?? VERIFY_CRITERIA_TOKENS
+  });
 }
 function buildVerifyUserPrompt(input2, criteria) {
   const { files, pathsByFinding } = collectFiles(input2);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Finding } from './types.js';
-import { buildVerifyCriteria, citedRule, withRuleCriteria } from './verify-criteria.js';
+import { buildVerifyCriteria, citedRule, refNamesGlob, withRuleCriteria } from './verify-criteria.js';
 import { buildVerifyPrompt } from './verify-prompt.js';
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
@@ -82,8 +82,9 @@ describe('verify criteria - the owner rules the verifier is shown', () => {
     });
 
     expect(prompt.user).not.toContain('<<<REVIEW_CRITERIA:RULES_FILE:A.md>>>');
-    expect(prompt.user).not.toContain('<<<REVIEW_CRITERIA:RULES_FILE:B.md>>>');
-    expect(prompt.user).toContain('Rule: B.md §1 (no REVIEW_CRITERIA block shown here has this name)');
+    expect(prompt.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:B.md>>>');
+    expect(prompt.user).toContain('Rule: B.md §1');
+    expect(prompt.user).not.toContain('(no REVIEW_CRITERIA block shown here has this name)');
   });
 
   it('shows the path instructions that match a changed file', () => {
@@ -187,7 +188,7 @@ describe('verify criteria - the owner rules the verifier is shown', () => {
     );
   });
 
-  it('shows no block for a rules file whose cut keeps no line', () => {
+  it('shows no block for a rules file whose cut keeps no line, and shows the next source', () => {
     const prompt = buildVerifyPrompt({
       language: 'en',
       findings: [makeFinding({ ruleRef: 'A.md §1' })],
@@ -200,18 +201,43 @@ describe('verify criteria - the owner rules the verifier is shown', () => {
     });
 
     expect(prompt.user).not.toContain('<<<REVIEW_CRITERIA:RULES_FILE:A.md>>>');
+    expect(prompt.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:B.md>>>');
     expect(prompt.user).toContain('Rule: A.md §1 (no REVIEW_CRITERIA block shown here has this name)');
+  });
+
+  it('shows the rule a finding cites before the cap is spent on an uncited one', () => {
+    const prompt = buildVerifyPrompt({
+      language: 'en',
+      findings: [makeFinding({ ruleRef: 'nested/AGENTS.md §1' })],
+      files: [{ path: 'src/api.ts', patch: PATCH }],
+      rulesFiles: [
+        {
+          path: 'ROOT.md',
+          content: Array.from({ length: 60 }, (_, index) => `root rule ${index + 1}`).join('\n'),
+        },
+        { path: 'nested/AGENTS.md', content: 'Nested rule.' },
+      ],
+      maxCriteriaTokens: 300,
+    });
+
+    expect(prompt.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:nested/AGENTS.md>>>');
+    expect(prompt.user.indexOf('nested/AGENTS.md')).toBeLessThan(
+      prompt.user.indexOf('root rule 1'),
+    );
+    expect(prompt.user).toContain('Rule: nested/AGENTS.md §1');
+    expect(prompt.user).not.toContain('(no REVIEW_CRITERIA block shown here has this name)');
   });
 });
 
 describe('verify criteria - buildVerifyCriteria', () => {
   it('names a rules file by its path and its file name', () => {
-    const criteria = buildVerifyCriteria(
-      [{ path: 'docs/AGENTS.md', content: 'Hard rules.' }],
-      [],
-      ['src/api.ts'],
-      4000,
-    );
+    const criteria = buildVerifyCriteria({
+      rulesFiles: [{ path: 'docs/AGENTS.md', content: 'Hard rules.' }],
+      pathInstructions: [],
+      filePaths: ['src/api.ts'],
+      ruleRefs: [],
+      maxTokens: 4000,
+    });
 
     expect(criteria.files).toEqual(['docs/AGENTS.md']);
     expect(citedRule('agents.md: Hard rules', criteria)).toBe('shown');
@@ -220,31 +246,62 @@ describe('verify criteria - buildVerifyCriteria', () => {
 
 describe('verify criteria - citedRule', () => {
   it('names a shown rules file by its whole path or by its file name', () => {
-    const root = buildVerifyCriteria([{ path: 'AGENTS.md', content: 'Root rules.' }], [], ['src/api.ts'], 4000);
-    const nested = buildVerifyCriteria(
-      [{ path: 'docs/AGENTS.md', content: 'Hard rules.' }],
-      [],
-      ['src/api.ts'],
-      4000,
-    );
+    const root = buildVerifyCriteria({
+      rulesFiles: [{ path: 'AGENTS.md', content: 'Root rules.' }],
+      pathInstructions: [],
+      filePaths: ['src/api.ts'],
+      ruleRefs: [],
+      maxTokens: 4000,
+    });
+    const nested = buildVerifyCriteria({
+      rulesFiles: [{ path: 'docs/AGENTS.md', content: 'Hard rules.' }],
+      pathInstructions: [],
+      filePaths: ['src/api.ts'],
+      ruleRefs: [],
+      maxTokens: 4000,
+    });
 
     expect(citedRule('apps/api/AGENTS.md §2', root)).toBe('not-shown');
     expect(citedRule('agents.md: Hard rules', nested)).toBe('shown');
   });
 
   it('names a path instruction by its glob', () => {
-    const criteria = buildVerifyCriteria(
-      [],
-      [
+    const criteria = buildVerifyCriteria({
+      rulesFiles: [],
+      pathInstructions: [
         { path: 'src/**', instructions: 'Log every refusal.' },
         { path: 'docs/**', instructions: 'Docs rule.' },
       ],
-      ['src/api.ts'],
-      4000,
-    );
+      filePaths: ['src/api.ts'],
+      ruleRefs: [],
+      maxTokens: 4000,
+    });
 
     expect(citedRule('.mergepilot.yml docs/**', criteria)).toBe('not-shown');
     expect(citedRule('.mergepilot.yml src/**', criteria)).toBe('shown');
+  });
+
+  it('names a shown rules file by its line number, its anchor or its quotes', () => {
+    const criteria = buildVerifyCriteria({
+      rulesFiles: [{ path: 'CLAUDE.md', content: 'Use camelCase.' }],
+      pathInstructions: [],
+      filePaths: ['src/api.ts'],
+      ruleRefs: [],
+      maxTokens: 4000,
+    });
+
+    expect(citedRule('CLAUDE.md:13', criteria)).toBe('shown');
+    expect(citedRule('CLAUDE.md#hard-rules', criteria)).toBe('shown');
+    expect(citedRule('`CLAUDE.md` §5', criteria)).toBe('shown');
+    expect(citedRule('"CLAUDE.md" §5', criteria)).toBe('shown');
+    expect(citedRule('OTHER.md:13', criteria)).toBe('not-shown');
+  });
+});
+
+describe('verify criteria - the citation helpers', () => {
+  it('names a path instruction by its glob', () => {
+    expect(refNamesGlob('.mergepilot.yml src/**', 'src/**')).toBe(true);
+    expect(refNamesGlob('.mergepilot.yml src/**', 'docs/**')).toBe(false);
   });
 });
 

@@ -14,7 +14,7 @@ function makeVerifyAnswerJson(verdicts: Array<{ id: string; verdict: 'confirmed'
   return JSON.stringify({ verdicts });
 }
 
-describe('runReview â€” verification pass', () => {
+describe('runReview — verification pass', () => {
   it('drops rejected findings and records verification stats', async () => {
     const f1 = validFindingJson({ id: 'f1', title: 'Bug 1' });
     const f2 = validFindingJson({ id: 'f2', title: 'Bug 2', line: 2 });

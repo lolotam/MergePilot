@@ -28,6 +28,16 @@ export interface VerifyCriteria {
   cutGlobs: string[];
 }
 
+export interface VerifyCriteriaInput {
+  rulesFiles: readonly { path: string; content: string }[];
+  pathInstructions: readonly PathInstruction[];
+  /** The reviewed files; a path instruction is a source when its glob matches one. */
+  filePaths: string[];
+  /** The ruleRefs of the findings: the sources they cite are shown first. */
+  ruleRefs: readonly string[];
+  maxTokens: number;
+}
+
 /** One rule source: a rules file or a path instruction, with the name it may be cited by. */
 interface CriteriaSource {
   label: string;
@@ -44,21 +54,18 @@ export function noCriteria(): VerifyCriteria {
 
 /**
  * The owner's rules for the verifier: the rules files, then the path instructions whose glob
- * matches a changed file, capped in tokens. A block that does not fit is cut to what is left; a
- * cut that keeps no line shows nothing of its source, so the source is left out, and a source that
- * is not shown adds no name: a ruleRef naming it gets no exception.
+ * matches a changed file, capped in tokens. The sources a finding cites come first, so a cited
+ * rule is shown before the cap is spent on an uncited one. A block that does not fit is cut to
+ * what is left; a cut that keeps no line shows nothing of its source, so that source is left out
+ * and the next one is tried with the same budget, and a source that is not shown adds no name: a
+ * ruleRef naming it gets no exception.
  */
-export function buildVerifyCriteria(
-  rulesFiles: readonly { path: string; content: string }[],
-  pathInstructions: readonly PathInstruction[],
-  filePaths: string[],
-  maxTokens: number,
-): VerifyCriteria {
+export function buildVerifyCriteria(input: VerifyCriteriaInput): VerifyCriteria {
   const sources: CriteriaSource[] = [];
-  for (const rf of rulesFiles) {
+  for (const rf of input.rulesFiles) {
     sources.push({ label: `RULES_FILE:${rf.path}`, content: rf.content, name: rf.path, kind: 'file' });
   }
-  for (const pi of matchingPathInstructions([...pathInstructions], filePaths)) {
+  for (const pi of matchingPathInstructions([...input.pathInstructions], input.filePaths)) {
     sources.push({
       label: `PATH_INSTRUCTIONS:${pi.path}`,
       content: pi.instructions,
@@ -72,8 +79,8 @@ export function buildVerifyCriteria(
   const cutFiles: string[] = [];
   const globs: string[] = [];
   const cutGlobs: string[] = [];
-  let left = maxTokens;
-  for (const source of sources) {
+  let left = input.maxTokens;
+  for (const source of citedFirst(sources, input.ruleRefs)) {
     const full = wrapCriteria(source.label, source.content);
     const cost = estimateTokens(full);
     if (cost <= left) {
@@ -86,15 +93,37 @@ export function buildVerifyCriteria(
     if (left < MIN_CUT_TOKENS) break;
     const overhead = estimateTokens(wrapCriteria(source.label, ''));
     const cutText = cutToTokens(source.content, left - overhead, CRITERIA_CUT_MARKER);
-    // A cut that kept no line shows nothing of its source: the source is not shown at all.
+    // A cut that kept no line shows nothing of its source: the source is left out and the next
+    // one is tried with the same budget.
     const kept = cutText.split('\n').filter((line) => line !== CRITERIA_CUT_MARKER && line.trim() !== '');
-    if (kept.length === 0) break;
+    if (kept.length === 0) continue;
     blocks.push(wrapCriteria(source.label, cutText));
     (source.kind === 'file' ? cutFiles : cutGlobs).push(source.name);
     break;
   }
 
   return { blocks, files, cutFiles, globs, cutGlobs };
+}
+
+/**
+ * The sources a ruleRef cites come first, so a cited rule is shown before the cap is spent on an
+ * uncited one. Each group keeps its own order: the sources as they were built.
+ */
+function citedFirst(
+  sources: readonly CriteriaSource[],
+  ruleRefs: readonly string[],
+): CriteriaSource[] {
+  const cited: CriteriaSource[] = [];
+  const rest: CriteriaSource[] = [];
+  for (const source of sources) {
+    const isCited = ruleRefs.some((ruleRef) =>
+      source.kind === 'file'
+        ? refNamesFile(ruleRef, source.name)
+        : refNamesGlob(ruleRef, source.name),
+    );
+    (isCited ? cited : rest).push(source);
+  }
+  return [...cited, ...rest];
 }
 
 /**
@@ -110,21 +139,34 @@ function namesRulesFile(token: string, paths: readonly string[]): boolean {
   });
 }
 
-/** The file names a ruleRef names: its tokens that carry a file name, without a trailing ':' or '.'. */
+/**
+ * The file names a ruleRef names: its tokens that carry a file name, without the line number or
+ * the anchor that may follow it (`CLAUDE.md:13`, `CLAUDE.md#hard-rules`) and without a trailing
+ * dot. A quoted or bracketed name is the name itself.
+ */
 function fileNames(ruleRef: string): string[] {
   return ruleRef
-    .split(/[\s,;()]+/)
-    .map((token) => token.replace(/[:.]+$/, ''))
+    .split(/[\s,;()[\]`"']+/)
+    .map((token) => token.replace(/[#:].*$/, '').replace(/\.+$/, ''))
     .filter((token) => token.includes('.'));
+}
+
+/** Whether the ruleRef names a rules file by its whole path or by its file name. */
+export function refNamesFile(ruleRef: string, path: string): boolean {
+  return fileNames(ruleRef).some((name) => namesRulesFile(name, [path]));
+}
+
+/** Whether the ruleRef names a path instruction by its glob. */
+export function refNamesGlob(ruleRef: string, glob: string): boolean {
+  return ruleRef.includes(glob);
 }
 
 /** Whether the ruleRef names a rule a shown REVIEW_CRITERIA block carries (ADR-0044). */
 export function citedRule(ruleRef: string, criteria: VerifyCriteria): 'shown' | 'cut' | 'not-shown' {
-  const names = fileNames(ruleRef);
-  if (names.some((name) => namesRulesFile(name, criteria.files))) return 'shown';
-  if (criteria.globs.some((glob) => ruleRef.includes(glob))) return 'shown';
-  if (names.some((name) => namesRulesFile(name, criteria.cutFiles))) return 'cut';
-  if (criteria.cutGlobs.some((glob) => ruleRef.includes(glob))) return 'cut';
+  if (criteria.files.some((path) => refNamesFile(ruleRef, path))) return 'shown';
+  if (criteria.globs.some((glob) => refNamesGlob(ruleRef, glob))) return 'shown';
+  if (criteria.cutFiles.some((path) => refNamesFile(ruleRef, path))) return 'cut';
+  if (criteria.cutGlobs.some((glob) => refNamesGlob(ruleRef, glob))) return 'cut';
   return 'not-shown';
 }
 
