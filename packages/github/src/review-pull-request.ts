@@ -202,7 +202,7 @@ export async function reviewPullRequest(
     selection.mode === 'incremental'
       ? { sinceSha: selection.sinceSha, prFiles, pullNumber, publisherLogin }
       : undefined;
-  const inputs = await gatherReviewInputs(client, { owner, repo, baseSha, headSha, config, rulesFiles, files: filesToReview, followUp, log });
+  const inputs = await gatherReviewInputs(client, { owner, repo, baseSha, headSha, config, rulesFiles, files: filesToReview, prBody, followUp, log });
 
   log?.('Running review...');
   const reviewResult = await runReview({
@@ -273,6 +273,7 @@ export async function reviewPullRequest(
       outcome: 'completed',
       judge: judgeSummaryInput(judgeReport, reviewResult.judge, judge?.uses),
       verifyRejected: reviewResult.verifyRejected,
+      withheld: reviewResult.withheld,
       rulesLeftOut: inputs.rulesLeftOut,
       context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut, inputs.openFindings),
       outputLimit: reviewResult.outputLimit,

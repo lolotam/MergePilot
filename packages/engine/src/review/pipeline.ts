@@ -37,6 +37,7 @@ import { manifestFileOf, type ManifestFile } from './manifest.js';
 import { reviewOutputTokensFor, verifyOutputTokensFor, type OutputLimitDisclosure } from './output-budget.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
+import { redactWithheld, type WithheldItem } from './withheld.js';
 import { anchorIndexOf, redactPatches } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, type CappedBatches } from './split.js';
@@ -115,6 +116,8 @@ export type ReviewRunResult =
       summary: string;
       inline: Finding[];
       summaryOnly: Finding[];
+      /** Problems the model noticed and did not report, secret-redacted (ADR-0042); summary only. */
+      withheld?: WithheldItem[] | undefined;
       result: ReviewResult;
       usage?: TokenUsage | undefined;
       costUsd?: number | undefined;
@@ -442,6 +445,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   // ── Step g: assemble result ────────────────────────────────────────────
   const complete = incompleteReasons.length === 0;
+  // What the model noticed and did not report, redacted like the summary and the findings (ADR-0042).
+  const withheld = redactWithheld(pass.withheld ?? [], knownSecrets);
 
   const result: ReviewResult = {
     summary: pass.summary,
@@ -459,6 +464,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     summary: pass.summary,
     inline,
     summaryOnly,
+    ...(withheld.length > 0 ? { withheld } : {}),
     result,
     usage: totalUsage,
     ...(reviewCostUsd !== undefined ? { costUsd: reviewCostUsd } : {}),

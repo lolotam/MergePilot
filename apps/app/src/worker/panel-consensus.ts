@@ -178,6 +178,9 @@ export async function publishConsensus(
 function row(bot: PanelBot, outcome: BotOutcome | undefined): PanelBotRow {
   const finish = outcome?.pending?.finish;
   const status = finish?.status ?? outcome?.result.status ?? 'failed';
+  // The bot's own run result, read once: its summary and what it withheld (ADR-0042).
+  const runResult = outcome?.pending?.outcome.runResult;
+  const completed = runResult?.status === 'completed' ? runResult : undefined;
   return {
     slot: bot.slot,
     name: bot.name,
@@ -186,7 +189,8 @@ function row(bot: PanelBot, outcome: BotOutcome | undefined): PanelBotRow {
     status: status === 'completed' || status === 'skipped' ? status : 'failed',
     findings: finish?.findingsCount ?? null,
     costUsd: finish?.costUsd ?? null,
-    summary: outcome?.pending?.outcome.runResult?.status === 'completed' ? outcome.pending.outcome.runResult.summary : undefined,
+    summary: completed?.summary,
+    withheld: completed?.withheld,
     fallback: outcome?.pending?.outcome.fallback,
     ...(bot.skill ? { skill: bot.skill.name } : {}),
   };

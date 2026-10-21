@@ -1,26 +1,24 @@
 /**
  * Repository context for reviews (ADR-0029): for every reviewed file, the full version of the file
- * itself, its sibling test or implementation, cited files and local imports; when the PR changes
- * scripts, tests or CI, also the package manifests and CI workflows that wire them up. All of it is
- * read at the PR HEAD through the per-client read cache. Head content is PR-controlled: the engine
- * redacts it and shows it as UNTRUSTED. Nothing here runs or installs the reviewed code; imports
- * and workflows are matched by text.
+ * itself, the files it cites or names (ADR-0041), its sibling test or implementation, its local
+ * imports; when the PR changes scripts, tests or CI, also the package manifests and CI workflows
+ * that wire them up. All of it is read at the PR HEAD through the per-client read cache. Head
+ * content is PR-controlled: the engine redacts it and shows it as UNTRUSTED. Nothing here runs or
+ * installs the reviewed code; imports and workflows are matched by text.
  */
 import {
   classifyFile,
   isContextPathAllowed,
   isSensitivePath,
   type ContextDisclosure,
-  type ContextKind,
   type RepositoryContextFile,
 } from '@mergepilot/engine';
 import type { GitHubClient } from './client.js';
-import { isCitedPath } from './cited-path.js';
+import { runCitedLookups, type Lookup } from './cited-lookups.js';
 import { listAtRef, readAtRef } from './read-cache.js';
 
 /** Default file-read cap per review; configurable with `review.contextReads`. */
 export const MAX_CONTEXT_READS = 120;
-const MAX_CITED_LOOKUPS = 20;
 
 /** Reads run this many at a time, to stay clear of GitHub's secondary rate limits. */
 const READ_CONCURRENCY = 8;
@@ -71,24 +69,16 @@ export interface GatherContextParams {
   contextTokens: number;
   contextReads?: number | undefined;
   contextTokensPerFile?: number | undefined;
+  /**
+   * The pull request description: untrusted, capped, scanned only for citations (ADR-0041).
+   */
+  prBody?: string | null | undefined;
 }
 
 export interface GatheredContext {
   files: RepositoryContextFile[];
   /** Files the gatherer could not include (read limit, failed read), for the summary. */
   leftOut: string[];
-}
-
-/** One thing to look up for a reviewed file: candidate paths in order, the first that exists wins. */
-interface Lookup {
-  candidates: string[];
-  kind: ContextKind;
-  reason: string;
-  forPath: string;
-  /** Named in the summary when the read limit stops it (a speculative test lookup is not). */
-  disclose: boolean;
-  /** Keeps a found file only when its content passes (a workflow that runs the changed scripts). */
-  accept?: (content: string) => boolean;
 }
 
 export const dirOf = (path: string): string => path.split('/').slice(0, -1).join('/');
@@ -229,55 +219,6 @@ function importLookups(path: string, content: string): Lookup[] {
   }));
 }
 
-/** Explicit repository paths and ADR ids on added lines only, never PR metadata or head text. */
-async function citedLookups(reader: ContextReader, reviewed: readonly ReviewedFile[], exclude: string[]): Promise<Lookup[]> {
-  const lookups: Lookup[] = [];
-  const selected = new Set<string>();
-  const omitted = new Set<string>();
-  let adrs: string[] | undefined;
-  let rootFiles: Set<string> | undefined;
-  for (const file of reviewed) {
-    let inHunk = false;
-    const added = (file.patch ?? '').split('\n').filter((line) => {
-      if (line.startsWith('@@ ')) inHunk = true;
-      return inHunk && line.startsWith('+');
-    }).map((line) => line.slice(1)).join('\n');
-    const references = added.matchAll(/\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])/gu);
-    for (const match of references) {
-      let candidates: string[];
-      if (match[1]) {
-        if (adrs === undefined) adrs = (await reader.list('docs/adr')).sort();
-        candidates = adrs.filter((path) => path.startsWith(`docs/adr/${match[1]}-`) && path.endsWith('.md'));
-      } else {
-        if (added[match.index + match[0].length] === '(') continue;
-        let path = match[2]!.split('](').pop()!;
-        // Markdown's opening link punctuation is not part of a path; route groups stay intact.
-        for (const [open, close] of [['(', ')'], ['[', ']']] as const) {
-          while (path.startsWith(open) && path.split(open).length > path.split(close).length) path = path.slice(1);
-        }
-        candidates = isCitedPath(path) ? [path] : [];
-      }
-      for (const path of candidates) {
-        if (!isContextPathAllowed(path, { exclude, isSensitivePath })) continue;
-        if (!selected.has(path) && selected.size >= MAX_CITED_LOOKUPS) {
-          if (!omitted.has(path) && (path.includes('/') || rootFiles?.has(path))) {
-            omitted.add(path);
-            reader.leftOut.push(`${path} (cited lookup limit)`);
-          }
-          continue;
-        }
-        if (!path.includes('/')) {
-          rootFiles ??= new Set(await reader.list(''));
-          if (!rootFiles.has(path)) continue;
-        }
-        selected.add(path);
-        lookups.push({ candidates: [path], kind: 'cited', reason: `cited by ${file.path}`, forPath: file.path, disclose: true });
-      }
-    }
-  }
-  return lookups;
-}
-
 /** Runs `fn` over the items, {@link READ_CONCURRENCY} at a time. */
 async function inChunks<T>(items: readonly T[], fn: (item: T) => Promise<void>): Promise<void> {
   for (let i = 0; i < items.length; i += READ_CONCURRENCY) {
@@ -362,7 +303,8 @@ class ContextReader {
 
   private async lookUp(lookup: Lookup): Promise<void> {
     for (const path of lookup.candidates) {
-      if (path === lookup.forPath) return;
+      // A citation of the first reviewed file still serves the other reviewed files.
+      if (path === lookup.forPath && (lookup.forPaths ?? []).every((p) => p === path)) return;
       if (this.known.has(path)) {
         const content = this.known.get(path);
         if (content) this.addAccepted(lookup, path, content);
@@ -390,8 +332,14 @@ class ContextReader {
     if (!lookup.accept || lookup.accept(content)) this.add(lookup, path, content);
   }
 
-  add(lookup: Pick<Lookup, 'kind' | 'reason' | 'forPath'>, path: string, content: string): void {
-    this.found.push({ path, content, reason: lookup.reason, kind: lookup.kind, forPaths: [lookup.forPath] });
+  add(lookup: Pick<Lookup, 'kind' | 'reason' | 'forPath' | 'forPaths'>, path: string, content: string): void {
+    this.found.push({
+      path,
+      content,
+      reason: lookup.reason,
+      kind: lookup.kind,
+      forPaths: lookup.forPaths ?? [lookup.forPath],
+    });
   }
 }
 
@@ -462,9 +410,9 @@ async function buildWiringLookups(reader: ContextReader, reviewed: readonly Revi
 
 /**
  * Reads the repository context of the reviewed files at the PR head, in priority order: each
- * changed file's full version, then sibling tests/implementations, citations, local imports and the
- * build and CI wiring of a PR that changes scripts, tests or CI. An added
- * file is not read (its patch is the whole file). The engine fits what is returned to
+ * changed file's full version, then the files it cites or names, then sibling tests/implementations,
+ * local imports and the build and CI wiring of a PR that changes scripts, tests or CI (ADR-0041).
+ * An added file is not read (its patch is the whole file). The engine fits what is returned to
  * `review.contextTokens`; reads use the configured, optionally scaled cap and are shared per client.
  */
 export async function gatherRepositoryContext(client: GitHubClient, params: GatherContextParams): Promise<GatheredContext> {
@@ -487,7 +435,8 @@ export async function gatherRepositoryContext(client: GitHubClient, params: Gath
   );
   await inChunks(readable, (file) => reader.readChangedFile(file));
 
-  // c, then b: sibling tests/implementations, then local imports (from the head content or patch).
+  // b, then c, then d: the cited and referenced files first, so the read limit cannot starve
+  // them, then sibling tests/implementations, then local imports (from the head content or patch).
   const pairs = reviewed.flatMap((file): Lookup[] => {
     const pair = pairCandidates(file.path);
     return pair ? [{ ...pair, kind: 'test-pair', forPath: file.path, disclose: false }] : [];
@@ -495,8 +444,8 @@ export async function gatherRepositoryContext(client: GitHubClient, params: Gath
   const imports = reviewed.flatMap((file) =>
     importLookups(file.path, reader.known.get(file.path) ?? patchNewSide(file.patch ?? '')),
   );
+  await runCitedLookups(reader, reviewed, params.exclude, params.prBody);
   await reader.run(pairs);
-  await reader.run(await citedLookups(reader, reviewed, params.exclude));
   await reader.run(imports);
   await reader.run(await buildWiringLookups(reader, reviewed));
   return { files: reader.found, leftOut: reader.leftOut };
@@ -516,6 +465,7 @@ export function contextDisclosureOf(
     sent: engine?.sent ?? [],
     leftOut: [...(engine?.leftOut ?? []), ...gathererLeftOut],
     ...(engine?.pr ? { pr: engine.pr } : {}),
+    ...(engine?.cited && engine.cited.length > 0 ? { cited: engine.cited } : {}),
     ...(openFindings ? { openFindings } : {}),
   };
 }

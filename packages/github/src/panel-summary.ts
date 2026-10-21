@@ -3,12 +3,13 @@ import { foundByLabel, type ConsensusCluster, type MergePanelResult } from './co
 import type { FallbackReason } from './fallback-reason.js';
 import type { BotFindingsFate } from './panel-findings-fate.js';
 import { renderFallbackNotice, renderScopeLine, type ReviewScope } from './summary.js';
-import type { ContextDisclosure, OutputLimitDisclosure } from '@mergepilot/engine';
+import type { ContextDisclosure, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
 import {
   renderContextNote,
   renderOutputLimitNote,
   renderRulesLeftOut,
   renderVerifyRejected,
+  renderWithheldLine,
   type VerifyRejectedItem,
 } from './review-notes.js';
 import { neutralize } from './text-safety.js';
@@ -25,6 +26,8 @@ export interface PanelBotRow {
   costUsd?: number | null | undefined;
   /** The bot's own summary, shown folded under the table. */
   summary?: string | undefined;
+  /** What the bot noticed and did not report (ADR-0042), shown under its summary. */
+  withheld?: readonly WithheldItem[] | undefined;
   /** Why a fallback model answered for this bot (`modelLabel` is then the fallback model). */
   fallback?: FallbackReason | undefined;
   /** The name of the bot's review skill (ADR-0034); left out on Default. */
@@ -78,6 +81,8 @@ interface Labels {
   below: (n: number) => string;
   overLimit: (n: number) => string;
   summaries: string;
+  /** The withheld problems of one bot, under its summary (ADR-0042). */
+  withheld: (n: number) => string;
   fatesHeader: string;
   fateOf: (notOwn: number, reported: number) => string;
   fateParts: Record<FatePart, (n: number) => string>;
@@ -104,6 +109,7 @@ const EN: Labels = {
   below: (n) => `Below agreement (${n})`,
   overLimit: (n) => `Over the findings limit (${n})`,
   summaries: 'Bot summaries',
+  withheld: (n) => `Noticed but not reported (${n}):`,
   fatesHeader: "> ℹ️ Findings counted in the table but not published as the bot's own comment:",
   fateOf: (notOwn, reported) => `${notOwn} of ${reported}`,
   fateParts: {
@@ -132,6 +138,7 @@ const AR: Labels = {
   below: (n) => `أقل من حد الاتفاق (${n})`,
   overLimit: (n) => `فوق الحد الأقصى للملاحظات (${n})`,
   summaries: 'ملخصات المراجعين',
+  withheld: (n) => `رصدها ولم ينشرها كملاحظات (${n}):`,
   fatesHeader: '> ℹ️ ملاحظات محسوبة في الجدول لم تُنشر كتعليق خاص بالمراجع:',
   fateOf: (notOwn, reported) => `${notOwn} من ${reported}`,
   fateParts: {
@@ -186,6 +193,21 @@ function renderFindingsFates(input: PanelSummaryInput, labels: Labels): string |
 
 function details(summary: string, body: string): string {
   return `<details>\n<summary>${summary}</summary>\n\n${body}\n</details>`;
+}
+
+/**
+ * One bot's entry in the «Bot summaries» section: its summary, then the problems it noticed and
+ * did not report (ADR-0042), one line each with the reason. They are folded with the summary and
+ * never become inline comments: they were never findings.
+ */
+function botSummary(bot: PanelBotRow, labels: Labels): string {
+  const summary = bot.summary?.trim() ?? '';
+  const name = `**${escapeInline(bot.name)}**`;
+  const text = summary ? `${name}\n\n${neutralize(summary)}` : name;
+  const withheld = bot.withheld ?? [];
+  if (withheld.length === 0) return text;
+  const lines = withheld.map((item) => renderWithheldLine(item));
+  return `${text}\n\n_${labels.withheld(withheld.length)}_\n${lines.join('\n')}`;
 }
 
 /**
@@ -246,9 +268,10 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
     if (note) sections.push(note);
   }
 
-  const summaries = input.bots.filter((b) => b.status === 'completed' && b.summary?.trim());
+  // A bot with only withheld items (a blank summary) is listed too, so they never vanish.
+  const summaries = input.bots.filter((b) => b.status === 'completed' && (b.summary?.trim() || (b.withheld ?? []).length > 0));
   if (summaries.length > 0) {
-    const items = summaries.map((b) => `**${escapeInline(b.name)}**\n\n${neutralize(b.summary!.trim())}`);
+    const items = summaries.map((b) => botSummary(b, labels));
     sections.push(details(labels.summaries, items.join('\n\n')));
   }
 

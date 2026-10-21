@@ -139,6 +139,7 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     config,
     rulesFiles,
     files: filesToReview,
+    prBody: params.prBody,
     followUp: followUpOf(params, incremental, prFiles),
     log,
   });

@@ -4,7 +4,8 @@ import { ContextPlan, MAX_SCALED_CONTEXT_TOKENS, scaledContextTokens, type Conte
 import { buildReviewPrompt, CONTEXT_TRUNCATED_MARKER, renderContextFile } from './prompt.js';
 
 // ADR-0029: repository context is filtered, redacted, capped per file and fitted per call in
-// priority order (changed file > test pair > import), and what was left out is counted.
+// priority order (changed file > cited > referenced > test pair > import, ADR-0041), and what was
+// left out is counted.
 
 function file(path: string, kind: RepositoryContextFile['kind'], content = 'export const x = 1;', forPaths = ['src/a.ts']): RepositoryContextFile {
   return { path, content, reason: `${kind} for test`, kind, forPaths };
@@ -40,7 +41,7 @@ describe('ContextPlan', () => {
     expect(tokens(batch)).toBeLessThanOrEqual(cap);
     expect(plan.forBatch([{ path: 'src/b.ts' }])).toEqual(batch);
     expect(plan.whole()).toEqual(whole);
-    expect(plan.disclosure()).toEqual({ sent: ['src/ref.ts'], leftOut: [] });
+    expect(plan.disclosure()).toEqual({ sent: ['src/ref.ts'], leftOut: [], cited: ['src/ref.ts'] });
   });
 
   it.each([true, false])('keeps the longest sent version for verification, whole first: %s', (wholeFirst) => {
@@ -52,7 +53,7 @@ describe('ContextPlan', () => {
     expect(batch).toHaveLength(1);
     expect(batch[0]?.truncated).toBe(true);
     expect(plan.sentFiles()).toEqual(whole);
-    expect(plan.disclosure()).toEqual({ sent: ['src/ref.ts'], leftOut: [] });
+    expect(plan.disclosure()).toEqual({ sent: ['src/ref.ts'], leftOut: [], cited: ['src/ref.ts'] });
   });
 
   it('decouples the batch context cap and preserves the old cap when unset', () => {
@@ -88,9 +89,9 @@ describe('ContextPlan', () => {
       file('src/a.test.ts', 'test-pair'), file('src/a.ts', 'changed-file'),
     ], options());
     const shown = plan.whole();
-    expect(shown.map((f) => f.path)).toEqual(['src/a.ts', 'src/a.test.ts', 'docs/ref.md', 'src/import.ts']);
-    expect(shown[2]!.content).not.toContain(token);
-    expect(shown[2]!.content).toContain('[REDACTED:github]');
+    expect(shown.map((f) => f.path)).toEqual(['src/a.ts', 'docs/ref.md', 'src/a.test.ts', 'src/import.ts']);
+    expect(shown[1]!.content).not.toContain(token);
+    expect(shown[1]!.content).toContain('[REDACTED:github]');
     plan.markSent(shown);
     expect(plan.disclosure()?.sent).toContain('docs/ref.md');
   });
@@ -123,6 +124,62 @@ describe('ContextPlan', () => {
     expect(whole.map((f) => f.path)).toEqual(['src/a.ts', 'src/a.test.ts']);
     plan.markSent(whole);
     expect(plan.disclosure()).toEqual({ sent: ['src/a.ts', 'src/a.test.ts'], leftOut: ['src/dep.ts'] });
+  });
+
+  it('sends the changed file, then the cited and referenced files, before the tests and imports', () => {
+    const body = 'const value = 1;\n'.repeat(20);
+    const offered = [
+      file('src/dep.ts', 'import', body),
+      file('src/a.test.ts', 'test-pair', body),
+      file('docs/named.md', 'referenced', body),
+      file('docs/ref.md', 'cited', body),
+      file('src/a.ts', 'changed-file', body),
+    ];
+    const blockTokens = (f: RepositoryContextFile): number => estimateTokens(renderContextFile(f)) + 30;
+    const one = blockTokens(offered[4]!);
+
+    const twoBlocks = new ContextPlan(offered, options({ contextTokens: one * 2 + 5 }));
+    const whole = twoBlocks.whole();
+    expect(whole.map((f) => f.path)).toEqual(['src/a.ts', 'docs/ref.md']);
+    twoBlocks.markSent(whole);
+    expect(twoBlocks.disclosure()?.leftOut).toEqual(['docs/named.md', 'src/a.test.ts', 'src/dep.ts']);
+
+    const threeBlocks = new ContextPlan(offered, options({ contextTokens: one * 3 + 5 }));
+    expect(threeBlocks.whole().map((f) => f.path)).toEqual(['src/a.ts', 'docs/ref.md', 'docs/named.md']);
+  });
+
+  it('names the sent cited and referenced files in the disclosure, and the imports not', () => {
+    const plan = new ContextPlan([
+      file('docs/ref.md', 'cited'),
+      file('docs/named.md', 'referenced'),
+      file('src/dep.ts', 'import'),
+    ], options());
+    plan.markSent(plan.whole());
+    expect(plan.disclosure()?.cited).toEqual(['docs/ref.md', 'docs/named.md']);
+
+    const withoutCitations = new ContextPlan([file('src/dep.ts', 'import')], options());
+    withoutCitations.markSent(withoutCitations.whole());
+    expect(withoutCitations.disclosure()?.cited).toBeUndefined();
+  });
+
+  it('names a changed file another changed file cites, though the merge keeps it a changed file', () => {
+    const plan = new ContextPlan([
+      file('src/a.ts', 'changed-file'),
+      file('src/a.ts', 'cited', 'export const x = 1;', ['src/b.ts']),
+    ], options());
+    plan.markSent(plan.whole());
+    expect(plan.disclosure()?.cited).toEqual(['src/a.ts']);
+  });
+
+  it('lists cited files from outside the diff before cited changed files', () => {
+    const plan = new ContextPlan([
+      file('src/a.ts', 'changed-file'),
+      file('src/a.ts', 'referenced', 'export const x = 1;', ['src/a.ts', 'src/b.ts']),
+      file('docs/ref.md', 'referenced', 'reference', ['src/a.ts', 'src/b.ts']),
+    ], options());
+    plan.markSent(plan.whole());
+    expect(plan.disclosure()?.sent).toEqual(['src/a.ts', 'docs/ref.md']);
+    expect(plan.disclosure()?.cited).toEqual(['docs/ref.md', 'src/a.ts']);
   });
 
   it('sends build and CI wiring after the imports, and a changed manifest only once as the changed file', () => {

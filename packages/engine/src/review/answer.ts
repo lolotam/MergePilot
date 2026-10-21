@@ -6,6 +6,13 @@ import {
   SeveritySchema,
   type Finding,
 } from './types.js';
+import {
+  MAX_WITHHELD_ITEMS,
+  parseWithheld,
+  WITHHELD_REASON_MAX_CHARS,
+  WITHHELD_TITLE_MAX_CHARS,
+  type WithheldItem,
+} from './withheld.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -18,6 +25,16 @@ import {
  */
 export const ReviewAnswerSchema = z.object({
   summary: z.string().min(1),
+  // The problems the model noticed and did not report, each with a reason (ADR-0042); optional,
+  // so an older model that omits it still answers. Its bounds go to the JSON schema, so the list
+  // fits the answer budget's summary room; parsing stays lenient (`parseWithheld`).
+  withheld: z
+    .array(z.object({
+      title: z.string().min(1).max(WITHHELD_TITLE_MAX_CHARS),
+      reason: z.string().min(1).max(WITHHELD_REASON_MAX_CHARS),
+    }))
+    .max(MAX_WITHHELD_ITEMS)
+    .optional(),
   findings: z.array(
     z.object({
       path: z.string().min(1),
@@ -42,6 +59,8 @@ export const ReviewAnswerSchema = z.object({
 const ReviewAnswerLooseSchema = z.object({
   summary: z.string().min(1),
   findings: z.array(z.unknown()),
+  // Any value is accepted here: a bad `withheld` is dropped, never the answer (ADR-0042).
+  withheld: z.unknown().optional(),
 });
 
 /**
@@ -49,7 +68,11 @@ const ReviewAnswerLooseSchema = z.object({
  * kept (no findings) only when no candidate has a list. Review callers may accept it as
  * empty after a normally finished reminder retry; audit callers keep it incomplete.
  */
-const SummaryOnlyAnswerSchema = z.object({ summary: z.string().min(1) });
+const SummaryOnlyAnswerSchema = z.object({
+  summary: z.string().min(1),
+  // The withheld list of a summary-only answer, kept like the summary itself (ADR-0042).
+  withheld: z.unknown().optional(),
+});
 
 /** Incomplete-review reason for an answer that had a summary but no findings list. */
 export const FINDINGS_MISSING_REASON = 'the model answered without a findings list (no inline findings from it)';
@@ -174,12 +197,21 @@ export function isTruncatedAnswer(finishReason: string | undefined, hasUnclosedO
   return false;
 }
 
+/**
+ * The answer's withheld list, or undefined when the answer sent no list. A list sent empty (or
+ * with only invalid items) stays an empty list, so a retry that withholds nothing replaces an
+ * earlier answer's list instead of inheriting it (ADR-0042).
+ */
+function withheldOf(raw: unknown): WithheldItem[] | undefined {
+  return Array.isArray(raw) ? parseWithheld(raw) : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Public parse function
 // ---------------------------------------------------------------------------
 
 export type ParseReviewAnswerResult =
-  | { ok: true; summary: string; findings: Finding[]; droppedInvalid: number; findingsMissing?: true; otherCandidatesRejected?: true; acceptedAsEmpty?: true }
+  | { ok: true; summary: string; findings: Finding[]; withheld?: WithheldItem[] | undefined; droppedInvalid: number; findingsMissing?: true; otherCandidatesRejected?: true; acceptedAsEmpty?: true }
   | { ok: false; error: string; code: ParseErrorCode };
 
 /**
@@ -204,7 +236,7 @@ export function parseReviewAnswer(
 
   let firstParseError: string | null = null;
   let matchedAnswer: z.infer<typeof ReviewAnswerLooseSchema> | null = null;
-  let summaryOnly: string | null = null;
+  let summaryOnly: { summary: string; withheld: WithheldItem[] | undefined } | null = null;
   let otherCandidatesRejected = false;
 
   for (const candidate of candidates) {
@@ -227,7 +259,7 @@ export function parseReviewAnswer(
     const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
     // Only a truly absent key: `findings: null`, `0` or `""` is a present non-list, so invalid-json.
     if (bare.success && (parsed as Record<string, unknown>).findings === undefined) {
-      summaryOnly ??= bare.data.summary;
+      summaryOnly ??= { summary: bare.data.summary, withheld: withheldOf(bare.data.withheld) };
     } else {
       otherCandidatesRejected = true;
       if (!firstParseError) firstParseError = loose.error.message;
@@ -236,7 +268,8 @@ export function parseReviewAnswer(
 
   if (!matchedAnswer && summaryOnly !== null) {
     return {
-      ok: true, summary: summaryOnly, findings: [], droppedInvalid: 0, findingsMissing: true,
+      ok: true, summary: summaryOnly.summary, findings: [], droppedInvalid: 0, findingsMissing: true,
+      ...(summaryOnly.withheld ? { withheld: summaryOnly.withheld } : {}),
       ...(otherCandidatesRejected ? { otherCandidatesRejected: true } : {}),
     };
   }
@@ -262,6 +295,7 @@ export function parseReviewAnswer(
   }
 
   const answer = matchedAnswer;
+  const withheld = withheldOf(answer.withheld);
   const findings: Finding[] = [];
   let droppedInvalid = 0;
   let idCounter = 1;
@@ -291,6 +325,7 @@ export function parseReviewAnswer(
     ok: true,
     summary: answer.summary,
     findings,
+    ...(withheld ? { withheld } : {}),
     droppedInvalid,
   };
 }
