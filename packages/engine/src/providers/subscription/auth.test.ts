@@ -100,7 +100,7 @@ describe('Anthropic subscription refresh', () => {
     expect(visible).not.toContain('platform.claude.com');
   });
 
-  it.each([429, 503])('treats an HTTP %i answer as a retryable failure', async (status) => {
+  it.each([408, 429, 503])('treats an HTTP %i answer as a retryable failure', async (status) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'server_error' }), { status })));
 
     const failure = await refreshSubscription('anthropic', credential, new AbortController().signal).catch((error: unknown) => error);
@@ -130,6 +130,75 @@ describe('Anthropic subscription refresh', () => {
     expect(error.status).toBeUndefined();
     expect(error.oauthError).toBeUndefined();
     expect(error.message).toBe('Subscription token refresh failed; sign in again');
+  });
+});
+
+// pi-ai reports a failed refresh in three different shapes, one per provider: Anthropic writes
+// `status=400`, Codex `token refresh failed (400)` and xAI `refresh failed (HTTP 400)`.
+describe('pi-ai refresh failure formats', () => {
+  const codexAccess = `header.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'account-test' } })).toString('base64url')}.signature`;
+  const codexRefresh = ['codex', 'refresh', 'stored'].join('-');
+  const codexCredential: SubscriptionCredential = { type: 'oauth', access: codexAccess, refresh: codexRefresh, expires: Date.now() + 3_600_000, accountId: 'account-test' };
+  const xaiRefresh = ['xai', 'refresh', 'stored'].join('-');
+  const xaiCredential: SubscriptionCredential = { type: 'oauth', access: ['xai', 'access', 'stored'].join('-'), refresh: xaiRefresh, expires: Date.now() + 3_600_000 };
+
+  it('reads the status and the OAuth code out of a refused Codex refresh', async () => {
+    const marker = ['codex', 'token', 'body', 'marker'].join('-');
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 })));
+
+    const failure = await refreshSubscription('openai', codexCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('sign-in');
+    expect(error.status).toBe(400);
+    expect(error.oauthError).toBe('invalid_grant');
+    expect(error.transient).toBe(false);
+    const visible = JSON.stringify({ message: error.message, status: error.status, oauthError: error.oauthError, reason: error.reason });
+    expect(visible).not.toContain(marker);
+    expect(visible).not.toContain(codexRefresh);
+  });
+
+  it('treats a rate-limited Codex refresh as a retryable failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'rate_limit' }), { status: 429 })));
+
+    const failure = await refreshSubscription('openai', codexCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.status).toBe(429);
+    expect(error.transient).toBe(true);
+  });
+
+  it('reads the status out of a refused xAI refresh', async () => {
+    const marker = ['xai', 'token', 'body', 'marker'].join('-');
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 })));
+
+    const failure = await refreshSubscription('xai', xaiCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('sign-in');
+    expect(error.status).toBe(400);
+    expect(error.transient).toBe(false);
+    const visible = JSON.stringify({ message: error.message, status: error.status, oauthError: error.oauthError, reason: error.reason });
+    expect(visible).not.toContain(marker);
+    expect(visible).not.toContain(xaiRefresh);
+  });
+
+  it('treats an xAI server error as a retryable failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'server_error' }), { status: 503 })));
+
+    const failure = await refreshSubscription('xai', xaiCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.status).toBe(503);
+    expect(error.transient).toBe(true);
   });
 });
 

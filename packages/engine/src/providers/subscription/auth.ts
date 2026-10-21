@@ -68,7 +68,7 @@ export async function loginSubscription(provider: SubscriptionProvider, interact
 
 /**
  * Fails with `SubscriptionRefreshError` only. Google Antigravity says whether the failure is
- * transient; pi-ai failures are classified from their HTTP status (429, 5xx or no answer are
+ * transient; pi-ai failures are classified from their HTTP status (408, 429, 5xx or no answer are
  * retryable, anything else means the sign-in has to be redone).
  */
 export async function refreshSubscription(provider: SubscriptionProvider, credential: SubscriptionCredential, signal: AbortSignal): Promise<SubscriptionCredential> {
@@ -84,8 +84,8 @@ export async function refreshSubscription(provider: SubscriptionProvider, creden
   }
 }
 
-/** The HTTP status in pi-ai's error text, e.g. `status=400`. */
-const PI_REFRESH_STATUS = /status=(\d{3})\b/;
+/** The HTTP status in pi-ai's error text: `status=400` (Anthropic), `failed (429)` (Codex) or `(HTTP 503)` (xAI). */
+const PI_REFRESH_STATUS = /status=(\d{3})\b|failed \((\d{3})\)|\(HTTP (\d{3})\)/;
 /** The OAuth error code in the token response body, e.g. `"error":"invalid_grant"`. */
 const PI_REFRESH_OAUTH_ERROR = /"error"\s*:\s*"([a-z_]{1,64})"/;
 /** A network failure or a timeout in pi-ai's error text. */
@@ -105,19 +105,20 @@ function refreshErrorText(error: unknown, depth = 0): string {
 }
 
 /**
- * Classifies a pi-ai refresh failure from its HTTP status and its OAuth error code: a 429, a 5xx or
- * no answer at all may clear on a later attempt, everything else means the sign-in is no longer
- * valid. Only the parsed status and code leave this function; the upstream text is discarded.
+ * Classifies a pi-ai refresh failure from its HTTP status and its OAuth error code: a 408, a 429,
+ * a 5xx or no answer at all may clear on a later attempt, everything else means the sign-in is no
+ * longer valid. Only the parsed status and code leave this function; the upstream text is discarded.
  */
 function classifyPiRefreshFailure(error: unknown): SubscriptionRefreshError {
   const text = refreshErrorText(error);
-  const statusText = PI_REFRESH_STATUS.exec(text)?.[1];
+  const match = PI_REFRESH_STATUS.exec(text);
+  const statusText = match?.[1] ?? match?.[2] ?? match?.[3];
   const status = statusText === undefined ? undefined : Number(statusText);
   const oauthError = PI_REFRESH_OAUTH_ERROR.exec(text)?.[1];
   const network = PI_REFRESH_NETWORK.test(text)
     || error instanceof TypeError
     || (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError'));
-  const retryable = status === 429 || (status !== undefined && status >= 500) || (status === undefined && network);
+  const retryable = status === 408 || status === 429 || (status !== undefined && status >= 500) || (status === undefined && network);
   return new SubscriptionRefreshError(retryable ? 'unreachable' : 'sign-in', { status, oauthError });
 }
 

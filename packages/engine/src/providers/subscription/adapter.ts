@@ -11,6 +11,7 @@ import { redactSecrets } from '../../security/redact.js';
 import { subscriptionProvider } from './auth.js';
 import { failureFromResponse } from '../http.js';
 import { subscriptionOutputTokens } from './output-tokens.js';
+import { SubscriptionRefreshError } from './refresh-error.js';
 import { AntigravityAdapter } from './antigravity/adapter.js';
 
 export function subscriptionModels(provider: PiSubscriptionProvider) {
@@ -74,8 +75,14 @@ export class SubscriptionAdapter extends LlmAdapter {
     try {
       if (this.resolveSecret) this.secret = await this.resolveSecret();
       envelope = decodeSubscription(this.secret.reveal(), this.provider);
-    } catch {
-      throw new LlmFailure({ provider: this.provider, code: options.signal?.aborted ? 'ABORTED' : 'INVALID_CREDENTIAL',
+    } catch (error) {
+      if (options.signal?.aborted) throw new LlmFailure({ provider: this.provider, code: 'ABORTED',
+        message: 'Subscription credential could not be resolved; sign in again' });
+      // A refresh the provider may answer later (408, 429, 5xx, no answer) stays retryable; it is not a lost sign-in.
+      if (error instanceof SubscriptionRefreshError && error.transient) {
+        throw new LlmFailure({ provider: this.provider, code: 'NETWORK', message: 'Could not refresh the subscription sign-in; try again' });
+      }
+      throw new LlmFailure({ provider: this.provider, code: 'INVALID_CREDENTIAL',
         message: 'Subscription credential could not be resolved; sign in again' });
     }
     if (!envelope) throw new LlmFailure({ provider: this.provider, code: 'INVALID_CREDENTIAL', message: 'Subscription login is required' });

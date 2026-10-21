@@ -4,11 +4,13 @@ import { encodeSubscription } from '../../credentials/subscription.js';
 import { Secret } from '../../credentials/secret.js';
 import { redactSecrets } from '../../security/redact.js';
 import { collectText } from '../../llm/collect.js';
+import { LlmFailure } from '../../llm/failure.js';
 import { createAdapter } from '../factory.js';
 import { listModels } from '../catalog.js';
 import { parseReviewAnswer } from '../../review/answer.js';
 import { reviewJsonSchema } from '../../review/split.js';
 import { SubscriptionAdapter, subscriptionModels } from './adapter.js';
+import { SubscriptionRefreshError } from './refresh-error.js';
 
 const access = `header.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'account-test' } })).toString('base64url')}.signature`;
 const refresh = ['opaque', 'refresh', 'value'].join('-');
@@ -151,6 +153,40 @@ describe('subscription model protocols', () => {
       expect(String(error)).not.toContain(token);
       expect(String(error)).not.toContain(refresh);
     }
+  });
+});
+
+// A refresh the provider may answer later (408, 429, 5xx, no answer) is not a lost sign-in:
+// the call fails transiently instead of sending the review into the sign-in fallback path.
+describe('subscription refresh failures at stream time', () => {
+  const model = () => subscriptionModels('anthropic')[0]!.id;
+
+  it('fails transiently when the sign-in refresh could not reach the provider', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'), async () => {
+      throw new SubscriptionRefreshError('unreachable', { status: 503 });
+    });
+
+    const failure = await collectText(adapter.stream(request(model()))).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(LlmFailure);
+    expect(failure).toMatchObject({ code: 'NETWORK' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails as an invalid credential when the provider refused the refresh', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'), async () => {
+      throw new SubscriptionRefreshError('sign-in', { status: 400, oauthError: 'invalid_grant' });
+    });
+
+    const failure = await collectText(adapter.stream(request(model()))).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(LlmFailure);
+    expect(failure).toMatchObject({ code: 'INVALID_CREDENTIAL' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
