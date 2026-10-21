@@ -31,10 +31,12 @@ export interface Lookup {
   accept?: (content: string) => boolean;
 }
 
-/** What the citation scan needs from the gatherer: a directory listing and the left-out list. */
+/** What the citation scan needs from the gatherer: a directory listing, the left-out list and a run. */
 export interface CitationReader {
   list(dir: string): Promise<string[]>;
   leftOut: string[];
+  /** Runs the lookups of one source, so its reads happen before the next source is scanned. */
+  run(lookups: readonly Lookup[]): Promise<void>;
 }
 
 /** Extensions of a documentation file: it may name the code file it talks about. */
@@ -46,10 +48,12 @@ const CODE_EXTENSIONS = new Set([
 ]);
 
 /**
- * An ADR id, a spec id or a repository path: `ADR-0029`, `spec 012`, `docs/adr/0029-…md`. The
- * path part refuses member expressions, calls and URLs through its look-behind.
+ * An ADR id, a repository path or a spec id: `ADR-0029`, `docs/adr/0029-…md`, `spec 012`. The
+ * path comes before the spec id, so an explicit path (`specs/012-pay/tasks.md`, `Spec-012.md`) is
+ * not eaten as an id; the path part refuses member expressions, calls and URLs through its
+ * look-behind.
  */
-const CITATION_RE = /\bADR[- ](\d{4})\b|\b[Ss]pecs?[- /#]{0,2}(\d{3})(?!\d)|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])/gu;
+const CITATION_RE = /\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])|\b[Ss]pecs?[- /#]{0,2}(\d{3})(?!\d)/gu;
 
 /** Where a scanned text comes from, so the kind and reason of a lookup say what named it. */
 type CitationSource =
@@ -101,17 +105,18 @@ function hunkLines(patch: string): { added: string; context: string } {
 }
 
 /**
- * The lookups of the files a change cites (ADR-0041): the paths, ADR ids and spec ids named on
- * the added lines of the reviewed files, then on their context lines, then in the pull request
- * description. The strongest source comes first, so the lookup limit goes to it.
+ * Reads the files a change cites (ADR-0041): the paths, ADR ids and spec ids named on the added
+ * lines of the reviewed files, then on their context lines, then in the pull request description.
+ * The strongest source comes first, so the lookup limit goes to it, and each source's lookups run
+ * before the next source is scanned: the directory listing a weaker source needs cannot take the
+ * read a stronger citation needs.
  */
-export async function citedLookups(
+export async function runCitedLookups(
   reader: CitationReader,
   reviewed: readonly ReviewedFile[],
   exclude: string[],
   prBody?: string | null,
-): Promise<Lookup[]> {
-  const lookups: Lookup[] = [];
+): Promise<void> {
   const selected = new Set<string>();
   const omitted = new Set<string>();
   let adrs: string[] | undefined;
@@ -119,11 +124,11 @@ export async function citedLookups(
   let rootFiles: Set<string> | undefined;
 
   /** Scans one text and pushes the lookups it names; `source` says what named them. */
-  const scan = async (text: string, source: CitationSource): Promise<void> => {
+  const scan = async (text: string, source: CitationSource, lookups: Lookup[]): Promise<void> => {
     for (const match of text.matchAll(CITATION_RE)) {
       const adrId = match[1];
-      const specId = match[2];
-      const rawPath = match[3];
+      const rawPath = match[2];
+      const specId = match[3];
       let candidates: string[];
       if (adrId !== undefined) {
         if (adrs === undefined) adrs = (await reader.list('docs/adr')).sort();
@@ -170,12 +175,17 @@ export async function citedLookups(
 
   const patches = reviewed.map((file) => ({ file, lines: hunkLines(file.patch ?? '') }));
   // a: the added lines of every reviewed file, in file order.
-  for (const { file, lines } of patches) await scan(lines.added, { kind: 'added-line', file });
+  const added: Lookup[] = [];
+  for (const { file, lines } of patches) await scan(lines.added, { kind: 'added-line', file }, added);
+  await reader.run(added);
   // b: the context lines around the change, in file order.
-  for (const { file, lines } of patches) await scan(lines.context, { kind: 'context-line', file });
+  const near: Lookup[] = [];
+  for (const { file, lines } of patches) await scan(lines.context, { kind: 'context-line', file }, near);
+  await reader.run(near);
   // c: the pull request description: untrusted, capped, and only a source of candidate paths.
   if (reviewed.length > 0) {
-    await scan((prBody ?? '').slice(0, MAX_PR_BODY_CITATION_CHARS), { kind: 'pr-body' });
+    const body: Lookup[] = [];
+    await scan((prBody ?? '').slice(0, MAX_PR_BODY_CITATION_CHARS), { kind: 'pr-body' }, body);
+    await reader.run(body);
   }
-  return lookups;
 }

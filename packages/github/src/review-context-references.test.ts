@@ -132,4 +132,40 @@ describe('referenced repository context (ADR-0041)', () => {
     expect(result.leftOut).toEqual(['docs/late.md (cited lookup limit)']);
     expect(result.files.map((f) => f.path)).not.toContain('docs/late.md');
   });
+
+  it('reads an explicit spec path as that path, not as a spec id', async () => {
+    const { client, reads } = fakeClient({ 'src/a.ts': 'code', 'specs/012-pay/tasks.md': 'tasks' });
+    const listings: string[] = [];
+    client.listDirectoryFiles = async ({ path }) => { listings.push(path); return []; };
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('src/a.ts'),
+      patch: '@@ -1 +1 @@\n-a\n+see specs/012-pay/tasks.md',
+    }]));
+
+    expect(reads.map((r) => r.path)).toContain('specs/012-pay/tasks.md');
+    expect(result.files.map((f) => f.path)).toContain('specs/012-pay/tasks.md');
+    expect(listings).not.toContain('docs/specs');
+  });
+
+  it('keeps a description citation of the first reviewed file for the other reviewed files', async () => {
+    const { client } = fakeClient({ 'src/a.ts': 'a', 'src/b.ts': 'b' });
+    const result = await gatherRepositoryContext(client, params(
+      [modified('src/a.ts'), modified('src/b.ts')],
+      { prBody: 'see src/a.ts' },
+    ));
+
+    const cited = result.files.find((f) => f.path === 'src/a.ts' && f.kind === 'referenced');
+    expect(cited?.forPaths ?? []).toContain('src/b.ts');
+  });
+
+  it('runs the added-line citations before the description listing takes a read', async () => {
+    const { client, reads } = fakeClient({ 'src/a.ts': 'code', 'docs/ref.md': 'ref' }, [], { '': ['README.md'] });
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('src/a.ts'),
+      patch: '@@ -1 +1 @@\n-a\n+see docs/ref.md',
+    }], { prBody: 'README.md', contextReads: 2 }));
+
+    expect(reads.map((r) => r.path)).toEqual(['src/a.ts', 'docs/ref.md']);
+    expect(result.leftOut).toContain('(repository root) (not looked up)');
+  });
 });

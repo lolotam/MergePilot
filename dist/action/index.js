@@ -195346,7 +195346,7 @@ function citedOf(context, isArabic) {
   if (unique.length === 0)
     return void 0;
   const separator = isArabic ? "\u060C " : ", ";
-  const shown2 = unique.slice(0, 5).map((path12) => `\`${path12.replace(/`/g, "")}\``);
+  const shown2 = unique.slice(0, 5).map((path12) => `\`${neutralize2(path12.replace(/`/g, ""))}\``);
   const rest = unique.length - shown2.length;
   const names = rest > 0 ? `${shown2.join(separator)}${isArabic ? ` \u0648 ${rest} \u063A\u064A\u0631\u0647\u0627` : ` +${rest} more`}` : shown2.join(separator);
   return { count: unique.length, names };
@@ -195766,7 +195766,7 @@ var CODE_EXTENSIONS = /* @__PURE__ */ new Set([
   "swift",
   "sql"
 ]);
-var CITATION_RE = /\bADR[- ](\d{4})\b|\b[Ss]pecs?[- /#]{0,2}(\d{3})(?!\d)|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])/gu;
+var CITATION_RE = /\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])|\b[Ss]pecs?[- /#]{0,2}(\d{3})(?!\d)/gu;
 var extensionOf = (path12) => {
   const base = path12.split("/").pop() ?? "";
   return base.includes(".") ? (base.split(".").pop() ?? "").toLowerCase() : "";
@@ -195806,18 +195806,17 @@ function hunkLines(patch) {
   }
   return { added: added.join("\n"), context: context.join("\n") };
 }
-async function citedLookups(reader, reviewed, exclude, prBody) {
-  const lookups = [];
+async function runCitedLookups(reader, reviewed, exclude, prBody) {
   const selected = /* @__PURE__ */ new Set();
   const omitted = /* @__PURE__ */ new Set();
   let adrs;
   let specs;
   let rootFiles;
-  const scan = async (text, source) => {
+  const scan = async (text, source, lookups) => {
     for (const match3 of text.matchAll(CITATION_RE)) {
       const adrId = match3[1];
-      const specId = match3[2];
-      const rawPath = match3[3];
+      const rawPath = match3[2];
+      const specId = match3[3];
       let candidates;
       if (adrId !== void 0) {
         if (adrs === void 0)
@@ -195866,14 +195865,19 @@ async function citedLookups(reader, reviewed, exclude, prBody) {
     }
   };
   const patches = reviewed.map((file2) => ({ file: file2, lines: hunkLines(file2.patch ?? "") }));
+  const added = [];
   for (const { file: file2, lines } of patches)
-    await scan(lines.added, { kind: "added-line", file: file2 });
+    await scan(lines.added, { kind: "added-line", file: file2 }, added);
+  await reader.run(added);
+  const near = [];
   for (const { file: file2, lines } of patches)
-    await scan(lines.context, { kind: "context-line", file: file2 });
+    await scan(lines.context, { kind: "context-line", file: file2 }, near);
+  await reader.run(near);
   if (reviewed.length > 0) {
-    await scan((prBody ?? "").slice(0, MAX_PR_BODY_CITATION_CHARS), { kind: "pr-body" });
+    const body = [];
+    await scan((prBody ?? "").slice(0, MAX_PR_BODY_CITATION_CHARS), { kind: "pr-body" }, body);
+    await reader.run(body);
   }
-  return lookups;
 }
 
 var MAX_CONTEXT_READS = 120;
@@ -196070,7 +196074,7 @@ var ContextReader = class {
   }
   async lookUp(lookup) {
     for (const path12 of lookup.candidates) {
-      if (path12 === lookup.forPath)
+      if (path12 === lookup.forPath && (lookup.forPaths ?? []).every((p) => p === path12))
         return;
       if (this.known.has(path12)) {
         const content = this.known.get(path12);
@@ -196171,7 +196175,7 @@ async function gatherRepositoryContext(client, params) {
     return pair ? [{ ...pair, kind: "test-pair", forPath: file2.path, disclose: false }] : [];
   });
   const imports = reviewed.flatMap((file2) => importLookups(file2.path, reader.known.get(file2.path) ?? patchNewSide(file2.patch ?? "")));
-  await reader.run(await citedLookups(reader, reviewed, params.exclude, params.prBody));
+  await runCitedLookups(reader, reviewed, params.exclude, params.prBody);
   await reader.run(pairs);
   await reader.run(imports);
   await reader.run(await buildWiringLookups(reader, reviewed));

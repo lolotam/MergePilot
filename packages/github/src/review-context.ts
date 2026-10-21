@@ -14,7 +14,7 @@ import {
   type RepositoryContextFile,
 } from '@mergepilot/engine';
 import type { GitHubClient } from './client.js';
-import { citedLookups, type Lookup } from './cited-lookups.js';
+import { runCitedLookups, type Lookup } from './cited-lookups.js';
 import { listAtRef, readAtRef } from './read-cache.js';
 
 /** Default file-read cap per review; configurable with `review.contextReads`. */
@@ -303,7 +303,8 @@ class ContextReader {
 
   private async lookUp(lookup: Lookup): Promise<void> {
     for (const path of lookup.candidates) {
-      if (path === lookup.forPath) return;
+      // A citation of the first reviewed file still serves the other reviewed files.
+      if (path === lookup.forPath && (lookup.forPaths ?? []).every((p) => p === path)) return;
       if (this.known.has(path)) {
         const content = this.known.get(path);
         if (content) this.addAccepted(lookup, path, content);
@@ -443,7 +444,7 @@ export async function gatherRepositoryContext(client: GitHubClient, params: Gath
   const imports = reviewed.flatMap((file) =>
     importLookups(file.path, reader.known.get(file.path) ?? patchNewSide(file.patch ?? '')),
   );
-  await reader.run(await citedLookups(reader, reviewed, params.exclude, params.prBody));
+  await runCitedLookups(reader, reviewed, params.exclude, params.prBody);
   await reader.run(pairs);
   await reader.run(imports);
   await reader.run(await buildWiringLookups(reader, reviewed));

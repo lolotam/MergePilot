@@ -74,7 +74,8 @@ function citedOf(context: ContextDisclosure, isArabic: boolean): { count: number
   const unique = [...new Set(context.cited ?? [])];
   if (unique.length === 0) return undefined;
   const separator = isArabic ? '، ' : ', ';
-  const shown = unique.slice(0, 5).map((path) => `\`${path.replace(/`/g, '')}\``);
+  // A cited path may come from a directory listing the author controls, so it is neutralized.
+  const shown = unique.slice(0, 5).map((path) => `\`${neutralize(path.replace(/`/g, ''))}\``);
   const rest = unique.length - shown.length;
   const names = rest > 0
     ? `${shown.join(separator)}${isArabic ? ` و ${rest} غيرها` : ` +${rest} more`}`

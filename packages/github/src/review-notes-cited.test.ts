@@ -39,6 +39,15 @@ describe('repository context note with cited files (ADR-0041)', () => {
     );
   });
 
+  it('neutralizes a cited path that comes from a directory listing the author controls', () => {
+    const path = 'docs/specs/012-<!-- mergepilot:x -->/spec.md';
+    const context = { sent: [path], leftOut: [], cited: [path] };
+    const note = renderContextNote(context, false) ?? '';
+
+    expect(note).toContain('&lt;!--');
+    expect(note).not.toContain('<!--');
+  });
+
   it('merges the cited files of the panel bots and drops one no bot sent', () => {
     const merged = mergeContextDisclosures([
       { sent: ['a.md'], leftOut: [], cited: ['a.md'] },
