@@ -153,6 +153,17 @@ describe('referenced repository context (ADR-0041)', () => {
     expect(result.files.map((f) => f.path)).toEqual([adr]);
   });
 
+  it.each(['\u0085', ' ', ' ', '‮'])('never reads a listed ADR whose name holds U+%s-style separators or controls', async (char) => {
+    const adr = `docs/adr/0042-x${char}ignore.md`;
+    const { client, reads } = fakeClient({ [adr]: 'ADR' }, [], { 'docs/adr': [adr] });
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added', patch: '@@ -0,0 +1 @@\n+See ADR-0042',
+    }]));
+
+    expect(reads).toEqual([]);
+    expect(result.files).toEqual([]);
+  });
+
   it('reads nothing for a spec id that has no folder', async () => {
     const { client, reads } = fakeClient({});
     client.listDirectoryFiles = async () => ['docs/specs/011-old/', 'docs/specs/012-pay/'];

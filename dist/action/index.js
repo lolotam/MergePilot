@@ -195767,7 +195767,7 @@ var CODE_EXTENSIONS = /* @__PURE__ */ new Set([
   "sql"
 ]);
 var CITATION_RE = /\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])|\b[Ss]pecs?[- /#]{0,2}(\d{3})(?!\d)/gu;
-var isSafeListedPath = (path12) => ![...path12].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 || "<>`".includes(char));
+var isSafeListedPath = (path12) => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>`]/u.test(path12);
 var extensionOf = (path12) => {
   const base = path12.split("/").pop() ?? "";
   return base.includes(".") ? (base.split(".").pop() ?? "").toLowerCase() : "";

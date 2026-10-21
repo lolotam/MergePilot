@@ -70,10 +70,10 @@ interface CitedId {
 
 /**
  * A path built from a directory listing (PR-controlled names): any file name GitHub allows, but no
- * control character, line break, markup bracket or backtick, so it cannot break a label or summary.
+ * control or format character (C0, C1, bidi overrides), line or paragraph separator, markup bracket
+ * or backtick, so it cannot break a label or summary.
  */
-const isSafeListedPath = (path: string): boolean =>
-  ![...path].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f || '<>`'.includes(char));
+const isSafeListedPath = (path: string): boolean => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>`]/u.test(path);
 
 /** The lower-case extension of a path, without its dot. */
 const extensionOf = (path: string): string => {
@@ -182,8 +182,9 @@ export async function runCitedLookups(
   };
 
   /**
-   * One source tier: its explicit paths are read first, then its ADR and spec ids are resolved
-   * and read, so the listings an id needs never take the read an explicit path needs.
+   * One source tier: its explicit paths are read first, then its ADR and spec ids are resolved and
+   * read, so the listings an id needs never take the read an explicit path needs. A bare root name
+   * keeps its place in citation order (and in the lookup limit) and checks the one root listing.
    */
   const runTier = async (texts: ReadonlyArray<{ text: string; source: CitationSource }>): Promise<void> => {
     const paths: Lookup[] = [];
