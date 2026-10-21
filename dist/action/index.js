@@ -141741,6 +141741,29 @@ ${escapeDelimiters(content)}
 <<<END UNTRUSTED:${safeLabel}>>>`;
 }
 var HUNK_HEADER_RE2 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+function parseHunkHeader(header2) {
+  return {
+    oldLine: parseInt(header2[1] ?? "1", 10),
+    oldCount: header2[2] !== void 0 ? parseInt(header2[2], 10) : 1,
+    newLine: parseInt(header2[3] ?? "1", 10),
+    newCount: header2[4] !== void 0 ? parseInt(header2[4], 10) : 1
+  };
+}
+function hunkRanges(hunk) {
+  return [
+    [hunk.oldLine, hunk.oldLine + Math.max(hunk.oldCount - 1, 0)],
+    [hunk.newLine, hunk.newLine + Math.max(hunk.newCount - 1, 0)]
+  ];
+}
+function patchRanges(patch) {
+  const ranges = [];
+  for (const line of patch.split(/\r?\n/)) {
+    const header2 = line.match(HUNK_HEADER_RE2);
+    if (header2)
+      ranges.push(...hunkRanges(parseHunkHeader(header2)));
+  }
+  return ranges;
+}
 function patchChunks(patch) {
   const hunks = [];
   let oldLine = 0;
@@ -141748,15 +141771,10 @@ function patchChunks(patch) {
   for (const line of patch.split(/\r?\n/)) {
     const header2 = line.match(HUNK_HEADER_RE2);
     if (header2) {
-      oldLine = parseInt(header2[1] ?? "1", 10);
-      newLine = parseInt(header2[3] ?? "1", 10);
-      const oldCount = header2[2] !== void 0 ? parseInt(header2[2], 10) : 1;
-      const newCount = header2[4] !== void 0 ? parseInt(header2[4], 10) : 1;
-      const ranges = [
-        [oldLine, oldLine + Math.max(oldCount - 1, 0)],
-        [newLine, newLine + Math.max(newCount - 1, 0)]
-      ];
-      hunks.push({ lines: [line], ranges });
+      const hunk = parseHunkHeader(header2);
+      oldLine = hunk.oldLine;
+      newLine = hunk.newLine;
+      hunks.push({ lines: [line], ranges: hunkRanges(hunk) });
       continue;
     }
     const lines = hunks[hunks.length - 1]?.lines;
@@ -141778,8 +141796,12 @@ function patchChunks(patch) {
   }
   return hunks.map((hunk) => ({ text: hunk.lines.join("\n"), ranges: hunk.ranges, findingLines: [] }));
 }
+function countLines(content) {
+  return content.split(/\r?\n/).length;
+}
 function contextChunk(file2) {
-  return { text: renderContextFile(file2), ranges: [], findingLines: [] };
+  const ranges = file2.source === "pull-request" ? patchRanges(file2.content) : [[1, countLines(file2.content)]];
+  return { text: renderContextFile(file2), ranges, findingLines: [] };
 }
 function cutToTokens(text, tokens) {
   const kept = [];
@@ -141798,11 +141820,12 @@ function lineNumberOf(line) {
   const match3 = /^\s+(\d+) /.exec(line);
   return match3 ? Number(match3[1]) : void 0;
 }
-function windowOf(chunk) {
+var PLACE_LINES = 3;
+function windowOf(chunk, radius) {
   const [header2 = "", ...body] = chunk.text.split("\n");
   const kept = body.filter((line) => {
     const number4 = lineNumberOf(line);
-    return number4 !== void 0 && chunk.findingLines.some((at) => Math.abs(at - number4) <= NEAR_LINES);
+    return number4 !== void 0 && chunk.findingLines.some((at) => Math.abs(at - number4) <= radius);
   });
   return kept.length === body.length ? chunk.text : [header2, ...kept, CUT_MARKER].join("\n");
 }
@@ -141823,7 +141846,11 @@ function fitChunks(chunks, maxTokens) {
   let left = maxTokens;
   const near = chunks.filter((c) => c.findingLines.length > 0);
   for (const chunk of near)
-    left -= show(chunk, windowOf(chunk), left);
+    left -= show(chunk, windowOf(chunk, 0), left);
+  for (const chunk of near)
+    left -= show(chunk, windowOf(chunk, PLACE_LINES), left);
+  for (const chunk of near)
+    left -= show(chunk, windowOf(chunk, NEAR_LINES), left);
   for (const chunk of near)
     left -= show(chunk, chunk.text, left);
   for (const chunk of chunks.filter((c) => c.findingLines.length === 0))
@@ -141876,11 +141903,79 @@ function collectFiles(input2) {
   markNearChunks(input2.findings, files);
   return { files: [...files.values()], pathsByFinding };
 }
+var ALSO_AT_RE = /^[ \t]*Also at:([^\n]*(?:\n(?![ \t]*$)[^\n]*)*)/m;
+function alsoAtPlaces(body, paths) {
+  const list = ALSO_AT_RE.exec(body)?.[1] ?? "";
+  const matches = [];
+  for (const path12 of paths) {
+    const escaped = path12.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const place of list.matchAll(new RegExp(`(?<![\\w./-])${escaped}:(\\d+)`, "g"))) {
+      const digits = place[1] ?? "";
+      const end = place.index + path12.length + 1 + digits.length;
+      matches.push({ path: path12, line: Number(digits), start: place.index, end });
+    }
+  }
+  matches.sort((a, b) => a.start - b.start || b.end - a.end);
+  const kept = [];
+  let lastEnd = 0;
+  for (const match3 of matches) {
+    if (match3.start < lastEnd)
+      continue;
+    kept.push(match3);
+    lastEnd = match3.end;
+  }
+  return kept.map((match3) => ({ path: match3.path, line: match3.line }));
+}
+function holdsPlace(chunk, line) {
+  return chunk.ranges.some(([from, to]) => line >= from - NEAR_LINES && line <= to + NEAR_LINES);
+}
+var RENDERED_LINE_RE = /^\s*(\d+) (\+|-| {2})/;
+function rendersLine(chunk, line, side) {
+  return chunk.text.split("\n").some((text) => {
+    const match3 = RENDERED_LINE_RE.exec(text);
+    if (match3 === null || Number(match3[1]) !== line)
+      return false;
+    const marker = match3[2];
+    if (marker === "  ")
+      return true;
+    if (side === void 0)
+      return true;
+    return side === "LEFT" ? marker === "-" : marker === "+";
+  });
+}
 function markNearChunks(findings, files) {
+  const byPath = /* @__PURE__ */ new Map();
+  for (const file2 of files.values()) {
+    byPath.set(file2.path, [...byPath.get(file2.path) ?? [], file2]);
+  }
   for (const finding of findings) {
-    for (const chunk of files.get(finding.path)?.chunks ?? []) {
-      if (chunk.ranges.some(([from, to]) => finding.line >= from - NEAR_LINES && finding.line <= to + NEAR_LINES)) {
-        chunk.findingLines.push(finding.line);
+    const places = [
+      { path: finding.path, line: finding.line, side: finding.side ?? "RIGHT" },
+      // An "Also at:" place names a line printed in a patch, on whichever side it sits.
+      ...alsoAtPlaces(finding.body, [...byPath.keys()]).map((place) => ({ ...place, side: void 0 }))
+    ];
+    for (const place of places) {
+      const pathFiles = byPath.get(place.path) ?? [];
+      const diffs = pathFiles.filter((file2) => file2.kind !== "REPOSITORY_CONTEXT");
+      const heads = pathFiles.filter((file2) => file2.kind === "REPOSITORY_CONTEXT");
+      let marked = false;
+      for (const file2 of diffs) {
+        for (const chunk of file2.chunks) {
+          if (holdsPlace(chunk, place.line)) {
+            chunk.findingLines.push(place.line);
+            marked ||= rendersLine(chunk, place.line, place.side);
+          }
+        }
+      }
+      if (place.side === "LEFT")
+        continue;
+      if (marked)
+        continue;
+      for (const file2 of heads) {
+        for (const chunk of file2.chunks) {
+          if (holdsPlace(chunk, place.line))
+            chunk.findingLines.push(place.line);
+        }
       }
     }
   }
