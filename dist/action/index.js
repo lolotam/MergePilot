@@ -141945,11 +141945,11 @@ function showCitedCut(skipped, budget) {
   for (const source of skipped) {
     if (budget.left < MIN_CUT_TOKENS)
       break;
-    const cut2 = cutBlock(source, budget.left);
-    if (!cut2)
+    const cut3 = cutBlock(source, budget.left);
+    if (!cut3)
       continue;
-    budget.shown.push({ source, block: cut2.block, cut: true });
-    budget.left -= cut2.cost;
+    budget.shown.push({ source, block: cut3.block, cut: true });
+    budget.left -= cut3.cost;
   }
 }
 function showUncited(uncited, budget) {
@@ -141962,11 +141962,11 @@ function showUncited(uncited, budget) {
     }
     if (budget.left < MIN_CUT_TOKENS)
       break;
-    const cut2 = cutBlock(source, budget.left);
-    if (!cut2)
+    const cut3 = cutBlock(source, budget.left);
+    if (!cut3)
       continue;
-    budget.shown.push({ source, block: cut2.block, cut: true });
-    budget.left -= cut2.cost;
+    budget.shown.push({ source, block: cut3.block, cut: true });
+    budget.left -= cut3.cost;
     break;
   }
 }
@@ -141992,10 +141992,10 @@ function criteriaOf(shown2) {
   }
   return criteria;
 }
-function nameList(criteria, kind, cut2) {
+function nameList(criteria, kind, cut3) {
   if (kind === "file")
-    return cut2 ? criteria.cutFiles : criteria.files;
-  return cut2 ? criteria.cutGlobs : criteria.globs;
+    return cut3 ? criteria.cutFiles : criteria.files;
+  return cut3 ? criteria.cutGlobs : criteria.globs;
 }
 function containsName(text, name) {
   if (name === "")
@@ -142486,17 +142486,8 @@ function applyVerdicts(findings, verdicts) {
   return { kept, rejected };
 }
 
-async function runVerifyPass(input2) {
-  const { model, spend, signal } = input2;
-  let totalUsage = input2.totalUsage;
-  const incompleteReasons = [];
-  const unchanged = (reason) => ({
-    findings: input2.findings,
-    totalUsage,
-    rejected: [],
-    incompleteReasons: [...incompleteReasons, `verification skipped: ${reason}`]
-  });
-  const verifyPrompt = buildVerifyPrompt({
+function buildFittingVerifyPrompt(input2) {
+  const base = {
     language: input2.language,
     findings: input2.findings,
     files: input2.files,
@@ -142504,14 +142495,75 @@ async function runVerifyPass(input2) {
     maxCodeTokens: input2.maxCodeTokens,
     rulesFiles: input2.rulesFiles,
     pathInstructions: input2.pathInstructions
+  };
+  const prompt = buildVerifyPrompt(base);
+  const promptTokens = estimateTokens(prompt.system + prompt.user);
+  const limit5 = input2.maxInputTokens;
+  if (limit5 === void 0 || promptTokens <= limit5)
+    return { prompt, promptTokens };
+  const withoutRules = buildVerifyPrompt({ ...base, rulesFiles: void 0, pathInstructions: void 0 });
+  if (prompt.system === withoutRules.system)
+    return { prompt, promptTokens };
+  const withoutRulesTokens = estimateTokens(withoutRules.system + withoutRules.user);
+  const hasRules = (input2.rulesFiles?.length ?? 0) > 0 || (input2.pathInstructions?.length ?? 0) > 0;
+  if (hasRules) {
+    const shortened = shortenRules(base, promptTokens, limit5);
+    if (shortened && shortened.system !== withoutRules.system) {
+      return {
+        prompt: shortened,
+        promptTokens: estimateTokens(shortened.system + shortened.user),
+        note: "verification rules shortened to fit maxInputTokens"
+      };
+    }
+  }
+  return {
+    prompt: withoutRules,
+    promptTokens: withoutRulesTokens,
+    note: "verification shown without the owner rules to fit maxInputTokens"
+  };
+}
+var SHORTEN_ATTEMPTS = 5;
+var SHORTEN_MIN_STEP = 50;
+function shortenRules(base, promptTokens, limit5) {
+  let cap = VERIFY_CRITERIA_TOKENS;
+  let tokens = promptTokens;
+  for (let attempt = 0; attempt < SHORTEN_ATTEMPTS; attempt++) {
+    cap -= Math.max(tokens - limit5, SHORTEN_MIN_STEP);
+    if (cap <= 0)
+      return void 0;
+    const shortened = buildVerifyPrompt({ ...base, maxCriteriaTokens: cap });
+    tokens = estimateTokens(shortened.system + shortened.user);
+    if (tokens <= limit5)
+      return shortened;
+  }
+  return void 0;
+}
+async function runVerifyPass(input2) {
+  const { model, spend, signal } = input2;
+  let totalUsage = input2.totalUsage;
+  const incompleteReasons = [];
+  const fitted = buildFittingVerifyPrompt(input2);
+  if (fitted.note)
+    incompleteReasons.push(fitted.note);
+  const unchanged = (reason) => ({
+    findings: input2.findings,
+    totalUsage,
+    rejected: [],
+    incompleteReasons: [...incompleteReasons, `verification skipped: ${reason}`]
   });
-  const promptTokens = estimateTokens(verifyPrompt.system + verifyPrompt.user);
+  const verifyPrompt = fitted.prompt;
+  const promptTokens = fitted.promptTokens;
   const maxOutputTokens = verifyOutputTokensFor(input2.findings.length);
   const retryOutputTokens = verifyRetryOutputTokens(maxOutputTokens);
   const firstRequested = requestedOutputTokens(model, maxOutputTokens);
   const responseSchema = external_exports.toJSONSchema(VerifyAnswerSchema);
   if (input2.deadline?.expired) {
     return unchanged("time limit reached");
+  }
+  if (input2.maxInputTokens !== void 0) {
+    const tokenBudget = checkBudget({ promptTokens, maxInputTokens: input2.maxInputTokens });
+    if (!tokenBudget.ok)
+      return unchanged(tokenBudget.reason);
   }
   if (!spend.canAfford(promptTokens, firstRequested)) {
     return unchanged("budget limit reached");
@@ -142759,6 +142811,7 @@ async function runReview(input2) {
       maxCodeTokens: limits2.batchTokens,
       rulesFiles: redactedRulesFiles,
       pathInstructions: redactedPathInstructions,
+      maxInputTokens: budgetCfg.maxInputTokens,
       model,
       spend,
       knownSecrets,
