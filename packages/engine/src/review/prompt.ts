@@ -13,6 +13,7 @@
 
 import { matchesGlob } from '../diff/glob.js';
 import { ESCAPED_MARKER_NOTE, escapeDelimiters, escapeLabel } from './delimiters.js';
+import { DESIGN_REVIEW_SECTION, isDesignReview } from './design-review.js';
 import { followUpWhatYouSee, renderOpenFindings, type FollowUp, type PromptPr } from './follow-up.js';
 import { renderSkillSection, type ReviewSkill } from './skill.js';
 
@@ -297,6 +298,7 @@ function buildSystemPrompt(
   batched: boolean,
   followUp: FollowUp | undefined,
   skill: ReviewSkill | undefined,
+  designReview: boolean,
 ): string {
   const isArabic = language === 'ar';
 
@@ -321,6 +323,7 @@ function buildSystemPrompt(
     '',
     REPORTING_RULES,
     '',
+    ...(designReview ? [DESIGN_REVIEW_SECTION, ''] : []),
     ...(batched ? [BATCHES, ''] : []),
     `Return at most ${maxFindings} findings. Prefer high-severity, high-confidence findings.`,
     '',
@@ -393,7 +396,14 @@ function buildUserPrompt(input: PromptInput): string {
  */
 export function buildReviewPrompt(input: PromptInput): BuiltPrompt {
   return {
-    system: buildSystemPrompt(input.language, input.maxFindings, input.batch !== undefined, input.pr.followUp, input.pr.skill),
+    system: buildSystemPrompt(
+      input.language,
+      input.maxFindings,
+      input.batch !== undefined,
+      input.pr.followUp,
+      input.pr.skill,
+      isDesignReview(input.files),
+    ),
     user: buildUserPrompt(input),
   };
 }
