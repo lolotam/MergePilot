@@ -208,10 +208,10 @@ reply starts with "{" and ends with "}", with no markdown fence around it.
     }
   ],
   "summary": "<string — 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>",
-  "withheld": [{ "title": "<string — a problem you noticed but did not report as a finding>", "reason": "<string — why: below the confidence bar, out of scope, already open, or over the findings limit>" }]
+  "withheld": [{ "title": "<string — under 15 words: a problem you noticed but did not report as a finding>", "reason": "<string — a few words: below the confidence bar, out of scope, already open, or over the findings limit>" }]
 }
-If you found nothing to report, return "findings": [] — never omit the key. "withheld" is optional; if your summary names \
-a problem, it must be a finding or appear in "withheld" with a reason.
+If you found nothing to report, return "findings": [] — never omit the key. "withheld" is optional (at most 5 items); if \
+your summary names a problem, it must be a finding or appear in "withheld" with a reason.
 Keys and the severity, category and side values are spelled exactly as above, whatever language the text fields use.`;
 
 const WHAT_YOU_SEE = `\

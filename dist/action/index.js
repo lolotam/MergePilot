@@ -139875,9 +139875,9 @@ function parseJsonLenient(json4) {
 }
 
 var WithheldItemSchema = external_exports.object({ title: external_exports.string().min(1), reason: external_exports.string().min(1) });
-var MAX_WITHHELD_ITEMS = 10;
-var WITHHELD_TITLE_MAX_CHARS = 200;
-var WITHHELD_REASON_MAX_CHARS = 300;
+var MAX_WITHHELD_ITEMS = 5;
+var WITHHELD_TITLE_MAX_CHARS = 120;
+var WITHHELD_REASON_MAX_CHARS = 160;
 var oneLine = (text) => text.replace(/\s+/g, " ").trim();
 var cut = (text, max) => Array.from(text).slice(0, max).join("");
 function parseWithheld(raw) {
@@ -139925,8 +139925,12 @@ function redactWithheld(items, knownSecrets) {
 var ReviewAnswerSchema = external_exports.object({
   summary: external_exports.string().min(1),
   // The problems the model noticed and did not report, each with a reason (ADR-0042); optional,
-  // so an older model that omits it still answers.
-  withheld: external_exports.array(WithheldItemSchema).optional(),
+  // so an older model that omits it still answers. Its bounds go to the JSON schema, so the list
+  // fits the answer budget's summary room; parsing stays lenient (`parseWithheld`).
+  withheld: external_exports.array(external_exports.object({
+    title: external_exports.string().min(1).max(WITHHELD_TITLE_MAX_CHARS),
+    reason: external_exports.string().min(1).max(WITHHELD_REASON_MAX_CHARS)
+  })).max(MAX_WITHHELD_ITEMS).optional(),
   findings: external_exports.array(external_exports.object({
     path: external_exports.string().min(1),
     line: external_exports.number().int().positive(),
@@ -140830,9 +140834,9 @@ var OUTPUT_CONTRACT = `Respond with exactly one JSON object matching this schema
     }
   ],
   "summary": "<string \u2014 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>",
-  "withheld": [{ "title": "<string \u2014 a problem you noticed but did not report as a finding>", "reason": "<string \u2014 why: below the confidence bar, out of scope, already open, or over the findings limit>" }]
+  "withheld": [{ "title": "<string \u2014 under 15 words: a problem you noticed but did not report as a finding>", "reason": "<string \u2014 a few words: below the confidence bar, out of scope, already open, or over the findings limit>" }]
 }
-If you found nothing to report, return "findings": [] \u2014 never omit the key. "withheld" is optional; if your summary names a problem, it must be a finding or appear in "withheld" with a reason.
+If you found nothing to report, return "findings": [] \u2014 never omit the key. "withheld" is optional (at most 5 items); if your summary names a problem, it must be a finding or appear in "withheld" with a reason.
 Keys and the severity, category and side values are spelled exactly as above, whatever language the text fields use.`;
 var WHAT_YOU_SEE = `WHAT YOU SEE: the pull request's title and description, the owner's rules, sometimes library docs, the diff of every changed file of this pull request (or of this batch of it): the changed lines with a few lines of context, each printed with its line number (new-file numbers for added and context lines, old-file numbers for removed lines), and sometimes REPOSITORY_CONTEXT blocks: read-only files of the repository at the head commit, numbered the same way. You never see the program running.`;
 var METHOD = `METHOD: first work out what the change is trying to do. Then, for every hunk, look for:

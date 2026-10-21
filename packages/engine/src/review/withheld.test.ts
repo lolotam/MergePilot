@@ -37,7 +37,7 @@ describe('parseWithheld', () => {
     expect(items[0]).toEqual({ title: 'Null\n## deref', reason: '  out of\r\n\tscope  ' });
   });
 
-  it('keeps at most ten items', () => {
+  it('keeps at most MAX_WITHHELD_ITEMS items', () => {
     const many = Array.from({ length: MAX_WITHHELD_ITEMS + 5 }, (_, i) => ({ title: `T${i}`, reason: 'r' }));
     expect(parseWithheld(many)).toHaveLength(MAX_WITHHELD_ITEMS);
   });
@@ -55,7 +55,7 @@ describe('mergeWithheld', () => {
     expect(merged[0]?.reason).toBe('first');
   });
 
-  it('keeps at most ten items', () => {
+  it('keeps at most MAX_WITHHELD_ITEMS items', () => {
     const many = Array.from({ length: MAX_WITHHELD_ITEMS + 5 }, (_, i) => [{ title: `T${i}`, reason: 'r' }]);
     expect(mergeWithheld(many)).toHaveLength(MAX_WITHHELD_ITEMS);
   });

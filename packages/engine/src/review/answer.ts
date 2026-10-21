@@ -6,7 +6,13 @@ import {
   SeveritySchema,
   type Finding,
 } from './types.js';
-import { parseWithheld, WithheldItemSchema, type WithheldItem } from './withheld.js';
+import {
+  MAX_WITHHELD_ITEMS,
+  parseWithheld,
+  WITHHELD_REASON_MAX_CHARS,
+  WITHHELD_TITLE_MAX_CHARS,
+  type WithheldItem,
+} from './withheld.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -20,8 +26,15 @@ import { parseWithheld, WithheldItemSchema, type WithheldItem } from './withheld
 export const ReviewAnswerSchema = z.object({
   summary: z.string().min(1),
   // The problems the model noticed and did not report, each with a reason (ADR-0042); optional,
-  // so an older model that omits it still answers.
-  withheld: z.array(WithheldItemSchema).optional(),
+  // so an older model that omits it still answers. Its bounds go to the JSON schema, so the list
+  // fits the answer budget's summary room; parsing stays lenient (`parseWithheld`).
+  withheld: z
+    .array(z.object({
+      title: z.string().min(1).max(WITHHELD_TITLE_MAX_CHARS),
+      reason: z.string().min(1).max(WITHHELD_REASON_MAX_CHARS),
+    }))
+    .max(MAX_WITHHELD_ITEMS)
+    .optional(),
   findings: z.array(
     z.object({
       path: z.string().min(1),

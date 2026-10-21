@@ -15,11 +15,11 @@ export const WithheldItemSchema = z.object({ title: z.string().min(1), reason: z
 export type WithheldItem = z.infer<typeof WithheldItemSchema>;
 
 /** At most this many withheld items are kept; the rest are dropped. */
-export const MAX_WITHHELD_ITEMS = 10;
+export const MAX_WITHHELD_ITEMS = 5;
 /** A withheld title is cut to this many characters. */
-export const WITHHELD_TITLE_MAX_CHARS = 200;
+export const WITHHELD_TITLE_MAX_CHARS = 120;
 /** A withheld reason is cut to this many characters. */
-export const WITHHELD_REASON_MAX_CHARS = 300;
+export const WITHHELD_REASON_MAX_CHARS = 160;
 
 /**
  * Whitespace runs (line breaks included) as one space, so an item stays one markdown list line.

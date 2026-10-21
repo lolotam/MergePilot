@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseReviewAnswer } from './answer.js';
 import { reviewJsonSchema } from './split.js';
+import { MAX_WITHHELD_ITEMS, WITHHELD_REASON_MAX_CHARS, WITHHELD_TITLE_MAX_CHARS } from './withheld.js';
 
 // ADR-0042: `withheld` is optional in the answer, and a bad one never drops the summary or the
 // findings of an answer.
@@ -91,5 +92,10 @@ describe('parseReviewAnswer — withheld (ADR-0042)', () => {
 
     expect(properties).toHaveProperty('withheld');
     expect(required ?? []).not.toContain('withheld');
+    // Bounded, so the list fits the summary room of the answer budget.
+    expect(properties?.['withheld']).toMatchObject({
+      maxItems: MAX_WITHHELD_ITEMS,
+      items: { properties: { title: { maxLength: WITHHELD_TITLE_MAX_CHARS }, reason: { maxLength: WITHHELD_REASON_MAX_CHARS } } },
+    });
   });
 });
