@@ -195823,8 +195823,9 @@ async function runCitedLookups(reader, reviewed, exclude, prBody) {
           adrs = (await reader.list("docs/adr")).sort();
         candidates = adrs.filter((path12) => path12.startsWith(`docs/adr/${adrId}-`) && path12.endsWith(".md"));
       } else if (specId !== void 0) {
-        if (specs === void 0)
-          specs = (await reader.list("docs/specs")).sort();
+        if (specs === void 0) {
+          specs = [.../* @__PURE__ */ new Set([...await reader.list("docs/specs"), ...await reader.list("specs")])].sort();
+        }
         candidates = specs.filter((dir) => isSpecDirOf(dir, specId)).map((dir) => `${dir}spec.md`);
       } else {
         if (text[match3.index + match3[0].length] === "(")

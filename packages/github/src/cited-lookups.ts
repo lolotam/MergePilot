@@ -67,7 +67,7 @@ const extensionOf = (path: string): string => {
   return base.includes('.') ? (base.split('.').pop() ?? '').toLowerCase() : '';
 };
 
-/** Whether a listed directory is the folder of a spec id (`docs/specs/012-pay/`). */
+/** Whether a listed directory is the folder of a spec id (`docs/specs/012-pay/`, `specs/012-pay/`). */
 function isSpecDirOf(dir: string, id: string): boolean {
   if (!dir.endsWith('/')) return false;
   const name = dir.split('/').filter(Boolean).pop() ?? '';
@@ -134,7 +134,10 @@ export async function runCitedLookups(
         if (adrs === undefined) adrs = (await reader.list('docs/adr')).sort();
         candidates = adrs.filter((path) => path.startsWith(`docs/adr/${adrId}-`) && path.endsWith('.md'));
       } else if (specId !== undefined) {
-        if (specs === undefined) specs = (await reader.list('docs/specs')).sort();
+        // Spec folders live under `docs/specs/` or, as in spec-kit, under a root `specs/`.
+        if (specs === undefined) {
+          specs = [...new Set([...(await reader.list('docs/specs')), ...(await reader.list('specs'))])].sort();
+        }
         candidates = specs.filter((dir) => isSpecDirOf(dir, specId)).map((dir) => `${dir}spec.md`);
       } else {
         // A member call (`response.json()`) is not a path.

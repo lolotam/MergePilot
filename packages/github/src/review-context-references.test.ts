@@ -94,7 +94,19 @@ describe('referenced repository context (ADR-0041)', () => {
 
     expect(result.files.map((f) => f.path)).toContain('docs/specs/012-pay/spec.md');
     expect(reads.filter((r) => r.path === 'docs/specs/012-pay/spec.md')).toHaveLength(1);
-    expect(listings).toEqual(['docs/specs']);
+    expect(listings).toEqual(['docs/specs', 'specs']);
+  });
+
+  it('resolves a spec id to a root specs folder, as spec-kit lays it out', async () => {
+    const { client, reads } = fakeClient({ 'specs/012-pay/spec.md': 'spec' });
+    client.listDirectoryFiles = async ({ path }) => (path === 'specs' ? ['specs/012-pay/'] : []);
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added',
+      patch: '@@ -0,0 +1 @@\n+See spec 012',
+    }]));
+
+    expect(result.files.map((f) => f.path)).toEqual(['specs/012-pay/spec.md']);
+    expect(reads.map((r) => r.path)).toEqual(['specs/012-pay/spec.md']);
   });
 
   it('reads nothing for a spec id that has no folder', async () => {
