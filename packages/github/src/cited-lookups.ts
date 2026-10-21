@@ -120,7 +120,8 @@ export async function runCitedLookups(
   const selected = new Set<string>();
   const omitted = new Set<string>();
   let adrs: string[] | undefined;
-  let specs: string[] | undefined;
+  let docsSpecs: string[] | undefined;
+  let rootSpecs: string[] | undefined;
   let rootFiles: Set<string> | undefined;
 
   /** Scans one text and pushes the lookups it names; `source` says what named them. */
@@ -132,13 +133,19 @@ export async function runCitedLookups(
       let candidates: string[];
       if (adrId !== undefined) {
         if (adrs === undefined) adrs = (await reader.list('docs/adr')).sort();
-        candidates = adrs.filter((path) => path.startsWith(`docs/adr/${adrId}-`) && path.endsWith('.md'));
+        // Listed names are PR-controlled: they still pass the path syntax check (no line breaks).
+        candidates = adrs.filter((path) => path.startsWith(`docs/adr/${adrId}-`) && path.endsWith('.md') && isCitedPath(path));
       } else if (specId !== undefined) {
-        // Spec folders live under `docs/specs/` or, as in spec-kit, under a root `specs/`.
-        if (specs === undefined) {
-          specs = [...new Set([...(await reader.list('docs/specs')), ...(await reader.list('specs'))])].sort();
+        // Spec folders live under `docs/specs/` or, as in spec-kit, under a root `specs/`; the root
+        // is listed only when `docs/specs` has no folder for the id, so it never takes that read.
+        const specFilesIn = (dirs: string[]): string[] =>
+          dirs.filter((dir) => isSpecDirOf(dir, specId)).map((dir) => `${dir}spec.md`).filter(isCitedPath);
+        docsSpecs ??= (await reader.list('docs/specs')).sort();
+        candidates = specFilesIn(docsSpecs);
+        if (candidates.length === 0) {
+          rootSpecs ??= (await reader.list('specs')).sort();
+          candidates = specFilesIn(rootSpecs);
         }
-        candidates = specs.filter((dir) => isSpecDirOf(dir, specId)).map((dir) => `${dir}spec.md`);
       } else {
         // A member call (`response.json()`) is not a path.
         if (text[match.index + match[0].length] === '(') continue;

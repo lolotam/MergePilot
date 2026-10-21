@@ -195810,7 +195810,8 @@ async function runCitedLookups(reader, reviewed, exclude, prBody) {
   const selected = /* @__PURE__ */ new Set();
   const omitted = /* @__PURE__ */ new Set();
   let adrs;
-  let specs;
+  let docsSpecs;
+  let rootSpecs;
   let rootFiles;
   const scan = async (text, source, lookups) => {
     for (const match3 of text.matchAll(CITATION_RE)) {
@@ -195821,12 +195822,15 @@ async function runCitedLookups(reader, reviewed, exclude, prBody) {
       if (adrId !== void 0) {
         if (adrs === void 0)
           adrs = (await reader.list("docs/adr")).sort();
-        candidates = adrs.filter((path12) => path12.startsWith(`docs/adr/${adrId}-`) && path12.endsWith(".md"));
+        candidates = adrs.filter((path12) => path12.startsWith(`docs/adr/${adrId}-`) && path12.endsWith(".md") && isCitedPath(path12));
       } else if (specId !== void 0) {
-        if (specs === void 0) {
-          specs = [.../* @__PURE__ */ new Set([...await reader.list("docs/specs"), ...await reader.list("specs")])].sort();
+        const specFilesIn = (dirs) => dirs.filter((dir) => isSpecDirOf(dir, specId)).map((dir) => `${dir}spec.md`).filter(isCitedPath);
+        docsSpecs ??= (await reader.list("docs/specs")).sort();
+        candidates = specFilesIn(docsSpecs);
+        if (candidates.length === 0) {
+          rootSpecs ??= (await reader.list("specs")).sort();
+          candidates = specFilesIn(rootSpecs);
         }
-        candidates = specs.filter((dir) => isSpecDirOf(dir, specId)).map((dir) => `${dir}spec.md`);
       } else {
         if (text[match3.index + match3[0].length] === "(")
           continue;

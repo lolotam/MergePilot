@@ -94,7 +94,7 @@ describe('referenced repository context (ADR-0041)', () => {
 
     expect(result.files.map((f) => f.path)).toContain('docs/specs/012-pay/spec.md');
     expect(reads.filter((r) => r.path === 'docs/specs/012-pay/spec.md')).toHaveLength(1);
-    expect(listings).toEqual(['docs/specs', 'specs']);
+    expect(listings).toEqual(['docs/specs']);
   });
 
   it('resolves a spec id to a root specs folder, as spec-kit lays it out', async () => {
@@ -107,6 +107,30 @@ describe('referenced repository context (ADR-0041)', () => {
 
     expect(result.files.map((f) => f.path)).toEqual(['specs/012-pay/spec.md']);
     expect(reads.map((r) => r.path)).toEqual(['specs/012-pay/spec.md']);
+  });
+
+  it('reads the docs/specs spec before listing the root specs folder under a tight read limit', async () => {
+    const { client, reads } = fakeClient(
+      { 'notes.md': 'notes', 'docs/specs/012-pay/spec.md': 'spec' },
+      [],
+      { 'docs/specs': ['docs/specs/012-pay/'], specs: ['specs/012-other/'] },
+    );
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), patch: '@@ -1 +1 @@\n-a\n+See spec 012',
+    }], { contextReads: 3 }));
+
+    expect(reads.map((r) => r.path)).toEqual(['notes.md', 'docs/specs/012-pay/spec.md']);
+    expect(result.files.map((f) => f.path)).toContain('docs/specs/012-pay/spec.md');
+  });
+
+  it('never reads a listed spec folder whose name breaks the path syntax', async () => {
+    const { client, reads } = fakeClient({}, [], { 'docs/specs': ['docs/specs/012-x\n\n<!-- y -->/'], specs: [] });
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added', patch: '@@ -0,0 +1 @@\n+See spec 012',
+    }]));
+
+    expect(reads).toEqual([]);
+    expect(result.files).toEqual([]);
   });
 
   it('reads nothing for a spec id that has no folder', async () => {
