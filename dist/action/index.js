@@ -136916,8 +136916,10 @@ var MissingCredentialError = class extends Error {
   }
 };
 var SubscriptionEnvelopeError = class extends MissingCredentialError {
-  constructor(envName) {
+  secret;
+  constructor(envName, secret) {
     super(envName, `${envName} holds a MergePilot dashboard subscription sign-in, which the GitHub Action does not accept. Use an API key, or provider: claude-code with CLAUDE_CODE_OAUTH_TOKEN; subscriptions run through the GitHub App.`);
+    this.secret = secret;
     this.name = "SubscriptionEnvelopeError";
   }
 };
@@ -136953,7 +136955,7 @@ var EnvCredentialStore = class {
       throw new MissingCredentialError(envName);
     }
     if (trimmed.startsWith(SUBSCRIPTION_PREFIX)) {
-      throw new SubscriptionEnvelopeError(envName);
+      throw new SubscriptionEnvelopeError(envName, new Secret(trimmed));
     }
     return new Secret(trimmed);
   }
@@ -189375,7 +189377,9 @@ async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rota
         const key2 = await resolveKey(store, entry.provider);
         if (key2)
           resolved.secrets.push(key2);
-      } catch {
+      } catch (error62) {
+        if (error62 instanceof SubscriptionEnvelopeError)
+          resolved.secrets.push(error62.secret);
       }
       const roster2 = rosterFor(rotation, entry.provider);
       if (roster2)
@@ -189393,8 +189397,12 @@ async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rota
     try {
       key = await resolveKey(store, entry.provider);
     } catch (error62) {
-      const reason2 = error62 instanceof SubscriptionEnvelopeError ? error62.message : `no API key is configured (${credentialEnvName(entry.provider)})`;
-      resolved.skipped.push({ label, reason: reason2 });
+      if (error62 instanceof SubscriptionEnvelopeError) {
+        resolved.secrets.push(error62.secret);
+        resolved.skipped.push({ label, reason: error62.message });
+      } else {
+        resolved.skipped.push({ label, reason: `no API key is configured (${credentialEnvName(entry.provider)})` });
+      }
       continue;
     }
     if (key)

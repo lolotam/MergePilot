@@ -22,9 +22,10 @@ export class MissingCredentialError extends Error {
 /**
  * The variable holds a dashboard subscription envelope (ADR-0038). The Action cannot persist a rotated
  * refresh token, so it accepts API keys only. The message is fixed text and never includes the value.
+ * `secret` keeps the rejected value so a review that skips it can still redact its tokens.
  */
 export class SubscriptionEnvelopeError extends MissingCredentialError {
-  constructor(envName: string) {
+  constructor(envName: string, readonly secret: Secret) {
     super(
       envName,
       `${envName} holds a MergePilot dashboard subscription sign-in, which the GitHub Action does not accept. ` +
@@ -94,7 +95,7 @@ export class EnvCredentialStore implements CredentialStore<AnyCredentialProvider
     }
     // A prefix check only: the envelope is never decoded, so its tokens are never handled here.
     if (trimmed.startsWith(SUBSCRIPTION_PREFIX)) {
-      throw new SubscriptionEnvelopeError(envName);
+      throw new SubscriptionEnvelopeError(envName, new Secret(trimmed));
     }
 
     return new Secret(trimmed);

@@ -101,8 +101,9 @@ export async function resolveFallbacks(
       try {
         const key = await resolveKey(store, entry.provider);
         if (key) resolved.secrets.push(key);
-      } catch {
-        // An unavailable skipped credential must not stop the primary review.
+      } catch (error) {
+        // An unavailable skipped credential must not stop the primary review; a rejected envelope is still redacted.
+        if (error instanceof SubscriptionEnvelopeError) resolved.secrets.push(error.secret);
       }
       const roster = rosterFor(rotation, entry.provider);
       if (roster) resolved.secrets.push(...roster.keys);
@@ -120,10 +121,13 @@ export async function resolveFallbacks(
     try {
       key = await resolveKey(store, entry.provider);
     } catch (error) {
-      const reason = error instanceof SubscriptionEnvelopeError
-        ? error.message
-        : `no API key is configured (${credentialEnvName(entry.provider)})`;
-      resolved.skipped.push({ label, reason });
+      if (error instanceof SubscriptionEnvelopeError) {
+        // Never used to build a model, but its tokens must not reach a prompt either (ADR-0038).
+        resolved.secrets.push(error.secret);
+        resolved.skipped.push({ label, reason: error.message });
+      } else {
+        resolved.skipped.push({ label, reason: `no API key is configured (${credentialEnvName(entry.provider)})` });
+      }
       continue;
     }
     if (key) resolved.secrets.push(key);

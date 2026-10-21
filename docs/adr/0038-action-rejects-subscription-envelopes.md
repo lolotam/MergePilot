@@ -23,7 +23,7 @@ Option A.
 1. `EnvCredentialStore.resolve` checks only the prefix. It never decodes the envelope, so its tokens are never parsed or handled.
 2. It throws `SubscriptionEnvelopeError`, a `MissingCredentialError` with fixed text: the variable name, that the Action does not accept dashboard subscription sign-ins, and the supported alternatives (an API key, or `provider: claude-code` with `CLAUDE_CODE_OAUTH_TOKEN`). The value never appears in the message.
 3. `info()` still reports the variable as configured, so the primary path reaches `resolve` and shows this message instead of the generic "no API key is configured".
-4. A fallback whose variable holds an envelope is skipped, and the skip reason carries the same fixed text instead of "no API key is configured".
+4. A fallback whose variable holds an envelope is skipped, and the skip reason carries the same fixed text instead of "no API key is configured". The error keeps the rejected value as a `Secret`, which prints as `[REDACTED]`. The fallback path adds it to the review's known secrets without building a model, so the envelope and its access and refresh tokens are still redacted from every prompt.
 5. `CLAUDE_CODE_OAUTH_TOKEN` is the official CLI's raw token, has no envelope prefix, and is unaffected.
 
 ## Consequences

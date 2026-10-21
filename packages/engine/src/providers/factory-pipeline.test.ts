@@ -122,6 +122,37 @@ describe('fallback keys take part in redaction', () => {
     expect(model.skippedFallbacks?.[0]?.reason).not.toContain(OAUTH.refresh);
   });
 
+  it('still redacts the tokens of a rejected fallback envelope from the PRIMARY prompt', async () => {
+    const sent: GenerateOptions[] = [];
+    vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation((options: GenerateOptions) => {
+      sent.push(options);
+      return answer();
+    });
+    const store = new EnvCredentialStore({ OPENAI_API_KEY: 'k1', XAI_API_KEY: encodeSubscription('xai', OAUTH) });
+    const cfg = config({
+      provider: 'openai',
+      model: 'gpt-5',
+      fallback: [{ provider: 'xai', model: 'grok-4' }],
+      review: { verify: false },
+    });
+    const model = await createReviewModel(cfg, store, { cwd: CWD });
+
+    const result = await runReview({
+      config: cfg,
+      pr: { title: 't', body: `see ${OAUTH.access}` },
+      files: [{ path: 'src/a.ts', status: 'modified', patch: patchWith(`// ${OAUTH.refresh}`), changes: 1 }],
+      rulesFiles: [],
+      model,
+      knownSecrets: [],
+    });
+
+    expect(result.status).toBe('completed');
+    const prompt = sent[0]?.messages.map((m) => m.content).join('\n') ?? '';
+    expect(prompt).not.toContain(OAUTH.access);
+    expect(prompt).not.toContain(OAUTH.refresh);
+    expect(prompt).toContain('[REDACTED:known]');
+  });
+
   it('resolveReviewSecrets returns the primary and present fallback keys, and allows a keyless custom primary', async () => {
     const store = new EnvCredentialStore({ XAI_API_KEY: FALLBACK_KEY });
     const cfg = config({

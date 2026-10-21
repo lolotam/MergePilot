@@ -135,6 +135,8 @@ describe('EnvCredentialStore', () => {
       expect(envelopeError.message).not.toContain('access-tok-000');
       expect(envelopeError.message).not.toContain('refresh-tok-000');
       expect(envelopeError.message).not.toContain(SUBSCRIPTION_PREFIX);
+      expect(envelopeError.secret.reveal()).toBe(envelope);
+      expect(JSON.stringify(envelopeError)).not.toContain('refresh-tok-000');
     });
 
     it('rejects on the prefix alone, without decoding the rest', async () => {
