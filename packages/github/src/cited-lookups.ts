@@ -61,6 +61,20 @@ type CitationSource =
   | { kind: 'context-line'; file: ReviewedFile }
   | { kind: 'pr-body' };
 
+/** An ADR or spec id found in a text, resolved after that tier's explicit paths are read. */
+interface CitedId {
+  adr?: string;
+  spec?: string;
+  source: CitationSource;
+}
+
+/**
+ * A path built from a directory listing (PR-controlled names): any file name GitHub allows, but no
+ * control character, line break, markup bracket or backtick, so it cannot break a label or summary.
+ */
+const isSafeListedPath = (path: string): boolean =>
+  ![...path].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f || '<>`'.includes(char));
+
 /** The lower-case extension of a path, without its dot. */
 const extensionOf = (path: string): string => {
   const base = path.split('/').pop() ?? '';
@@ -124,78 +138,91 @@ export async function runCitedLookups(
   let rootSpecs: string[] | undefined;
   let rootFiles: Set<string> | undefined;
 
-  /** Scans one text and pushes the lookups it names; `source` says what named them. */
-  const scan = async (text: string, source: CitationSource, lookups: Lookup[]): Promise<void> => {
-    for (const match of text.matchAll(CITATION_RE)) {
-      const adrId = match[1];
-      const rawPath = match[2];
-      const specId = match[3];
-      let candidates: string[];
-      if (adrId !== undefined) {
-        if (adrs === undefined) adrs = (await reader.list('docs/adr')).sort();
-        // Listed names are PR-controlled: they still pass the path syntax check (no line breaks).
-        candidates = adrs.filter((path) => path.startsWith(`docs/adr/${adrId}-`) && path.endsWith('.md') && isCitedPath(path));
-      } else if (specId !== undefined) {
-        // Spec folders live under `docs/specs/` or, as in spec-kit, under a root `specs/`; the root
-        // is listed only when `docs/specs` has no folder for the id, so it never takes that read.
-        const specFilesIn = (dirs: string[]): string[] =>
-          dirs.filter((dir) => isSpecDirOf(dir, specId)).map((dir) => `${dir}spec.md`).filter(isCitedPath);
-        docsSpecs ??= (await reader.list('docs/specs')).sort();
-        candidates = specFilesIn(docsSpecs);
-        if (candidates.length === 0) {
-          rootSpecs ??= (await reader.list('specs')).sort();
-          candidates = specFilesIn(rootSpecs);
+  /** Queues a cited path once, within the lookup limit; bare names must be in the root listing. */
+  const select = async (path: string, source: CitationSource, lookups: Lookup[]): Promise<void> => {
+    if (!isContextPathAllowed(path, { exclude, isSensitivePath })) return;
+    if (!selected.has(path) && selected.size >= MAX_CITED_LOOKUPS) {
+      if (!omitted.has(path) && (path.includes('/') || rootFiles?.has(path))) {
+        omitted.add(path);
+        reader.leftOut.push(`${path} (cited lookup limit)`);
+      }
+      return;
+    }
+    if (!path.includes('/')) {
+      rootFiles ??= new Set(await reader.list(''));
+      if (!rootFiles.has(path)) return;
+    }
+    selected.add(path);
+    const { kind, reason } = citationKind(source, path);
+    lookups.push({
+      candidates: [path],
+      kind,
+      reason,
+      forPath: source.kind === 'pr-body' ? reviewed[0]!.path : source.file.path,
+      ...(source.kind === 'pr-body' ? { forPaths: reviewed.map((f) => f.path) } : {}),
+      disclose: true,
+    });
+  };
+
+  /** The files an ADR or spec id names, from the (cached) directory listings. */
+  const resolveId = async (id: CitedId): Promise<string[]> => {
+    if (id.adr !== undefined) {
+      adrs ??= (await reader.list('docs/adr')).sort();
+      return adrs.filter((path) => path.startsWith(`docs/adr/${id.adr}-`) && path.endsWith('.md') && isSafeListedPath(path));
+    }
+    // Spec folders live under `docs/specs/` or, as in spec-kit, under a root `specs/`; the root
+    // is listed only when `docs/specs` has no folder for the id, so it never takes that read.
+    const specFilesIn = (dirs: string[]): string[] =>
+      dirs.filter((dir) => isSpecDirOf(dir, id.spec!)).map((dir) => `${dir}spec.md`).filter(isSafeListedPath);
+    docsSpecs ??= (await reader.list('docs/specs')).sort();
+    const found = specFilesIn(docsSpecs);
+    if (found.length > 0) return found;
+    rootSpecs ??= (await reader.list('specs')).sort();
+    return specFilesIn(rootSpecs);
+  };
+
+  /**
+   * One source tier: its explicit paths are read first, then its ADR and spec ids are resolved
+   * and read, so the listings an id needs never take the read an explicit path needs.
+   */
+  const runTier = async (texts: ReadonlyArray<{ text: string; source: CitationSource }>): Promise<void> => {
+    const paths: Lookup[] = [];
+    const ids: CitedId[] = [];
+    for (const { text, source } of texts) {
+      for (const match of text.matchAll(CITATION_RE)) {
+        if (match[1] !== undefined) {
+          ids.push({ adr: match[1], source });
+          continue;
         }
-      } else {
+        if (match[3] !== undefined) {
+          ids.push({ spec: match[3], source });
+          continue;
+        }
         // A member call (`response.json()`) is not a path.
         if (text[match.index + match[0].length] === '(') continue;
-        let path = rawPath!.split('](').pop()!;
+        let path = match[2]!.split('](').pop()!;
         // Markdown's opening link punctuation is not part of a path; route groups stay intact.
         for (const [open, close] of [['(', ')'], ['[', ']']] as const) {
           while (path.startsWith(open) && path.split(open).length > path.split(close).length) path = path.slice(1);
         }
-        candidates = isCitedPath(path) ? [path] : [];
-      }
-      for (const path of candidates) {
-        if (!isContextPathAllowed(path, { exclude, isSensitivePath })) continue;
-        if (!selected.has(path) && selected.size >= MAX_CITED_LOOKUPS) {
-          if (!omitted.has(path) && (path.includes('/') || rootFiles?.has(path))) {
-            omitted.add(path);
-            reader.leftOut.push(`${path} (cited lookup limit)`);
-          }
-          continue;
-        }
-        if (!path.includes('/')) {
-          rootFiles ??= new Set(await reader.list(''));
-          if (!rootFiles.has(path)) continue;
-        }
-        selected.add(path);
-        const { kind, reason } = citationKind(source, path);
-        lookups.push({
-          candidates: [path],
-          kind,
-          reason,
-          forPath: source.kind === 'pr-body' ? reviewed[0]!.path : source.file.path,
-          ...(source.kind === 'pr-body' ? { forPaths: reviewed.map((f) => f.path) } : {}),
-          disclose: true,
-        });
+        if (isCitedPath(path)) await select(path, source, paths);
       }
     }
+    await reader.run(paths);
+    const named: Lookup[] = [];
+    for (const id of ids) {
+      for (const path of await resolveId(id)) await select(path, id.source, named);
+    }
+    await reader.run(named);
   };
 
   const patches = reviewed.map((file) => ({ file, lines: hunkLines(file.patch ?? '') }));
   // a: the added lines of every reviewed file, in file order.
-  const added: Lookup[] = [];
-  for (const { file, lines } of patches) await scan(lines.added, { kind: 'added-line', file }, added);
-  await reader.run(added);
+  await runTier(patches.map(({ file, lines }) => ({ text: lines.added, source: { kind: 'added-line', file } })));
   // b: the context lines around the change, in file order.
-  const near: Lookup[] = [];
-  for (const { file, lines } of patches) await scan(lines.context, { kind: 'context-line', file }, near);
-  await reader.run(near);
+  await runTier(patches.map(({ file, lines }) => ({ text: lines.context, source: { kind: 'context-line', file } })));
   // c: the pull request description: untrusted, capped, and only a source of candidate paths.
   if (reviewed.length > 0) {
-    const body: Lookup[] = [];
-    await scan((prBody ?? '').slice(0, MAX_PR_BODY_CITATION_CHARS), { kind: 'pr-body' }, body);
-    await reader.run(body);
+    await runTier([{ text: (prBody ?? '').slice(0, MAX_PR_BODY_CITATION_CHARS), source: { kind: 'pr-body' } }]);
   }
 }

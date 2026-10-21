@@ -133,6 +133,26 @@ describe('referenced repository context (ADR-0041)', () => {
     expect(result.files).toEqual([]);
   });
 
+  it('reads an explicit path before the listings a spec id of the same source needs', async () => {
+    const { client, reads } = fakeClient({ 'docs/ref.md': 'ref' }, [], { 'docs/specs': [], specs: [] });
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added', patch: '@@ -0,0 +1 @@\n+docs/ref.md spec 099',
+    }], { contextReads: 2 }));
+
+    expect(reads.map((r) => r.path)).toEqual(['docs/ref.md']);
+    expect(result.files.map((f) => f.path)).toEqual(['docs/ref.md']);
+  });
+
+  it('resolves a listed ADR whose file name has characters a free-text path may not', async () => {
+    const adr = 'docs/adr/0012-c++-interop (v2).md';
+    const { client } = fakeClient({ [adr]: 'ADR' }, [], { 'docs/adr': [adr] });
+    const result = await gatherRepositoryContext(client, params([{
+      ...modified('notes.md'), status: 'added', patch: '@@ -0,0 +1 @@\n+See ADR-0012',
+    }]));
+
+    expect(result.files.map((f) => f.path)).toEqual([adr]);
+  });
+
   it('reads nothing for a spec id that has no folder', async () => {
     const { client, reads } = fakeClient({});
     client.listDirectoryFiles = async () => ['docs/specs/011-old/', 'docs/specs/012-pay/'];

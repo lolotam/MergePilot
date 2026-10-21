@@ -195767,6 +195767,7 @@ var CODE_EXTENSIONS = /* @__PURE__ */ new Set([
   "sql"
 ]);
 var CITATION_RE = /\bADR[- ](\d{4})\b|(?<![\p{L}\p{N}_./:\\@-])([\p{L}\p{N}_.@()[\]-]+(?:\/[\p{L}\p{N}_.@()[\]-]+)*\.[a-zA-Z]\w*)(?![\w/])|\b[Ss]pecs?[- /#]{0,2}(\d{3})(?!\d)/gu;
+var isSafeListedPath = (path12) => ![...path12].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 || "<>`".includes(char));
 var extensionOf = (path12) => {
   const base = path12.split("/").pop() ?? "";
   return base.includes(".") ? (base.split(".").pop() ?? "").toLowerCase() : "";
@@ -195813,75 +195814,82 @@ async function runCitedLookups(reader, reviewed, exclude, prBody) {
   let docsSpecs;
   let rootSpecs;
   let rootFiles;
-  const scan = async (text, source, lookups) => {
-    for (const match3 of text.matchAll(CITATION_RE)) {
-      const adrId = match3[1];
-      const rawPath = match3[2];
-      const specId = match3[3];
-      let candidates;
-      if (adrId !== void 0) {
-        if (adrs === void 0)
-          adrs = (await reader.list("docs/adr")).sort();
-        candidates = adrs.filter((path12) => path12.startsWith(`docs/adr/${adrId}-`) && path12.endsWith(".md") && isCitedPath(path12));
-      } else if (specId !== void 0) {
-        const specFilesIn = (dirs) => dirs.filter((dir) => isSpecDirOf(dir, specId)).map((dir) => `${dir}spec.md`).filter(isCitedPath);
-        docsSpecs ??= (await reader.list("docs/specs")).sort();
-        candidates = specFilesIn(docsSpecs);
-        if (candidates.length === 0) {
-          rootSpecs ??= (await reader.list("specs")).sort();
-          candidates = specFilesIn(rootSpecs);
+  const select = async (path12, source, lookups) => {
+    if (!isContextPathAllowed(path12, { exclude, isSensitivePath }))
+      return;
+    if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
+      if (!omitted.has(path12) && (path12.includes("/") || rootFiles?.has(path12))) {
+        omitted.add(path12);
+        reader.leftOut.push(`${path12} (cited lookup limit)`);
+      }
+      return;
+    }
+    if (!path12.includes("/")) {
+      rootFiles ??= new Set(await reader.list(""));
+      if (!rootFiles.has(path12))
+        return;
+    }
+    selected.add(path12);
+    const { kind, reason } = citationKind(source, path12);
+    lookups.push({
+      candidates: [path12],
+      kind,
+      reason,
+      forPath: source.kind === "pr-body" ? reviewed[0].path : source.file.path,
+      ...source.kind === "pr-body" ? { forPaths: reviewed.map((f3) => f3.path) } : {},
+      disclose: true
+    });
+  };
+  const resolveId = async (id) => {
+    if (id.adr !== void 0) {
+      adrs ??= (await reader.list("docs/adr")).sort();
+      return adrs.filter((path12) => path12.startsWith(`docs/adr/${id.adr}-`) && path12.endsWith(".md") && isSafeListedPath(path12));
+    }
+    const specFilesIn = (dirs) => dirs.filter((dir) => isSpecDirOf(dir, id.spec)).map((dir) => `${dir}spec.md`).filter(isSafeListedPath);
+    docsSpecs ??= (await reader.list("docs/specs")).sort();
+    const found = specFilesIn(docsSpecs);
+    if (found.length > 0)
+      return found;
+    rootSpecs ??= (await reader.list("specs")).sort();
+    return specFilesIn(rootSpecs);
+  };
+  const runTier = async (texts) => {
+    const paths = [];
+    const ids = [];
+    for (const { text, source } of texts) {
+      for (const match3 of text.matchAll(CITATION_RE)) {
+        if (match3[1] !== void 0) {
+          ids.push({ adr: match3[1], source });
+          continue;
         }
-      } else {
+        if (match3[3] !== void 0) {
+          ids.push({ spec: match3[3], source });
+          continue;
+        }
         if (text[match3.index + match3[0].length] === "(")
           continue;
-        let path12 = rawPath.split("](").pop();
+        let path12 = match3[2].split("](").pop();
         for (const [open4, close] of [["(", ")"], ["[", "]"]]) {
           while (path12.startsWith(open4) && path12.split(open4).length > path12.split(close).length)
             path12 = path12.slice(1);
         }
-        candidates = isCitedPath(path12) ? [path12] : [];
-      }
-      for (const path12 of candidates) {
-        if (!isContextPathAllowed(path12, { exclude, isSensitivePath }))
-          continue;
-        if (!selected.has(path12) && selected.size >= MAX_CITED_LOOKUPS) {
-          if (!omitted.has(path12) && (path12.includes("/") || rootFiles?.has(path12))) {
-            omitted.add(path12);
-            reader.leftOut.push(`${path12} (cited lookup limit)`);
-          }
-          continue;
-        }
-        if (!path12.includes("/")) {
-          rootFiles ??= new Set(await reader.list(""));
-          if (!rootFiles.has(path12))
-            continue;
-        }
-        selected.add(path12);
-        const { kind, reason } = citationKind(source, path12);
-        lookups.push({
-          candidates: [path12],
-          kind,
-          reason,
-          forPath: source.kind === "pr-body" ? reviewed[0].path : source.file.path,
-          ...source.kind === "pr-body" ? { forPaths: reviewed.map((f3) => f3.path) } : {},
-          disclose: true
-        });
+        if (isCitedPath(path12))
+          await select(path12, source, paths);
       }
     }
+    await reader.run(paths);
+    const named = [];
+    for (const id of ids) {
+      for (const path12 of await resolveId(id))
+        await select(path12, id.source, named);
+    }
+    await reader.run(named);
   };
   const patches = reviewed.map((file2) => ({ file: file2, lines: hunkLines(file2.patch ?? "") }));
-  const added = [];
-  for (const { file: file2, lines } of patches)
-    await scan(lines.added, { kind: "added-line", file: file2 }, added);
-  await reader.run(added);
-  const near = [];
-  for (const { file: file2, lines } of patches)
-    await scan(lines.context, { kind: "context-line", file: file2 }, near);
-  await reader.run(near);
+  await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.added, source: { kind: "added-line", file: file2 } })));
+  await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.context, source: { kind: "context-line", file: file2 } })));
   if (reviewed.length > 0) {
-    const body = [];
-    await scan((prBody ?? "").slice(0, MAX_PR_BODY_CITATION_CHARS), { kind: "pr-body" }, body);
-    await reader.run(body);
+    await runTier([{ text: (prBody ?? "").slice(0, MAX_PR_BODY_CITATION_CHARS), source: { kind: "pr-body" } }]);
   }
 }
 
