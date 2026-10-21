@@ -141751,6 +141751,14 @@ function noCriteria() {
   return { blocks: [], files: [], cutFiles: [], globs: [], cutGlobs: [] };
 }
 function buildVerifyCriteria(input2) {
+  const { cited, uncited } = splitByCitation(collectSources(input2), input2.ruleRefs);
+  const budget = { left: input2.maxTokens, shown: [] };
+  const skipped = showCitedWhole(cited, budget);
+  showCitedCut(skipped, budget);
+  showUncited(uncited, budget);
+  return criteriaOf(budget.shown);
+}
+function collectSources(input2) {
   const sources = [];
   for (const rf of input2.rulesFiles) {
     sources.push({ label: `RULES_FILE:${rf.path}`, content: rf.content, name: rf.path, kind: "file" });
@@ -141763,57 +141771,98 @@ function buildVerifyCriteria(input2) {
       kind: "glob"
     });
   }
-  const blocks = [];
-  const files = [];
-  const cutFiles = [];
-  const globs = [];
-  const cutGlobs = [];
-  let left = input2.maxTokens;
-  for (const source of citedFirst(sources, input2.ruleRefs)) {
-    const full = wrapCriteria(source.label, source.content);
-    const cost = estimateTokens(full);
-    if (cost <= left) {
-      blocks.push(full);
-      (source.kind === "file" ? files : globs).push(source.name);
-      left -= cost;
-      continue;
-    }
-    if (left < MIN_CUT_TOKENS)
-      break;
-    const overhead = estimateTokens(wrapCriteria(source.label, ""));
-    const cutText = cutToTokens(source.content, left - overhead, CRITERIA_CUT_MARKER);
-    const kept = cutText.split("\n").filter((line) => line !== CRITERIA_CUT_MARKER && line.trim() !== "");
-    if (kept.length === 0)
-      continue;
-    blocks.push(wrapCriteria(source.label, cutText));
-    (source.kind === "file" ? cutFiles : cutGlobs).push(source.name);
-    break;
-  }
-  return { blocks, files, cutFiles, globs, cutGlobs };
+  return sources;
 }
-function citedFirst(sources, ruleRefs) {
+function splitByCitation(sources, ruleRefs) {
   const cited = [];
-  const rest = [];
+  const uncited = [];
   for (const source of sources) {
     const isCited = ruleRefs.some((ruleRef) => source.kind === "file" ? refNamesFile(ruleRef, source.name) : refNamesGlob(ruleRef, source.name));
-    (isCited ? cited : rest).push(source);
+    (isCited ? cited : uncited).push(source);
   }
-  return [...cited, ...rest];
+  return { cited, uncited };
 }
-function namesRulesFile(token, paths) {
-  const name = token.toLowerCase();
-  return paths.some((path12) => {
-    const lower2 = path12.toLowerCase();
-    if (token.includes("/"))
-      return lower2 === name;
-    return lower2.slice(lower2.lastIndexOf("/") + 1) === name;
-  });
+function showCitedWhole(cited, budget) {
+  const skipped = [];
+  for (const source of cited) {
+    const whole = wholeBlock(source, budget.left);
+    if (!whole) {
+      skipped.push(source);
+      continue;
+    }
+    budget.shown.push({ source, block: whole.block, cut: false });
+    budget.left -= whole.cost;
+  }
+  return skipped;
 }
-function fileNames(ruleRef) {
-  return ruleRef.split(/[\s,;()[\]`"']+/).map((token) => token.replace(/[#:].*$/, "").replace(/\.+$/, "")).filter((token) => token.includes("."));
+function showCitedCut(skipped, budget) {
+  for (const source of skipped) {
+    if (budget.left < MIN_CUT_TOKENS)
+      break;
+    const cut2 = cutBlock(source, budget.left);
+    if (!cut2)
+      continue;
+    budget.shown.push({ source, block: cut2.block, cut: true });
+    budget.left -= cut2.cost;
+  }
+}
+function showUncited(uncited, budget) {
+  for (const source of uncited) {
+    const whole = wholeBlock(source, budget.left);
+    if (whole) {
+      budget.shown.push({ source, block: whole.block, cut: false });
+      budget.left -= whole.cost;
+      continue;
+    }
+    if (budget.left < MIN_CUT_TOKENS)
+      break;
+    const cut2 = cutBlock(source, budget.left);
+    if (!cut2)
+      continue;
+    budget.shown.push({ source, block: cut2.block, cut: true });
+    budget.left -= cut2.cost;
+    break;
+  }
+}
+function wholeBlock(source, left) {
+  const block = wrapCriteria(source.label, source.content);
+  const cost = estimateTokens(block);
+  return cost <= left ? { block, cost } : void 0;
+}
+function cutBlock(source, left) {
+  const overhead = estimateTokens(wrapCriteria(source.label, ""));
+  const cutText = cutToTokens(source.content, left - overhead, CRITERIA_CUT_MARKER);
+  const kept = cutText.split("\n").filter((line) => line !== CRITERIA_CUT_MARKER && line.trim() !== "");
+  if (kept.length === 0)
+    return void 0;
+  const block = wrapCriteria(source.label, cutText);
+  return { block, cost: estimateTokens(block) };
+}
+function criteriaOf(shown2) {
+  const criteria = { blocks: [], files: [], cutFiles: [], globs: [], cutGlobs: [] };
+  for (const entry of shown2) {
+    criteria.blocks.push(entry.block);
+    nameList(criteria, entry.source.kind, entry.cut).push(entry.source.name);
+  }
+  return criteria;
+}
+function nameList(criteria, kind, cut2) {
+  if (kind === "file")
+    return cut2 ? criteria.cutFiles : criteria.files;
+  return cut2 ? criteria.cutGlobs : criteria.globs;
+}
+function containsName(text, name) {
+  if (name === "")
+    return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const flags = name.includes(".") ? "i" : "";
+  return new RegExp(`(?<![\\w./-])${escaped}(?![\\w-]|[./][\\w-])`, flags).test(text);
 }
 function refNamesFile(ruleRef, path12) {
-  return fileNames(ruleRef).some((name) => namesRulesFile(name, [path12]));
+  if (containsName(ruleRef, path12))
+    return true;
+  const base = path12.slice(path12.lastIndexOf("/") + 1);
+  return containsName(ruleRef, base);
 }
 function refNamesGlob(ruleRef, glob3) {
   return ruleRef.includes(glob3);

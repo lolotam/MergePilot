@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Finding } from './types.js';
-import { buildVerifyCriteria, citedRule, refNamesGlob, withRuleCriteria } from './verify-criteria.js';
+import {
+  buildVerifyCriteria,
+  citedRule,
+  refNamesFile,
+  refNamesGlob,
+  withRuleCriteria,
+} from './verify-criteria.js';
 import { buildVerifyPrompt } from './verify-prompt.js';
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
@@ -227,6 +233,31 @@ describe('verify criteria - the owner rules the verifier is shown', () => {
     expect(prompt.user).toContain('Rule: nested/AGENTS.md §1');
     expect(prompt.user).not.toContain('(no REVIEW_CRITERIA block shown here has this name)');
   });
+
+  it('shows a small cited block whole before a big cited block is cut', () => {
+    const prompt = buildVerifyPrompt({
+      language: 'en',
+      findings: [
+        makeFinding({ id: 'f1', ruleRef: 'BIG.md §1' }),
+        makeFinding({ id: 'f2', ruleRef: 'nested/AGENTS.md §2' }),
+      ],
+      files: [{ path: 'src/api.ts', patch: PATCH }],
+      rulesFiles: [
+        {
+          path: 'BIG.md',
+          content: Array.from({ length: 400 }, (_, index) => `big rule ${index + 1}`).join('\n'),
+        },
+        { path: 'nested/AGENTS.md', content: 'Nested rule.' },
+      ],
+      maxCriteriaTokens: 400,
+    });
+
+    expect(prompt.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:nested/AGENTS.md>>>');
+    expect(prompt.user).toContain('Nested rule.');
+    expect(prompt.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:BIG.md>>>');
+    expect(prompt.user).toContain('[verification limit: the rest of this rules block was not shown]');
+    expect(prompt.user.indexOf('nested/AGENTS.md')).toBeLessThan(prompt.user.indexOf('big rule 1'));
+  });
 });
 
 describe('verify criteria - buildVerifyCriteria', () => {
@@ -302,6 +333,31 @@ describe('verify criteria - the citation helpers', () => {
   it('names a path instruction by its glob', () => {
     expect(refNamesGlob('.mergepilot.yml src/**', 'src/**')).toBe(true);
     expect(refNamesGlob('.mergepilot.yml src/**', 'docs/**')).toBe(false);
+  });
+
+  it('names a rules file in quotes, before a colon, an anchor or a trailing dot', () => {
+    expect(refNamesFile('«CLAUDE.md» §5', 'CLAUDE.md')).toBe(true);
+    expect(refNamesFile('“CLAUDE.md” §5', 'CLAUDE.md')).toBe(true);
+    expect(refNamesFile('CLAUDE.md، القواعد', 'CLAUDE.md')).toBe(true);
+    expect(refNamesFile('CLAUDE.md:13', 'CLAUDE.md')).toBe(true);
+    expect(refNamesFile('CLAUDE.md#hard-rules', 'CLAUDE.md')).toBe(true);
+    expect(refNamesFile('see CLAUDE.md.', 'CLAUDE.md')).toBe(true);
+    expect(refNamesFile('CLAUDE.mdx §1', 'CLAUDE.md')).toBe(false);
+    expect(refNamesFile('XCLAUDE.md', 'CLAUDE.md')).toBe(false);
+  });
+
+  it('names a rules file whose path holds a space', () => {
+    expect(refNamesFile('"docs/project rules.md" §1', 'docs/project rules.md')).toBe(true);
+  });
+
+  it('names a dotless rules file as it is written', () => {
+    expect(refNamesFile('RULES §2', 'RULES')).toBe(true);
+    expect(refNamesFile('the project rules', 'RULES')).toBe(false);
+  });
+
+  it('names a rules file by its file name, not by the file name of another path', () => {
+    expect(refNamesFile('apps/api/AGENTS.md §2', 'AGENTS.md')).toBe(false);
+    expect(refNamesFile('agents.md: Hard rules', 'docs/AGENTS.md')).toBe(true);
   });
 });
 

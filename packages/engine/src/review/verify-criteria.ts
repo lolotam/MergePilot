@@ -47,6 +47,27 @@ interface CriteriaSource {
   kind: 'file' | 'glob';
 }
 
+/** The block of a source the verifier is shown, and what it costs. */
+interface ShownBlock {
+  block: string;
+  cost: number;
+}
+
+/** A source the verifier is shown: its block, and whether it was cut. */
+interface ShownSource {
+  source: CriteriaSource;
+  block: string;
+  cut: boolean;
+}
+
+/** The budget the shown blocks spend, and the blocks shown so far. */
+interface CriteriaBudget {
+  /** The tokens still free for the blocks that are not shown yet. */
+  left: number;
+  /** The blocks shown, in the order they were shown. */
+  shown: ShownSource[];
+}
+
 /** The criteria of a verification prompt that shows no rule at all. */
 export function noCriteria(): VerifyCriteria {
   return { blocks: [], files: [], cutFiles: [], globs: [], cutGlobs: [] };
@@ -54,13 +75,24 @@ export function noCriteria(): VerifyCriteria {
 
 /**
  * The owner's rules for the verifier: the rules files, then the path instructions whose glob
- * matches a changed file, capped in tokens. The sources a finding cites come first, so a cited
- * rule is shown before the cap is spent on an uncited one. A block that does not fit is cut to
- * what is left; a cut that keeps no line shows nothing of its source, so that source is left out
- * and the next one is tried with the same budget, and a source that is not shown adds no name: a
- * ruleRef naming it gets no exception.
+ * matches a changed file, capped in tokens. The sources a finding cites come first: every cited
+ * source that fits whole is shown whole, then the cited sources that did not fit are cut to what
+ * is left of the budget, and the uncited sources come last, the first of them that does not fit
+ * whole cut to what is left and the rest left out. A cut that keeps no line shows nothing of its
+ * source, so that source is left out and the next one is tried with the same budget, and a
+ * source that is not shown adds no name: a ruleRef naming it gets no exception.
  */
 export function buildVerifyCriteria(input: VerifyCriteriaInput): VerifyCriteria {
+  const { cited, uncited } = splitByCitation(collectSources(input), input.ruleRefs);
+  const budget: CriteriaBudget = { left: input.maxTokens, shown: [] };
+  const skipped = showCitedWhole(cited, budget);
+  showCitedCut(skipped, budget);
+  showUncited(uncited, budget);
+  return criteriaOf(budget.shown);
+}
+
+/** The rules files and the path instructions that match a changed file, as the rule sources. */
+function collectSources(input: VerifyCriteriaInput): CriteriaSource[] {
   const sources: CriteriaSource[] = [];
   for (const rf of input.rulesFiles) {
     sources.push({ label: `RULES_FILE:${rf.path}`, content: rf.content, name: rf.path, kind: 'file' });
@@ -73,87 +105,136 @@ export function buildVerifyCriteria(input: VerifyCriteriaInput): VerifyCriteria 
       kind: 'glob',
     });
   }
-
-  const blocks: string[] = [];
-  const files: string[] = [];
-  const cutFiles: string[] = [];
-  const globs: string[] = [];
-  const cutGlobs: string[] = [];
-  let left = input.maxTokens;
-  for (const source of citedFirst(sources, input.ruleRefs)) {
-    const full = wrapCriteria(source.label, source.content);
-    const cost = estimateTokens(full);
-    if (cost <= left) {
-      blocks.push(full);
-      (source.kind === 'file' ? files : globs).push(source.name);
-      left -= cost;
-      continue;
-    }
-    // Too little left for a cut block to be worth showing: the rest of the rules stay unshown.
-    if (left < MIN_CUT_TOKENS) break;
-    const overhead = estimateTokens(wrapCriteria(source.label, ''));
-    const cutText = cutToTokens(source.content, left - overhead, CRITERIA_CUT_MARKER);
-    // A cut that kept no line shows nothing of its source: the source is left out and the next
-    // one is tried with the same budget.
-    const kept = cutText.split('\n').filter((line) => line !== CRITERIA_CUT_MARKER && line.trim() !== '');
-    if (kept.length === 0) continue;
-    blocks.push(wrapCriteria(source.label, cutText));
-    (source.kind === 'file' ? cutFiles : cutGlobs).push(source.name);
-    break;
-  }
-
-  return { blocks, files, cutFiles, globs, cutGlobs };
+  return sources;
 }
 
 /**
- * The sources a ruleRef cites come first, so a cited rule is shown before the cap is spent on an
- * uncited one. Each group keeps its own order: the sources as they were built.
+ * The sources a ruleRef cites, and the ones no ruleRef cites. Each group keeps its own order:
+ * the sources as they were built.
  */
-function citedFirst(
+function splitByCitation(
   sources: readonly CriteriaSource[],
   ruleRefs: readonly string[],
-): CriteriaSource[] {
+): { cited: CriteriaSource[]; uncited: CriteriaSource[] } {
   const cited: CriteriaSource[] = [];
-  const rest: CriteriaSource[] = [];
+  const uncited: CriteriaSource[] = [];
   for (const source of sources) {
     const isCited = ruleRefs.some((ruleRef) =>
       source.kind === 'file'
         ? refNamesFile(ruleRef, source.name)
         : refNamesGlob(ruleRef, source.name),
     );
-    (isCited ? cited : rest).push(source);
+    (isCited ? cited : uncited).push(source);
   }
-  return [...cited, ...rest];
+  return { cited, uncited };
+}
+
+/** Step 1: every cited source that fits whole; the ones that do not fit are left for the cut. */
+function showCitedWhole(cited: readonly CriteriaSource[], budget: CriteriaBudget): CriteriaSource[] {
+  const skipped: CriteriaSource[] = [];
+  for (const source of cited) {
+    const whole = wholeBlock(source, budget.left);
+    if (!whole) {
+      skipped.push(source);
+      continue;
+    }
+    budget.shown.push({ source, block: whole.block, cut: false });
+    budget.left -= whole.cost;
+  }
+  return skipped;
+}
+
+/** Step 2: the cited sources that did not fit whole, cut to what is left of the budget. */
+function showCitedCut(skipped: readonly CriteriaSource[], budget: CriteriaBudget): void {
+  for (const source of skipped) {
+    // Too little left for a cut block to be worth showing: the rest of the rules stay unshown.
+    if (budget.left < MIN_CUT_TOKENS) break;
+    const cut = cutBlock(source, budget.left);
+    // A cut that kept no line shows nothing of its source: the source is left out and the next
+    // one is tried with the same budget.
+    if (!cut) continue;
+    budget.shown.push({ source, block: cut.block, cut: true });
+    budget.left -= cut.cost;
+  }
+}
+
+/** Step 3: the uncited sources; the first that does not fit whole is cut, and then it stops. */
+function showUncited(uncited: readonly CriteriaSource[], budget: CriteriaBudget): void {
+  for (const source of uncited) {
+    const whole = wholeBlock(source, budget.left);
+    if (whole) {
+      budget.shown.push({ source, block: whole.block, cut: false });
+      budget.left -= whole.cost;
+      continue;
+    }
+    if (budget.left < MIN_CUT_TOKENS) break;
+    const cut = cutBlock(source, budget.left);
+    if (!cut) continue;
+    budget.shown.push({ source, block: cut.block, cut: true });
+    budget.left -= cut.cost;
+    break;
+  }
+}
+
+/** The block of a source that fits whole, and what it costs; undefined when it does not fit. */
+function wholeBlock(source: CriteriaSource, left: number): ShownBlock | undefined {
+  const block = wrapCriteria(source.label, source.content);
+  const cost = estimateTokens(block);
+  return cost <= left ? { block, cost } : undefined;
 }
 
 /**
- * Whether a ruleRef token names a rules file: the whole path when the token has a directory,
- * else the file name of the path.
+ * The block of a source cut to what is left, and what it costs; undefined when the cut keeps no
+ * line of the source, so the source shows nothing of itself.
  */
-function namesRulesFile(token: string, paths: readonly string[]): boolean {
-  const name = token.toLowerCase();
-  return paths.some((path) => {
-    const lower = path.toLowerCase();
-    if (token.includes('/')) return lower === name;
-    return lower.slice(lower.lastIndexOf('/') + 1) === name;
-  });
+function cutBlock(source: CriteriaSource, left: number): ShownBlock | undefined {
+  const overhead = estimateTokens(wrapCriteria(source.label, ''));
+  const cutText = cutToTokens(source.content, left - overhead, CRITERIA_CUT_MARKER);
+  const kept = cutText.split('\n').filter((line) => line !== CRITERIA_CUT_MARKER && line.trim() !== '');
+  if (kept.length === 0) return undefined;
+  const block = wrapCriteria(source.label, cutText);
+  return { block, cost: estimateTokens(block) };
+}
+
+/** The blocks shown, in the order they were shown, and the names of the sources they carry. */
+function criteriaOf(shown: readonly ShownSource[]): VerifyCriteria {
+  const criteria: VerifyCriteria = { blocks: [], files: [], cutFiles: [], globs: [], cutGlobs: [] };
+  for (const entry of shown) {
+    criteria.blocks.push(entry.block);
+    nameList(criteria, entry.source.kind, entry.cut).push(entry.source.name);
+  }
+  return criteria;
+}
+
+/** The list a shown source records its name in: a rules file or a glob, whole or cut. */
+function nameList(criteria: VerifyCriteria, kind: CriteriaSource['kind'], cut: boolean): string[] {
+  if (kind === 'file') return cut ? criteria.cutFiles : criteria.files;
+  return cut ? criteria.cutGlobs : criteria.globs;
 }
 
 /**
- * The file names a ruleRef names: its tokens that carry a file name, without the line number or
- * the anchor that may follow it (`CLAUDE.md:13`, `CLAUDE.md#hard-rules`) and without a trailing
- * dot. A quoted or bracketed name is the name itself.
+ * Whether `text` holds `name` as a whole name: the character before it is the start of the text
+ * or is not a name or path character, and the character after it is the end of the text or is not
+ * a name character, nor a `.` or `/` and one. A name right after a `/` is the end of a longer
+ * path, so it does not count. A name with a `.` is matched without regard to case, a name without
+ * one is matched as it is written, so a dotless `RULES` file does not match the word "rules".
  */
-function fileNames(ruleRef: string): string[] {
-  return ruleRef
-    .split(/[\s,;()[\]`"']+/)
-    .map((token) => token.replace(/[#:].*$/, '').replace(/\.+$/, ''))
-    .filter((token) => token.includes('.'));
+function containsName(text: string, name: string): boolean {
+  if (name === '') return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const flags = name.includes('.') ? 'i' : '';
+  return new RegExp(`(?<![\\w./-])${escaped}(?![\\w-]|[./][\\w-])`, flags).test(text);
 }
 
-/** Whether the ruleRef names a rules file by its whole path or by its file name. */
+/**
+ * Whether the ruleRef names a rules file: by its whole path, or by the file name it ends with
+ * when the path has a directory. The name is matched as a whole, so `CLAUDE.mdx` does not name
+ * `CLAUDE.md` and `apps/api/AGENTS.md` does not name a root `AGENTS.md`.
+ */
 export function refNamesFile(ruleRef: string, path: string): boolean {
-  return fileNames(ruleRef).some((name) => namesRulesFile(name, [path]));
+  if (containsName(ruleRef, path)) return true;
+  const base = path.slice(path.lastIndexOf('/') + 1);
+  return containsName(ruleRef, base);
 }
 
 /** Whether the ruleRef names a path instruction by its glob. */
