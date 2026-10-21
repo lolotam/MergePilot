@@ -276,7 +276,7 @@ RULES CHECK: before you conclude, take each concrete, checkable rule in the REVI
 and layer boundaries, required comments or tests) and check it against every changed file it \
 applies to, not only the first one. Report a broken rule with "category": "project-rule" and the \
 rule's place in "ruleRef"; use one finding per broken rule, with "Also at:" for the other places. \
-Skip rules that are vague or only about style.`;
+Skip only rules too vague to check against the code.`;
 
 const REPORTING_RULES = `\
 REPORTING: reason across every file shown, not one hunk at a time. One finding per root cause, \
