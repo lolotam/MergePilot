@@ -141880,17 +141880,18 @@ function collectFiles(input2) {
   return { files: [...files.values()], pathsByFinding };
 }
 var ALSO_AT_RE = /^[ \t]*Also at:(.*)$/m;
-var PLACE_RE = /^`?([^`,]+?):(\d+)(?:-\d+)?`?$/;
-function alsoAtPlaces(body) {
+function alsoAtPlaces(body, paths) {
   const list = ALSO_AT_RE.exec(body)?.[1] ?? "";
-  return list.split(",").flatMap((part) => {
-    const place = PLACE_RE.exec(part.trim().replace(/[.;]$/, ""));
-    return place ? [{ path: place[1], line: Number(place[2]) }] : [];
+  return paths.flatMap((path12) => {
+    const escaped = path12.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const places = list.matchAll(new RegExp(`(?<![\\w./-])${escaped}:(\\d+)`, "g"));
+    return [...places].map((place) => ({ path: path12, line: Number(place[1]) }));
   });
 }
 function markNearChunks(findings, files) {
+  const paths = [...new Set([...files.values()].map((file2) => file2.path))];
   for (const finding of findings) {
-    for (const place of [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body)]) {
+    for (const place of [{ path: finding.path, line: finding.line }, ...alsoAtPlaces(finding.body, paths)]) {
       for (const chunk of files.get(place.path)?.chunks ?? []) {
         if (chunk.ranges.some(([from, to]) => place.line >= from - NEAR_LINES && place.line <= to + NEAR_LINES)) {
           chunk.findingLines.push(place.line);

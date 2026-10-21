@@ -186,16 +186,19 @@ describe('verify prompt — code across files (ADR-0028)', () => {
   });
 
   it('reads the "Also at:" places of a body', () => {
-    expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.')).toEqual([
+    const paths = ['src/a.ts', 'lib/b.ts', 'c.ts', 'src/my file.ts', 'src/a,b.ts'];
+    expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.', paths)).toEqual([
       { path: 'src/a.ts', line: 3 },
       { path: 'lib/b.ts', line: 10 },
       { path: 'c.ts', line: 7 },
     ]);
-    expect(alsoAtPlaces('Also at: `src/my file.ts:9`, docs/a b.md:4')).toEqual([
+    expect(alsoAtPlaces('Also at: `src/my file.ts:9`, src/a,b.ts:402', paths)).toEqual([
       { path: 'src/my file.ts', line: 9 },
-      { path: 'docs/a b.md', line: 4 },
+      { path: 'src/a,b.ts', line: 402 },
     ]);
-    expect(alsoAtPlaces('No list here: src/a.ts:3')).toEqual([]);
+    // Only known paths count, and a known path inside a longer one is not a match.
+    expect(alsoAtPlaces('Also at: other.ts:5, xsrc/a.ts:8', paths)).toEqual([]);
+    expect(alsoAtPlaces('No list here: src/a.ts:3', paths)).toEqual([]);
   });
 
   it.each(['en', 'ar'])('in %s, no longer rejects a finding only for depending on code not shown', (language) => {
