@@ -117279,49 +117279,6 @@ function resolveBaseUrl(id, override) {
   return chosen.replace(/\/+$/, "");
 }
 
-var MissingCredentialError = class extends Error {
-  envName;
-  constructor(envName, message) {
-    super(message ?? `Missing credential: ${envName} is not set or is blank`);
-    this.name = "MissingCredentialError";
-    this.envName = envName;
-  }
-};
-var PROVIDER_ENV_MAP = {
-  ...Object.fromEntries(Object.values(PROVIDER_REGISTRY).map((entry) => [entry.id, entry.envName])),
-  "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
-};
-function credentialEnvName(provider) {
-  return PROVIDER_ENV_MAP[provider];
-}
-var EnvCredentialStore = class {
-  #env;
-  constructor(env3 = process.env) {
-    this.#env = env3;
-  }
-  async info(ref) {
-    const envName = PROVIDER_ENV_MAP[ref.provider];
-    const raw = this.#env[envName];
-    const trimmed = raw !== void 0 ? raw.trim() : "";
-    const configured = trimmed.length > 0;
-    return {
-      provider: ref.provider,
-      configured,
-      source: configured ? "env" : "none",
-      envName
-    };
-  }
-  async resolve(ref, _purpose) {
-    const envName = PROVIDER_ENV_MAP[ref.provider];
-    const raw = this.#env[envName];
-    const trimmed = raw !== void 0 ? raw.trim() : "";
-    if (trimmed.length === 0) {
-      throw new MissingCredentialError(envName);
-    }
-    return new Secret(trimmed);
-  }
-};
-
 var external_exports = {};
 __export(external_exports, {
   $brand: () => $brand,
@@ -136949,6 +136906,60 @@ function malformedEnvelopeTokens(value) {
     return [];
   }
 }
+
+var MissingCredentialError = class extends Error {
+  envName;
+  constructor(envName, message) {
+    super(message ?? `Missing credential: ${envName} is not set or is blank`);
+    this.name = "MissingCredentialError";
+    this.envName = envName;
+  }
+};
+var SubscriptionEnvelopeError = class extends MissingCredentialError {
+  secret;
+  constructor(envName, secret) {
+    super(envName, `${envName} holds a MergePilot dashboard subscription sign-in, which the GitHub Action does not accept. Use an API key, or provider: claude-code with CLAUDE_CODE_OAUTH_TOKEN; subscriptions run through the GitHub App.`);
+    this.secret = secret;
+    this.name = "SubscriptionEnvelopeError";
+  }
+};
+var PROVIDER_ENV_MAP = {
+  ...Object.fromEntries(Object.values(PROVIDER_REGISTRY).map((entry) => [entry.id, entry.envName])),
+  "claude-code": "CLAUDE_CODE_OAUTH_TOKEN"
+};
+function credentialEnvName(provider) {
+  return PROVIDER_ENV_MAP[provider];
+}
+var EnvCredentialStore = class {
+  #env;
+  constructor(env3 = process.env) {
+    this.#env = env3;
+  }
+  async info(ref) {
+    const envName = PROVIDER_ENV_MAP[ref.provider];
+    const raw = this.#env[envName];
+    const trimmed = raw !== void 0 ? raw.trim() : "";
+    const configured = trimmed.length > 0;
+    return {
+      provider: ref.provider,
+      configured,
+      source: configured ? "env" : "none",
+      envName
+    };
+  }
+  async resolve(ref, _purpose) {
+    const envName = PROVIDER_ENV_MAP[ref.provider];
+    const raw = this.#env[envName];
+    const trimmed = raw !== void 0 ? raw.trim() : "";
+    if (trimmed.length === 0) {
+      throw new MissingCredentialError(envName);
+    }
+    if (trimmed.startsWith(SUBSCRIPTION_PREFIX)) {
+      throw new SubscriptionEnvelopeError(envName, new Secret(trimmed));
+    }
+    return new Secret(trimmed);
+  }
+};
 
 init_lazy();
 var anthropicMessagesApi = () => lazyApi(() => Promise.resolve().then(() => (init_anthropic_messages(), anthropic_messages_exports)));
@@ -189366,7 +189377,9 @@ async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rota
         const key2 = await resolveKey(store, entry.provider);
         if (key2)
           resolved.secrets.push(key2);
-      } catch {
+      } catch (error62) {
+        if (error62 instanceof SubscriptionEnvelopeError)
+          resolved.secrets.push(error62.secret);
       }
       const roster2 = rosterFor(rotation, entry.provider);
       if (roster2)
@@ -189383,8 +189396,13 @@ async function resolveFallbacks(config2, store, customBaseUrl, customFetch, rota
     let key;
     try {
       key = await resolveKey(store, entry.provider);
-    } catch {
-      resolved.skipped.push({ label, reason: `no API key is configured (${credentialEnvName(entry.provider)})` });
+    } catch (error62) {
+      if (error62 instanceof SubscriptionEnvelopeError) {
+        resolved.secrets.push(error62.secret);
+        resolved.skipped.push({ label, reason: error62.message });
+      } else {
+        resolved.skipped.push({ label, reason: `no API key is configured (${credentialEnvName(entry.provider)})` });
+      }
       continue;
     }
     if (key)

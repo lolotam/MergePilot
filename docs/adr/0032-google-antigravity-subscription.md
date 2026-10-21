@@ -136,7 +136,7 @@ The owner accepted every recommendation in س47 and confirmed (د): the new prov
     - **Sign-in step.** The step asks for the address from the browser and explains the localhost page and the port-51121 caveat. Each failure reason has its own translated text.
     - **Code.** All text lives in `apps/web/src/i18n/antigravity-{en,ar}.ts`. `apps/app/src/api/contract-subscriptions.ts` (`SubscriptionStartSchema`, `SubscriptionAvailabilitySchema`, `errorCode`, `SUBSCRIPTION_ONLY_PROVIDER_IDS`) and the web client changed together. The web keeps a copy of the subscription-only list, checked against the contract by type.
 
-12. **Action.** The registry entry names `GOOGLE_ANTIGRAVITY_SUBSCRIPTION` as the provider's environment variable. `AntigravityAdapter` does not refresh tokens itself (refresh lives in the dashboard's credential service), so the Action can use such an envelope only while its access token is still valid. The supported path is the dashboard.
+12. **Action.** The registry entry names `GOOGLE_ANTIGRAVITY_SUBSCRIPTION` as the provider's environment variable. `AntigravityAdapter` does not refresh tokens itself (refresh lives in the dashboard's credential service), so the Action can use such an envelope only while its access token is still valid. The supported path is the dashboard. *Amended by ADR-0038:* the Action now rejects any subscription envelope, so Google Antigravity runs only through the GitHub App.
 
 ## Tests
 

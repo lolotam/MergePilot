@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { EnvCredentialStore, MissingCredentialError } from './store.js';
+import { EnvCredentialStore, MissingCredentialError, SubscriptionEnvelopeError } from './store.js';
+import { encodeSubscription, SUBSCRIPTION_PREFIX } from './subscription.js';
 import type { CredentialProvider } from './types.js';
 
 describe('EnvCredentialStore', () => {
@@ -108,6 +109,54 @@ describe('EnvCredentialStore', () => {
       expect(missingErr.envName).toBe('ANTHROPIC_API_KEY');
       expect(missingErr.message).toContain('ANTHROPIC_API_KEY');
     }
+  });
+
+  describe('subscription envelopes (ADR-0038)', () => {
+    const credential = { type: 'oauth' as const, access: 'access-tok-000', refresh: 'refresh-tok-000', expires: Date.now() + 3_600_000 };
+
+    it.each([
+      { provider: 'anthropic', envName: 'ANTHROPIC_API_KEY' },
+      { provider: 'openai', envName: 'OPENAI_API_KEY' },
+      { provider: 'xai', envName: 'XAI_API_KEY' },
+      { provider: 'google-antigravity', envName: 'GOOGLE_ANTIGRAVITY_SUBSCRIPTION' },
+    ] as const)('rejects an unexpired $provider envelope in $envName and names the supported inputs', async ({ provider, envName }) => {
+      const envelope = encodeSubscription(provider, credential);
+      const store = new EnvCredentialStore({ [envName]: `  ${envelope}  ` });
+
+      const error = await store.resolve({ provider }, 'review').then(() => undefined, (err: unknown) => err);
+
+      expect(error).toBeInstanceOf(SubscriptionEnvelopeError);
+      expect(error).toBeInstanceOf(MissingCredentialError);
+      const envelopeError = error as SubscriptionEnvelopeError;
+      expect(envelopeError.envName).toBe(envName);
+      expect(envelopeError.message).toContain(envName);
+      expect(envelopeError.message).toContain('CLAUDE_CODE_OAUTH_TOKEN');
+      expect(envelopeError.message).toContain('GitHub App');
+      expect(envelopeError.message).not.toContain('access-tok-000');
+      expect(envelopeError.message).not.toContain('refresh-tok-000');
+      expect(envelopeError.message).not.toContain(SUBSCRIPTION_PREFIX);
+      expect(envelopeError.secret.reveal()).toBe(envelope);
+      expect(JSON.stringify(envelopeError)).not.toContain('refresh-tok-000');
+    });
+
+    it('rejects on the prefix alone, without decoding the rest', async () => {
+      const malformedEnvelope = SUBSCRIPTION_PREFIX + 'not-json';
+      const store = new EnvCredentialStore({ ANTHROPIC_API_KEY: malformedEnvelope });
+
+      await expect(store.resolve({ provider: 'anthropic' }, 'review')).rejects.toBeInstanceOf(SubscriptionEnvelopeError);
+    });
+
+    it('still reports the variable as configured, so the primary path reaches the clear message', async () => {
+      const store = new EnvCredentialStore({ ANTHROPIC_API_KEY: encodeSubscription('anthropic', credential) });
+
+      expect(await store.info({ provider: 'anthropic' })).toMatchObject({ configured: true, envName: 'ANTHROPIC_API_KEY' });
+    });
+
+    it('leaves the raw claude-code token alone', async () => {
+      const store = new EnvCredentialStore(sampleEnv);
+
+      expect((await store.resolve({ provider: 'claude-code' }, 'review')).reveal()).toBe(sampleEnv.CLAUDE_CODE_OAUTH_TOKEN);
+    });
   });
 
   it('defaults to process.env when no env record is provided', async () => {
