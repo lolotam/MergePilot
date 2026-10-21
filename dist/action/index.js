@@ -141938,6 +141938,8 @@ function rendersLine(chunk, line, side) {
     const marker = match3[2];
     if (marker === "  ")
       return true;
+    if (side === void 0)
+      return true;
     return side === "LEFT" ? marker === "-" : marker === "+";
   });
 }
@@ -141949,8 +141951,8 @@ function markNearChunks(findings, files) {
   for (const finding of findings) {
     const places = [
       { path: finding.path, line: finding.line, side: finding.side ?? "RIGHT" },
-      // An "Also at:" place names a line printed in a patch, so it is on the new side.
-      ...alsoAtPlaces(finding.body, [...byPath.keys()]).map((place) => ({ ...place, side: "RIGHT" }))
+      // An "Also at:" place names a line printed in a patch, on whichever side it sits.
+      ...alsoAtPlaces(finding.body, [...byPath.keys()]).map((place) => ({ ...place, side: void 0 }))
     ];
     for (const place of places) {
       const pathFiles = byPath.get(place.path) ?? [];

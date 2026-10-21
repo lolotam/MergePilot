@@ -338,17 +338,21 @@ const RENDERED_LINE_RE = /^\s*(\d+) (\+|-| {2})/;
 /**
  * True when the chunk renders a line with that number on that side of the diff. A RIGHT place
  * names an added line ("  <n> + text") or a context line ("  <n>   text"); a LEFT place names a
- * removed line ("  <n> - text"), whose number is the old-side one, or a context line. The ranges
- * of a hunk cover its old side as well, and a line can live on the old side only: no rendered
- * line carries that number, so the chunk does not hold the place.
+ * removed line ("  <n> - text"), whose number is the old-side one, or a context line. A place
+ * that names no side (an "Also at:" place) counts on either side: its line may sit on the old
+ * one or on the new one, so any rendered line with that number counts. The ranges of a hunk
+ * cover its old side as well, and a line can live on the old side only: no rendered line
+ * carries that number, so the chunk does not hold the place.
  */
-function rendersLine(chunk: Chunk, line: number, side: DiffSide): boolean {
+function rendersLine(chunk: Chunk, line: number, side: DiffSide | undefined): boolean {
   return chunk.text.split('\n').some((text) => {
     const match = RENDERED_LINE_RE.exec(text);
     if (match === null || Number(match[1]) !== line) return false;
     // A context line is on both sides; an added line is on the new side, a removed one on the old.
     const marker = match[2];
     if (marker === '  ') return true;
+    // An "Also at:" place names no side: the line it names may be an added or a removed one.
+    if (side === undefined) return true;
     return side === 'LEFT' ? marker === '-' : marker === '+';
   });
 }
@@ -357,13 +361,14 @@ function rendersLine(chunk: Chunk, line: number, side: DiffSide): boolean {
  * Flags the hunks within NEAR_LINES of a finding line in its own file, and of every place its
  * "Also at:" line lists: they are shown first, so each listed place reaches the verifier. A path
  * can be shown twice, as its hunks and as its full version; the hunks (or the PR diff of the path)
- * are flagged first, and the full version only for a place none of them holds, since it covers
+ * are flagged first, and the full version only for a place none of them renders, since it covers
  * every line and would otherwise be shown near every finding.
  *
- * Every place carries the side of the diff it names: the side of the line the finding anchors on,
- * or the new side for an "Also at:" place. The full version of a file is numbered on the new
- * side, so it never holds a LEFT place (a removed line, numbered on the old side): it is not
- * flagged with that number.
+ * Every place carries the side of the diff it names: the side of the line the finding anchors
+ * on. An "Also at:" place names no side: its line may sit on either one, so any rendered line
+ * with that number holds it. The full version of a file is numbered on the new side, so it never
+ * holds a LEFT place (a removed line, numbered on the old side): it is not flagged with that
+ * number.
  */
 function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string, ShownFile>): void {
   // The same path sits under two keys when it is shown as hunks and as its full version (ADR-0030).
@@ -373,10 +378,10 @@ function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string,
     byPath.set(file.path, [...(byPath.get(file.path) ?? []), file]);
   }
   for (const finding of findings) {
-    const places: Array<{ path: string; line: number; side: DiffSide }> = [
+    const places: Array<{ path: string; line: number; side: DiffSide | undefined }> = [
       { path: finding.path, line: finding.line, side: finding.side ?? 'RIGHT' },
-      // An "Also at:" place names a line printed in a patch, so it is on the new side.
-      ...alsoAtPlaces(finding.body, [...byPath.keys()]).map((place) => ({ ...place, side: 'RIGHT' as const })),
+      // An "Also at:" place names a line printed in a patch, on whichever side it sits.
+      ...alsoAtPlaces(finding.body, [...byPath.keys()]).map((place) => ({ ...place, side: undefined })),
     ];
     for (const place of places) {
       const pathFiles = byPath.get(place.path) ?? [];
@@ -397,7 +402,7 @@ function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string,
       // The full version of a file is numbered on the new side, so a LEFT place (a removed line)
       // is never in it: flagging it with that number would put unrelated head lines first.
       if (place.side === 'LEFT') continue;
-      // A place the hunks already cover never marks the full version: its window would show the
+      // A place the hunks already render never marks the full version: its window would show the
       // whole file again, and the whole file would go ahead of the other findings' hunks.
       if (marked) continue;
       for (const file of heads) {

@@ -307,6 +307,27 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).not.toContain('const filler100 = 100;');
   });
 
+  it('shows a removed line an "Also at:" place names, and not the head file around it', () => {
+    // The place names a removed line, so the hunk renders it as "101 - gone();". The place says
+    // no side, so any rendered line with that number holds it: the full version of the file is
+    // numbered on the new side and holds no such line, so it gets no window of its own and no
+    // unrelated head line (filler100) is flagged.
+    const shiftPatch = '@@ -100,2 +50,2 @@\n kept();\n-gone();\n+added();';
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Audit write dropped.\nAlso at: src/shift.ts:101' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/shift.ts', patch: shiftPatch },
+      ],
+      contextFiles: [{ path: 'src/shift.ts', reason: 'x', content: filler }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('101 - gone();');
+    expect(user).not.toContain('const filler100 = 100;');
+  });
+
   it('reads the "Also at:" places of a body', () => {
     const paths = ['src/a.ts', 'lib/b.ts', 'c.ts', 'src/my file.ts', 'src/a,b.ts'];
     expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.', paths)).toEqual([
