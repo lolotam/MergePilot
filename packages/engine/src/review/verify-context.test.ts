@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Finding } from './types.js';
 import { applyVerdicts, buildVerifyPrompt } from './verify.js';
+import { alsoAtPlaces } from './verify-prompt.js';
 
 // ADR-0028: the verifier sees the code a finding rests on, across files, and no longer rejects a
 // finding only because the code that would prove it is not shown.
@@ -144,6 +145,222 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).toContain('402 + bad1();');
     expect(user).toContain('1301 + bad2();');
     expect(user).not.toContain('filler0 ');
+  });
+
+  it('shows a window around every "Also at:" place before filling whole hunks (ADR-0039)', () => {
+    // The finding's own line is in src/api.ts; the same pattern sits at the end of a 400-line hunk
+    // of src/big.ts. Without its own window the cap would be spent before that line.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const bigPatch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+unlogged();`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: `src/big.ts:402`, src/missing.ts:9.' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/big.ts', patch: bigPatch },
+      ],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('2 + await unlock();');
+    expect(user).toContain('402 + unlogged();');
+    expect(user).not.toContain('filler0 ');
+  });
+
+  it('keeps every "Also at:" place of one large hunk when their wide windows do not all fit', () => {
+    // Three places far apart in one 402-line hunk: their wide windows together pass the cap, and
+    // one window cut from the top would drop the last place.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const bigPatch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+unlogged();`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/big.ts:50, src/big.ts:200, src/big.ts:402' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/big.ts', patch: bigPatch },
+      ],
+      maxCodeTokens: 400,
+    });
+    expect(user).toContain('50 + const filler48 = 48;');
+    expect(user).toContain('200 + const filler198 = 198;');
+    expect(user).toContain('402 + unlogged();');
+  });
+
+  it('shows the exact line of every "Also at:" place before any wider window (ADR-0039)', () => {
+    // Ten places in one 402-line hunk: their narrow windows together pass the cap, so the wider
+    // window would be cut from the top and the later places would be dropped. The exact lines go
+    // first, so every place reaches the verifier whatever the cap leaves.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const bigPatch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+unlogged();`;
+    const places = [40, 80, 120, 160, 200, 240, 280, 320, 360, 402].map((line) => `src/big.ts:${line}`);
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: `Refusal not logged.\nAlso at: ${places.join(', ')}` })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/big.ts', patch: bigPatch },
+      ],
+      maxCodeTokens: 250,
+    });
+    expect(user).toContain('402 + unlogged();');
+    expect(user).toContain('40 + const filler38 = 38;');
+  });
+
+  it('shows an "Also at:" place that sits in a PR_CONTEXT block (ADR-0039)', () => {
+    // The place is at the end of a 402-line PR diff of another file. A context block has no range
+    // of its own, so the line would be cut from the top before the verifier sees it.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const bigPatch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+unlogged();`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/big.ts:402' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+      contextFiles: [{ path: 'src/big.ts', source: 'pull-request', reason: 'x', content: bigPatch }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('402 + unlogged();');
+    expect(user).not.toContain('filler0 ');
+  });
+
+  it('shows an "Also at:" place that sits in a REPOSITORY_CONTEXT block (ADR-0039)', () => {
+    // The place is the last line of a 401-line repository file shown as context.
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/big.ts:401' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+      contextFiles: [{ path: 'src/big.ts', reason: 'x', content: `${filler}\nunlogged();` }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('401   unlogged();');
+    expect(user).not.toContain('filler0 ');
+  });
+
+  it('shows an "Also at:" place that sits in the full version of a changed file (ADR-0039)', () => {
+    // The path is sent both as its hunks and as its head file: the place sits in the head file, so
+    // the block keyed by the path is not the one that holds it.
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/big.ts:401' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/big.ts', patch: '@@ -1,1 +1,2 @@\n const first = 0;\n+const second = 1;' },
+      ],
+      contextFiles: [{ path: 'src/big.ts', reason: 'x', content: `${filler}\nunlogged();` }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('401   unlogged();');
+    expect(user).not.toContain('filler0 ');
+  });
+
+  it('does not mark the full version of a changed file when its hunks already hold the place', () => {
+    // The path is sent both as its hunks and as its head file. The hunk holds the finding's line,
+    // so the head file is not marked near: it gets no window of its own, and the cap the hunks
+    // leave is too small for it, so none of it reaches the verifier.
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'The lock is released before the write.' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+      contextFiles: [{ path: 'src/api.ts', reason: 'x', content: filler }],
+      maxCodeTokens: 100,
+    });
+    expect(user).toContain('2 + await unlock();');
+    expect(user).not.toContain('filler0 ');
+  });
+
+  it('shows the head file of a place whose hunk renders no line with that number', () => {
+    // The hunk of src/shift.ts covers old lines 100-101 and new lines 50-51, so line 100 falls in
+    // its range while no rendered line carries that number: the head file is where it is read.
+    const shiftPatch = '@@ -100,2 +50,2 @@\n kept();\n-gone();\n+added();';
+    const filler = (from: number, count: number): string =>
+      Array.from({ length: count }, (_, i) => `const filler${from + i} = ${from + i};`).join('\n');
+    const head = `${filler(0, 99)}\ncited();\n${filler(99, 300)}`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/shift.ts:100' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/shift.ts', patch: shiftPatch },
+      ],
+      contextFiles: [{ path: 'src/shift.ts', reason: 'x', content: head }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('100   cited();');
+  });
+
+  it('shows a removed line a LEFT finding anchors on, and not the head file around it', () => {
+    // The finding anchors on a removed line, so its number is an old-side one and the hunk
+    // renders it as "101 - gone();". The full version of the file is numbered on the new side,
+    // so it holds no such line: no window opens around its line 101 (filler100). What is left of
+    // the cap still fills the head file from the top, as for any file no place points into.
+    const shiftPatch = '@@ -100,2 +50,2 @@\n kept();\n-gone();\n+added();';
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ path: 'src/shift.ts', line: 101, side: 'LEFT', evidence: 'gone();', body: 'b' })],
+      files: [{ path: 'src/shift.ts', patch: shiftPatch }],
+      contextFiles: [{ path: 'src/shift.ts', reason: 'x', content: filler }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('101 - gone();');
+    expect(user).not.toContain('const filler100 = 100;');
+  });
+
+  it('shows a removed line an "Also at:" place names, and not the head file around it', () => {
+    // The place names a removed line, so the hunk renders it as "101 - gone();". The place says
+    // no side, so any rendered line with that number holds it: the full version of the file is
+    // numbered on the new side and holds no such line, so it gets no window of its own and no
+    // unrelated head line (filler100) is flagged.
+    const shiftPatch = '@@ -100,2 +50,2 @@\n kept();\n-gone();\n+added();';
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Audit write dropped.\nAlso at: src/shift.ts:101' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/shift.ts', patch: shiftPatch },
+      ],
+      contextFiles: [{ path: 'src/shift.ts', reason: 'x', content: filler }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('101 - gone();');
+    expect(user).not.toContain('const filler100 = 100;');
+  });
+
+  it('reads the "Also at:" places of a body', () => {
+    const paths = ['src/a.ts', 'lib/b.ts', 'c.ts', 'src/my file.ts', 'src/a,b.ts'];
+    expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.', paths)).toEqual([
+      { path: 'src/a.ts', line: 3 },
+      { path: 'lib/b.ts', line: 10 },
+      { path: 'c.ts', line: 7 },
+    ]);
+    expect(alsoAtPlaces('Also at: `src/my file.ts:9`, src/a,b.ts:402', paths)).toEqual([
+      { path: 'src/my file.ts', line: 9 },
+      { path: 'src/a,b.ts', line: 402 },
+    ]);
+    // Only known paths count, and a known path inside a longer one is not a match.
+    expect(alsoAtPlaces('Also at: other.ts:5, xsrc/a.ts:8', paths)).toEqual([]);
+    expect(alsoAtPlaces('No list here: src/a.ts:3', paths)).toEqual([]);
+  });
+
+  it('reads a known path that sits inside a longer one as part of that longer place', () => {
+    const paths = ['src/my file.ts', 'file.ts'];
+    expect(alsoAtPlaces('Also at: `src/my file.ts:402`', paths)).toEqual([{ path: 'src/my file.ts', line: 402 }]);
+    expect(alsoAtPlaces('Also at: file.ts:3, src/my file.ts:4', paths)).toEqual([
+      { path: 'file.ts', line: 3 },
+      { path: 'src/my file.ts', line: 4 },
+    ]);
+  });
+
+  it('reads the places of a list the model wrapped over several lines', () => {
+    const paths = ['src/a.ts', 'lib/b.ts', 'c.ts'];
+    const body = 'Body.\nAlso at: src/a.ts:3,\n  lib/b.ts:10\n- c.ts:7\n\nlater src/a.ts:99';
+    expect(alsoAtPlaces(body, paths)).toEqual([
+      { path: 'src/a.ts', line: 3 },
+      { path: 'lib/b.ts', line: 10 },
+      { path: 'c.ts', line: 7 },
+    ]);
   });
 
   it.each(['en', 'ar'])('in %s, no longer rejects a finding only for depending on code not shown', (language) => {

@@ -2,15 +2,16 @@
  * The verification prompt (PRD v0.2 §7 step 8, ADR-0028): every finding with the code it rests on.
  * The verifier sees all hunks of each finding's file and the hunks of every other changed file (or
  * repository context file) whose path the finding's evidence or body names, each file once. The
- * code is bounded by a token cap: hunks near a finding line go first, the rest fill what is left,
- * and whatever does not fit is replaced by a visible marker.
+ * code is bounded by a token cap: the lines near a finding line or near a place the finding lists
+ * on its "Also at:" line go first, the rest fill what is left, and whatever does not fit is
+ * replaced by a visible marker.
  */
 
 import { REVIEW_LIMIT_DEFAULTS } from '../config/schema.js';
 import { estimateTokens } from './budget.js';
 import { ESCAPED_MARKER_NOTE, escapeDelimiters, escapeLabel } from './delimiters.js';
 import { renderContextFile, type ContextFile } from './prompt.js';
-import type { Finding } from './types.js';
+import type { DiffSide, Finding } from './types.js';
 
 export interface VerifyReviewableFile {
   path: string;
@@ -52,7 +53,7 @@ function wrapUntrusted(label: string, content: string): string {
 
 interface Chunk {
   text: string;
-  /** Line ranges (new and old side) the chunk covers; empty for a context file. */
+  /** Line ranges (new and old side) the chunk covers. */
   ranges: Array<[number, number]>;
   /** Lines of findings this chunk is near (in the finding's own file): their window is shown first. */
   findingLines: number[];
@@ -60,6 +61,41 @@ interface Chunk {
 }
 
 const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/** The line numbers and the line counts a hunk header gives. */
+interface HunkHeader {
+  oldLine: number;
+  oldCount: number;
+  newLine: number;
+  newCount: number;
+}
+
+function parseHunkHeader(header: RegExpMatchArray): HunkHeader {
+  return {
+    oldLine: parseInt(header[1] ?? '1', 10),
+    oldCount: header[2] !== undefined ? parseInt(header[2], 10) : 1,
+    newLine: parseInt(header[3] ?? '1', 10),
+    newCount: header[4] !== undefined ? parseInt(header[4], 10) : 1,
+  };
+}
+
+/** The old-side and the new-side line ranges a hunk covers, the way its lines are numbered. */
+function hunkRanges(hunk: HunkHeader): Array<[number, number]> {
+  return [
+    [hunk.oldLine, hunk.oldLine + Math.max(hunk.oldCount - 1, 0)],
+    [hunk.newLine, hunk.newLine + Math.max(hunk.newCount - 1, 0)],
+  ];
+}
+
+/** The line ranges of every hunk of a patch, so a patch ranges the same wherever it is shown. */
+function patchRanges(patch: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (const line of patch.split(/\r?\n/)) {
+    const header = line.match(HUNK_HEADER_RE);
+    if (header) ranges.push(...hunkRanges(parseHunkHeader(header)));
+  }
+  return ranges;
+}
 
 /** Splits a patch into hunks, each line numbered like the review prompt prints it. */
 function patchChunks(patch: string): Chunk[] {
@@ -69,15 +105,10 @@ function patchChunks(patch: string): Chunk[] {
   for (const line of patch.split(/\r?\n/)) {
     const header = line.match(HUNK_HEADER_RE);
     if (header) {
-      oldLine = parseInt(header[1] ?? '1', 10);
-      newLine = parseInt(header[3] ?? '1', 10);
-      const oldCount = header[2] !== undefined ? parseInt(header[2], 10) : 1;
-      const newCount = header[4] !== undefined ? parseInt(header[4], 10) : 1;
-      const ranges: Array<[number, number]> = [
-        [oldLine, oldLine + Math.max(oldCount - 1, 0)],
-        [newLine, newLine + Math.max(newCount - 1, 0)],
-      ];
-      hunks.push({ lines: [line], ranges });
+      const hunk = parseHunkHeader(header);
+      oldLine = hunk.oldLine;
+      newLine = hunk.newLine;
+      hunks.push({ lines: [line], ranges: hunkRanges(hunk) });
       continue;
     }
     const lines = hunks[hunks.length - 1]?.lines;
@@ -99,8 +130,20 @@ function patchChunks(patch: string): Chunk[] {
   return hunks.map((hunk) => ({ text: hunk.lines.join('\n'), ranges: hunk.ranges, findingLines: [] }));
 }
 
+/** The number of lines a file has, the way `numberLines` numbers them. */
+function countLines(content: string): number {
+  return content.split(/\r?\n/).length;
+}
+
+/**
+ * A context file as a chunk: its text as the model sees it, and the lines it covers, so a place
+ * an "Also at:" line lists finds its window in a context block too (ADR-0039). A PR_CONTEXT block
+ * holds a patch, so its hunk headers give the ranges; a repository file is numbered from line 1.
+ */
 function contextChunk(file: ContextFile): Chunk {
-  return { text: renderContextFile(file), ranges: [], findingLines: [] };
+  const ranges: Array<[number, number]> =
+    file.source === 'pull-request' ? patchRanges(file.content) : [[1, countLines(file.content)]];
+  return { text: renderContextFile(file), ranges, findingLines: [] };
 }
 
 /** A chunk cut at a line break to about `tokens`, ending with the visible marker. */
@@ -122,12 +165,15 @@ function lineNumberOf(line: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-/** The hunk header and the lines within NEAR_LINES of a finding line; the rest is marked as cut. */
-function windowOf(chunk: Chunk): string {
+/** The narrow window: a few lines around each place, so every listed place fits. */
+const PLACE_LINES = 3;
+
+/** The hunk header and the lines within `radius` of a finding line; the rest is marked as cut. */
+function windowOf(chunk: Chunk, radius: number): string {
   const [header = '', ...body] = chunk.text.split('\n');
   const kept = body.filter((line) => {
     const number = lineNumberOf(line);
-    return number !== undefined && chunk.findingLines.some((at) => Math.abs(at - number) <= NEAR_LINES);
+    return number !== undefined && chunk.findingLines.some((at) => Math.abs(at - number) <= radius);
   });
   return kept.length === body.length ? chunk.text : [header, ...kept, CUT_MARKER].join('\n');
 }
@@ -148,14 +194,18 @@ function show(chunk: Chunk, text: string, left: number): number {
 }
 
 /**
- * Fills the cap in three passes: first a window around every finding line, so one large hunk cannot
- * use up the budget and leave another finding without its own evidence; then the whole hunks near a
- * finding; then everything else in file order.
+ * Fills the cap in five passes: first the exact line of every finding line and "Also at:" place, so
+ * no listed place is cut because another one sits earlier in the same hunk; then a few lines around
+ * every place; then a wider window around each, so one large hunk cannot use up the budget and leave
+ * another finding without its own evidence; then the whole hunks near a finding; then everything
+ * else in file order.
  */
 function fitChunks(chunks: Chunk[], maxTokens: number): void {
   let left = maxTokens;
   const near = chunks.filter((c) => c.findingLines.length > 0);
-  for (const chunk of near) left -= show(chunk, windowOf(chunk), left);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk, 0), left);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk, PLACE_LINES), left);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk, NEAR_LINES), left);
   for (const chunk of near) left -= show(chunk, chunk.text, left);
   for (const chunk of chunks.filter((c) => c.findingLines.length === 0)) left -= show(chunk, chunk.text, left);
 }
@@ -227,12 +277,138 @@ function collectFiles(input: VerifyPromptInput): { files: ShownFile[]; pathsByFi
   return { files: [...files.values()], pathsByFinding };
 }
 
-/** Flags the hunks within NEAR_LINES of a finding line in its own file: they are shown first. */
+/**
+ * The "Also at:" line of a body and the lines that carry on its list: the rest of that line, then
+ * every following line up to the first blank line, so a list the model wrapped or bulleted is read
+ * whole.
+ */
+const ALSO_AT_RE = /^[ \t]*Also at:([^\n]*(?:\n(?![ \t]*$)[^\n]*)*)/m;
+
+/** One place a list names, with where it sits in the list text. */
+interface AlsoAtMatch {
+  path: string;
+  line: number;
+  start: number;
+  end: number;
+}
+
+/**
+ * The `path:line` places a finding lists on its "Also at:" line (ADR-0039 pattern sweep). Only known
+ * paths count, matched whole, so a path holding spaces or commas is read as one place. A known path
+ * that sits inside another match is part of that place, not a place of its own.
+ */
+export function alsoAtPlaces(body: string, paths: readonly string[]): Array<{ path: string; line: number }> {
+  const list = ALSO_AT_RE.exec(body)?.[1] ?? '';
+  const matches: AlsoAtMatch[] = [];
+  for (const path of paths) {
+    const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const place of list.matchAll(new RegExp(`(?<![\\w./-])${escaped}:(\\d+)`, 'g'))) {
+      const digits = place[1] ?? '';
+      // The match is the path, a colon, then the line number.
+      const end = place.index + path.length + 1 + digits.length;
+      matches.push({ path, line: Number(digits), start: place.index, end });
+    }
+  }
+  // Left to right, and at the same spot the longer path wins. A match that overlaps a kept one is
+  // part of it, not a place of its own.
+  matches.sort((a, b) => a.start - b.start || b.end - a.end);
+  const kept: AlsoAtMatch[] = [];
+  let lastEnd = 0;
+  for (const match of matches) {
+    if (match.start < lastEnd) continue;
+    kept.push(match);
+    lastEnd = match.end;
+  }
+  return kept.map((match) => ({ path: match.path, line: match.line }));
+}
+
+/** True when the chunk covers the place, or a line within NEAR_LINES of it. */
+function holdsPlace(chunk: Chunk, line: number): boolean {
+  return chunk.ranges.some(([from, to]) => line >= from - NEAR_LINES && line <= to + NEAR_LINES);
+}
+
+/**
+ * The number a rendered line prints, and the marker that says which side of the diff the line is
+ * on: an added line ("  <n> + text"), a removed line ("  <n> - text") or a context line
+ * ("  <n>   text"). A removed line carries the old-side number, the side a LEFT finding anchors
+ * on.
+ */
+const RENDERED_LINE_RE = /^\s*(\d+) (\+|-| {2})/;
+
+/**
+ * True when the chunk renders a line with that number on that side of the diff. A RIGHT place
+ * names an added line ("  <n> + text") or a context line ("  <n>   text"); a LEFT place names a
+ * removed line ("  <n> - text"), whose number is the old-side one, or a context line. A place
+ * that names no side (an "Also at:" place) counts on either side: its line may sit on the old
+ * one or on the new one, so any rendered line with that number counts. The ranges of a hunk
+ * cover its old side as well, and a line can live on the old side only: no rendered line
+ * carries that number, so the chunk does not hold the place.
+ */
+function rendersLine(chunk: Chunk, line: number, side: DiffSide | undefined): boolean {
+  return chunk.text.split('\n').some((text) => {
+    const match = RENDERED_LINE_RE.exec(text);
+    if (match === null || Number(match[1]) !== line) return false;
+    // A context line is on both sides; an added line is on the new side, a removed one on the old.
+    const marker = match[2];
+    if (marker === '  ') return true;
+    // An "Also at:" place names no side: the line it names may be an added or a removed one.
+    if (side === undefined) return true;
+    return side === 'LEFT' ? marker === '-' : marker === '+';
+  });
+}
+
+/**
+ * Flags the hunks within NEAR_LINES of a finding line in its own file, and of every place its
+ * "Also at:" line lists: they are shown first, so each listed place reaches the verifier. A path
+ * can be shown twice, as its hunks and as its full version; the hunks (or the PR diff of the path)
+ * are flagged first, and the full version only for a place none of them renders, since it covers
+ * every line and would otherwise be shown near every finding.
+ *
+ * Every place carries the side of the diff it names: the side of the line the finding anchors
+ * on. An "Also at:" place names no side: its line may sit on either one, so any rendered line
+ * with that number holds it. The full version of a file is numbered on the new side, so it never
+ * holds a LEFT place (a removed line, numbered on the old side): it is not flagged with that
+ * number.
+ */
 function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string, ShownFile>): void {
+  // The same path sits under two keys when it is shown as hunks and as its full version (ADR-0030).
+  // The lookup is by path, so both blocks are flagged, not only the one the map is keyed by.
+  const byPath = new Map<string, ShownFile[]>();
+  for (const file of files.values()) {
+    byPath.set(file.path, [...(byPath.get(file.path) ?? []), file]);
+  }
   for (const finding of findings) {
-    for (const chunk of files.get(finding.path)?.chunks ?? []) {
-      if (chunk.ranges.some(([from, to]) => finding.line >= from - NEAR_LINES && finding.line <= to + NEAR_LINES)) {
-        chunk.findingLines.push(finding.line);
+    const places: Array<{ path: string; line: number; side: DiffSide | undefined }> = [
+      { path: finding.path, line: finding.line, side: finding.side ?? 'RIGHT' },
+      // An "Also at:" place names a line printed in a patch, on whichever side it sits.
+      ...alsoAtPlaces(finding.body, [...byPath.keys()]).map((place) => ({ ...place, side: undefined })),
+    ];
+    for (const place of places) {
+      const pathFiles = byPath.get(place.path) ?? [];
+      // The hunks and the PR diff of the path hold the lines the pull request touched; the full
+      // version of the path covers every line of it.
+      const diffs = pathFiles.filter((file) => file.kind !== 'REPOSITORY_CONTEXT');
+      const heads = pathFiles.filter((file) => file.kind === 'REPOSITORY_CONTEXT');
+      let marked = false;
+      for (const file of diffs) {
+        for (const chunk of file.chunks) {
+          if (holdsPlace(chunk, place.line)) {
+            chunk.findingLines.push(place.line);
+            // Only a block that renders the line itself spares the full version, not one merely near it.
+            marked ||= rendersLine(chunk, place.line, place.side);
+          }
+        }
+      }
+      // The full version of a file is numbered on the new side, so a LEFT place (a removed line)
+      // is never in it: flagging it with that number would put unrelated head lines first.
+      if (place.side === 'LEFT') continue;
+      // A place the hunks already render never marks the full version: its window would show the
+      // whole file again, and the whole file would go ahead of the other findings' hunks.
+      if (marked) continue;
+      for (const file of heads) {
+        for (const chunk of file.chunks) {
+          if (holdsPlace(chunk, place.line)) chunk.findingLines.push(place.line);
+        }
       }
     }
   }
