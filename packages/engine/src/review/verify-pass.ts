@@ -4,13 +4,15 @@
  * when spent so far + their estimated cost still fit perReviewUsd. Skips and failures are
  * returned as disclosed incomplete reasons, never swallowed. An empty (reasoning-only) reply gets
  * one gated retry with thinking off, and the pass is skipped once the review time limit is
- * reached (ADR-0013).
+ * reached (ADR-0013). The prompt is fitted to `budget.maxInputTokens` before the call: the
+ * owner's rules give up the overflow, then are left out, and a prompt that still does not fit is
+ * skipped with a disclosed reason (ADR-0044).
  */
 
 import { z } from 'zod';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
-import { estimateTokens } from './budget.js';
+import { checkBudget, estimateTokens } from './budget.js';
 import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { combineUsage, needsTruncationRetry, type ReviewableFileWithPatch } from './split.js';
@@ -24,11 +26,13 @@ import {
 } from './spend.js';
 import type { ContextFile, PathInstruction } from './prompt.js';
 import type { Finding } from './types.js';
+import { VERIFY_CRITERIA_TOKENS } from './verify-criteria.js';
 import {
   applyVerdicts,
   buildVerifyPrompt,
   parseVerifyAnswer,
   VerifyAnswerSchema,
+  type BuiltVerifyPrompt,
   type VerifyRejectedFinding,
 } from './verify.js';
 
@@ -47,6 +51,11 @@ export interface VerifyPassInput {
    * Path instructions; those whose glob matches a changed file are shown with the rules files.
    */
   pathInstructions?: readonly PathInstruction[] | undefined;
+  /**
+   * The `budget.maxInputTokens` limit: the verification prompt must fit it, the owner's rules
+   * shortened or left out first (ADR-0044).
+   */
+  maxInputTokens?: number | undefined;
   model: ReviewModel;
   spend: SpendTracker;
   knownSecrets: readonly Secret[];
@@ -64,18 +73,17 @@ export interface VerifyPassResult {
   incompleteReasons: string[];
 }
 
-export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassResult> {
-  const { model, spend, signal } = input;
-  let totalUsage = input.totalUsage;
-  const incompleteReasons: string[] = [];
-  const unchanged = (reason: string): VerifyPassResult => ({
-    findings: input.findings,
-    totalUsage,
-    rejected: [],
-    incompleteReasons: [...incompleteReasons, `verification skipped: ${reason}`],
-  });
-
-  const verifyPrompt = buildVerifyPrompt({
+/**
+ * The verification prompt that fits `maxInputTokens`: the owner's rules give up the overflow
+ * first, then are left out, and the step taken is disclosed (ADR-0044). The prompt returned may
+ * still be over the limit; the caller skips the call then, with the reason the review call uses.
+ */
+function buildFittingVerifyPrompt(input: VerifyPassInput): {
+  prompt: BuiltVerifyPrompt;
+  promptTokens: number;
+  note?: string;
+} {
+  const base = {
     language: input.language,
     findings: input.findings,
     files: input.files,
@@ -83,8 +91,82 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     maxCodeTokens: input.maxCodeTokens,
     rulesFiles: input.rulesFiles,
     pathInstructions: input.pathInstructions,
+  };
+  const prompt = buildVerifyPrompt(base);
+  const promptTokens = estimateTokens(prompt.system + prompt.user);
+  const limit = input.maxInputTokens;
+  if (limit === undefined || promptTokens <= limit) return { prompt, promptTokens };
+
+  // The verification without the owner's rules: the last step before the call is skipped.
+  const withoutRules = buildVerifyPrompt({ ...base, rulesFiles: undefined, pathInstructions: undefined });
+  // No rule block was shown (the system prompt names the rules only then): the code alone is over
+  // the limit, so there is nothing to shorten and nothing to disclose here.
+  if (prompt.system === withoutRules.system) return { prompt, promptTokens };
+  const withoutRulesTokens = estimateTokens(withoutRules.system + withoutRules.user);
+  const hasRules = (input.rulesFiles?.length ?? 0) > 0 || (input.pathInstructions?.length ?? 0) > 0;
+  if (hasRules) {
+    const shortened = shortenRules(base, promptTokens, limit);
+    // The system prompt names the rules only when a rule block is shown, so the two prompts
+    // differ exactly when the shortened one still shows a rule.
+    if (shortened && shortened.system !== withoutRules.system) {
+      return {
+        prompt: shortened,
+        promptTokens: estimateTokens(shortened.system + shortened.user),
+        note: 'verification rules shortened to fit maxInputTokens',
+      };
+    }
+  }
+  return {
+    prompt: withoutRules,
+    promptTokens: withoutRulesTokens,
+    note: 'verification shown without the owner rules to fit maxInputTokens',
+  };
+}
+
+/** How many times the rules cap is lowered by the overflow before the rules are left out. */
+const SHORTEN_ATTEMPTS = 5;
+/** The least each step lowers the cap: a cut drops whole lines, so a smaller step may drop none. */
+const SHORTEN_MIN_STEP = 50;
+
+/**
+ * The verification prompt with the rules cap lowered by the overflow until the prompt fits, or
+ * undefined. The rule lines the system prompt gains with a shown block are outside the cap, so one
+ * step can leave a small overflow: the cap is lowered again by what is left over.
+ */
+function shortenRules(
+  base: Parameters<typeof buildVerifyPrompt>[0],
+  promptTokens: number,
+  limit: number,
+): BuiltVerifyPrompt | undefined {
+  let cap = VERIFY_CRITERIA_TOKENS;
+  let tokens = promptTokens;
+  for (let attempt = 0; attempt < SHORTEN_ATTEMPTS; attempt++) {
+    cap -= Math.max(tokens - limit, SHORTEN_MIN_STEP);
+    if (cap <= 0) return undefined;
+    const shortened = buildVerifyPrompt({ ...base, maxCriteriaTokens: cap });
+    tokens = estimateTokens(shortened.system + shortened.user);
+    if (tokens <= limit) return shortened;
+  }
+  return undefined;
+}
+
+export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassResult> {
+  const { model, spend, signal } = input;
+  let totalUsage = input.totalUsage;
+  const incompleteReasons: string[] = [];
+  // The prompt is fitted to the input-token limit before anything else, and the step taken is
+  // disclosed in every outcome (ADR-0044).
+  const fitted = buildFittingVerifyPrompt(input);
+  if (fitted.note) incompleteReasons.push(fitted.note);
+  const unchanged = (reason: string): VerifyPassResult => ({
+    findings: input.findings,
+    totalUsage,
+    rejected: [],
+    incompleteReasons: [...incompleteReasons, `verification skipped: ${reason}`],
   });
-  const promptTokens = estimateTokens(verifyPrompt.system + verifyPrompt.user);
+
+  const verifyPrompt = fitted.prompt;
+  const promptTokens = fitted.promptTokens;
   // The answer has one verdict per finding, so its budget grows with them (ADR-0033).
   const maxOutputTokens = verifyOutputTokensFor(input.findings.length);
   const retryOutputTokens = verifyRetryOutputTokens(maxOutputTokens);
@@ -93,6 +175,10 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
 
   if (input.deadline?.expired) {
     return unchanged('time limit reached');
+  }
+  if (input.maxInputTokens !== undefined) {
+    const tokenBudget = checkBudget({ promptTokens, maxInputTokens: input.maxInputTokens });
+    if (!tokenBudget.ok) return unchanged(tokenBudget.reason);
   }
   if (!spend.canAfford(promptTokens, firstRequested)) {
     return unchanged('budget limit reached');

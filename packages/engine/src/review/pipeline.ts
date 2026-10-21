@@ -394,6 +394,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       maxCodeTokens: limits.batchTokens,
       rulesFiles: redactedRulesFiles,
       pathInstructions: redactedPathInstructions,
+      maxInputTokens: budgetCfg.maxInputTokens,
       model,
       spend,
       knownSecrets,
