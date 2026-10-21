@@ -260,6 +260,13 @@ CHECKLIST: where the change touches them, also check:
 - secret redaction order: redact before truncating, normalising or logging;
 - config and CI regressions: timeouts, a gate that stops running a test, environment-specific wiring.`;
 
+const EDGE_INPUTS = `\
+EDGE INPUTS: for each changed parser, validator, regex, date or number handling, or request-body \
+read, list its edge inputs before you conclude: empty or whitespace-only text, malformed or \
+non-object JSON, a missing or null field, a duplicate or case-variant key, an out-of-range or \
+non-finite number, and a date without a time or rolled past a month or year end. Report only \
+those the shown code mishandles.`;
+
 const REPORTING_RULES = `\
 REPORTING: reason across every file shown, not one hunk at a time. One finding per root cause, \
 placed on the line where the defect shows in this diff. "line" must be a number printed in the \
@@ -314,6 +321,8 @@ function buildSystemPrompt(
     METHOD,
     '',
     CHECKLIST,
+    '',
+    EDGE_INPUTS,
     '',
     SEVERITY_SCALE,
     '',

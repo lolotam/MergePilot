@@ -92,7 +92,7 @@ export function shortSha(sha: string): string {
   return /^[0-9a-f]{7,64}$/i.test(sha) ? sha.slice(0, 7).toLowerCase() : 'the last reviewed commit';
 }
 
-/** "What you see" on a follow-up review: replaces the whole-PR wording of ADR-0028. */
+/** "What you see" on a follow-up review (ADR-0030), plus the fix re-check (ADR-0043). */
 export function followUpWhatYouSee(followUp: FollowUp): string {
   const since = shortSha(followUp.sinceSha);
   return `\
@@ -108,7 +108,11 @@ findings posted on earlier commits whose threads are still open. You never see t
 FOLLOW-UP: report problems the new changes cause or reveal anywhere in the pull request, anchored \
 in the new changes: "path" is a file with a PATCH block and "line" a number printed in it; code from \
 PR_CONTEXT may be quoted in "evidence". Judge an open finding only from the code shown: when the new \
-changes fix one, mention that in the summary; never report an open finding again as a new finding.`;
+changes fix one, mention that in the summary; never report an open finding again as a new finding.
+
+FIX RE-CHECK: for each guard, condition or error path the new changes add or alter, ask what it \
+newly allows, what it newly rejects or breaks, and which partial-failure or retry path runs when it \
+fires. A fix that moves a defect is still a defect.`;
 }
 
 /** The OPEN_FINDINGS block body: one line per open finding. */
