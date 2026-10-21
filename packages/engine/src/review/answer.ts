@@ -184,6 +184,15 @@ export function isTruncatedAnswer(finishReason: string | undefined, hasUnclosedO
   return false;
 }
 
+/**
+ * The answer's withheld list, or undefined when the answer sent no list. A list sent empty (or
+ * with only invalid items) stays an empty list, so a retry that withholds nothing replaces an
+ * earlier answer's list instead of inheriting it (ADR-0042).
+ */
+function withheldOf(raw: unknown): WithheldItem[] | undefined {
+  return Array.isArray(raw) ? parseWithheld(raw) : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Public parse function
 // ---------------------------------------------------------------------------
@@ -214,7 +223,7 @@ export function parseReviewAnswer(
 
   let firstParseError: string | null = null;
   let matchedAnswer: z.infer<typeof ReviewAnswerLooseSchema> | null = null;
-  let summaryOnly: { summary: string; withheld: WithheldItem[] } | null = null;
+  let summaryOnly: { summary: string; withheld: WithheldItem[] | undefined } | null = null;
   let otherCandidatesRejected = false;
 
   for (const candidate of candidates) {
@@ -237,7 +246,7 @@ export function parseReviewAnswer(
     const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
     // Only a truly absent key: `findings: null`, `0` or `""` is a present non-list, so invalid-json.
     if (bare.success && (parsed as Record<string, unknown>).findings === undefined) {
-      summaryOnly ??= { summary: bare.data.summary, withheld: parseWithheld(bare.data.withheld) };
+      summaryOnly ??= { summary: bare.data.summary, withheld: withheldOf(bare.data.withheld) };
     } else {
       otherCandidatesRejected = true;
       if (!firstParseError) firstParseError = loose.error.message;
@@ -247,7 +256,7 @@ export function parseReviewAnswer(
   if (!matchedAnswer && summaryOnly !== null) {
     return {
       ok: true, summary: summaryOnly.summary, findings: [], droppedInvalid: 0, findingsMissing: true,
-      ...(summaryOnly.withheld.length > 0 ? { withheld: summaryOnly.withheld } : {}),
+      ...(summaryOnly.withheld ? { withheld: summaryOnly.withheld } : {}),
       ...(otherCandidatesRejected ? { otherCandidatesRejected: true } : {}),
     };
   }
@@ -273,7 +282,7 @@ export function parseReviewAnswer(
   }
 
   const answer = matchedAnswer;
-  const withheld = parseWithheld(answer.withheld);
+  const withheld = withheldOf(answer.withheld);
   const findings: Finding[] = [];
   let droppedInvalid = 0;
   let idCounter = 1;
@@ -303,7 +312,7 @@ export function parseReviewAnswer(
     ok: true,
     summary: answer.summary,
     findings,
-    ...(withheld.length > 0 ? { withheld } : {}),
+    ...(withheld ? { withheld } : {}),
     droppedInvalid,
   };
 }

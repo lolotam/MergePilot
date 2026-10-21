@@ -170,6 +170,14 @@ describe('renderPanelSummary — withheld problems (ADR-0042)', () => {
     expect(body).toContain('- Null deref — below the confidence bar');
   });
 
+  it('lists a bot whose summary is blank when it withheld problems', async () => {
+    const blank: PanelBotRow[] = [{ ...withWithheld[0]!, summary: '   ' }];
+    const body = renderPanelSummary({ language: 'en', baseUrl: BASE, bots: blank, merge: await merged(), minAgreement: 2, inlineCount: 1 });
+
+    expect(body).toContain('<summary>Bot summaries</summary>');
+    expect(body).toContain('**MergePilot**\n\n_Noticed but not reported (2):_');
+  });
+
   it('renders a bot without withheld problems exactly as before', async () => {
     const body = renderPanelSummary({ language: 'en', baseUrl: BASE, bots, merge: await merged(), minAgreement: 2, inlineCount: 1 });
 

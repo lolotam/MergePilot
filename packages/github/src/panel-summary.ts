@@ -201,7 +201,9 @@ function details(summary: string, body: string): string {
  * never become inline comments: they were never findings.
  */
 function botSummary(bot: PanelBotRow, labels: Labels): string {
-  const text = `**${escapeInline(bot.name)}**\n\n${neutralize(bot.summary!.trim())}`;
+  const summary = bot.summary?.trim() ?? '';
+  const name = `**${escapeInline(bot.name)}**`;
+  const text = summary ? `${name}\n\n${neutralize(summary)}` : name;
   const withheld = bot.withheld ?? [];
   if (withheld.length === 0) return text;
   const lines = withheld.map((item) => renderWithheldLine(item));
@@ -266,7 +268,8 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
     if (note) sections.push(note);
   }
 
-  const summaries = input.bots.filter((b) => b.status === 'completed' && b.summary?.trim());
+  // A bot with only withheld items (a blank summary) is listed too, so they never vanish.
+  const summaries = input.bots.filter((b) => b.status === 'completed' && (b.summary?.trim() || (b.withheld ?? []).length > 0));
   if (summaries.length > 0) {
     const items = summaries.map((b) => botSummary(b, labels));
     sections.push(details(labels.summaries, items.join('\n\n')));

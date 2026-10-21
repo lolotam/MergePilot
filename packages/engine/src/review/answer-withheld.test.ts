@@ -59,9 +59,16 @@ describe('parseReviewAnswer — withheld (ADR-0042)', () => {
       if (result.ok) {
         expect(result.summary).toBe('Looks mostly fine.');
         expect(result.findings).toHaveLength(1);
-        expect(result.withheld).toBeUndefined();
+        // A list with only invalid items is an empty list; anything else is no list.
+        expect(result.withheld).toEqual(Array.isArray(bad) ? [] : undefined);
       }
     }
+  });
+
+  it('keeps a list sent empty as an empty list, unlike an omitted one', () => {
+    const result = parseReviewAnswer(answer({ withheld: [] }));
+
+    expect(result.ok && result.withheld).toEqual([]);
   });
 
   it('keeps the withheld items of a summary-only answer', () => {

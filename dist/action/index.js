@@ -140029,6 +140029,9 @@ function isTruncatedAnswer(finishReason, hasUnclosedObject) {
   }
   return false;
 }
+function withheldOf(raw) {
+  return Array.isArray(raw) ? parseWithheld(raw) : void 0;
+}
 function parseReviewAnswer(text, options) {
   if (!text || text.trim().length === 0) {
     return { ok: false, code: "empty-response", error: "empty-response: model returned no text" };
@@ -140056,7 +140059,7 @@ function parseReviewAnswer(text, options) {
     }
     const bare = SummaryOnlyAnswerSchema.safeParse(parsed);
     if (bare.success && parsed.findings === void 0) {
-      summaryOnly ??= { summary: bare.data.summary, withheld: parseWithheld(bare.data.withheld) };
+      summaryOnly ??= { summary: bare.data.summary, withheld: withheldOf(bare.data.withheld) };
     } else {
       otherCandidatesRejected = true;
       if (!firstParseError)
@@ -140070,7 +140073,7 @@ function parseReviewAnswer(text, options) {
       findings: [],
       droppedInvalid: 0,
       findingsMissing: true,
-      ...summaryOnly.withheld.length > 0 ? { withheld: summaryOnly.withheld } : {},
+      ...summaryOnly.withheld ? { withheld: summaryOnly.withheld } : {},
       ...otherCandidatesRejected ? { otherCandidatesRejected: true } : {}
     };
   }
@@ -140092,7 +140095,7 @@ function parseReviewAnswer(text, options) {
     };
   }
   const answer = matchedAnswer;
-  const withheld = parseWithheld(answer.withheld);
+  const withheld = withheldOf(answer.withheld);
   const findings = [];
   let droppedInvalid = 0;
   let idCounter = 1;
@@ -140119,7 +140122,7 @@ function parseReviewAnswer(text, options) {
     ok: true,
     summary: answer.summary,
     findings,
-    ...withheld.length > 0 ? { withheld } : {},
+    ...withheld ? { withheld } : {},
     droppedInvalid
   };
 }

@@ -48,6 +48,16 @@ describe('the findings-list retry and the withheld list (ADR-0042)', () => {
     expect(result.parsed.withheld).toEqual([{ title: 'A', reason: 'B' }]);
   });
 
+  it('drops the first list when the retry sends an empty one', async () => {
+    const model = modelReturning(JSON.stringify({ summary: 'Docs-only PR.', findings: [], withheld: [] }));
+
+    const result = await retry(model);
+
+    expect(result.parsed.ok).toBe(true);
+    if (!result.parsed.ok) return;
+    expect(result.parsed.withheld).toEqual([]);
+  });
+
   it('keeps the withheld list the retry sends itself', async () => {
     const model = modelReturning(WITH_OWN_WITHHELD);
 
