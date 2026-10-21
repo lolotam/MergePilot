@@ -185,6 +185,26 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).toContain('402 + unlogged();');
   });
 
+  it('shows the exact line of every "Also at:" place before any wider window (ADR-0039)', () => {
+    // Ten places in one 402-line hunk: their narrow windows together pass the cap, so the wider
+    // window would be cut from the top and the later places would be dropped. The exact lines go
+    // first, so every place reaches the verifier whatever the cap leaves.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const bigPatch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+unlogged();`;
+    const places = [40, 80, 120, 160, 200, 240, 280, 320, 360, 402].map((line) => `src/big.ts:${line}`);
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: `Refusal not logged.\nAlso at: ${places.join(', ')}` })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/big.ts', patch: bigPatch },
+      ],
+      maxCodeTokens: 250,
+    });
+    expect(user).toContain('402 + unlogged();');
+    expect(user).toContain('40 + const filler38 = 38;');
+  });
+
   it('shows an "Also at:" place that sits in a PR_CONTEXT block (ADR-0039)', () => {
     // The place is at the end of a 402-line PR diff of another file. A context block has no range
     // of its own, so the line would be cut from the top before the verifier sees it.
@@ -266,30 +286,6 @@ describe('verify prompt — code across files (ADR-0028)', () => {
       { path: 'lib/b.ts', line: 10 },
       { path: 'c.ts', line: 7 },
     ]);
-  });
-
-  it('shows the owner rule of a finding, so a rule about naming is not a style nit (ADR-0039)', () => {
-    const withRule = buildVerifyPrompt({
-      language: 'en',
-      findings: [finding({ ruleRef: 'AGENTS.md §3' })],
-      files: [{ path: 'src/api.ts', patch: API_PATCH }],
-    });
-    expect(withRule.user).toContain('Rule: AGENTS.md §3');
-    const withoutRule = buildVerifyPrompt({
-      language: 'en',
-      findings: [finding()],
-      files: [{ path: 'src/api.ts', patch: API_PATCH }],
-    });
-    expect(withoutRule.user).not.toContain('Rule:');
-  });
-
-  it.each(['en', 'ar'])('in %s, does not reject an owner rule as a style nit', (language) => {
-    const { system } = buildVerifyPrompt({ language, findings: [finding()], files: [] });
-    expect(system).toContain(
-      language === 'ar'
-        ? 'تفضيل أسلوبي (style nit) لا تفرضه قاعدة من قواعد المالك'
-        : 'it is a style nit or preference that no owner rule requires',
-    );
   });
 
   it.each(['en', 'ar'])('in %s, no longer rejects a finding only for depending on code not shown', (language) => {

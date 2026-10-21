@@ -165,7 +165,7 @@ function lineNumberOf(line: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
-/** The first, narrow window: a few lines around each place, so every listed place fits first. */
+/** The narrow window: a few lines around each place, so every listed place fits. */
 const PLACE_LINES = 3;
 
 /** The hunk header and the lines within `radius` of a finding line; the rest is marked as cut. */
@@ -194,14 +194,16 @@ function show(chunk: Chunk, text: string, left: number): number {
 }
 
 /**
- * Fills the cap in four passes: first a few lines around every finding line and "Also at:" place,
- * so no listed place is cut because another one sits earlier in the same hunk; then a wider window
- * around each, so one large hunk cannot use up the budget and leave another finding without its own
- * evidence; then the whole hunks near a finding; then everything else in file order.
+ * Fills the cap in five passes: first the exact line of every finding line and "Also at:" place, so
+ * no listed place is cut because another one sits earlier in the same hunk; then a few lines around
+ * every place; then a wider window around each, so one large hunk cannot use up the budget and leave
+ * another finding without its own evidence; then the whole hunks near a finding; then everything
+ * else in file order.
  */
 function fitChunks(chunks: Chunk[], maxTokens: number): void {
   let left = maxTokens;
   const near = chunks.filter((c) => c.findingLines.length > 0);
+  for (const chunk of near) left -= show(chunk, windowOf(chunk, 0), left);
   for (const chunk of near) left -= show(chunk, windowOf(chunk, PLACE_LINES), left);
   for (const chunk of near) left -= show(chunk, windowOf(chunk, NEAR_LINES), left);
   for (const chunk of near) left -= show(chunk, chunk.text, left);
@@ -363,7 +365,7 @@ const ROLE_EN = `You are verifying another reviewer's findings on a pull request
 Reject a finding when:
 - its evidence is not in the code shown (a quote from another file must match that file's code);
 - the code shown contradicts the claim (for example, another part of the diff already handles it);
-- it is a style nit or preference that no owner rule requires (a finding with a Rule line cites an owner rule: judge whether the code breaks that rule);
+- it is a style nit or preference;
 - it depends on code that is not shown and does not say which code would confirm it.
 
 Do not reject a finding only because it depends on code that is not shown. Answer "plausible" when the code shown is consistent with the claim, the code that would prove it is not shown, and the finding says which code would confirm it: it is kept with its confidence capped at 0.69. Answer "confirmed" when the code shown supports the claim.`;
@@ -373,7 +375,7 @@ const ROLE_AR = `أنت تتحقق من ملاحظات مراجع كود آخر 
 ارفض الملاحظة (rejected) إذا:
 - لم يكن دليلها موجودًا في الكود المعروض (الاقتباس من ملف آخر لازم يطابق كود الملف ده)؛
 - كان الكود المعروض يناقض ما تقوله (مثلًا جزء آخر من التغييرات يعالج المشكلة بالفعل)؛
-- كانت مجرد تفضيل أسلوبي (style nit) لا تفرضه قاعدة من قواعد المالك (الملاحظة اللي فيها سطر Rule بتستشهد بقاعدة للمالك: احكم هل الكود بيخالف القاعدة دي)؛
+- كانت مجرد تفضيل أسلوبي (style nit)؛
 - كانت تعتمد على كود غير معروض ولا تقول أي كود سيؤكدها.
 
 لا ترفض الملاحظة لمجرد أنها تعتمد على كود غير معروض. اختر "plausible" إذا كان الكود المعروض متسقًا مع ما تقوله، والكود الذي يثبتها غير معروض، والملاحظة تقول أي كود سيؤكدها: تبقى الملاحظة وثقتها بحد أقصى 0.69. اختر "confirmed" إذا كان الكود المعروض يدعم ما تقوله. اكتب سبب القرار (reason) باللغة العربية البسيطة.`;
@@ -393,12 +395,6 @@ function buildVerifySystemPrompt(language: string): string {
   return [language === 'ar' ? ROLE_AR : ROLE_EN, '', contract, '', trustRule].join('\n');
 }
 
-/** The "Rule:" line of a finding, when it cites an owner rule the verifier must weigh (ADR-0039). */
-function ruleLine(finding: Finding): string[] {
-  const ruleRef = finding.ruleRef?.trim();
-  return ruleRef ? [`Rule: ${escapeDelimiters(ruleRef)}`] : [];
-}
-
 function buildVerifyUserPrompt(input: VerifyPromptInput): string {
   const { files, pathsByFinding } = collectFiles(input);
   fitChunks(files.flatMap((f) => f.chunks), input.maxCodeTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens);
@@ -411,7 +407,6 @@ function buildVerifyUserPrompt(input: VerifyPromptInput): string {
       `Title: ${escapeDelimiters(finding.title)}`,
       `Body: ${escapeDelimiters(finding.body)}`,
       `Evidence: ${escapeDelimiters(finding.evidence)}`,
-      ...ruleLine(finding),
       `Code shown for it: ${(pathsByFinding.get(finding.id) ?? []).map(escapeDelimiters).join(', ')}`,
     ].join('\n'),
   );
