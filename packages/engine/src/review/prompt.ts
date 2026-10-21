@@ -279,6 +279,13 @@ applies to, not only the first one. Report a broken rule with "category": "proje
 rule's place in "ruleRef"; use one finding per broken rule, with "Also at:" for the other places. \
 Skip only rules too vague to check against the code.`;
 
+const EDGE_INPUTS = `\
+EDGE INPUTS: for each changed parser, validator, regex, date or number handling, or request-body \
+read, list its edge inputs before you conclude: empty or whitespace-only text, malformed or \
+non-object JSON, a missing or null field, a duplicate or case-variant key, an out-of-range or \
+non-finite number, and a date without a time or rolled past a month or year end. Report only \
+those the shown code mishandles.`;
+
 const REPORTING_RULES = `\
 REPORTING: reason across every file shown, not one hunk at a time. One finding per root cause, \
 placed on the line where the defect shows in this diff. "line" must be a number printed in the \
@@ -339,6 +346,8 @@ function buildSystemPrompt(
     PATTERN_SWEEP,
     '',
     ...(hasCriteria ? [RULES_CHECK, ''] : []),
+    EDGE_INPUTS,
+    '',
     SEVERITY_SCALE,
     '',
     CONFIDENCE_SCALE,
