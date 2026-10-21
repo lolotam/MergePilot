@@ -11,6 +11,22 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3.5);
 }
 
+/**
+ * A text cut at a line break to about `tokens`, ending with the visible `marker`: the lines that
+ * do not fit are left out and the marker says they were not shown.
+ */
+export function cutToTokens(text: string, tokens: number, marker: string): string {
+  const kept: string[] = [];
+  let used = estimateTokens(marker);
+  for (const line of text.split('\n')) {
+    const cost = estimateTokens(`${line}\n`);
+    if (used + cost > tokens) break;
+    kept.push(line);
+    used += cost;
+  }
+  return [...kept, marker].join('\n');
+}
+
 export interface CheckBudgetInput {
   promptTokens: number;
   maxInputTokens: number;

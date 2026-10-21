@@ -145,6 +145,47 @@ describe('runReview — verification pass', () => {
     }
   });
 
+  it('redacts path instructions in the review and verification prompts (ADR-0044)', async () => {
+    const secretValue = 'fake-audit-token-5678-placeholder';
+    const reviewAnswer = JSON.stringify({
+      summary: 'Reviewed.',
+      findings: [validFindingJson({ category: 'project-rule', ruleRef: '.mergepilot.yml src/**' })],
+    });
+    const verifyAnswer = makeVerifyAnswerJson([{ id: 'f1', verdict: 'confirmed', reason: 'Rule broken' }]);
+    const calls: ReviewModelRequest[] = [];
+    const model: ReviewModel = {
+      label: 'fake:two-step',
+      generate: async (req: ReviewModelRequest): Promise<ReviewModelResponse> => {
+        calls.push(req);
+        return { text: calls.length === 1 ? reviewAnswer : verifyAnswer, finishReason: 'stop' };
+      },
+    };
+    const review = {
+      ...makeConfig().review,
+      verify: true,
+      pathInstructions: [{ path: 'src/**', instructions: `Log every refusal; the audit key is ${secretValue}.` }],
+    };
+
+    const result = await runReview({
+      config: makeConfig({ review }),
+      pr: { title: 'T', body: 'B' },
+      files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }],
+      // A rules file whose path holds the secret: the path is printed in the block label.
+      rulesFiles: [{ path: `rules/${secretValue}.md`, content: 'Every refusal writes a log row.' }],
+      model,
+      knownSecrets: [new Secret(secretValue)],
+    });
+
+    expect(result.status).toBe('completed');
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:rules/');
+    expect(calls[1]?.user).toContain('<<<REVIEW_CRITERIA:PATH_INSTRUCTIONS:src/**>>>');
+    expect(calls[1]?.user).toContain('Log every refusal');
+    for (const call of calls) {
+      expect(call.system + call.user).not.toContain(secretValue);
+    }
+  });
+
   it('keeps findings and marks incomplete when verify call throws', async () => {
     const modelFinding = validFindingJson({ id: 'f1', title: 'Bug 1' });
     const reviewAnswer = JSON.stringify({

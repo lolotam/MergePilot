@@ -5,13 +5,24 @@
  * code is bounded by a token cap: the lines near a finding line or near a place the finding lists
  * on its "Also at:" line go first, the rest fill what is left, and whatever does not fit is
  * replaced by a visible marker.
+ *
+ * When a finding cites a rule, the owner's rules are shown too, capped in tokens, so a broken rule
+ * is not rejected as a style nit (ADR-0044).
  */
 
 import { REVIEW_LIMIT_DEFAULTS } from '../config/schema.js';
-import { estimateTokens } from './budget.js';
+import { cutToTokens, estimateTokens } from './budget.js';
 import { ESCAPED_MARKER_NOTE, escapeDelimiters, escapeLabel } from './delimiters.js';
-import { renderContextFile, type ContextFile } from './prompt.js';
+import { renderContextFile, type ContextFile, type PathInstruction } from './prompt.js';
 import type { DiffSide, Finding } from './types.js';
+import {
+  buildVerifyCriteria,
+  citedRule,
+  noCriteria,
+  VERIFY_CRITERIA_TOKENS,
+  withRuleCriteria,
+  type VerifyCriteria,
+} from './verify-criteria.js';
 
 export interface VerifyReviewableFile {
   path: string;
@@ -29,11 +40,25 @@ export interface VerifyPromptInput {
   contextFiles?: readonly ContextFile[] | undefined;
   /** Estimated tokens of code shown in total; defaults to the `review.batchTokens` default. */
   maxCodeTokens?: number | undefined;
+  /**
+   * The owner's rules files, already redacted, shown when a finding carries a ruleRef (ADR-0044).
+   */
+  rulesFiles?: readonly { path: string; content: string }[] | undefined;
+  /**
+   * Path instructions; those whose glob matches a changed file are shown with the rules files.
+   */
+  pathInstructions?: readonly PathInstruction[] | undefined;
+  /**
+   * Estimated tokens of REVIEW_CRITERIA shown in total; defaults to VERIFY_CRITERIA_TOKENS.
+   */
+  maxCriteriaTokens?: number | undefined;
 }
 
 export interface BuiltVerifyPrompt {
   system: string;
   user: string;
+  /** Estimated tokens of the REVIEW_CRITERIA blocks shown (0 when none). */
+  criteriaTokens: number;
 }
 
 /** Hunks within this many lines of a finding line are shown before any other code. */
@@ -146,19 +171,6 @@ function contextChunk(file: ContextFile): Chunk {
   return { text: renderContextFile(file), ranges, findingLines: [] };
 }
 
-/** A chunk cut at a line break to about `tokens`, ending with the visible marker. */
-function cutToTokens(text: string, tokens: number): string {
-  const kept: string[] = [];
-  let used = estimateTokens(CUT_MARKER);
-  for (const line of text.split('\n')) {
-    const cost = estimateTokens(`${line}\n`);
-    if (used + cost > tokens) break;
-    kept.push(line);
-    used += cost;
-  }
-  return [...kept, CUT_MARKER].join('\n');
-}
-
 /** The number a rendered chunk line starts with, or undefined for a header or marker line. */
 function lineNumberOf(line: string): number | undefined {
   const match = /^\s+(\d+) /.exec(line);
@@ -187,7 +199,7 @@ function show(chunk: Chunk, text: string, left: number): number {
     return Math.max(cost, 0);
   }
   if (chunk.shown === undefined && left >= MIN_CUT_TOKENS) {
-    chunk.shown = cutToTokens(text, left);
+    chunk.shown = cutToTokens(text, left, CUT_MARKER);
     return left;
   }
   return 0;
@@ -461,27 +473,82 @@ function buildVerifySystemPrompt(language: string): string {
   return [language === 'ar' ? ROLE_AR : ROLE_EN, '', contract, '', trustRule].join('\n');
 }
 
-function buildVerifyUserPrompt(input: VerifyPromptInput): string {
+/** What the `Rule:` line says about the block the cited rule names (ADR-0044). */
+const RULE_NOTES: Record<'shown' | 'cut' | 'not-shown', string> = {
+  shown: '',
+  cut: ' (the cited block was cut at the verification limit: the rule may not be shown)',
+  'not-shown': ' (no REVIEW_CRITERIA block shown here has this name)',
+};
+
+/** The `Rule:` line of a finding: the rule it cites and whether a shown block carries that name. */
+function ruleLine(finding: Finding, criteria: VerifyCriteria): string[] {
+  // The ruleRef is free text the review model wrote: it is held to one line, so a newline in it
+  // cannot start a field line of its own.
+  const ref = (finding.ruleRef ?? '').replace(/\s+/g, ' ').trim();
+  if (ref === '') return [];
+  const note = RULE_NOTES[citedRule(ref, criteria)];
+  return [`Rule: ${escapeDelimiters(ref)}${note}`];
+}
+
+/** The owner's rules for the verifier: shown only when a finding cites one (ADR-0044). */
+function buildCriteria(input: VerifyPromptInput): VerifyCriteria {
+  const ruleRefs = input.findings
+    .map((finding) => (finding.ruleRef ?? '').trim())
+    .filter((ruleRef) => ruleRef !== '');
+  if (ruleRefs.length === 0) return noCriteria();
+  return buildVerifyCriteria({
+    rulesFiles: input.rulesFiles ?? [],
+    pathInstructions: input.pathInstructions ?? [],
+    filePaths: input.files.map((f) => f.path),
+    ruleRefs,
+    maxTokens: input.maxCriteriaTokens ?? VERIFY_CRITERIA_TOKENS,
+  });
+}
+
+/**
+ * A field's text with every line after the first indented: a field line then always starts at the
+ * first column, so a line inside a field cannot pose as a field of its own.
+ */
+function indentContinuation(text: string): string {
+  return text.replace(/\n/g, '\n  ');
+}
+
+/** A free-text field value as the verifier sees it: delimiters escaped, extra lines indented. */
+function fieldText(text: string): string {
+  return indentContinuation(escapeDelimiters(text));
+}
+
+function buildVerifyUserPrompt(input: VerifyPromptInput, criteria: VerifyCriteria): string {
   const { files, pathsByFinding } = collectFiles(input);
   fitChunks(files.flatMap((f) => f.chunks), input.maxCodeTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens);
 
   const findings = input.findings.map((finding) =>
     [
-      `Finding ID: ${escapeDelimiters(finding.id)}`,
-      `File: ${escapeDelimiters(finding.path)}`,
+      `Finding ID: ${fieldText(finding.id)}`,
+      `File: ${fieldText(finding.path)}`,
       `Line: ${finding.line}`,
-      `Title: ${escapeDelimiters(finding.title)}`,
-      `Body: ${escapeDelimiters(finding.body)}`,
-      `Evidence: ${escapeDelimiters(finding.evidence)}`,
-      `Code shown for it: ${(pathsByFinding.get(finding.id) ?? []).map(escapeDelimiters).join(', ')}`,
+      `Title: ${fieldText(finding.title)}`,
+      `Body: ${fieldText(finding.body)}`,
+      `Evidence: ${fieldText(finding.evidence)}`,
+      ...ruleLine(finding, criteria),
+      `Code shown for it: ${fieldText((pathsByFinding.get(finding.id) ?? []).join(', '))}`,
     ].join('\n'),
   );
-  return [...findings, `Code:\n\n${files.map(renderFile).join('\n\n')}`].join('\n\n---\n\n');
+  const parts: string[] = [];
+  if (criteria.blocks.length > 0) parts.push(`Owner rules:\n\n${criteria.blocks.join('\n\n')}`);
+  parts.push(...findings);
+  parts.push(`Code:\n\n${files.map(renderFile).join('\n\n')}`);
+  return parts.join('\n\n---\n\n');
 }
 
 export function buildVerifyPrompt(input: VerifyPromptInput): BuiltVerifyPrompt {
+  const criteria = buildCriteria(input);
+  const system = buildVerifySystemPrompt(input.language);
   return {
-    system: buildVerifySystemPrompt(input.language),
-    user: buildVerifyUserPrompt(input),
+    // The rule exception and the trust sentence only when a rule is shown (ADR-0044).
+    system: criteria.blocks.length > 0 ? withRuleCriteria(system) : system,
+    user: buildVerifyUserPrompt(input, criteria),
+    // What the shown rule blocks really cost, so the shortening step starts from their own size.
+    criteriaTokens: criteria.blocks.length > 0 ? estimateTokens(criteria.blocks.join('\n\n')) : 0,
   };
 }
