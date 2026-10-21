@@ -231,8 +231,10 @@ export class ContextPlan {
     const on = opts.contextTokens > 0;
     this.files = on ? prepareRepository(offered, { ...opts, contextTokens: this.wholeCap() }) : [];
     this.prFiles = on ? preparePullRequest(offered, opts) : [];
+    // From the offered files, not the merged ones: a changed file another file cites keeps the
+    // `changed-file` kind after the merge but was still sent because of that citation.
     this.citedPaths = new Set(
-      this.files.filter((f) => f.kind === 'cited' || f.kind === 'referenced').map((f) => f.path),
+      offered.filter((f) => f.kind === 'cited' || f.kind === 'referenced').map((f) => f.path),
     );
   }
 

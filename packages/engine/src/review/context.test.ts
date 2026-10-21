@@ -162,6 +162,15 @@ describe('ContextPlan', () => {
     expect(withoutCitations.disclosure()?.cited).toBeUndefined();
   });
 
+  it('names a changed file another changed file cites, though the merge keeps it a changed file', () => {
+    const plan = new ContextPlan([
+      file('src/a.ts', 'changed-file'),
+      file('src/a.ts', 'cited', 'export const x = 1;', ['src/b.ts']),
+    ], options());
+    plan.markSent(plan.whole());
+    expect(plan.disclosure()?.cited).toEqual(['src/a.ts']);
+  });
+
   it('sends build and CI wiring after the imports, and a changed manifest only once as the changed file', () => {
     const offered = [
       file('.github/workflows/ci.yml', 'build-config', 'run: pnpm test'),

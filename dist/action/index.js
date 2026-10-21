@@ -141333,7 +141333,7 @@ var ContextPlan = class {
     const on = opts.contextTokens > 0;
     this.files = on ? prepareRepository(offered, { ...opts, contextTokens: this.wholeCap() }) : [];
     this.prFiles = on ? preparePullRequest(offered, opts) : [];
-    this.citedPaths = new Set(this.files.filter((f3) => f3.kind === "cited" || f3.kind === "referenced").map((f3) => f3.path));
+    this.citedPaths = new Set(offered.filter((f3) => f3.kind === "cited" || f3.kind === "referenced").map((f3) => f3.path));
   }
   /**
    * The context of a call reviewing `paths`, in send order, within `maxTokens`; not recorded. PR
