@@ -269,6 +269,26 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).not.toContain('filler0 ');
   });
 
+  it('shows the head file of a place whose hunk renders no line with that number', () => {
+    // The hunk of src/shift.ts covers old lines 100-101 and new lines 50-51, so line 100 falls in
+    // its range while no rendered line carries that number: the head file is where it is read.
+    const shiftPatch = '@@ -100,2 +50,2 @@\n kept();\n-gone();\n+added();';
+    const filler = (from: number, count: number): string =>
+      Array.from({ length: count }, (_, i) => `const filler${from + i} = ${from + i};`).join('\n');
+    const head = `${filler(0, 99)}\ncited();\n${filler(99, 300)}`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/shift.ts:100' })],
+      files: [
+        { path: 'src/api.ts', patch: API_PATCH },
+        { path: 'src/shift.ts', patch: shiftPatch },
+      ],
+      contextFiles: [{ path: 'src/shift.ts', reason: 'x', content: head }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('100   cited();');
+  });
+
   it('reads the "Also at:" places of a body', () => {
     const paths = ['src/a.ts', 'lib/b.ts', 'c.ts', 'src/my file.ts', 'src/a,b.ts'];
     expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.', paths)).toEqual([

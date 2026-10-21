@@ -141929,6 +141929,13 @@ function alsoAtPlaces(body, paths) {
 function holdsPlace(chunk, line) {
   return chunk.ranges.some(([from, to]) => line >= from - NEAR_LINES && line <= to + NEAR_LINES);
 }
+var RENDERED_LINE_RE = /^\s*(\d+) (?:\+ | {2})/;
+function rendersLine(chunk, line) {
+  return chunk.text.split("\n").some((text) => {
+    const match3 = RENDERED_LINE_RE.exec(text);
+    return match3 !== null && Number(match3[1]) === line;
+  });
+}
 function markNearChunks(findings, files) {
   const byPath = /* @__PURE__ */ new Map();
   for (const file2 of files.values()) {
@@ -141945,7 +141952,7 @@ function markNearChunks(findings, files) {
         for (const chunk of file2.chunks) {
           if (holdsPlace(chunk, place.line)) {
             chunk.findingLines.push(place.line);
-            marked ||= chunk.ranges.some(([from, to]) => place.line >= from && place.line <= to);
+            marked ||= rendersLine(chunk, place.line);
           }
         }
       }

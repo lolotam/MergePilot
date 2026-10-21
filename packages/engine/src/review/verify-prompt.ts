@@ -328,6 +328,25 @@ function holdsPlace(chunk: Chunk, line: number): boolean {
 }
 
 /**
+ * The number a rendered line prints, when the line is an added line ("  <n> + text") or a
+ * context line ("  <n>   text"). A removed line prints "  <n> - text": its number is the
+ * old-side one, a line the model does not read, so it does not count.
+ */
+const RENDERED_LINE_RE = /^\s*(\d+) (?:\+ | {2})/;
+
+/**
+ * True when the chunk renders a line with that number. The ranges of a hunk cover its old side
+ * as well, and a line can live on the old side only: no rendered line carries that number, so
+ * the chunk does not hold the place.
+ */
+function rendersLine(chunk: Chunk, line: number): boolean {
+  return chunk.text.split('\n').some((text) => {
+    const match = RENDERED_LINE_RE.exec(text);
+    return match !== null && Number(match[1]) === line;
+  });
+}
+
+/**
  * Flags the hunks within NEAR_LINES of a finding line in its own file, and of every place its
  * "Also at:" line lists: they are shown first, so each listed place reaches the verifier. A path
  * can be shown twice, as its hunks and as its full version; the hunks (or the PR diff of the path)
@@ -354,8 +373,8 @@ function markNearChunks(findings: readonly Finding[], files: ReadonlyMap<string,
         for (const chunk of file.chunks) {
           if (holdsPlace(chunk, place.line)) {
             chunk.findingLines.push(place.line);
-            // Only a block that holds the line itself spares the full version, not one merely near it.
-            marked ||= chunk.ranges.some(([from, to]) => place.line >= from && place.line <= to);
+            // Only a block that renders the line itself spares the full version, not one merely near it.
+            marked ||= rendersLine(chunk, place.line);
           }
         }
       }
