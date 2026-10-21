@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Secret } from '../credentials/secret.js';
 import { LlmFailure } from '../llm/failure.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
