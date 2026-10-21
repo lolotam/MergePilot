@@ -170,13 +170,15 @@ describe('runReview — verification pass', () => {
       config: makeConfig({ review }),
       pr: { title: 'T', body: 'B' },
       files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }],
-      rulesFiles: [],
+      // A rules file whose path holds the secret: the path is printed in the block label.
+      rulesFiles: [{ path: `rules/${secretValue}.md`, content: 'Every refusal writes a log row.' }],
       model,
       knownSecrets: [new Secret(secretValue)],
     });
 
     expect(result.status).toBe('completed');
     expect(calls).toHaveLength(2);
+    expect(calls[1]?.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:rules/');
     expect(calls[1]?.user).toContain('<<<REVIEW_CRITERIA:PATH_INSTRUCTIONS:src/**>>>');
     expect(calls[1]?.user).toContain('Log every refusal');
     for (const call of calls) {

@@ -212,8 +212,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const promptPr = promptPrOf(redactedPrTitle, redactedPrBody, followUp, skill);
 
   // Redact rules files
+  // The path is printed in the REVIEW_CRITERIA block label, so it is redacted like the content.
   const redactedRulesFiles = rulesFiles.map((rf) => ({
-    path: rf.path,
+    path: redactSecrets(rf.path, knownSecrets).text,
     content: redactSecrets(rf.content, knownSecrets).text,
   }));
 

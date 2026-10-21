@@ -513,20 +513,25 @@ function indentContinuation(text: string): string {
   return text.replace(/\n/g, '\n  ');
 }
 
+/** A free-text field value as the verifier sees it: delimiters escaped, extra lines indented. */
+function fieldText(text: string): string {
+  return indentContinuation(escapeDelimiters(text));
+}
+
 function buildVerifyUserPrompt(input: VerifyPromptInput, criteria: VerifyCriteria): string {
   const { files, pathsByFinding } = collectFiles(input);
   fitChunks(files.flatMap((f) => f.chunks), input.maxCodeTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens);
 
   const findings = input.findings.map((finding) =>
     [
-      `Finding ID: ${escapeDelimiters(finding.id)}`,
-      `File: ${escapeDelimiters(finding.path)}`,
+      `Finding ID: ${fieldText(finding.id)}`,
+      `File: ${fieldText(finding.path)}`,
       `Line: ${finding.line}`,
-      `Title: ${escapeDelimiters(finding.title)}`,
-      `Body: ${indentContinuation(escapeDelimiters(finding.body))}`,
-      `Evidence: ${indentContinuation(escapeDelimiters(finding.evidence))}`,
+      `Title: ${fieldText(finding.title)}`,
+      `Body: ${fieldText(finding.body)}`,
+      `Evidence: ${fieldText(finding.evidence)}`,
       ...ruleLine(finding, criteria),
-      `Code shown for it: ${(pathsByFinding.get(finding.id) ?? []).map(escapeDelimiters).join(', ')}`,
+      `Code shown for it: ${fieldText((pathsByFinding.get(finding.id) ?? []).join(', '))}`,
     ].join('\n'),
   );
   const parts: string[] = [];
