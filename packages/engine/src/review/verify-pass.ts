@@ -107,7 +107,7 @@ function buildFittingVerifyPrompt(
   const withoutRulesTokens = estimateTokens(withoutRules.system + withoutRules.user);
   const hasRules = (input.rulesFiles?.length ?? 0) > 0 || (input.pathInstructions?.length ?? 0) > 0;
   if (hasRules) {
-    const shortened = shortenRules(base, promptTokens, withoutRulesTokens, limit);
+    const shortened = shortenRules(base, promptTokens, prompt.criteriaTokens, limit);
     // The system prompt names the rules only when a rule block is shown, so the two prompts
     // differ exactly when the shortened one still shows a rule.
     if (shortened && shortened.system !== withoutRules.system) {
@@ -137,17 +137,18 @@ const SHORTEN_MIN_STEP = 50;
 
 /**
  * The verification prompt with the rules cap lowered by the overflow until the prompt fits, or
- * undefined. The cap starts at the size the rules really take, so a small rules block is cut
- * instead of left out. The rule lines the system prompt gains with a shown block are outside the
- * cap, so one step can leave a small overflow: the cap is lowered again by what is left over.
+ * undefined. The cap starts at the size the shown REVIEW_CRITERIA blocks really take, so a small
+ * rules block is cut instead of left out. The rule lines the system prompt gains with a shown
+ * block are outside the cap, so one step can leave a small overflow: the cap is lowered again by
+ * what is left over.
  */
 function shortenRules(
   base: Parameters<typeof buildVerifyPrompt>[0],
   promptTokens: number,
-  withoutRulesTokens: number,
+  criteriaTokens: number,
   limit: number,
 ): BuiltVerifyPrompt | undefined {
-  let cap = Math.min(VERIFY_CRITERIA_TOKENS, promptTokens - withoutRulesTokens);
+  let cap = Math.min(VERIFY_CRITERIA_TOKENS, criteriaTokens);
   let tokens = promptTokens;
   for (let attempt = 0; attempt < SHORTEN_ATTEMPTS; attempt++) {
     cap -= Math.max(tokens - limit, SHORTEN_MIN_STEP);
@@ -191,8 +192,10 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
   if (input.deadline?.expired) {
     return unchanged('time limit reached');
   }
-  if (inputLimit !== undefined) {
-    const tokenBudget = checkBudget({ promptTokens, maxInputTokens: inputLimit });
+  if (input.maxInputTokens !== undefined) {
+    // The JSON-only retry adds the reminder, so it is counted here against the configured limit.
+    const retryTokens = promptTokens + estimateTokens(JSON_ONLY_REMINDER);
+    const tokenBudget = checkBudget({ promptTokens: retryTokens, maxInputTokens: input.maxInputTokens });
     if (!tokenBudget.ok) return unchanged(tokenBudget.reason);
   }
   if (!spend.canAfford(promptTokens, firstRequested)) {

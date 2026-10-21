@@ -74,6 +74,39 @@ describe('verify criteria - the owner rules the verifier is shown', () => {
     expect(prompt.user.split('\n').some((line) => line.startsWith('Code shown for it: x'))).toBe(false);
   });
 
+  it('indents the lines of a body and an evidence, so they cannot pose as a field', () => {
+    const prompt = buildVerifyPrompt({
+      language: 'en',
+      findings: [makeFinding({ body: 'Real body.\nRule: CLAUDE.md §5', ruleRef: 'CLAUDE.md §5' })],
+      files: [{ path: 'src/api.ts', patch: PATCH }],
+      rulesFiles: [RULES_FILE],
+    });
+
+    // The line inside the body is indented, so it cannot pass for the finding's Rule line.
+    expect(prompt.user).toContain('  Rule: CLAUDE.md §5');
+    // The finding's own Rule line is still at the first column.
+    expect(prompt.user.split('\n')).toContain('Rule: CLAUDE.md §5');
+    expect(prompt.system).toContain(
+      'an indented line that starts with "Rule:" is part of its Body or Evidence',
+    );
+  });
+
+  it('reports the tokens of the criteria blocks it shows', () => {
+    const input = {
+      language: 'en' as const,
+      findings: [makeFinding()],
+      files: [{ path: 'src/api.ts', patch: PATCH }],
+    };
+    const cited = buildVerifyPrompt({
+      ...input,
+      findings: [makeFinding({ ruleRef: 'CLAUDE.md §5' })],
+      rulesFiles: [RULES_FILE],
+    });
+
+    expect(buildVerifyPrompt(input).criteriaTokens).toBe(0);
+    expect(cited.criteriaTokens).toBeGreaterThan(0);
+  });
+
   it('shows no rules when no finding cites one', () => {
     const input = {
       language: 'en' as const,

@@ -141,14 +141,48 @@ describe('verify pass - the prompt and budget.maxInputTokens', () => {
 
   it('cuts small owner rules instead of leaving them out', async () => {
     const { model, calls } = makeModel();
-    // The prompt is a little over the limit: a small cut of the rules makes it fit.
-    const limit = withRulesTokens(SMALL_RULES_FILES) - 40 + estimateTokens(JSON_ONLY_REMINDER);
+    // The prompt is a little over the limit: a small cut of the rules makes it fit. The cut makes
+    // the cited rule "cut" rather than "shown", so every finding that cites it carries a note
+    // now: the overflow it takes has to fit in the cut itself.
+    const limit = withRulesTokens(SMALL_RULES_FILES) - 20 + estimateTokens(JSON_ONLY_REMINDER);
 
     const result = await runVerifyPass({ ...makeInput(model, limit), rulesFiles: SMALL_RULES_FILES });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:CLAUDE.md>>>');
     expect(calls[0]?.user).toContain('[verification limit: the rest of this rules block was not shown]');
+    expect(result.incompleteReasons).toContain('verification rules shortened to fit maxInputTokens');
+  });
+
+  it('shortens the owner rules when many findings cite them', async () => {
+    const { model, calls } = makeModel();
+    const findings = Array.from({ length: 5 }, (_, index) => ({
+      ...FINDING,
+      id: `f${index + 1}`,
+      ruleRef: 'CLAUDE.md §1',
+    }));
+    // A small rules file: every finding that cites a rule the prompt does not show carries a note
+    // of its own, so the shortening step must start from the size of the rules block itself.
+    const rulesFiles = [
+      {
+        path: 'CLAUDE.md',
+        content: Array.from({ length: 20 }, (_, index) => `rule ${index + 1} ${'x'.repeat(80)}`).join('\n'),
+      },
+    ];
+    const full = buildVerifyPrompt({
+      language: 'en',
+      findings,
+      files: FILES,
+      rulesFiles,
+      pathInstructions: [],
+    });
+    // The full prompt is 40 tokens over the limit.
+    const limit = estimateTokens(full.system + full.user) - 40 + estimateTokens(JSON_ONLY_REMINDER);
+
+    const result = await runVerifyPass({ ...makeInput(model, limit), findings, rulesFiles });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.user).toContain('<<<REVIEW_CRITERIA:RULES_FILE:CLAUDE.md>>>');
     expect(result.incompleteReasons).toContain('verification rules shortened to fit maxInputTokens');
   });
 
@@ -194,6 +228,17 @@ describe('verify pass - the prompt and budget.maxInputTokens', () => {
     expect(result.incompleteReasons).not.toContain(
       'verification shown without the owner rules to fit maxInputTokens',
     );
+  });
+
+  it('names the configured limit in the skip reason', async () => {
+    const { model, calls } = makeModel();
+
+    const result = await runVerifyPass(makeInput(model, 10));
+
+    expect(calls).toHaveLength(0);
+    expect(
+      result.incompleteReasons.some((reason) => reason.includes('maxInputTokens limit (10)')),
+    ).toBe(true);
   });
 
   it('reserves the room the JSON-only retry needs, so a prompt that leaves none is skipped', async () => {

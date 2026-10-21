@@ -57,6 +57,8 @@ export interface VerifyPromptInput {
 export interface BuiltVerifyPrompt {
   system: string;
   user: string;
+  /** Estimated tokens of the REVIEW_CRITERIA blocks shown (0 when none). */
+  criteriaTokens: number;
 }
 
 /** Hunks within this many lines of a finding line are shown before any other code. */
@@ -503,6 +505,14 @@ function buildCriteria(input: VerifyPromptInput): VerifyCriteria {
   });
 }
 
+/**
+ * A field's text with every line after the first indented: a field line then always starts at the
+ * first column, so a line inside a field cannot pose as a field of its own.
+ */
+function indentContinuation(text: string): string {
+  return text.replace(/\n/g, '\n  ');
+}
+
 function buildVerifyUserPrompt(input: VerifyPromptInput, criteria: VerifyCriteria): string {
   const { files, pathsByFinding } = collectFiles(input);
   fitChunks(files.flatMap((f) => f.chunks), input.maxCodeTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens);
@@ -513,8 +523,8 @@ function buildVerifyUserPrompt(input: VerifyPromptInput, criteria: VerifyCriteri
       `File: ${escapeDelimiters(finding.path)}`,
       `Line: ${finding.line}`,
       `Title: ${escapeDelimiters(finding.title)}`,
-      `Body: ${escapeDelimiters(finding.body)}`,
-      `Evidence: ${escapeDelimiters(finding.evidence)}`,
+      `Body: ${indentContinuation(escapeDelimiters(finding.body))}`,
+      `Evidence: ${indentContinuation(escapeDelimiters(finding.evidence))}`,
       ...ruleLine(finding, criteria),
       `Code shown for it: ${(pathsByFinding.get(finding.id) ?? []).map(escapeDelimiters).join(', ')}`,
     ].join('\n'),
@@ -533,5 +543,7 @@ export function buildVerifyPrompt(input: VerifyPromptInput): BuiltVerifyPrompt {
     // The rule exception and the trust sentence only when a rule is shown (ADR-0044).
     system: criteria.blocks.length > 0 ? withRuleCriteria(system) : system,
     user: buildVerifyUserPrompt(input, criteria),
+    // What the shown rule blocks really cost, so the shortening step starts from their own size.
+    criteriaTokens: criteria.blocks.length > 0 ? estimateTokens(criteria.blocks.join('\n\n')) : 0,
   };
 }
