@@ -37,6 +37,8 @@ export async function writePgCredential(tx: AppTx, credential: StoredCredential)
     createdBy: credential.createdBy,
     createdAt: credential.createdAt,
     baseUrl: credential.baseUrl ?? null,
+    // A write without the flag clears it: a new sign-in replaces the row.
+    signInRequiredAt: credential.signInRequiredAt ?? null,
   };
   await tx
     .insert(providerCredentials)

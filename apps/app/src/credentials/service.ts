@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Secret, decodeSubscription, encodeSubscription, isSubscriptionOnlyProvider, isSubscriptionProvider, refreshSubscription, SUBSCRIPTION_PREFIX,
+import { Secret, decodeSubscription, encodeSubscription, isSubscriptionOnlyProvider, isSubscriptionProvider, SUBSCRIPTION_PREFIX,
   type SubscriptionCredential, type SubscriptionProvider } from '@mergepilot/engine';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { KeyProvider, KeyQuotaStatus, ProviderAuthMethod, AppStore, StoredCredential, Vault } from '../core/types.js';
@@ -20,8 +20,8 @@ import {
   slotFromCredential,
 } from './key-list-helpers.js';
 import { isDualMethodProvider, isKeyListProvider, MAX_PROVIDER_KEYS } from './multi-key.js';
-import { coordinateRefresh } from './refresh-coordination.js';
-import { readCredentialForRedaction, readStoredSubscription, UnavailableCredentialError } from './subscription-resolution.js';
+import { readCredentialForRedaction } from './subscription-resolution.js';
+import { resolveSubscriptionSecret } from './subscription-refresh.js';
 
 export { UnavailableAuthMethodError } from './dual-auth.js';
 export { NoSubscriptionConnectedError } from './credential-dual-methods.js';
@@ -415,25 +415,7 @@ export class CredentialService {
   }
 
   async resolve(workspaceId: string, provider: KeyProvider): Promise<Secret> {
-    if (isSubscriptionProvider(provider)) {
-      const initial = await this.#store.getCredential(workspaceId, provider);
-      const { value: plaintext, subscription: envelope } = await readStoredSubscription(this.#vault, initial, workspaceId, provider);
-      if (!envelope || envelope.credential.expires > Date.now() + 60_000) return new Secret(plaintext);
-      return coordinateRefresh(this.#store, `${workspaceId}:${provider}`, async () => {
-        let value = '';
-        await this.#store.modifyCredential(workspaceId, provider, async (stored) => {
-          if (!stored) throw new UnavailableCredentialError('missing');
-          const current = await readStoredSubscription(this.#vault, stored, workspaceId, provider);
-          value = current.value;
-          const subscription = current.subscription;
-          if (!subscription || subscription.credential.expires > Date.now() + 60_000) return stored;
-          const refreshed = await refreshSubscription(provider, subscription.credential, AbortSignal.timeout(30_000));
-          value = encodeSubscription(provider, refreshed);
-          return { ...stored, ciphertext: await this.#vault.encrypt(value, { workspaceId, provider }), keyVersion: this.#vault.keyVersion, last4: refreshed.access.slice(-4) };
-        });
-        return new Secret(value);
-      });
-    }
+    if (isSubscriptionProvider(provider)) return resolveSubscriptionSecret(this.#store, this.#vault, workspaceId, provider);
     const cred = await this.#store.getCredential(workspaceId, provider);
     if (!cred) {
       throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
@@ -448,16 +430,19 @@ export class CredentialService {
     return readCredentialForRedaction(this.#store, this.#vault, workspaceId, provider);
   }
 
+  /** The credential and its URL from one row read. `refresh: false` returns the stored value as is (backup export): no refresh, even after a refused one. */
   async resolveCredential(
     workspaceId: string,
     provider: KeyProvider,
+    options: { refresh?: boolean } = {},
   ): Promise<{ secret: Secret; baseUrl?: string | null }> {
     const cred = await this.#store.getCredential(workspaceId, provider);
     if (!cred) {
       throw new Error(`No credential found for provider "${provider}" in workspace "${workspaceId}"`);
     }
 
-    return { secret: await this.resolve(workspaceId, provider), baseUrl: cred.baseUrl ?? null };
+    const secret = options.refresh === false ? new Secret(await this.#vault.decrypt(cred.ciphertext, { workspaceId, provider })) : await this.resolve(workspaceId, provider);
+    return { secret, baseUrl: cred.baseUrl ?? null };
   }
 
   async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isSubscriptionAvailable, loginSubscription, refreshSubscription } from './auth.js';
+import type { SubscriptionCredential } from '../../credentials/subscription.js';
+import { isSubscriptionAvailable, loginSubscription, refreshSubscription, SubscriptionRefreshError } from './auth.js';
 import { ANTIGRAVITY_CLIENT_ID_ENV, ANTIGRAVITY_CLIENT_SECRET_ENV } from './antigravity/index.js';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -45,6 +46,187 @@ describe('headless subscription login', () => {
     const notify = vi.fn(() => controller.abort());
     await expect(loginSubscription('xai', { signal: controller.signal, notify, prompt: async () => '' })).rejects.toThrow();
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'device_code', userCode: 'GROK-CODE' }));
+  });
+});
+
+describe('Anthropic subscription refresh', () => {
+  const storedAccess = ['claude', 'access', 'stored'].join('-');
+  const storedRefresh = ['claude', 'refresh', 'stored'].join('-');
+  const rotatedAccess = ['claude', 'access', 'rotated'].join('-');
+  const rotatedRefresh = ['claude', 'refresh', 'rotated'].join('-');
+  const credential: SubscriptionCredential = { type: 'oauth', access: storedAccess, refresh: storedRefresh, expires: Date.now() + 3_600_000 };
+
+  it('sends the stored refresh token to the token endpoint and returns the rotated credential', async () => {
+    let sent: { url: string; init?: RequestInit } | undefined;
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      sent = { url: String(input), init };
+      return Response.json({ access_token: rotatedAccess, refresh_token: rotatedRefresh, expires_in: 28800 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const before = Date.now();
+    const result = await refreshSubscription('anthropic', credential, new AbortController().signal);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sent?.url).toBe('https://platform.claude.com/v1/oauth/token');
+    expect(sent?.init?.method).toBe('POST');
+    const body = JSON.parse(String(sent?.init?.body)) as Record<string, string>;
+    expect(body.grant_type).toBe('refresh_token');
+    expect(body.refresh_token).toBe(storedRefresh);
+    expect(body.client_id).toEqual(expect.any(String));
+    expect(body.client_id).not.toBe('');
+    expect(result.access).toBe(rotatedAccess);
+    expect(result.refresh).toBe(rotatedRefresh);
+    expect(Math.abs(result.expires - (before + 28_800_000 - 5 * 60_000))).toBeLessThanOrEqual(5_000);
+  });
+
+  it('reports a refused refresh as a sign-in failure and keeps the response body out of the error', async () => {
+    const marker = ['token', 'response', 'body', 'marker'].join('-');
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 })));
+
+    const failure = await refreshSubscription('anthropic', credential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('sign-in');
+    expect(error.status).toBe(400);
+    expect(error.oauthError).toBe('invalid_grant');
+    expect(error.transient).toBe(false);
+    expect(error.message).toBe('Subscription token refresh failed; sign in again');
+    const visible = JSON.stringify({ message: error.message, status: error.status, oauthError: error.oauthError, reason: error.reason });
+    expect(visible).not.toContain(marker);
+    expect(visible).not.toContain(storedRefresh);
+    expect(visible).not.toContain('platform.claude.com');
+  });
+
+  it.each([408, 429, 503])('treats an HTTP %i answer as a retryable failure', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'server_error' }), { status })));
+
+    const failure = await refreshSubscription('anthropic', credential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.status).toBe(status);
+    expect(error.transient).toBe(true);
+  });
+
+  it('treats a network failure as a retryable failure without a status', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+
+    const failure = await refreshSubscription('anthropic', credential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.status).toBeUndefined();
+    expect(error.transient).toBe(true);
+  });
+
+  it('drops diagnostics that are not a plain status or error code', () => {
+    const error = new SubscriptionRefreshError('sign-in', { status: 42, oauthError: 'Bad Value!' });
+
+    expect(error.status).toBeUndefined();
+    expect(error.oauthError).toBeUndefined();
+    expect(error.message).toBe('Subscription token refresh failed; sign in again');
+  });
+});
+
+// pi-ai reports a failed refresh in three different shapes, one per provider: Anthropic writes
+// `status=400`, Codex `token refresh failed (400)` and xAI `refresh failed (HTTP 400)`.
+describe('pi-ai refresh failure formats', () => {
+  const codexAccess = `header.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'account-test' } })).toString('base64url')}.signature`;
+  const codexRefresh = ['codex', 'refresh', 'stored'].join('-');
+  const codexCredential: SubscriptionCredential = { type: 'oauth', access: codexAccess, refresh: codexRefresh, expires: Date.now() + 3_600_000, accountId: 'account-test' };
+  const xaiRefresh = ['xai', 'refresh', 'stored'].join('-');
+  const xaiCredential: SubscriptionCredential = { type: 'oauth', access: ['xai', 'access', 'stored'].join('-'), refresh: xaiRefresh, expires: Date.now() + 3_600_000 };
+
+  it('reads the status and the OAuth code out of a refused Codex refresh', async () => {
+    const marker = ['codex', 'token', 'body', 'marker'].join('-');
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 })));
+
+    const failure = await refreshSubscription('openai', codexCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('sign-in');
+    expect(error.status).toBe(400);
+    expect(error.oauthError).toBe('invalid_grant');
+    expect(error.transient).toBe(false);
+    const visible = JSON.stringify({ message: error.message, status: error.status, oauthError: error.oauthError, reason: error.reason });
+    expect(visible).not.toContain(marker);
+    expect(visible).not.toContain(codexRefresh);
+  });
+
+  it('treats a rate-limited Codex refresh as a retryable failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'rate_limit' }), { status: 429 })));
+
+    const failure = await refreshSubscription('openai', codexCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.status).toBe(429);
+    expect(error.transient).toBe(true);
+  });
+
+  it('reads the status out of a refused xAI refresh', async () => {
+    const marker = ['xai', 'token', 'body', 'marker'].join('-');
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 })));
+
+    const failure = await refreshSubscription('xai', xaiCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('sign-in');
+    expect(error.status).toBe(400);
+    expect(error.transient).toBe(false);
+    const visible = JSON.stringify({ message: error.message, status: error.status, oauthError: error.oauthError, reason: error.reason });
+    expect(visible).not.toContain(marker);
+    expect(visible).not.toContain(xaiRefresh);
+  });
+
+  it('treats an xAI server error as a retryable failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'server_error' }), { status: 503 })));
+
+    const failure = await refreshSubscription('xai', xaiCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.status).toBe(503);
+    expect(error.transient).toBe(true);
+  });
+
+  // Our own 30-second deadline: pi-ai rethrows the abort without a status, so the failure must not
+  // look like a refused sign-in the credential service would remember as `sign_in_required_at`.
+  it('treats a refresh our own deadline cut short as a retryable failure', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      controller.abort();
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }));
+
+    const failure = await refreshSubscription('xai', xaiCredential, controller.signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.transient).toBe(true);
+  });
+
+  it('treats a refresh pi-ai cut short by its own timeout as a retryable failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('The operation was aborted due to timeout'); }));
+
+    const failure = await refreshSubscription('openai', codexCredential, new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('unreachable');
+    expect(error.transient).toBe(true);
   });
 });
 

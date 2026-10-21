@@ -77,10 +77,10 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
 
     const effectiveAuth = await deps.credentials.getEffectiveAuthMethod?.(workspaceId, choice.provider as ApiProvider);
     const unavailableSubscriptions = new Set<string>();
-    const onPrimaryUnavailable = (reason: string) => {
+    const onPrimaryUnavailable = (reason: string, details: { status?: number; oauthError?: string } = {}) => {
       if (unavailableSubscriptions.has(choice.provider)) return;
       unavailableSubscriptions.add(choice.provider);
-      logger.warn({ event: 'credential.primary_unavailable', workspaceId, runId: br.run.id, provider: choice.provider, reason },
+      logger.warn({ event: 'credential.primary_unavailable', workspaceId, runId: br.run.id, provider: choice.provider, reason, ...details },
         'Primary subscription credential is unavailable; configured model fallbacks remain eligible');
     };
     let primarySecret: Secret | undefined;
@@ -104,7 +104,10 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       const terminal = terminalSubscriptionFailure(error, choice.provider);
       if (!terminal) throw error;
       primaryFailure = new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: choice.provider, message: terminal.message });
-      onPrimaryUnavailable(terminal.reason);
+      onPrimaryUnavailable(terminal.reason, {
+        ...(terminal.status !== undefined ? { status: terminal.status } : {}),
+        ...(terminal.oauthError ? { oauthError: terminal.oauthError } : {}),
+      });
     }
     credStore = new WorkspaceCredentialStore(workspaceId, deps.credentials, choice.provider as ApiProvider, primarySecret, { subscriptionOnlyProviders, primaryFailure, onPrimaryUnavailable });
     if (primaryFailure) {

@@ -46,6 +46,8 @@ export function SettingsPage() {
   const disconnectSubscriptionMutation = useDisconnectSubscriptionMutation(workspaceId);
 
   const isDualProviderRow = (k: KeyItem) => k.hasSubscription !== undefined;
+  /** The row shows a subscription: the dual row's own flag, else the stored method. */
+  const showsSubscription = (k: KeyItem) => (isDualProviderRow(k) ? k.hasSubscription === true : k.authMethod === 'subscription');
 
   const currentWorkspace = meData?.workspaces.find((w) => w.id === workspaceId);
   const isMember = currentWorkspace?.role === 'member';
@@ -180,6 +182,21 @@ export function SettingsPage() {
                           {!k.hasSubscription && !k.keys?.length && (k.authMethod === 'unknown' ? t('authMethodUnknown') : `••••${k.last4}`)}
                         </div>
                       ) : k.authMethod === 'subscription' ? t('authMethodSubscription') : k.authMethod === 'unknown' ? t('authMethodUnknown') : `••••${k.last4}`}
+                      {/* The provider refused the subscription's refresh (ADR-0037): sign in again. */}
+                      {k.signInRequiredAt && showsSubscription(k) && (
+                        <div role="alert" className="mt-1 rounded-[8px] border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 font-sans text-[11px] text-amber-800 dark:text-amber-300">
+                          <span>{t('subscriptionSignInRequired')}</span>
+                          {!isMember && (
+                            <button
+                              type="button"
+                              onClick={() => setAddKeyModalOpen(true)}
+                              className="px-2 py-1 mt-1 rounded-full border border-ink-300 dark:border-ink-700 text-[11px]"
+                            >
+                              {t('subscriptionSignInAgain')}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="py-2.5 px-3 text-xs text-ink-500 dark:text-ink-400 truncate max-w-[150px]">
                       {k.createdBy}

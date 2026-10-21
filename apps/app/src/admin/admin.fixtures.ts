@@ -44,6 +44,7 @@ export async function createAdminTestDb(): Promise<AdminTestDb> {
     '0014_postgres_15_required.sql',
     '0014_review_skills.sql',
     '0015_per_review_usd.sql',
+    '0016_credential_sign_in_required.sql',
   ]) {
     await client.exec(readFileSync(join(migrationsDir, file), 'utf-8'));
   }

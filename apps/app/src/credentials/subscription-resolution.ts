@@ -14,11 +14,17 @@ export class UnavailableCredentialError extends Error {
  * a refused refresh or a missing or unreadable stored credential. Its first call then fails as an
  * auth failure, so the configured fallbacks run. The message is rebuilt from the reason, so text an
  * upstream layer appended to the error (possibly a token) never reaches the run or the review.
+ * `status` and `oauthError` are the token endpoint's HTTP status and OAuth error code, when known.
  */
-export function terminalSubscriptionFailure(error: unknown, provider: string): { reason: string; message: string } | undefined {
+export function terminalSubscriptionFailure(error: unknown, provider: string): { reason: string; message: string; status?: number; oauthError?: string } | undefined {
   if (!isSubscriptionProvider(provider)) return undefined;
   if (error instanceof UnavailableCredentialError) return { reason: error.reason, message: new UnavailableCredentialError(error.reason).message };
-  if (error instanceof SubscriptionRefreshError && !error.transient) return { reason: error.reason, message: new SubscriptionRefreshError(error.reason).message };
+  if (error instanceof SubscriptionRefreshError && !error.transient) return {
+    reason: error.reason,
+    message: new SubscriptionRefreshError(error.reason).message,
+    ...(error.status !== undefined ? { status: error.status } : {}),
+    ...(error.oauthError ? { oauthError: error.oauthError } : {}),
+  };
   return undefined;
 }
 

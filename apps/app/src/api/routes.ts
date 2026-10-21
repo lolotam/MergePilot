@@ -220,6 +220,7 @@ export function registerDashboardApi(
         authMethod: k.authMethod ?? 'api-key',
         ...(k.hasSubscription !== undefined ? { hasSubscription: k.hasSubscription } : {}),
         ...(k.defaultMethod ? { defaultMethod: k.defaultMethod } : {}),
+        ...(k.signInRequiredAt ? { signInRequiredAt: toIso(k.signInRequiredAt) } : {}),
         ...(k.keys
           ? {
               keys: k.keys.map((slot) => ({

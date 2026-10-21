@@ -162,6 +162,8 @@ export interface StoredCredential {
   createdBy: string;
   createdAt: Date;
   baseUrl?: string | null | undefined;
+  /** Set when the provider refused a subscription refresh; a new sign-in clears it. Never a secret. */
+  signInRequiredAt?: Date | null | undefined;
 }
 
 /** Last provider test of one stored API key (ADR-0026). Never a secret. */

@@ -136901,6 +136901,7 @@ function isSubscriptionOnlyProvider(provider) {
   return SUBSCRIPTION_ONLY_PROVIDERS.includes(provider);
 }
 var SUBSCRIPTION_PREFIX = "mergepilot:oauth:v1:";
+var SUBSCRIPTION_REFRESH_MARGIN_MS = 10 * 6e4;
 var CredentialSchema = external_exports.object({
   type: external_exports.literal("oauth"),
   access: external_exports.string().min(1),
@@ -137208,10 +137209,18 @@ var MESSAGES = {
 };
 var SubscriptionRefreshError = class extends Error {
   reason;
-  constructor(reason) {
+  status;
+  oauthError;
+  constructor(reason, details = {}) {
     super(MESSAGES[reason]);
     this.reason = reason;
     this.name = "SubscriptionRefreshError";
+    const status = details.status;
+    if (status !== void 0 && Number.isInteger(status) && status >= 100 && status <= 599)
+      this.status = status;
+    const oauthError = details.oauthError;
+    if (oauthError !== void 0 && /^[a-z_]{1,64}$/.test(oauthError))
+      this.oauthError = oauthError;
   }
   get transient() {
     return this.reason === "unreachable";
@@ -138478,6 +138487,21 @@ function withResponseSchema(options) {
 ${instruction}` }, ...rest];
   return [{ role: "system", content: instruction }, ...options.messages];
 }
+function resolveFailure2(provider, error62, signal) {
+  if (signal?.aborted)
+    return new LlmFailure({ provider, code: "ABORTED", message: "Subscription credential could not be resolved; sign in again" });
+  if (error62 instanceof LlmFailure)
+    return error62;
+  if (error62 instanceof SubscriptionRefreshError) {
+    if (error62.transient)
+      return new LlmFailure({ provider, code: "NETWORK", message: "Could not refresh the subscription sign-in; try again" });
+    return new LlmFailure({ provider, code: "INVALID_CREDENTIAL", message: "Subscription credential could not be resolved; sign in again" });
+  }
+  if (error62 instanceof MissingCredentialError) {
+    return new LlmFailure({ provider, code: "INVALID_CREDENTIAL", message: "Subscription credential could not be resolved; sign in again" });
+  }
+  return new LlmFailure({ provider, code: "SERVER", message: "Could not load the subscription credential; try again" });
+}
 var SubscriptionAdapter = class extends LlmAdapter {
   provider;
   secret;
@@ -138502,9 +138526,14 @@ var SubscriptionAdapter = class extends LlmAdapter {
   }
   async *stream(options) {
     let envelope;
-    try {
-      if (this.resolveSecret)
+    if (this.resolveSecret) {
+      try {
         this.secret = await this.resolveSecret();
+      } catch (error62) {
+        throw resolveFailure2(this.provider, error62, options.signal);
+      }
+    }
+    try {
       envelope = decodeSubscription(this.secret.reveal(), this.provider);
     } catch {
       throw new LlmFailure({
@@ -138515,16 +138544,11 @@ var SubscriptionAdapter = class extends LlmAdapter {
     }
     if (!envelope)
       throw new LlmFailure({ provider: this.provider, code: "INVALID_CREDENTIAL", message: "Subscription login is required" });
-    let credential = envelope.credential;
+    const credential = envelope.credential;
     const store = {
       read: async () => credential,
       list: async () => [{ providerId: subscriptionProvider(this.provider).id, type: "oauth" }],
-      modify: async (_id, fn) => {
-        const next = await fn(credential);
-        if (next?.type === "oauth")
-          credential = next;
-        return credential;
-      },
+      modify: async () => credential,
       delete: async () => {
         throw new Error("Logout is owned by the credential service");
       }

@@ -155,6 +155,8 @@ export const KeysResponseSchema = z.object({
       createdAt: z.string(),
       createdBy: z.string(),
       baseUrl: z.string().nullable().optional(),
+      /** When the provider refused the subscription's token refresh; sign in again. */
+      signInRequiredAt: z.string().optional(),
       /** Ordered keys for key-list providers. Absent when there are no API key slots. */
       keys: z.array(ProviderKeySlotSchema).max(MAX_PROVIDER_KEYS).optional(),
     }),

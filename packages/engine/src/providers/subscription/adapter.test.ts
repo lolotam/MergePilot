@@ -4,11 +4,13 @@ import { encodeSubscription } from '../../credentials/subscription.js';
 import { Secret } from '../../credentials/secret.js';
 import { redactSecrets } from '../../security/redact.js';
 import { collectText } from '../../llm/collect.js';
+import { LlmFailure } from '../../llm/failure.js';
 import { createAdapter } from '../factory.js';
 import { listModels } from '../catalog.js';
 import { parseReviewAnswer } from '../../review/answer.js';
 import { reviewJsonSchema } from '../../review/split.js';
 import { SubscriptionAdapter, subscriptionModels } from './adapter.js';
+import { SubscriptionRefreshError } from './refresh-error.js';
 
 const access = `header.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'account-test' } })).toString('base64url')}.signature`;
 const refresh = ['opaque', 'refresh', 'value'].join('-');
@@ -107,6 +109,39 @@ describe('subscription model protocols', () => {
     expect(result.usage?.outputTokens).toBe(2);
   });
 
+  it('never refreshes in memory when the stored token expires inside pi-ai refresh window', async () => {
+    const model = subscriptionModels('anthropic')[0]!.id;
+    const access = ['claude', 'access', 'near-expiry'].join('-');
+    const refreshToken = ['claude', 'refresh', 'near-expiry'].join('-');
+    const secret = new Secret(encodeSubscription('anthropic', { type: 'oauth', access, refresh: refreshToken, expires: Date.now() + 2 * 60_000 }));
+    let tokenCalls = 0;
+    let requestHeaders: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/v1/oauth/token')) {
+        tokenCalls++;
+        return Response.json({ access_token: ['claude', 'access', 'rotated'].join('-'), refresh_token: ['claude', 'refresh', 'rotated'].join('-'), expires_in: 28800 });
+      }
+      const headers = new Headers(init?.headers);
+      requestHeaders = [];
+      headers.forEach((value) => requestHeaders.push(value));
+      return sse([
+        { type: 'message_start', message: { id: 'msg', type: 'message', role: 'assistant', content: [], model, stop_reason: null, usage: { input_tokens: 5, output_tokens: 0 } } },
+        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'OK' } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } },
+        { type: 'message_stop' },
+      ]);
+    }));
+
+    const result = await collectText(new SubscriptionAdapter('anthropic', secret).stream(request(model)));
+
+    expect(result.text).toBe('OK');
+    expect(tokenCalls).toBe(0);
+    expect(requestHeaders.some((value) => value.includes(access))).toBe(true);
+  });
+
   it.each(['openai', 'anthropic', 'xai'] as const)('classifies %s quota failures for fallback and redacts tokens echoed by the server', async (provider) => {
     const token = provider === 'anthropic' ? claudeAccess : access;
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: { message: `quota exceeded ${token} ${refresh}` } }, { status: 429 })));
@@ -118,6 +153,69 @@ describe('subscription model protocols', () => {
       expect(String(error)).not.toContain(token);
       expect(String(error)).not.toContain(refresh);
     }
+  });
+});
+
+// A refresh the provider may answer later (408, 429, 5xx, no answer) is not a lost sign-in, and a
+// database or lock error while loading the credential is retryable too: the call fails transiently
+// instead of sending the review into the sign-in fallback path.
+describe('subscription refresh failures at stream time', () => {
+  const model = () => subscriptionModels('anthropic')[0]!.id;
+
+  it('fails transiently when the sign-in refresh could not reach the provider', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'), async () => {
+      throw new SubscriptionRefreshError('unreachable', { status: 503 });
+    });
+
+    const failure = await collectText(adapter.stream(request(model()))).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(LlmFailure);
+    expect(failure).toMatchObject({ code: 'NETWORK' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails as an invalid credential when the provider refused the refresh', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'), async () => {
+      throw new SubscriptionRefreshError('sign-in', { status: 400, oauthError: 'invalid_grant' });
+    });
+
+    const failure = await collectText(adapter.stream(request(model()))).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(LlmFailure);
+    expect(failure).toMatchObject({ code: 'INVALID_CREDENTIAL' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails transiently when the credential could not be loaded at all', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'), async () => {
+      throw new Error('connection terminated unexpectedly');
+    });
+
+    const failure = await collectText(adapter.stream(request(model()))).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(LlmFailure);
+    expect(failure).toMatchObject({ code: 'SERVER' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('passes a failure the credential layer already classified through', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const classified = new LlmFailure({ provider: 'anthropic', code: 'INVALID_CREDENTIAL', message: 'x' });
+    const adapter = new SubscriptionAdapter('anthropic', secretFor('anthropic'), async () => {
+      throw classified;
+    });
+
+    const failure = await collectText(adapter.stream(request(model()))).catch((error: unknown) => error);
+
+    expect(failure).toBe(classified);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

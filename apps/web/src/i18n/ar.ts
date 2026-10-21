@@ -46,6 +46,8 @@ export const ar = {
   subscriptionSubmitCode: 'متابعة',
   subscriptionRetry: 'ابدأ تسجيل دخول جديد',
   subscriptionConnected: 'الاشتراك اتربط',
+  subscriptionSignInRequired: 'تسجيل الدخول للاشتراك انتهى ومقدرناش نجدّده. المراجعات هتشتغل على الموديل البديل بتاع البوت لحد ما تسجّل دخول تاني.',
+  subscriptionSignInAgain: 'سجّل دخول تاني',
   subscriptionModalTitle: 'ربط اشتراك',
   loading: 'جاري التحميل...',
   saving: 'جاري الحفظ...',

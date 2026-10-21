@@ -2,6 +2,7 @@ import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai/
 import type { CredentialStore, Message, ThinkingLevel } from '@earendil-works/pi-ai';
 import { decodeSubscription, type PiSubscriptionProvider, type SubscriptionProvider } from '../../credentials/subscription.js';
 import type { Secret } from '../../credentials/secret.js';
+import { MissingCredentialError } from '../../credentials/store.js';
 import { LlmAdapter, type OutputTokenRequest } from '../../llm/adapter.js';
 import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY } from '../../llm/retry.js';
@@ -11,6 +12,7 @@ import { redactSecrets } from '../../security/redact.js';
 import { subscriptionProvider } from './auth.js';
 import { failureFromResponse } from '../http.js';
 import { subscriptionOutputTokens } from './output-tokens.js';
+import { SubscriptionRefreshError } from './refresh-error.js';
 import { AntigravityAdapter } from './antigravity/adapter.js';
 
 export function subscriptionModels(provider: PiSubscriptionProvider) {
@@ -51,6 +53,23 @@ function withResponseSchema(options: GenerateOptions): GenerateOptions['messages
   return [{ role: 'system', content: instruction }, ...options.messages];
 }
 
+/**
+ * Why the credential could not be resolved before a call: a failure the credential layer already classified passes through, only a
+ * refused refresh means "sign in again", and a refresh the provider may answer later or a database/lock error while loading is retryable.
+ */
+function resolveFailure(provider: PiSubscriptionProvider, error: unknown, signal: AbortSignal | undefined): LlmFailure {
+  if (signal?.aborted) return new LlmFailure({ provider, code: 'ABORTED', message: 'Subscription credential could not be resolved; sign in again' });
+  if (error instanceof LlmFailure) return error;
+  if (error instanceof SubscriptionRefreshError) {
+    if (error.transient) return new LlmFailure({ provider, code: 'NETWORK', message: 'Could not refresh the subscription sign-in; try again' });
+    return new LlmFailure({ provider, code: 'INVALID_CREDENTIAL', message: 'Subscription credential could not be resolved; sign in again' });
+  }
+  if (error instanceof MissingCredentialError) {
+    return new LlmFailure({ provider, code: 'INVALID_CREDENTIAL', message: 'Subscription credential could not be resolved; sign in again' });
+  }
+  return new LlmFailure({ provider, code: 'SERVER', message: 'Could not load the subscription credential; try again' });
+}
+
 /** Streams only model text; no agent tools or subprocesses are enabled. */
 export class SubscriptionAdapter extends LlmAdapter {
   override readonly retryPolicy = DEFAULT_RETRY_POLICY;
@@ -71,25 +90,27 @@ export class SubscriptionAdapter extends LlmAdapter {
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     let envelope;
+    if (this.resolveSecret) {
+      try {
+        this.secret = await this.resolveSecret();
+      } catch (error) {
+        throw resolveFailure(this.provider, error, options.signal);
+      }
+    }
     try {
-      if (this.resolveSecret) this.secret = await this.resolveSecret();
       envelope = decodeSubscription(this.secret.reveal(), this.provider);
     } catch {
       throw new LlmFailure({ provider: this.provider, code: options.signal?.aborted ? 'ABORTED' : 'INVALID_CREDENTIAL',
         message: 'Subscription credential could not be resolved; sign in again' });
     }
     if (!envelope) throw new LlmFailure({ provider: this.provider, code: 'INVALID_CREDENTIAL', message: 'Subscription login is required' });
-    // The SaaS resolves and persists refreshes under its database lock before reaching this adapter.
-    // Env-based consumers keep a refreshed value in memory for this call.
-    let credential = envelope.credential;
+    // Refreshes happen only in the credential service, under its database lock, where the rotated refresh token is persisted
+    // (SUBSCRIPTION_REFRESH_MARGIN_MS). A refresh here would rotate the token in memory and discard it, which revokes the sign-in.
+    const credential = envelope.credential;
     const store: CredentialStore = {
       read: async () => credential,
       list: async () => [{ providerId: subscriptionProvider(this.provider).id, type: 'oauth' }],
-      modify: async (_id, fn) => {
-        const next = await fn(credential);
-        if (next?.type === 'oauth') credential = next;
-        return credential;
-      },
+      modify: async () => credential,
       delete: async () => { throw new Error('Logout is owned by the credential service'); },
     };
     const models = createModels({ credentials: store, authContext: { env: async () => undefined, fileExists: async () => false } });

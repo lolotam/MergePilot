@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { decodeSubscription, encodeSubscription, type SubscriptionCredential } from '@mergepilot/engine';
+import { decodeSubscription, encodeSubscription, SubscriptionRefreshError, type SubscriptionCredential } from '@mergepilot/engine';
 import { MemoryStore } from '../core/memory-store.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { CredentialService } from './service.js';
@@ -125,5 +125,144 @@ describe('workspace subscription credentials', () => {
     release();
     await Promise.all([resolve, disconnect]);
     expect(await store.getCredential('ws', 'xai')).toBeNull();
+  });
+});
+
+describe('Anthropic refresh ownership', () => {
+  const provider = 'anthropic' as const;
+  const newAccess = fakeValue('new', 'access');
+  const newRefresh = fakeValue('new', 'refresh');
+  const marker = fakeValue('token', 'response', 'body', 'marker');
+  /** The token request body pi-ai sends: JSON for Anthropic. */
+  const requestBody = (body: unknown): Record<string, string> => JSON.parse(String(body)) as Record<string, string>;
+  const okResponse = () => Response.json({ access_token: newAccess, refresh_token: newRefresh, expires_in: 28800 });
+
+  it('refreshes inside the margin and persists the rotated refresh token', async () => {
+    const { service, store, vault } = fixture();
+    await service.saveSubscription('ws', provider, credential(Date.now() + 8 * 60_000), 'user');
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) => okResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const secret = await service.resolve('ws', provider);
+    expect(decodeSubscription(secret.reveal(), provider)?.credential.refresh).toBe(newRefresh);
+
+    const row = (await store.getCredential('ws', provider))!;
+    const stored = decodeSubscription(await vault.decrypt(row.ciphertext, { workspaceId: 'ws', provider }), provider);
+    expect(stored?.credential.refresh).toBe(newRefresh);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBody(fetchMock.mock.calls[0]?.[1]?.body).refresh_token).toBe(credential().refresh);
+  });
+
+  it('does not refresh a credential outside the margin', async () => {
+    const { service } = fixture();
+    await service.saveSubscription('ws', provider, credential(Date.now() + 11 * 60_000), 'user');
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) => okResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await service.resolve('ws', provider);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refreshes once for two concurrent resolves', async () => {
+    const { service } = fixture();
+    await service.saveSubscription('ws', provider, credential(Date.now() + 8 * 60_000), 'user');
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) => okResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const values = await Promise.all([service.resolve('ws', provider), service.resolve('ws', provider)]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(values.map((secret) => decodeSubscription(secret.reveal(), provider)?.credential.refresh)).toEqual([newRefresh, newRefresh]);
+  });
+
+  it('remembers a refused refresh, skips the provider and clears the flag on a new sign-in', async () => {
+    const { service, store } = fixture();
+    await service.saveSubscription('ws', provider, credential(Date.now() + 8 * 60_000), 'user');
+    const before = (await store.getCredential('ws', provider))!.ciphertext;
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const failure = await service.resolve('ws', provider).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    const error = failure as SubscriptionRefreshError;
+    expect(error.reason).toBe('sign-in');
+    expect(error.status).toBe(400);
+    expect(error.oauthError).toBe('invalid_grant');
+
+    // The failed credential stays stored, and the row remembers the refusal.
+    const row = (await store.getCredential('ws', provider))!;
+    expect(row.ciphertext).toBe(before);
+    expect(row.signInRequiredAt).toBeInstanceOf(Date);
+
+    // The provider is not asked again until a new sign-in.
+    const again = await service.resolve('ws', provider).catch((second: unknown) => second);
+    expect(again).toBeInstanceOf(SubscriptionRefreshError);
+    expect((again as SubscriptionRefreshError).reason).toBe('sign-in');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const listed = (await service.listKeys('ws')).find((key) => key.provider === provider);
+    expect(listed?.signInRequiredAt).toBeInstanceOf(Date);
+
+    // A new sign-in replaces the row and clears the flag.
+    await service.saveSubscription('ws', provider, credential(), 'user');
+    expect((await store.getCredential('ws', provider))?.signInRequiredAt ?? null).toBeNull();
+    await service.resolve('ws', provider);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the stored subscription as is after a refused refresh (ADR-0018)', async () => {
+    const { service, store } = fixture();
+    await service.saveSubscription('ws', provider, credential(Date.now() + 8 * 60_000), 'user');
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // The provider refuses the refresh, so the row asks for a new sign-in.
+    const failure = await service.resolve('ws', provider).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    expect((failure as SubscriptionRefreshError).reason).toBe('sign-in');
+    expect((await store.getCredential('ws', provider))?.signInRequiredAt).toBeInstanceOf(Date);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The export reads the stored value: no refresh, no refusal, no provider call.
+    const resolved = await service.resolveCredential('ws', provider, { refresh: false });
+    expect(decodeSubscription(resolved.secret.reveal(), provider)?.credential.refresh).toBe(credential().refresh);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The default path still refuses, as a review does.
+    const again = await service.resolveCredential('ws', provider).catch((error: unknown) => error);
+    expect(again).toBeInstanceOf(SubscriptionRefreshError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a transient failure retryable and stores no flag', async () => {
+    const { service, store } = fixture();
+    await service.saveSubscription('ws', provider, credential(Date.now() + 8 * 60_000), 'user');
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify({ error: 'server_error' }), { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const failure = await service.resolve('ws', provider).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SubscriptionRefreshError);
+    expect((failure as SubscriptionRefreshError).reason).toBe('unreachable');
+    expect((await store.getCredential('ws', provider))?.signInRequiredAt ?? null).toBeNull();
+
+    // The next resolve asks the provider again.
+    await service.resolve('ws', provider).catch(() => undefined);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the refusal body and the old refresh token out of the error', async () => {
+    const { service } = fixture();
+    await service.saveSubscription('ws', provider, credential(Date.now() + 8 * 60_000), 'user');
+    vi.stubGlobal('fetch', vi.fn(async (_input: unknown, _init?: RequestInit) =>
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: marker }), { status: 400 })));
+
+    const failure = await service.resolve('ws', provider).catch((error: unknown) => error);
+    const error = failure as SubscriptionRefreshError;
+    const visible = JSON.stringify({ message: error.message, status: error.status, oauthError: error.oauthError });
+    expect(visible).not.toContain(marker);
+    expect(visible).not.toContain(credential().refresh);
   });
 });
