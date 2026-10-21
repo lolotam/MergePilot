@@ -2,8 +2,9 @@
  * The verification prompt (PRD v0.2 §7 step 8, ADR-0028): every finding with the code it rests on.
  * The verifier sees all hunks of each finding's file and the hunks of every other changed file (or
  * repository context file) whose path the finding's evidence or body names, each file once. The
- * code is bounded by a token cap: hunks near a finding line go first, the rest fill what is left,
- * and whatever does not fit is replaced by a visible marker.
+ * code is bounded by a token cap: the lines near a finding line or near a place the finding lists
+ * on its "Also at:" line go first, the rest fill what is left, and whatever does not fit is
+ * replaced by a visible marker.
  */
 
 import { REVIEW_LIMIT_DEFAULTS } from '../config/schema.js';
@@ -52,7 +53,7 @@ function wrapUntrusted(label: string, content: string): string {
 
 interface Chunk {
   text: string;
-  /** Line ranges (new and old side) the chunk covers; empty for a context file. */
+  /** Line ranges (new and old side) the chunk covers. */
   ranges: Array<[number, number]>;
   /** Lines of findings this chunk is near (in the finding's own file): their window is shown first. */
   findingLines: number[];
@@ -60,6 +61,41 @@ interface Chunk {
 }
 
 const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/** The line numbers and the line counts a hunk header gives. */
+interface HunkHeader {
+  oldLine: number;
+  oldCount: number;
+  newLine: number;
+  newCount: number;
+}
+
+function parseHunkHeader(header: RegExpMatchArray): HunkHeader {
+  return {
+    oldLine: parseInt(header[1] ?? '1', 10),
+    oldCount: header[2] !== undefined ? parseInt(header[2], 10) : 1,
+    newLine: parseInt(header[3] ?? '1', 10),
+    newCount: header[4] !== undefined ? parseInt(header[4], 10) : 1,
+  };
+}
+
+/** The old-side and the new-side line ranges a hunk covers, the way its lines are numbered. */
+function hunkRanges(hunk: HunkHeader): Array<[number, number]> {
+  return [
+    [hunk.oldLine, hunk.oldLine + Math.max(hunk.oldCount - 1, 0)],
+    [hunk.newLine, hunk.newLine + Math.max(hunk.newCount - 1, 0)],
+  ];
+}
+
+/** The line ranges of every hunk of a patch, so a patch ranges the same wherever it is shown. */
+function patchRanges(patch: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (const line of patch.split(/\r?\n/)) {
+    const header = line.match(HUNK_HEADER_RE);
+    if (header) ranges.push(...hunkRanges(parseHunkHeader(header)));
+  }
+  return ranges;
+}
 
 /** Splits a patch into hunks, each line numbered like the review prompt prints it. */
 function patchChunks(patch: string): Chunk[] {
@@ -69,15 +105,10 @@ function patchChunks(patch: string): Chunk[] {
   for (const line of patch.split(/\r?\n/)) {
     const header = line.match(HUNK_HEADER_RE);
     if (header) {
-      oldLine = parseInt(header[1] ?? '1', 10);
-      newLine = parseInt(header[3] ?? '1', 10);
-      const oldCount = header[2] !== undefined ? parseInt(header[2], 10) : 1;
-      const newCount = header[4] !== undefined ? parseInt(header[4], 10) : 1;
-      const ranges: Array<[number, number]> = [
-        [oldLine, oldLine + Math.max(oldCount - 1, 0)],
-        [newLine, newLine + Math.max(newCount - 1, 0)],
-      ];
-      hunks.push({ lines: [line], ranges });
+      const hunk = parseHunkHeader(header);
+      oldLine = hunk.oldLine;
+      newLine = hunk.newLine;
+      hunks.push({ lines: [line], ranges: hunkRanges(hunk) });
       continue;
     }
     const lines = hunks[hunks.length - 1]?.lines;
@@ -99,8 +130,20 @@ function patchChunks(patch: string): Chunk[] {
   return hunks.map((hunk) => ({ text: hunk.lines.join('\n'), ranges: hunk.ranges, findingLines: [] }));
 }
 
+/** The number of lines a file has, the way `numberLines` numbers them. */
+function countLines(content: string): number {
+  return content.split(/\r?\n/).length;
+}
+
+/**
+ * A context file as a chunk: its text as the model sees it, and the lines it covers, so a place
+ * an "Also at:" line lists finds its window in a context block too (ADR-0039). A PR_CONTEXT block
+ * holds a patch, so its hunk headers give the ranges; a repository file is numbered from line 1.
+ */
 function contextChunk(file: ContextFile): Chunk {
-  return { text: renderContextFile(file), ranges: [], findingLines: [] };
+  const ranges: Array<[number, number]> =
+    file.source === 'pull-request' ? patchRanges(file.content) : [[1, countLines(file.content)]];
+  return { text: renderContextFile(file), ranges, findingLines: [] };
 }
 
 /** A chunk cut at a line break to about `tokens`, ending with the visible marker. */
@@ -281,7 +324,7 @@ const ROLE_EN = `You are verifying another reviewer's findings on a pull request
 Reject a finding when:
 - its evidence is not in the code shown (a quote from another file must match that file's code);
 - the code shown contradicts the claim (for example, another part of the diff already handles it);
-- it is a style nit or preference;
+- it is a style nit or preference that no owner rule requires (a finding with a Rule line cites an owner rule: judge whether the code breaks that rule);
 - it depends on code that is not shown and does not say which code would confirm it.
 
 Do not reject a finding only because it depends on code that is not shown. Answer "plausible" when the code shown is consistent with the claim, the code that would prove it is not shown, and the finding says which code would confirm it: it is kept with its confidence capped at 0.69. Answer "confirmed" when the code shown supports the claim.`;
@@ -291,7 +334,7 @@ const ROLE_AR = `أنت تتحقق من ملاحظات مراجع كود آخر 
 ارفض الملاحظة (rejected) إذا:
 - لم يكن دليلها موجودًا في الكود المعروض (الاقتباس من ملف آخر لازم يطابق كود الملف ده)؛
 - كان الكود المعروض يناقض ما تقوله (مثلًا جزء آخر من التغييرات يعالج المشكلة بالفعل)؛
-- كانت مجرد تفضيل أسلوبي (style nit)؛
+- كانت مجرد تفضيل أسلوبي (style nit) لا تفرضه قاعدة من قواعد المالك (الملاحظة اللي فيها سطر Rule بتستشهد بقاعدة للمالك: احكم هل الكود بيخالف القاعدة دي)؛
 - كانت تعتمد على كود غير معروض ولا تقول أي كود سيؤكدها.
 
 لا ترفض الملاحظة لمجرد أنها تعتمد على كود غير معروض. اختر "plausible" إذا كان الكود المعروض متسقًا مع ما تقوله، والكود الذي يثبتها غير معروض، والملاحظة تقول أي كود سيؤكدها: تبقى الملاحظة وثقتها بحد أقصى 0.69. اختر "confirmed" إذا كان الكود المعروض يدعم ما تقوله. اكتب سبب القرار (reason) باللغة العربية البسيطة.`;
@@ -311,6 +354,12 @@ function buildVerifySystemPrompt(language: string): string {
   return [language === 'ar' ? ROLE_AR : ROLE_EN, '', contract, '', trustRule].join('\n');
 }
 
+/** The "Rule:" line of a finding, when it cites an owner rule the verifier must weigh (ADR-0039). */
+function ruleLine(finding: Finding): string[] {
+  const ruleRef = finding.ruleRef?.trim();
+  return ruleRef ? [`Rule: ${escapeDelimiters(ruleRef)}`] : [];
+}
+
 function buildVerifyUserPrompt(input: VerifyPromptInput): string {
   const { files, pathsByFinding } = collectFiles(input);
   fitChunks(files.flatMap((f) => f.chunks), input.maxCodeTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens);
@@ -323,6 +372,7 @@ function buildVerifyUserPrompt(input: VerifyPromptInput): string {
       `Title: ${escapeDelimiters(finding.title)}`,
       `Body: ${escapeDelimiters(finding.body)}`,
       `Evidence: ${escapeDelimiters(finding.evidence)}`,
+      ...ruleLine(finding),
       `Code shown for it: ${(pathsByFinding.get(finding.id) ?? []).map(escapeDelimiters).join(', ')}`,
     ].join('\n'),
   );

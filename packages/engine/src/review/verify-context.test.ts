@@ -185,6 +185,36 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     expect(user).toContain('402 + unlogged();');
   });
 
+  it('shows an "Also at:" place that sits in a PR_CONTEXT block (ADR-0039)', () => {
+    // The place is at the end of a 402-line PR diff of another file. A context block has no range
+    // of its own, so the line would be cut from the top before the verifier sees it.
+    const filler = Array.from({ length: 400 }, (_, i) => `+const filler${i} = ${i};`).join('\n');
+    const bigPatch = `@@ -1,1 +1,402 @@\n const first = 0;\n${filler}\n+unlogged();`;
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/big.ts:402' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+      contextFiles: [{ path: 'src/big.ts', source: 'pull-request', reason: 'x', content: bigPatch }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('402 + unlogged();');
+    expect(user).not.toContain('filler0 ');
+  });
+
+  it('shows an "Also at:" place that sits in a REPOSITORY_CONTEXT block (ADR-0039)', () => {
+    // The place is the last line of a 401-line repository file shown as context.
+    const filler = Array.from({ length: 400 }, (_, i) => `const filler${i} = ${i};`).join('\n');
+    const { user } = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ body: 'Refusal not logged.\nAlso at: src/big.ts:401' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+      contextFiles: [{ path: 'src/big.ts', reason: 'x', content: `${filler}\nunlogged();` }],
+      maxCodeTokens: 300,
+    });
+    expect(user).toContain('401   unlogged();');
+    expect(user).not.toContain('filler0 ');
+  });
+
   it('reads the "Also at:" places of a body', () => {
     const paths = ['src/a.ts', 'lib/b.ts', 'c.ts', 'src/my file.ts', 'src/a,b.ts'];
     expect(alsoAtPlaces('x\nAlso at: src/a.ts:3, `lib/b.ts:10-12`, not a place, c.ts:7.', paths)).toEqual([
@@ -199,6 +229,30 @@ describe('verify prompt — code across files (ADR-0028)', () => {
     // Only known paths count, and a known path inside a longer one is not a match.
     expect(alsoAtPlaces('Also at: other.ts:5, xsrc/a.ts:8', paths)).toEqual([]);
     expect(alsoAtPlaces('No list here: src/a.ts:3', paths)).toEqual([]);
+  });
+
+  it('shows the owner rule of a finding, so a rule about naming is not a style nit (ADR-0039)', () => {
+    const withRule = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding({ ruleRef: 'AGENTS.md §3' })],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+    });
+    expect(withRule.user).toContain('Rule: AGENTS.md §3');
+    const withoutRule = buildVerifyPrompt({
+      language: 'en',
+      findings: [finding()],
+      files: [{ path: 'src/api.ts', patch: API_PATCH }],
+    });
+    expect(withoutRule.user).not.toContain('Rule:');
+  });
+
+  it.each(['en', 'ar'])('in %s, does not reject an owner rule as a style nit', (language) => {
+    const { system } = buildVerifyPrompt({ language, findings: [finding()], files: [] });
+    expect(system).toContain(
+      language === 'ar'
+        ? 'تفضيل أسلوبي (style nit) لا تفرضه قاعدة من قواعد المالك'
+        : 'it is a style nit or preference that no owner rule requires',
+    );
   });
 
   it.each(['en', 'ar'])('in %s, no longer rejects a finding only for depending on code not shown', (language) => {
