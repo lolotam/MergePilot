@@ -141414,7 +141414,9 @@ var ContextPlan = class {
     const sentPrPaths = sent.filter((f3) => f3.source === "pull-request").map((f3) => f3.path);
     const sentRepositoryPaths = sent.filter((f3) => f3.source !== "pull-request").map((f3) => f3.path);
     const leftOutOf = (files) => files.filter((f3) => !this.sent.has(blockKey(f3)) && !this.shownAsPatch.has(f3.path)).map((f3) => f3.path);
-    const cited = sentRepositoryPaths.filter((p) => this.citedPaths.has(p));
+    const reviewed = new Set(this.opts.reviewedPaths);
+    const citedSent = sentRepositoryPaths.filter((p) => this.citedPaths.has(p));
+    const cited = [...citedSent.filter((p) => !reviewed.has(p)), ...citedSent.filter((p) => reviewed.has(p))];
     return {
       sent: sentRepositoryPaths,
       leftOut: leftOutOf(this.files),

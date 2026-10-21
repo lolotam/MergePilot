@@ -331,7 +331,11 @@ export class ContextPlan {
     const sentRepositoryPaths = sent.filter((f) => f.source !== 'pull-request').map((f) => f.path);
     const leftOutOf = (files: readonly PreparedContextFile[]): string[] =>
       files.filter((f) => !this.sent.has(blockKey(f)) && !this.shownAsPatch.has(f.path)).map((f) => f.path);
-    const cited = sentRepositoryPaths.filter((p) => this.citedPaths.has(p));
+    // Files from outside the diff first: the summary names only five, and a description often
+    // names the changed files themselves, which were sent anyway.
+    const reviewed = new Set(this.opts.reviewedPaths);
+    const citedSent = sentRepositoryPaths.filter((p) => this.citedPaths.has(p));
+    const cited = [...citedSent.filter((p) => !reviewed.has(p)), ...citedSent.filter((p) => reviewed.has(p))];
     return {
       sent: sentRepositoryPaths,
       leftOut: leftOutOf(this.files),

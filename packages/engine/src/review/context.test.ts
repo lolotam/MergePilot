@@ -171,6 +171,17 @@ describe('ContextPlan', () => {
     expect(plan.disclosure()?.cited).toEqual(['src/a.ts']);
   });
 
+  it('lists cited files from outside the diff before cited changed files', () => {
+    const plan = new ContextPlan([
+      file('src/a.ts', 'changed-file'),
+      file('src/a.ts', 'referenced', 'export const x = 1;', ['src/a.ts', 'src/b.ts']),
+      file('docs/ref.md', 'referenced', 'reference', ['src/a.ts', 'src/b.ts']),
+    ], options());
+    plan.markSent(plan.whole());
+    expect(plan.disclosure()?.sent).toEqual(['src/a.ts', 'docs/ref.md']);
+    expect(plan.disclosure()?.cited).toEqual(['docs/ref.md', 'src/a.ts']);
+  });
+
   it('sends build and CI wiring after the imports, and a changed manifest only once as the changed file', () => {
     const offered = [
       file('.github/workflows/ci.yml', 'build-config', 'run: pnpm test'),
