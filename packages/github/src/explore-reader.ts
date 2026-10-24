@@ -37,7 +37,8 @@ export function isExplorablePath(path: string): boolean {
 
 /**
  * The reader of one review: `readFile` and `listDirectory` read at the head, `listPaths` lists
- * the blobs of the head's tree once (one call per review).
+ * the blobs of the head's tree once (one call per review) and says whether the listing is
+ * partial: a tree the API truncated holds only part of the repository (ADR-0046).
  */
 export function createRepositoryReader(
   client: GitHubClient,
@@ -46,7 +47,7 @@ export function createRepositoryReader(
   const { owner, repo, headSha, exclude } = params;
   const allowed = (path: string): boolean =>
     isExplorablePath(path) && isContextPathAllowed(path, { exclude: [...exclude], isSensitivePath });
-  let treePaths: Promise<string[] | null> | undefined;
+  let treePaths: Promise<{ paths: string[]; truncated: boolean } | null> | undefined;
 
   return {
     async readFile(path: string): Promise<string | null> {
@@ -67,12 +68,16 @@ export function createRepositoryReader(
       );
     },
 
-    async listPaths(): Promise<string[] | null> {
+    async listPaths(): Promise<{ paths: string[]; truncated: boolean } | null> {
       const list = client.listTreePaths?.bind(client);
       if (!list) return null;
       let pending = treePaths;
       if (!pending) {
-        const fresh: Promise<string[] | null> = list({ owner, repo, ref: headSha });
+        const fresh: Promise<{ paths: string[]; truncated: boolean } | null> = list({
+          owner,
+          repo,
+          ref: headSha,
+        });
         pending = fresh.catch((err: unknown) => {
           // A rejected listing is not kept: a later find tries again.
           if (treePaths === pending) treePaths = undefined;
@@ -80,8 +85,10 @@ export function createRepositoryReader(
         });
         treePaths = pending;
       }
-      const paths = await pending;
-      return paths === null ? null : paths.filter((path) => allowed(path));
+      const listing = await pending;
+      if (listing === null) return null;
+      // The paths the rules refuse are left out; the listing stays partial when it was.
+      return { paths: listing.paths.filter((path) => allowed(path)), truncated: listing.truncated };
     },
   };
 }

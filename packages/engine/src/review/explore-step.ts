@@ -24,6 +24,7 @@ import {
   type ExplorePassInput,
   type ExplorationDisclosure,
 } from './explore.js';
+import type { ExploreEntry } from './explore-requests.js';
 import type { ReviewModel } from './model.js';
 import type { SpendTracker } from './spend.js';
 
@@ -91,6 +92,9 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
   let usage: TokenUsage | undefined;
   // The block the review's prompt carries: the verifier judges against the same evidence.
   let priorBlock = '';
+  // The entries the review's exploration gathered: the verifier does not show them again when the
+  // block above is in its prompt.
+  let priorEntries: readonly ExploreEntry[] = [];
 
   if (budget && opts.explore && !opts.batched) {
     const explored = await runExploration({
@@ -108,13 +112,20 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       allowPath,
       knownSecrets: opts.knownSecrets,
       purpose: 'review',
-      // The money the review call and the verification call need stays out of the exploration's reach.
+      // A round whose prompt is over the input-token limit is not sent.
+      promptLimit: opts.promptLimit,
+      // The money the review call and the verification call need stays out of the exploration's
+      // reach. The verification call may carry the review's explored block, so the read budget is
+      // reserved for it too.
       reserve: {
-        promptTokens: opts.promptTokens + (opts.verifyReserve?.promptTokens ?? 0),
+        promptTokens:
+          opts.promptTokens +
+          (opts.verifyReserve ? opts.verifyReserve.promptTokens + limits.maxReadTokens : 0),
         outputTokens: opts.reviewOutputTokens + (opts.verifyReserve?.outputTokens ?? 0),
       },
     });
     usage = explored.usage;
+    priorEntries = explored.entries;
     if (explored.block) {
       const user = `${opts.prompt.user}\n\n${explored.block}`;
       const tokens = estimateTokens(opts.prompt.system + user);
@@ -132,7 +143,7 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
   // against the results the review explored, even when the read budget is used up by then.
   const explorePass =
     budget && opts.explore && !opts.batched && budget.rounds > 0
-      ? { reader: opts.explore.reader, budget, heldTexts, allowPath, limits, priorBlock }
+      ? { reader: opts.explore.reader, budget, heldTexts, allowPath, limits, priorBlock, priorEntries }
       : undefined;
 
   return {

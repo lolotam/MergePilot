@@ -32,13 +32,18 @@ describe('the limits of the read-only exploration (ADR-0046)', () => {
 
   it('rejects rounds outside the range', () => {
     expect(() => parse({ explore: { maxRounds: 0 } })).toThrow();
-    expect(() => parse({ explore: { maxRounds: 6 } })).toThrow();
+    expect(() => parse({ explore: { maxRounds: 4 } })).toThrow();
     expect(() => parse({ explore: { maxRequestsPerRound: 0 } })).toThrow();
-    expect(() => parse({ explore: { maxRequestsPerRound: 21 } })).toThrow();
+    expect(() => parse({ explore: { maxRequestsPerRound: 9 } })).toThrow();
     expect(() => parse({ explore: { maxReadTokens: 999 } })).toThrow();
     expect(() => parse({ explore: { maxReadTokens: 200_001 } })).toThrow();
     expect(() => parse({ explore: { maxLinesPerRead: 19 } })).toThrow();
     expect(() => parse({ explore: { maxLinesPerRead: 2_001 } })).toThrow();
+  });
+
+  it('takes the approved bounds of the exploration limits', () => {
+    expect(parse({ explore: { maxRounds: 3 } }).explore.maxRounds).toBe(3);
+    expect(parse({ explore: { maxRequestsPerRound: 8 } }).explore.maxRequestsPerRound).toBe(8);
   });
 });
 

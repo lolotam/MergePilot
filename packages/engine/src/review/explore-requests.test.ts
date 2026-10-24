@@ -33,7 +33,8 @@ interface FakeReader extends RepositoryReader {
 function fakeReader(
   files: Record<string, string> = {},
   dirs: Record<string, string[]> = {},
-  paths: string[] | null = null,
+  listing: string[] | null = null,
+  truncated = false,
 ): FakeReader {
   const reads: string[] = [];
   const listings: string[] = [];
@@ -51,7 +52,7 @@ function fakeReader(
     },
     async listPaths() {
       reader.listCalls += 1;
-      return paths;
+      return listing === null ? null : { paths: listing, truncated };
     },
   };
   return reader;
@@ -60,11 +61,19 @@ function fakeReader(
 function ctx(
   reader: RepositoryReader,
   budget: ExploreBudget,
-  heldTexts: Map<string, string> = new Map(),
+  heldFiles: Record<string, string> = {},
+  patches: readonly string[] = [],
   limits: ExploreLimits = LIMITS,
   knownSecrets: readonly Secret[] = [],
 ): Parameters<typeof executeRequests>[1] {
-  return { reader, budget, limits, allowPath, heldTexts, knownSecrets };
+  return {
+    reader,
+    budget,
+    limits,
+    allowPath,
+    heldTexts: { texts: new Map(Object.entries(heldFiles)), patches: new Set(patches) },
+    knownSecrets,
+  };
 }
 
 describe('the requests of an exploration round (ADR-0046)', () => {
@@ -129,7 +138,7 @@ describe('the requests of an exploration round (ADR-0046)', () => {
     const reader = fakeReader({ 'src/a.ts': content });
     const budget = new ExploreBudget({ ...LIMITS, maxLinesPerRead: 20 });
 
-    const result = await executeRequests([{ read: { path: 'src/a.ts' } }], ctx(reader, budget, new Map(), { ...LIMITS, maxLinesPerRead: 20 }));
+    const result = await executeRequests([{ read: { path: 'src/a.ts' } }], ctx(reader, budget, {}, [], { ...LIMITS, maxLinesPerRead: 20 }));
 
     expect(result.entries[0]!.content.split('\n')).toHaveLength(20);
     expect(result.entries[0]!.content.startsWith('1| line 1')).toBe(true);
@@ -216,7 +225,7 @@ describe('the requests of an exploration round (ADR-0046)', () => {
   it('searches the files the review holds and the files it read', async () => {
     const reader = fakeReader({ 'src/read.ts': 'const found = 1;\nconst other = 2;' });
     const budget = new ExploreBudget(LIMITS);
-    const held = new Map([['src/held.ts', 'const found = 0;']]);
+    const held = { 'src/held.ts': 'const found = 0;' };
 
     await executeRequests([{ read: { path: 'src/read.ts' } }], ctx(reader, budget, held));
     const result = await executeRequests([{ find: { text: 'found' } }], ctx(reader, budget, held));
@@ -228,10 +237,10 @@ describe('the requests of an exploration round (ADR-0046)', () => {
   it('limits a search to the paths that start with the given prefix', async () => {
     const reader = fakeReader();
     const budget = new ExploreBudget(LIMITS);
-    const held = new Map([
-      ['src/a.ts', 'const found = 1;'],
-      ['lib/b.ts', 'const found = 2;'],
-    ]);
+    const held = {
+      'src/a.ts': 'const found = 1;',
+      'lib/b.ts': 'const found = 2;',
+    };
 
     const result = await executeRequests([{ find: { text: 'found', path: 'src/' } }], ctx(reader, budget, held));
 
@@ -264,7 +273,7 @@ describe('the requests of an exploration round (ADR-0046)', () => {
   it('cuts a search that does not fit the remaining budget and says so', async () => {
     const reader = fakeReader();
     const budget = new ExploreBudget({ ...LIMITS, maxReadTokens: 1000 });
-    const held = new Map(
+    const held = Object.fromEntries(
       Array.from({ length: 200 }, (_, index) => [`src/f${index}.ts`, `const found = ${index}; ${'x'.repeat(180)}`]),
     );
 
@@ -349,7 +358,7 @@ describe('the requests of an exploration round (ADR-0046)', () => {
       },
     };
     const budget = new ExploreBudget(LIMITS);
-    const held = new Map([['src/held.ts', 'const found = 1;']]);
+    const held = { 'src/held.ts': 'const found = 1;' };
 
     const result = await executeRequests(
       [{ find: { text: 'found' } }, { read: { path: 'src/a.ts' } }],
@@ -375,7 +384,7 @@ describe('the requests of an exploration round (ADR-0046)', () => {
       async listPaths() {
         calls += 1;
         if (calls === 1) throw new Error('the server is down');
-        return ['src/guard.ts'];
+        return { paths: ['src/guard.ts'], truncated: false };
       },
     };
     const budget = new ExploreBudget(LIMITS);
@@ -401,7 +410,7 @@ describe('the requests of an exploration round (ADR-0046)', () => {
 
     const result = await executeRequests(
       [{ read: { path: 'src/a.ts' } }],
-      ctx(reader, budget, new Map(), limits, [secret]),
+      ctx(reader, budget, {}, [], limits, [secret]),
     );
 
     expect(result.entries[0]!.content).toContain('[REDACTED:known]');
@@ -418,10 +427,10 @@ describe('the requests of an exploration round (ADR-0046)', () => {
     });
     const budget = new ExploreBudget(LIMITS);
 
-    await executeRequests([{ read: { path: 'src/a.ts' } }], ctx(reader, budget, new Map(), LIMITS, [secret]));
+    await executeRequests([{ read: { path: 'src/a.ts' } }], ctx(reader, budget, {}, [], LIMITS, [secret]));
     const result = await executeRequests(
       [{ find: { text: 'a' } }],
-      ctx(reader, budget, new Map(), LIMITS, [secret]),
+      ctx(reader, budget, {}, [], LIMITS, [secret]),
     );
 
     expect(result.entries[0]!.content).toContain('src/a.ts:1');

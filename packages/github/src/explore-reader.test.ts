@@ -74,15 +74,28 @@ describe('the repository reader of the exploration (ADR-0046)', () => {
     const client = {
       listTreePaths: async () => {
         calls += 1;
-        return ['src/a.ts', 'src/secret/key.ts', 'node_modules/x.js'];
+        return {
+          paths: ['src/a.ts', 'src/secret/key.ts', 'node_modules/x.js'],
+          truncated: false,
+        };
       },
     } as unknown as GitHubClient;
 
     const reader = createRepositoryReader(client, PARAMS);
 
-    expect(await reader.listPaths()).toEqual(['src/a.ts']);
-    expect(await reader.listPaths()).toEqual(['src/a.ts']);
+    expect(await reader.listPaths()).toEqual({ paths: ['src/a.ts'], truncated: false });
+    expect(await reader.listPaths()).toEqual({ paths: ['src/a.ts'], truncated: false });
     expect(calls).toBe(1);
+  });
+
+  it('says the tree was truncated, so a search over it knows it is partial', async () => {
+    const client = {
+      listTreePaths: async () => ({ paths: ['src/a.ts'], truncated: true }),
+    } as unknown as GitHubClient;
+
+    const reader = createRepositoryReader(client, PARAMS);
+
+    expect(await reader.listPaths()).toEqual({ paths: ['src/a.ts'], truncated: true });
   });
 
   it('lists nothing when the client cannot list the tree', async () => {
@@ -99,14 +112,14 @@ describe('the repository reader of the exploration (ADR-0046)', () => {
       listTreePaths: async () => {
         calls += 1;
         if (calls === 1) throw new Error('the server is down');
-        return ['src/a.ts'];
+        return { paths: ['src/a.ts'], truncated: false };
       },
     } as unknown as GitHubClient;
 
     const reader = createRepositoryReader(client, PARAMS);
 
     await expect(reader.listPaths()).rejects.toThrow('the server is down');
-    expect(await reader.listPaths()).toEqual(['src/a.ts']);
+    expect(await reader.listPaths()).toEqual({ paths: ['src/a.ts'], truncated: false });
     expect(calls).toBe(2);
   });
 });

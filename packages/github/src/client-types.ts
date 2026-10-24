@@ -191,10 +191,15 @@ export interface GitHubClient {
    */
   listDirectoryFiles?(params: GetFileContentParams): Promise<string[] | null>;
   /**
-   * Every blob path of the git tree at `ref`, recursive; null when it is not available (the
-   * client has no such method, or the tree does not exist).
+   * Every blob path of the git tree at `ref`, recursive, and whether the listing is partial: the
+   * API truncates a big tree, and the paths it left out are not in the list. Null when it is not
+   * available (the client has no such method, or the tree does not exist).
    */
-  listTreePaths?(params: { owner: string; repo: string; ref: string }): Promise<string[] | null>;
+  listTreePaths?(params: {
+    owner: string;
+    repo: string;
+    ref: string;
+  }): Promise<{ paths: string[]; truncated: boolean } | null>;
   compareCommits(params: CompareCommitsParams): Promise<CompareCommitsResult | null>;
   createIssue?(params: CreateIssueParams): Promise<GitHubCreatedIssue>;
   listReviewCommentsPage?(params: ListReviewCommentsParams): Promise<GitHubReviewComment[]>;

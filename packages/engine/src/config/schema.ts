@@ -99,9 +99,9 @@ export const EXPLORE_LIMIT_DEFAULTS: Readonly<ExploreLimits> = Object.freeze({
 /** The limits of the read-only repository exploration (ADR-0046). */
 export const ExploreSettingsSchema = z.strictObject({
   /** Exploration rounds before the review answer; each one is a model call. */
-  maxRounds: z.number().int().min(1).max(5).default(EXPLORE_LIMIT_DEFAULTS.maxRounds),
+  maxRounds: z.number().int().min(1).max(3).default(EXPLORE_LIMIT_DEFAULTS.maxRounds),
   /** Requests one round may ask for. */
-  maxRequestsPerRound: z.number().int().min(1).max(20).default(EXPLORE_LIMIT_DEFAULTS.maxRequestsPerRound),
+  maxRequestsPerRound: z.number().int().min(1).max(8).default(EXPLORE_LIMIT_DEFAULTS.maxRequestsPerRound),
   /** Estimated tokens of read content per review, across the rounds and the verifier. */
   maxReadTokens: z.number().int().min(1000).max(200_000).default(EXPLORE_LIMIT_DEFAULTS.maxReadTokens),
   /** Lines one read may return. */

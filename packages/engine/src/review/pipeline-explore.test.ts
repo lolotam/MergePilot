@@ -1,15 +1,33 @@
 /**
  * The exploration in the pipeline (ADR-0046): a review without a reader is untouched, a review
  * with one carries the explored files in its prompt, a batched review discloses that it did not
- * explore, and the verifier explores as well.
+ * explore, and the verifier explores as well. The verifier's own round is checked here too: what
+ * it shows again, the prompt it sends when the spend runs out, and the call it skips when the
+ * deadline runs out.
  */
 
 import { describe, expect, it } from 'vitest';
+import type { ExploreLimits } from '../config/schema.js';
 import { estimateTokens } from './budget.js';
-import type { RepositoryReader } from './explore.js';
+import { JSON_ONLY_REMINDER, ReviewDeadline } from './call.js';
+import { renderExploredBlock } from './explore-block.js';
+import {
+  ExploreBudget,
+  type ExplorePassInput,
+  type RepositoryReader,
+} from './explore.js';
 import type { ReviewModel, ReviewModelRequest } from './model.js';
 import { makeAnswerJson, makeConfig, SIMPLE_PATCH, validFindingJson } from './pipeline.fixtures.js';
 import { runReview, type RunReviewInput } from './pipeline.js';
+import { SpendTracker } from './spend.js';
+import { runVerifyPass, type VerifyPassInput } from './verify-pass.js';
+
+const LIMITS: ExploreLimits = {
+  maxRounds: 3,
+  maxRequestsPerRound: 8,
+  maxReadTokens: 30_000,
+  maxLinesPerRead: 400,
+};
 
 function recordingModel(answers: string[] = []): { model: ReviewModel; requests: ReviewModelRequest[] } {
   const requests: ReviewModelRequest[] = [];
@@ -173,17 +191,21 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
   });
 
   it('keeps the review prompt when the explored results do not fit the input limit', async () => {
-    const baseline = recordingModel([makeAnswerJson([])]);
-    await runReview(input(baseline.model));
-    const baseTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user);
-
-    const { model, requests } = recordingModel([READ_GUARD, NOTHING, makeAnswerJson([])]);
-    const result = await runReview(input(model, {
+    // The prompt of an exploration round, measured with a review that explores.
+    const probe = recordingModel([READ_GUARD, NOTHING, makeAnswerJson([])]);
+    await runReview(input(probe.model, {
       explore: { reader: fakeReader({ 'src/guard.ts': 'export function guard() {}' }) },
-    }, { maxPromptTokens: baseTokens + 20 }));
+    }));
+    const roundTokens = estimateTokens(probe.requests[0]!.system + probe.requests[0]!.user);
+    // A read whose block is bigger than the room the limit leaves for the round's instructions.
+    const { model, requests } = recordingModel([READ_BIG, makeAnswerJson([])]);
+    const result = await runReview(input(model, {
+      explore: { reader: fakeReader({ 'src/big.ts': 'x'.repeat(4000) }) },
+    }, { maxPromptTokens: roundTokens + 10 }));
 
-    expect(requests).toHaveLength(3);
-    expect(requests[2]!.user).not.toContain('EXPLORED (');
+    // The exploration round ran, but its result does not fit the review prompt.
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.user).not.toContain('EXPLORED (');
     expect(result).toMatchObject({
       status: 'completed',
       exploration: { skipped: 'explored results did not fit the input-token limit' },
@@ -256,5 +278,127 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
       status: 'completed',
       exploration: { rounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'budget limit reached' },
     });
+  });
+});
+
+/** The verification call the pipeline makes, with the exploration the review left it. */
+function verifyInput(
+  model: ReviewModel,
+  overrides: Partial<VerifyPassInput> = {},
+): VerifyPassInput {
+  return {
+    language: 'en',
+    findings: [],
+    files: [],
+    model,
+    spend: new SpendTracker(undefined, 0.5),
+    knownSecrets: [],
+    totalUsage: undefined,
+    maxInputTokens: 1_000_000,
+    ...overrides,
+  };
+}
+
+/** The exploration the verifier runs: the reader, the budget and the review's results. */
+function explorePass(overrides: Partial<ExplorePassInput> = {}): ExplorePassInput {
+  return {
+    reader: fakeReader({ 'src/guard.ts': 'export function guard() {}' }),
+    budget: new ExploreBudget(LIMITS),
+    heldTexts: { texts: new Map(), patches: new Set() },
+    allowPath: () => true,
+    limits: LIMITS,
+    priorBlock: '',
+    priorEntries: [],
+    ...overrides,
+  };
+}
+
+describe("the verifier's own exploration (ADR-0046)", () => {
+  const READ_GUARD_JSON = JSON.stringify({ explore: [{ read: { path: 'src/guard.ts' } }] });
+  // The entry the review's exploration gathered: the file at the head, with its line numbers.
+  const PRIOR_ENTRIES = [{ label: 'src/guard.ts', content: '1| export function guard() {}' }];
+
+  it('does not show the review\'s entry again when its block is in the verifier\'s prompt', async () => {
+    const { model, requests } = recordingModel([READ_GUARD_JSON, VERDICTS]);
+
+    const result = await runVerifyPass(verifyInput(model, {
+      explore: explorePass({
+        priorBlock: renderExploredBlock(PRIOR_ENTRIES, []),
+        priorEntries: PRIOR_ENTRIES,
+      }),
+    }));
+
+    // The verifier read the same file again, and its block did not repeat the review's entry.
+    expect(requests).toHaveLength(2);
+    const markers = requests[1]!.user.match(/<<<UNTRUSTED:EXPLORED:src\/guard\.ts>>>/g) ?? [];
+    expect(markers).toHaveLength(1);
+    expect(result.incompleteReasons).toEqual([]);
+  });
+
+  it('shows the entry again when the review\'s block did not fit the verifier\'s prompt', async () => {
+    // The prompt of the verifier\'s own round, measured without a prior block.
+    const probe = recordingModel([NOTHING, VERDICTS]);
+    await runVerifyPass(verifyInput(probe.model, { explore: explorePass() }));
+    const roundTokens = estimateTokens(probe.requests[0]!.system + probe.requests[0]!.user);
+    // A prior block that does not fit in the room the limit leaves for it.
+    const priorBlock = `${renderExploredBlock(PRIOR_ENTRIES, [])}\n${'x'.repeat(10_000)}`;
+    const { model, requests } = recordingModel([READ_GUARD_JSON, VERDICTS]);
+
+    await runVerifyPass(verifyInput(model, {
+      maxInputTokens: roundTokens + estimateTokens(JSON_ONLY_REMINDER) + 10,
+      explore: explorePass({ priorBlock, priorEntries: PRIOR_ENTRIES }),
+    }));
+
+    // The prior block is not in the prompt, so the verifier shows the entry in its own block.
+    expect(requests[1]!.user).not.toContain('xxxxxxxxxx');
+    const markers = requests[1]!.user.match(/<<<UNTRUSTED:EXPLORED:src\/guard\.ts>>>/g) ?? [];
+    expect(markers).toHaveLength(1);
+  });
+
+  it('sends the plain verification prompt when the prior block does not fit the spend', async () => {
+    // The spend pays for the plain verification call and for the exploration, but not for the
+    // verification call that carries the prior block.
+    let checks = 0;
+    const spend = {
+      canAfford: () => {
+        checks += 1;
+        // The first check is the plain verification call, the second is the exploration's round.
+        return checks <= 2;
+      },
+      record: () => {},
+    } as unknown as SpendTracker;
+    const { model, requests } = recordingModel([READ_GUARD_JSON, VERDICTS]);
+
+    await runVerifyPass(verifyInput(model, {
+      spend,
+      explore: explorePass({
+        priorBlock: renderExploredBlock(PRIOR_ENTRIES, []),
+        priorEntries: PRIOR_ENTRIES,
+      }),
+    }));
+
+    // The call went with the prompt that passed the earlier check: the blocks are not in it.
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.user).not.toContain('EXPLORED:');
+  });
+
+  it('makes no verification call when the deadline expires during the verifier\'s round', async () => {
+    let clock = 0;
+    const deadline = new ReviewDeadline(60_000, () => clock);
+    const requests: ReviewModelRequest[] = [];
+    const model: ReviewModel = {
+      label: 'fake:verify-deadline',
+      generate: async (request) => {
+        requests.push(request);
+        // The round uses the time the review had left.
+        clock = 120_000;
+        return { text: NOTHING, finishReason: 'stop' };
+      },
+    };
+
+    const result = await runVerifyPass(verifyInput(model, { deadline, explore: explorePass() }));
+
+    expect(requests).toHaveLength(1);
+    expect(result.incompleteReasons).toContain('verification skipped: time limit reached');
   });
 });

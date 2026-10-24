@@ -67,7 +67,7 @@ function options(overrides: Partial<Parameters<typeof runExploration>[0]> = {}):
     limits: LIMITS,
     budget: new ExploreBudget(LIMITS),
     reader: fakeReader(),
-    heldTexts: new Map(),
+    heldTexts: { texts: new Map(), patches: new Set() },
     allowPath: () => true,
     knownSecrets: [],
     purpose: 'review',
@@ -135,6 +135,21 @@ describe('the exploration rounds (ADR-0046)', () => {
 
     expect(requests).toHaveLength(0);
     expect(result.block).toBe('');
+  });
+
+  it('runs no round when the prompt is over the input-token limit', async () => {
+    // The prompt of the first round, measured without a limit.
+    const probe = makeModel([NOTHING]);
+    await runExploration(options({ model: probe.model }));
+    const roundTokens = estimateTokens(probe.requests[0]!.system + probe.requests[0]!.user);
+    const { model, requests } = makeModel([NOTHING]);
+    const budget = new ExploreBudget(LIMITS);
+
+    const result = await runExploration(options({ model, budget, promptLimit: roundTokens - 1 }));
+
+    expect(requests).toHaveLength(0);
+    expect(result.block).toBe('');
+    expect(budget.disclosure().skipped).toBe('exploration prompt over the input-token limit');
   });
 
   it('runs no round when the spend cannot afford the call', async () => {
