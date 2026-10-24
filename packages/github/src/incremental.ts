@@ -42,6 +42,9 @@ export type SelectIncrementalFilesResult =
 const REVIEWS_PAGE_SIZE = 100;
 const MAX_COMPARE_FILES = 300;
 
+/** A drizzle migration snapshot: `packages/db/migrations/meta/0175_snapshot.json`. */
+const SNAPSHOT_PATH_RE = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
+
 /**
  * Finds the hidden MergePilot marker of the most recent review
  * authored by publisherLogin, or null if no such review exists.
@@ -195,19 +198,28 @@ export async function selectIncrementalFiles(
       continue;
     }
 
+    const status = compareFile.status ?? prFile.status;
     const mapped: PullRequestFile = {
       path: compareFile.filename,
-      status: compareFile.status ?? prFile.status,
+      status,
       additions: compareFile.additions ?? prFile.additions,
       deletions: compareFile.deletions ?? prFile.deletions,
       changes: compareFile.changes ?? prFile.changes,
     };
 
-    if (compareFile.patch !== undefined) {
+    if (status === 'added' && SNAPSHOT_PATH_RE.test(compareFile.filename) && prFile.patch !== undefined) {
+      // A snapshot's patch is the diff against its previous snapshot (ADR-0045, rule 5): the
+      // compare API's patch is the whole new file, so the rebuilt one is reviewed instead.
+      mapped.patch = prFile.patch;
+    } else if (compareFile.patch !== undefined) {
       // A base-branch merge brings in changes the PR did not make: those hunks are left out.
       const own = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own === undefined) continue;
       mapped.patch = own;
+    } else if (prFile.patch !== undefined) {
+      // The compare API left the patch out (its diff was too big for it): the pull request's own
+      // patch is reviewed instead of nothing.
+      mapped.patch = prFile.patch;
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== undefined) {

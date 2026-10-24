@@ -175,7 +175,13 @@ export async function reviewPullRequest(
   });
   // A file whose diff is too big for GitHub's files API comes without a patch (ADR-0045): its
   // patch is rebuilt from the file contents, so the bots see the file at all.
-  const rebuilt = await rebuildMissingPatches(client, listed.files, { owner, repo, baseSha, headSha });
+  const rebuilt = await rebuildMissingPatches(client, listed.files, {
+    owner,
+    repo,
+    baseSha,
+    headSha,
+    exclude: config.review.exclude,
+  });
   const prFiles = rebuilt.files;
   log?.(`Found ${prFiles.length} files in PR diff`);
   if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {

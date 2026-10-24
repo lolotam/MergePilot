@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { estimateTokens } from './budget.js';
-import { splitPatchIntoParts } from './patch-parts.js';
+import { LINE_CUT_MARKER, splitPatchIntoParts } from './patch-parts.js';
 import {
   batchFilesBySize,
   batchFilesByTokenCap,
@@ -97,7 +97,7 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
 
   it('splits a file bigger than the cap into parts, one batch each', () => {
     const huge = ['@@ -0,0 +1,2000 @@', ...Array.from({ length: 2000 }, (_, i) => `+huge line ${i}`)].join('\n');
-    const parts = splitPatchIntoParts(huge, 500);
+    const { parts } = splitPatchIntoParts(huge, 500);
     const total = parts.length;
     expect(total).toBeGreaterThan(3);
     const files = [
@@ -126,7 +126,7 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
 
   it('keeps the first maxFileParts parts and reports the ones left out', () => {
     const patch = ['@@ -0,0 +1,30 @@', ...Array.from({ length: 30 }, () => '+x')].join('\n');
-    expect(splitPatchIntoParts(patch, 10)).toHaveLength(5);
+    expect(splitPatchIntoParts(patch, 10).parts).toHaveLength(5);
 
     const { batches, skippedParts } = batchFilesByTokenCap([{ path: 'src/a.ts', patch }], 10, 2);
 
@@ -136,6 +136,14 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
       { index: 2, total: 5 },
     ]);
     expect(skippedParts).toEqual([{ path: 'src/a.ts', from: 3, total: 5 }]);
+  });
+
+  it('reports the lines that were cut to fit the cap', () => {
+    const patch = ['@@ -0,0 +1,2 @@', `+${'x'.repeat(500_000)}`, '+small'].join('\n');
+    const { batches, cutLines } = batchFilesByTokenCap([{ path: 'src/big.ts', patch }], 500);
+
+    expect(cutLines).toEqual([{ path: 'src/big.ts', count: 1 }]);
+    expect(batches.flat().map((f) => f.patch).join('\n')).toContain(LINE_CUT_MARKER);
   });
 
   // ~`tokens` estimated diff tokens (3.5 characters per token).

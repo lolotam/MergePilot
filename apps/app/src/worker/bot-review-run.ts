@@ -89,7 +89,10 @@ export interface BotFiles {
 
 /** The PR files a bot reviews: listed (unless given), then narrowed since its last review. */
 export async function selectBotFiles(
-  params: Pick<BotReviewParams, 'client' | 'owner' | 'repo' | 'pullNumber' | 'headSha' | 'baseSha' | 'configHash' | 'publisherLogin' | 'log' | 'botSlot' | 'prFiles' | 'force'>,
+  params: Pick<BotReviewParams, 'client' | 'owner' | 'repo' | 'pullNumber' | 'headSha' | 'baseSha' | 'configHash' | 'publisherLogin' | 'log' | 'botSlot' | 'prFiles' | 'force'> & {
+    /** The paths the review excludes: their content is never read to rebuild a patch. */
+    exclude?: string[];
+  },
 ): Promise<BotFiles> {
   const { client, owner, repo, pullNumber, headSha, configHash, log, botSlot } = params;
   let prFiles = params.prFiles;
@@ -103,6 +106,7 @@ export async function selectBotFiles(
       repo,
       baseSha: params.baseSha,
       headSha: params.headSha,
+      ...(params.exclude ? { exclude: params.exclude } : {}),
     });
     prFiles = rebuilt.files;
     log?.(`Found ${prFiles.length} files in PR diff`);
@@ -135,7 +139,7 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
   const { prFiles, selection: incremental } =
     params.selection && params.prFiles
       ? { prFiles: params.prFiles, selection: params.selection }
-      : await selectBotFiles(params);
+      : await selectBotFiles({ ...params, exclude: params.config.review.exclude });
   const filesToReview = incremental.files;
   const scope = reviewScopeOf(incremental);
   log?.(`Review scope: ${scope.mode} (${filesToReview.length} files)`);

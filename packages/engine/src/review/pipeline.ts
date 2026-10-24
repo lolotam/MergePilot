@@ -267,18 +267,24 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
 
   // Token and cost budgets count only the context retained in the prompt.
-  const budgetResult = checkBudget({
-    promptTokens,
-    maxInputTokens: budgetCfg.maxInputTokens,
-  });
+  // A review that will be batched sends no whole-PR prompt: only its batches are checked, each
+  // against maxInputTokens below. Counting the whole PR here would skip a review whose batches
+  // fit, so the check is only for the unbatched review.
+  const batched = withoutContextTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0;
+  if (!batched) {
+    const budgetResult = checkBudget({
+      promptTokens,
+      maxInputTokens: budgetCfg.maxInputTokens,
+    });
 
-  if (!budgetResult.ok) {
-    return { status: 'skipped-budget', reason: budgetResult.reason };
+    if (!budgetResult.ok) {
+      return { status: 'skipped-budget', reason: budgetResult.reason };
+    }
   }
 
   // Size guard (ADR-0013): a prompt too big for one reliable call goes straight to capped batches.
   let plan: CappedBatches | undefined;
-  if (withoutContextTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0) {
+  if (batched) {
     plan = batchFilesByTokenCap(redactedReviewableFiles, limits.batchTokens, reviewCfg.maxFileParts);
     // A file too big for one batch is reviewed in parts (ADR-0045); the parts beyond
     // review.maxFileParts are not sent, and the file is reported as not fully reviewed.
@@ -286,6 +292,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       incompleteReasons.push(
         `${skipped.path}: parts ${skipped.from}–${skipped.total} of ${skipped.total} not reviewed (review.maxFileParts)`,
       );
+    }
+    // A line too big for the cap on its own was cut to fit: the file says so.
+    for (const cut of plan.cutLines) {
+      incompleteReasons.push(`${cut.path}: ${cut.count} over-long line(s) cut to fit review.batchTokens`);
     }
   } else {
     context.markSent(wholeContext);

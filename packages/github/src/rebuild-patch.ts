@@ -5,7 +5,7 @@
  * A drizzle migration snapshot is a whole copy of the schema, so it is reviewed only where it
  * differs from the previous snapshot of the same folder (ADR-0045, rule 5).
  */
-import { isSensitivePath } from '@mergepilot/engine';
+import { classifyFile, isSensitivePath } from '@mergepilot/engine';
 import { structuredPatch } from 'diff';
 import type { GitHubClient } from './client.js';
 import type { PullRequestFile } from './pr-files.js';
@@ -13,6 +13,15 @@ import { listAtRef, readAtRef } from './read-cache.js';
 
 /** The most diff lines a rebuilt patch may have; a bigger one is not used (ADR-0045). */
 export const MAX_REBUILT_PATCH_LINES = 50_000;
+
+/** How long a diff may run before it is given up on (milliseconds). */
+export const DIFF_TIMEOUT_MS = 2_000;
+
+/** The most edits a diff may compute; a bigger one is given up on. */
+export const MAX_DIFF_EDIT_LENGTH = 20_000;
+
+/** The options every diff runs with: three context lines, and a bound on what it may cost. */
+const DIFF_OPTIONS = { context: 3, timeout: DIFF_TIMEOUT_MS, maxEditLength: MAX_DIFF_EDIT_LENGTH };
 
 /** How many contents reads run at the same time. */
 const MAX_CONCURRENT_READS = 4;
@@ -31,6 +40,7 @@ const NOT_RETURNED = 'not returned by the contents API';
 const BINARY = 'binary';
 const TOO_LARGE = `over ${MAX_REBUILT_PATCH_LINES.toLocaleString('en-US')} diff lines`;
 const NO_CHANGE = 'no content change';
+const DIFF_TOO_COSTLY = 'diff too costly to compute';
 
 export interface RebuildPatchesOptions {
   owner: string;
@@ -39,6 +49,8 @@ export interface RebuildPatchesOptions {
   baseSha: string;
   /** The pull request's head commit: where the new content is read. */
   headSha: string;
+  /** The paths the review excludes (`review.exclude`): their content is never read. */
+  exclude?: string[];
 }
 
 export interface RebuildPatchesResult {
@@ -56,27 +68,30 @@ type RebuildOutcome =
   | { path: string; patch: string; previous?: string }
   | { path: string; reason: string }
   | { path: string; unchanged: true };
+
 /**
  * Rebuilds the patches of the files GitHub left out. A file is a candidate when it has no patch,
- * has changes, has a text status (added, modified, renamed, copied) and is not a sensitive path.
- * The other files are returned unchanged, and a file whose patch cannot be rebuilt keeps the
- * "patch truncated" reason of the review.
+ * has changes, has a text status (added, modified, renamed, copied), is not a sensitive path and
+ * is not excluded or generated. The other files are returned unchanged, and a file whose patch
+ * cannot be rebuilt keeps the "patch truncated" reason of the review.
  */
 export async function rebuildMissingPatches(
   client: GitHubClient,
   files: PullRequestFile[],
   opts: RebuildPatchesOptions,
 ): Promise<RebuildPatchesResult> {
-  const candidates = files.filter(isCandidate);
+  const candidates = files.filter((file) => isCandidate(file, opts.exclude ?? []));
   const rebuilt: string[] = [];
   const failed: Array<{ path: string; reason: string }> = [];
   const snapshotDiffs: Array<{ path: string; previous: string }> = [];
   const patches = new Map<string, string>();
+  // The base content is read at the merge base of the pull request, not at the base branch's tip.
+  const baseRef = await mergeBaseOf(client, candidates, opts);
 
   // At most four reads at a time, so a pull request with many big files stays polite.
   for (let start = 0; start < candidates.length; start += MAX_CONCURRENT_READS) {
     const group = candidates.slice(start, start + MAX_CONCURRENT_READS);
-    const outcomes = await Promise.all(group.map((file) => rebuildOne(client, file, opts)));
+    const outcomes = await Promise.all(group.map((file) => rebuildOne(client, file, opts, baseRef)));
     for (const outcome of outcomes) {
       if ('patch' in outcome) {
         patches.set(outcome.path, outcome.patch);
@@ -101,11 +116,51 @@ export async function rebuildMissingPatches(
   };
 }
 
+/**
+ * The commit the base content is read at: the merge base of the pull request, so a change the
+ * base branch took after the pull request branched is not in the diff. The base branch's tip is
+ * used when the merge base is unknown. Nothing is compared when no candidate reads the base.
+ */
+async function mergeBaseOf(
+  client: GitHubClient,
+  candidates: readonly PullRequestFile[],
+  opts: RebuildPatchesOptions,
+): Promise<string> {
+  if (!candidates.some(needsBaseRead)) return opts.baseSha;
+  try {
+    const compared = client.compareCommits?.({
+      owner: opts.owner,
+      repo: opts.repo,
+      base: opts.baseSha,
+      head: opts.headSha,
+    });
+    // A client without the comparison, or a comparison that fails, leaves the base at its tip.
+    const result = await Promise.resolve(compared).catch(() => null);
+    return result?.mergeBaseSha ?? opts.baseSha;
+  } catch {
+    return opts.baseSha;
+  }
+}
+
+/** Whether the rebuild of a file reads the base commit: its old content, or a folder listing. */
+function needsBaseRead(file: PullRequestFile): boolean {
+  if (file.status === 'added') return snapshotOf(file) !== null;
+  return true;
+}
+
 /** A file whose patch GitHub left out and that can be rebuilt from its contents. */
-function isCandidate(file: PullRequestFile): boolean {
+function isCandidate(file: PullRequestFile, exclude: readonly string[]): boolean {
   if (file.changes <= 0) return false;
   if (!REBUILDABLE_STATUSES.has(file.status)) return false;
   if (isSensitivePath(file.path)) return false;
+  // A rename reads the file's old path: a sensitive one is never read either.
+  if (file.previousPath !== undefined && isSensitivePath(file.previousPath)) return false;
+  // An excluded or generated file is not reviewed, so its content is never read.
+  const classification = classifyFile(
+    { path: file.path, status: file.status, patch: '+', changes: file.changes },
+    { exclude: [...exclude], isSensitivePath },
+  );
+  if (classification !== 'review') return false;
   // A snapshot is rebuilt even when GitHub sent a patch: that patch is the whole new file, and
   // only the regions that differ from the previous snapshot are worth reviewing.
   if (snapshotOf(file)) return true;
@@ -117,10 +172,11 @@ async function rebuildOne(
   client: GitHubClient,
   file: PullRequestFile,
   opts: RebuildPatchesOptions,
+  baseRef: string,
 ): Promise<RebuildOutcome> {
   try {
     if (file.status === 'added') {
-      const snapshot = await snapshotOutcome(client, file, opts);
+      const snapshot = await snapshotOutcome(client, file, opts, baseRef);
       if (snapshot.kind === 'diff') {
         return { path: file.path, patch: snapshot.patch, previous: snapshot.previous };
       }
@@ -137,14 +193,15 @@ async function rebuildOne(
     }
     // A rename or a copy is read at the path it had in the base commit.
     const basePath = file.previousPath ?? file.path;
-    const base = await readAtRef(client, opts.owner, opts.repo, opts.baseSha, basePath);
+    const base = await readAtRef(client, opts.owner, opts.repo, baseRef, basePath);
     const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path);
     if (base === null || head === null) return { path: file.path, reason: NOT_RETURNED };
     if (isBinary(base) || isBinary(head)) return { path: file.path, reason: BINARY };
     const patch = modifiedPatch(base, head);
-    if (patch === undefined) return { path: file.path, reason: TOO_LARGE };
-    if (patch === '') return { path: file.path, reason: NO_CHANGE };
-    return { path: file.path, patch };
+    if (patch.kind === 'costly') return { path: file.path, reason: DIFF_TOO_COSTLY };
+    if (patch.kind === 'large') return { path: file.path, reason: TOO_LARGE };
+    if (patch.kind === 'same') return { path: file.path, reason: NO_CHANGE };
+    return { path: file.path, patch: patch.patch };
   } catch {
     // A read that fails (a rate limit, a 5xx) leaves the file as it was.
     return { path: file.path, reason: NOT_RETURNED };
@@ -169,16 +226,27 @@ function addedPatch(content: string): string | undefined {
   return lineCount(patch) > MAX_REBUILT_PATCH_LINES ? undefined : patch;
 }
 
+/** What a diff between two contents gave: its patch, or why there is none. */
+type DiffOutcome =
+  | { kind: 'text'; patch: string }
+  | { kind: 'same' }
+  | { kind: 'large' }
+  | { kind: 'costly' };
+
 /** A changed file: the hunks between the base content and the head content, without file headers. */
-function modifiedPatch(base: string, head: string): string | undefined {
-  const diff = structuredPatch('', '', base, head, '', '', { context: 3 });
+function modifiedPatch(base: string, head: string): DiffOutcome {
+  const diff = structuredPatch('', '', base, head, '', '', DIFF_OPTIONS);
+  // The diff gave up: too costly to compute.
+  if (!diff) return { kind: 'costly' };
   const lines: string[] = [];
   for (const hunk of diff.hunks) {
     lines.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
     lines.push(...hunkLines(hunk.lines));
   }
   const patch = lines.join('\n');
-  return lineCount(patch) > MAX_REBUILT_PATCH_LINES ? undefined : patch;
+  if (lineCount(patch) > MAX_REBUILT_PATCH_LINES) return { kind: 'large' };
+  if (patch === '') return { kind: 'same' };
+  return { kind: 'text', patch };
 }
 
 /** The body lines of a hunk, without the line breaks the diff kept in them. */
@@ -224,11 +292,12 @@ async function snapshotOutcome(
   client: GitHubClient,
   file: PullRequestFile,
   opts: RebuildPatchesOptions,
+  baseRef: string,
 ): Promise<SnapshotOutcome> {
   const snapshot = snapshotOf(file);
   if (!snapshot) return { kind: 'none' };
   try {
-    const previous = await findPreviousSnapshot(client, snapshot, opts);
+    const previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
     if (!previous) return { kind: 'none' };
     const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
     if (before === null) return { kind: 'none' };
@@ -237,7 +306,7 @@ async function snapshotOutcome(
     if (isBinary(before) || isBinary(after)) return { kind: 'none' };
     const patch = snapshotPatch(before, after, previous.name);
     if (patch.kind === 'same') return { kind: 'same', previous: previous.name };
-    if (patch.kind === 'large') return { kind: 'none' };
+    if (patch.kind === 'empty' || patch.kind === 'large' || patch.kind === 'costly') return { kind: 'none' };
     return { kind: 'diff', patch: patch.text, previous: previous.name };
   } catch {
     // A read that fails leaves the file to the added-file rebuild.
@@ -246,39 +315,46 @@ async function snapshotOutcome(
 }
 
 /**
- * The previous snapshot of a snapshot file: the highest number below it in the same folder, taken
- * from the base commit, or from the head commit when the base has no earlier snapshot.
+ * The previous snapshot of a snapshot file: the highest number below it in the same folder, in
+ * the head commit's listing or in the merge base's, whichever has the higher one. The pull
+ * request's own snapshot wins, so a pull request that adds two snapshots diffs the newer one
+ * against the older one it adds itself.
  */
 async function findPreviousSnapshot(
   client: GitHubClient,
   snapshot: { number: number; folder: string },
   opts: RebuildPatchesOptions,
+  baseRef: string,
 ): Promise<{ name: string; path: string; sha: string } | null> {
-  const base = await listAtRef(client, opts.owner, opts.repo, opts.baseSha, snapshot.folder);
+  const [base, head] = await Promise.all([
+    listAtRef(client, opts.owner, opts.repo, baseRef, snapshot.folder),
+    listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder),
+  ]);
   const fromBase = previousSnapshotIn(base, snapshot.number);
-  if (fromBase) {
-    return { name: fromBase, path: `${snapshot.folder}/${fromBase}`, sha: opts.baseSha };
-  }
-  const head = await listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder);
   const fromHead = previousSnapshotIn(head, snapshot.number);
-  if (fromHead) {
-    return { name: fromHead, path: `${snapshot.folder}/${fromHead}`, sha: opts.headSha };
+  if (fromHead && (!fromBase || fromHead.number >= fromBase.number)) {
+    return { name: fromHead.name, path: `${snapshot.folder}/${fromHead.name}`, sha: opts.headSha };
+  }
+  if (fromBase) {
+    return { name: fromBase.name, path: `${snapshot.folder}/${fromBase.name}`, sha: baseRef };
   }
   return null;
 }
 
 /** The snapshot of a folder listing with the highest number below `number`. */
-function previousSnapshotIn(files: string[] | null, number: number): string | null {
+function previousSnapshotIn(
+  files: string[] | null,
+  number: number,
+): { name: string; number: number } | null {
   if (!files) return null;
-  let best: string | null = null;
-  let bestNumber = -1;
+  let best: { name: string; number: number } | null = null;
   for (const file of files) {
     const digits = SNAPSHOT_NAME_RE.exec(file.slice(file.lastIndexOf('/') + 1))?.[1];
     if (!digits) continue;
     const value = Number(digits);
-    if (value >= number || value <= bestNumber) continue;
-    bestNumber = value;
-    best = `${digits}_snapshot.json`;
+    if (value >= number) continue;
+    if (best && value <= best.number) continue;
+    best = { name: `${digits}_snapshot.json`, number: value };
   }
   return best;
 }
@@ -286,14 +362,19 @@ function previousSnapshotIn(files: string[] | null, number: number): string | nu
 type SnapshotPatch =
   | { kind: 'text'; text: string }
   | { kind: 'same' }
-  | { kind: 'large' };
+  | { kind: 'empty' }
+  | { kind: 'large' }
+  | { kind: 'costly' };
 
 /**
  * The regions where a snapshot differs from the previous one, as the new file's side: every line
  * it holds is an added line of the new file, with the new file's own line numbers.
  */
 function snapshotPatch(before: string, after: string, previousName: string): SnapshotPatch {
-  const diff = structuredPatch('', '', before, after, '', '', { context: 3 });
+  const diff = structuredPatch('', '', before, after, '', '', DIFF_OPTIONS);
+  // The diff gave up: too costly to compute.
+  if (!diff) return { kind: 'costly' };
+  if (diff.hunks.length === 0) return { kind: 'same' };
   const lines: string[] = [];
   let hunks = 0;
   for (const hunk of diff.hunks) {
@@ -308,7 +389,7 @@ function snapshotPatch(before: string, after: string, previousName: string): Sna
     hunks++;
     lines.push(...kept.lines);
   }
-  if (hunks === 0) return { kind: 'same' };
+  if (hunks === 0) return { kind: 'empty' };
   const text = lines.join('\n');
   if (lineCount(text) > MAX_REBUILT_PATCH_LINES) return { kind: 'large' };
   return { kind: 'text', text };

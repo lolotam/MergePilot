@@ -136,6 +136,8 @@ export interface CappedBatches {
   batches: ReviewableFileWithPatch[][];
   /** Files whose patch was split into more parts than `maxFileParts`: the parts left out. */
   skippedParts: Array<{ path: string; from: number; total: number }>;
+  /** Files with a line too big for the cap: the line was cut to fit `review.batchTokens`. */
+  cutLines: Array<{ path: string; count: number }>;
 }
 
 /**
@@ -143,7 +145,8 @@ export interface CappedBatches {
  * ordered by `groupFilesForBatches` (ADR-0031): a group that fits the cap shares one batch; a
  * bigger group is split between implementations, then between files. A single file bigger than
  * the cap is split into parts of at most the cap, one part per batch (ADR-0045); the parts beyond
- * `maxFileParts` are not sent and are reported as skipped.
+ * `maxFileParts` are not sent and are reported as skipped. A line too big for the cap on its own
+ * is cut to fit, and the file says how many lines were cut.
  */
 export function batchFilesByTokenCap(
   files: readonly ReviewableFileWithPatch[],
@@ -152,6 +155,7 @@ export function batchFilesByTokenCap(
 ): CappedBatches {
   const batches: ReviewableFileWithPatch[][] = [];
   const skippedParts: Array<{ path: string; from: number; total: number }> = [];
+  const cutLines: Array<{ path: string; count: number }> = [];
   let current: ReviewableFileWithPatch[] = [];
   let currentTokens = 0;
   const flush = (): void => {
@@ -178,12 +182,15 @@ export function batchFilesByTokenCap(
     } else {
       const file = node.files[0]!;
       flush();
-      const parts = splitPatchIntoParts(file.patch, capTokens);
-      parts.slice(0, maxFileParts).forEach((part, index) => {
-        batches.push([{ path: file.path, patch: part, part: { index: index + 1, total: parts.length } }]);
+      const split = splitPatchIntoParts(file.patch, capTokens);
+      split.parts.slice(0, maxFileParts).forEach((part, index) => {
+        batches.push([{ path: file.path, patch: part, part: { index: index + 1, total: split.parts.length } }]);
       });
-      if (parts.length > maxFileParts) {
-        skippedParts.push({ path: file.path, from: maxFileParts + 1, total: parts.length });
+      if (split.parts.length > maxFileParts) {
+        skippedParts.push({ path: file.path, from: maxFileParts + 1, total: split.parts.length });
+      }
+      if (split.cutLines > 0) {
+        cutLines.push({ path: file.path, count: split.cutLines });
       }
     }
   };
@@ -194,5 +201,5 @@ export function batchFilesByTokenCap(
   }
   placeDeferred();
   flush();
-  return { batches, skippedParts };
+  return { batches, skippedParts, cutLines };
 }

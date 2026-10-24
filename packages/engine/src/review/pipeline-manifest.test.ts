@@ -160,6 +160,26 @@ describe('renderManifest', () => {
     expect(lines.at(-1)).toBe('+1 more files');
   });
 
+  it('shows the range of batches a file split into parts is reviewed in', () => {
+    const split = manifestFileOf({ path: 'src/a.ts', status: 'added', patch: '+a' }, []);
+    const other = manifestFileOf({ path: 'src/b.ts', status: 'added', patch: '+b' }, []);
+    const batches = [
+      [{ path: 'src/c.ts' }],
+      [{ path: 'src/b.ts' }],
+      [{ path: 'src/a.ts' }],
+      [{ path: 'src/a.ts' }],
+      [{ path: 'src/a.ts' }],
+      [{ path: 'src/a.ts' }],
+      [{ path: 'src/a.ts' }],
+    ];
+
+    const lines = renderManifest([split, other], batches).split('\n');
+
+    // A file in one batch keeps the old line; a file in several shows the range.
+    expect(lines).toContain('batches 3–7 | added | +1 -0 | src/a.ts');
+    expect(lines).toContain('batch 2 | added | +1 -0 | src/b.ts');
+  });
+
   it('does not count the +++/--- file headers as changed lines', () => {
     const file = manifestFileOf({ path: 'src/a.ts', status: 'modified', patch: '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-x\n+y' }, []);
     expect([file.additions, file.deletions]).toEqual([1, 1]);

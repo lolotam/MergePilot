@@ -217,6 +217,38 @@ describe('createOctokitClient', () => {
     });
   });
 
+  it('returns null for a file over 1 MB, which GitHub returns without content', async () => {
+    mockGetContent.mockResolvedValueOnce({
+      data: { type: 'file', encoding: 'none', content: '' },
+    });
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.getFileContent({
+      owner: 'org',
+      repo: 'repo',
+      path: 'big.data',
+      ref: 'main',
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns an empty string for an empty file', async () => {
+    mockGetContent.mockResolvedValueOnce({
+      data: { type: 'file', encoding: 'base64', content: '' },
+    });
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.getFileContent({
+      owner: 'org',
+      repo: 'repo',
+      path: 'empty.txt',
+      ref: 'main',
+    });
+
+    expect(result).toBe('');
+  });
+
   it('returns null when getFileContent encounters a 404', async () => {
     const notFoundError = new Error('Not Found');
     (notFoundError as unknown as { status: number }).status = 404;
@@ -349,6 +381,17 @@ describe('createOctokitClient', () => {
       page: 2,
       per_page: 100,
     });
+  });
+
+  it('reads the merge base of the comparison from its first page', async () => {
+    mockCompareCommitsWithBasehead.mockResolvedValueOnce({
+      data: { status: 'ahead', files: [], merge_base_commit: { sha: 'merge-base-sha' } },
+    });
+
+    const client = createOctokitClient(secretToken);
+    const result = await client.compareCommits({ owner: 'org', repo: 'repo', base: 'sha-base', head: 'sha-head' });
+
+    expect(result).toEqual({ status: 'ahead', files: [], mergeBaseSha: 'merge-base-sha' });
   });
 
   it('returns null when compareCommits encounters a 404', async () => {

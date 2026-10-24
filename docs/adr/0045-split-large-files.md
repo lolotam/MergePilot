@@ -36,7 +36,7 @@ Option A.
 
 - Spec and design pull requests with large documents are reviewed in full, part by part; the design-review mode (ADR-0040) applies to each part.
 - A rebuilt patch costs one or two extra contents reads per affected file; files that GitHub already patches are unaffected.
-- A file split into many parts costs one call per part per bot. `review.maxFileParts` bounds it; at the default 8 parts of 48,000 tokens a single file can add up to about 384,000 input tokens per bot.
+- A file split into many parts costs one call per part per bot. `review.maxFileParts` bounds it; at the default 8 parts of 24,000 tokens (`review.batchTokens`) a single file can add up to about 192,000 input tokens per bot.
 - `PATCH_TRUNCATED_NOTE` and `truncatePatch` stay only for the truncation-recovery retry (ADR-0013), which halves an answer that ran out of output, not the input.
 - Adds the `diff` (jsdiff, BSD-3-Clause) dependency to `packages/github`.
 - Measured by the next comparison: PRs with large files should no longer end "incomplete" for this reason, and PayPos#482-style spec misses should fall.

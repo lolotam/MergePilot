@@ -140706,17 +140706,33 @@ function shown(text) {
 }
 function renderManifest(files, batches) {
   const batchOf = /* @__PURE__ */ new Map();
-  batches.forEach((batch, index) => batch.forEach((f3) => batchOf.set(f3.path, index + 1)));
-  const order = (f3) => batchOf.get(f3.path) ?? batches.length + 1;
+  batches.forEach((batch, index) => batch.forEach((f3) => {
+    const seen = batchOf.get(f3.path);
+    if (seen)
+      seen.push(index + 1);
+    else
+      batchOf.set(f3.path, [index + 1]);
+  }));
+  const lastBatchOf = (path12) => {
+    const seen = batchOf.get(path12);
+    return seen?.[seen.length - 1];
+  };
+  const order = (f3) => lastBatchOf(f3.path) ?? batches.length + 1;
   const sorted = files.map((file2, index) => ({ file: file2, index })).sort((a, b) => order(a.file) - order(b.file) || a.index - b.index).map(({ file: file2 }) => file2);
   const lines = sorted.slice(0, MANIFEST_MAX_FILES).map((f3) => {
-    const batch = batchOf.get(f3.path);
-    const where = batch === void 0 ? "not reviewed" : `batch ${batch}`;
+    const where = whereOf(batchOf.get(f3.path));
     return `${where} | ${shown(f3.status)} | +${f3.additions} -${f3.deletions} | ${shown(f3.label)}`;
   });
   if (sorted.length > MANIFEST_MAX_FILES)
     lines.push(`+${sorted.length - MANIFEST_MAX_FILES} more files`);
   return [`${files.length} changed files in ${batches.length} batches (batch | status | lines | path):`, ...lines].join("\n");
+}
+function whereOf(batches) {
+  if (!batches || batches.length === 0)
+    return "not reviewed";
+  const first = batches[0];
+  const last = batches[batches.length - 1];
+  return first === last ? `batch ${first}` : `batches ${first}\u2013${last}`;
 }
 
 var DESIGN_DOC_GLOBS = [
@@ -141119,32 +141135,44 @@ function groupFilesForBatches(files, tokensOf) {
 }
 
 var HUNK_HEADER_RE2 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+var LINE_CUT_MARKER = " [line cut to fit review.batchTokens]";
 function splitPatchIntoParts(patch, capTokens) {
   if (estimateTokens(patch) <= capTokens)
-    return [patch];
+    return { parts: [patch], cutLines: 0 };
   const hunks = parseHunks(patch);
   if (hunks.length === 0)
-    return [patch];
+    return { parts: [patch], cutLines: 0 };
   const pieces = [];
+  let cutLines = 0;
   for (const hunk of hunks) {
     const rendered = renderHunk(hunk);
-    if (estimateTokens(rendered) <= capTokens)
+    if (estimateTokens(rendered) <= capTokens) {
       pieces.push(rendered);
-    else
-      pieces.push(...splitHunk(hunk, capTokens));
+    } else {
+      const split = splitHunk(hunk, capTokens);
+      pieces.push(...split.pieces);
+      cutLines += split.cutLines;
+    }
   }
   const parts = [];
   let current = [];
+  let currentChars = 0;
   for (const piece of pieces) {
-    if (current.length > 0 && estimateTokens([...current, piece].join("\n")) > capTokens) {
+    const joined = currentChars + piece.length + current.length;
+    if (current.length > 0 && estimateChars(joined) > capTokens) {
       parts.push(current.join("\n"));
       current = [];
+      currentChars = 0;
     }
     current.push(piece);
+    currentChars += piece.length;
   }
   if (current.length > 0)
     parts.push(current.join("\n"));
-  return parts;
+  return { parts, cutLines };
+}
+function estimateChars(chars) {
+  return Math.ceil(chars / 3.5);
 }
 function parseHunks(patch) {
   const hunks = [];
@@ -141175,29 +141203,49 @@ function renderHunk(hunk) {
 function splitHunk(hunk, capTokens) {
   let oldLine = hunk.oldLines > 0 ? hunk.oldStart : hunk.oldStart + 1;
   let newLine = hunk.newLines > 0 ? hunk.newStart : hunk.newStart + 1;
-  const subHunks = [];
+  const pieces = [];
   let lines = [];
   let oldStart = oldLine;
   let newStart = newLine;
   let oldCount = 0;
   let newCount = 0;
   let heading = hunk.heading;
+  let bodyChars = 0;
+  let cutLines = 0;
   const flush = () => {
     if (lines.length === 0)
       return;
-    subHunks.push(renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines));
+    pieces.push(renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines));
     lines = [];
     oldCount = 0;
     newCount = 0;
+    bodyChars = 0;
     heading = "";
   };
   for (const unit of groupUnits(hunk.lines)) {
     const line = unit[0] ?? "";
     const unitOld = line.startsWith(" ") || line.startsWith("-") ? 1 : 0;
     const unitNew = line.startsWith(" ") || line.startsWith("+") ? 1 : 0;
-    const candidate = [...lines, ...unit];
-    const candidateText = renderSubHunk(oldStart, oldCount + unitOld, newStart, newCount + unitNew, heading, candidate);
-    if (lines.length > 0 && estimateTokens(candidateText) > capTokens) {
+    const unitChars = charsOf(unit);
+    if (isOverLong(unit, capTokens)) {
+      flush();
+      const cut3 = cutUnit(unit, capTokens);
+      cutLines += 1;
+      lines = cut3;
+      oldCount = unitOld;
+      newCount = unitNew;
+      bodyChars = charsOf(cut3);
+      oldStart = oldLine;
+      newStart = newLine;
+      flush();
+      oldLine += unitOld;
+      newLine += unitNew;
+      oldStart = oldLine;
+      newStart = newLine;
+      continue;
+    }
+    const candidate = headerChars(oldStart, oldCount + unitOld, newStart, newCount + unitNew, heading) + lines.length + unit.length + bodyChars + unitChars;
+    if (lines.length > 0 && estimateChars(candidate) > capTokens) {
       flush();
       oldStart = oldLine;
       newStart = newLine;
@@ -141205,16 +141253,42 @@ function splitHunk(hunk, capTokens) {
     lines.push(...unit);
     oldCount += unitOld;
     newCount += unitNew;
+    bodyChars += unitChars;
     oldLine += unitOld;
     newLine += unitNew;
   }
   flush();
-  return subHunks;
+  return { pieces, cutLines };
+}
+function isOverLong(unit, capTokens) {
+  if (estimateChars(charsOf(unit)) <= capTokens)
+    return false;
+  const cutChars = 1 + Math.floor(capTokens * 3) + LINE_CUT_MARKER.length;
+  return estimateChars(cutChars) <= capTokens;
 }
 function renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines) {
+  return [subHunkHeader(oldStart, oldCount, newStart, newCount, heading), ...lines].join("\n");
+}
+function subHunkHeader(oldStart, oldCount, newStart, newCount, heading) {
   const old = oldCount > 0 ? oldStart : Math.max(0, oldStart - 1);
   const current = newCount > 0 ? newStart : Math.max(0, newStart - 1);
-  return [`@@ -${old},${oldCount} +${current},${newCount} @@${heading}`, ...lines].join("\n");
+  return `@@ -${old},${oldCount} +${current},${newCount} @@${heading}`;
+}
+function headerChars(oldStart, oldCount, newStart, newCount, heading) {
+  return subHunkHeader(oldStart, oldCount, newStart, newCount, heading).length;
+}
+function charsOf(lines) {
+  let chars = 0;
+  for (const line of lines)
+    chars += line.length;
+  return chars;
+}
+function cutUnit(unit, capTokens) {
+  const line = unit[0] ?? "";
+  const prefix = line.slice(0, 1);
+  const text = line.slice(1);
+  const maxChars = Math.max(0, Math.floor(capTokens * 3));
+  return [`${prefix}${text.slice(0, maxChars)}${LINE_CUT_MARKER}`, ...unit.slice(1)];
 }
 function groupUnits(lines) {
   const units = [];
@@ -141296,6 +141370,7 @@ function needsTruncationRetry(parsed, finishReason) {
 function batchFilesByTokenCap(files, capTokens, maxFileParts = 8) {
   const batches = [];
   const skippedParts = [];
+  const cutLines = [];
   let current = [];
   let currentTokens = 0;
   const flush = () => {
@@ -141324,12 +141399,15 @@ function batchFilesByTokenCap(files, capTokens, maxFileParts = 8) {
     } else {
       const file2 = node2.files[0];
       flush();
-      const parts = splitPatchIntoParts(file2.patch, capTokens);
-      parts.slice(0, maxFileParts).forEach((part, index) => {
-        batches.push([{ path: file2.path, patch: part, part: { index: index + 1, total: parts.length } }]);
+      const split = splitPatchIntoParts(file2.patch, capTokens);
+      split.parts.slice(0, maxFileParts).forEach((part, index) => {
+        batches.push([{ path: file2.path, patch: part, part: { index: index + 1, total: split.parts.length } }]);
       });
-      if (parts.length > maxFileParts) {
-        skippedParts.push({ path: file2.path, from: maxFileParts + 1, total: parts.length });
+      if (split.parts.length > maxFileParts) {
+        skippedParts.push({ path: file2.path, from: maxFileParts + 1, total: split.parts.length });
+      }
+      if (split.cutLines > 0) {
+        cutLines.push({ path: file2.path, count: split.cutLines });
       }
     }
   };
@@ -141340,7 +141418,7 @@ function batchFilesByTokenCap(files, capTokens, maxFileParts = 8) {
   }
   placeDeferred();
   flush();
-  return { batches, skippedParts };
+  return { batches, skippedParts, cutLines };
 }
 
 function parseReviewResponse(response) {
@@ -142840,18 +142918,24 @@ async function runReview(input2) {
     prompt = buildReviewPrompt({ ...promptInput, contextFiles: wholeContext });
     promptTokens = estimateTokens(prompt.system + prompt.user);
   }
-  const budgetResult = checkBudget({
-    promptTokens,
-    maxInputTokens: budgetCfg.maxInputTokens
-  });
-  if (!budgetResult.ok) {
-    return { status: "skipped-budget", reason: budgetResult.reason };
+  const batched = withoutContextTokens > limits2.maxPromptTokens && redactedReviewableFiles.length > 0;
+  if (!batched) {
+    const budgetResult = checkBudget({
+      promptTokens,
+      maxInputTokens: budgetCfg.maxInputTokens
+    });
+    if (!budgetResult.ok) {
+      return { status: "skipped-budget", reason: budgetResult.reason };
+    }
   }
   let plan;
-  if (withoutContextTokens > limits2.maxPromptTokens && redactedReviewableFiles.length > 0) {
+  if (batched) {
     plan = batchFilesByTokenCap(redactedReviewableFiles, limits2.batchTokens, reviewCfg.maxFileParts);
     for (const skipped of plan.skippedParts) {
       incompleteReasons.push(`${skipped.path}: parts ${skipped.from}\u2013${skipped.total} of ${skipped.total} not reviewed (review.maxFileParts)`);
+    }
+    for (const cut3 of plan.cutLines) {
+      incompleteReasons.push(`${cut3.path}: ${cut3.count} over-long line(s) cut to fit review.batchTokens`);
     }
   } else {
     context.markSent(wholeContext);
@@ -194926,6 +195010,9 @@ function createOctokitClient(token) {
           if (item.type !== "file" || typeof item.content !== "string") {
             return null;
           }
+          if (item.encoding === "none") {
+            return null;
+          }
           const encoding = item.encoding ?? "base64";
           if (encoding === "base64") {
             return Buffer.from(item.content, "base64").toString("utf8");
@@ -194959,6 +195046,7 @@ function createOctokitClient(token) {
           let status = "identical";
           const allFiles = [];
           let totalCommits;
+          let mergeBaseSha;
           while (true) {
             const response = await octokit.rest.repos.compareCommitsWithBasehead({
               owner: params.owner,
@@ -194971,6 +195059,9 @@ function createOctokitClient(token) {
             if (response.data.total_commits !== void 0) {
               totalCommits = response.data.total_commits;
             }
+            if (page === 1) {
+              mergeBaseSha = response.data.merge_base_commit?.sha;
+            }
             const pageFiles = response.data.files ?? [];
             allFiles.push(...pageFiles);
             if (pageFiles.length < PAGE_SIZE2) {
@@ -194981,7 +195072,8 @@ function createOctokitClient(token) {
           return {
             status,
             files: allFiles,
-            ...totalCommits !== void 0 ? { totalCommits } : {}
+            ...totalCommits !== void 0 ? { totalCommits } : {},
+            ...mergeBaseSha !== void 0 ? { mergeBaseSha } : {}
           };
         } catch (error62) {
           if (typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404) {
@@ -195550,6 +195642,9 @@ function listAtRef(client, owner, repo, ref, path12) {
 }
 
 var MAX_REBUILT_PATCH_LINES = 5e4;
+var DIFF_TIMEOUT_MS = 2e3;
+var MAX_DIFF_EDIT_LENGTH = 2e4;
+var DIFF_OPTIONS = { context: 3, timeout: DIFF_TIMEOUT_MS, maxEditLength: MAX_DIFF_EDIT_LENGTH };
 var MAX_CONCURRENT_READS = 4;
 var REBUILDABLE_STATUSES = /* @__PURE__ */ new Set(["added", "modified", "renamed", "copied"]);
 var SNAPSHOT_PATH_RE = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
@@ -195558,15 +195653,17 @@ var NOT_RETURNED = "not returned by the contents API";
 var BINARY = "binary";
 var TOO_LARGE = `over ${MAX_REBUILT_PATCH_LINES.toLocaleString("en-US")} diff lines`;
 var NO_CHANGE = "no content change";
+var DIFF_TOO_COSTLY = "diff too costly to compute";
 async function rebuildMissingPatches(client, files, opts) {
-  const candidates = files.filter(isCandidate);
+  const candidates = files.filter((file2) => isCandidate(file2, opts.exclude ?? []));
   const rebuilt = [];
   const failed = [];
   const snapshotDiffs = [];
   const patches = /* @__PURE__ */ new Map();
+  const baseRef = await mergeBaseOf(client, candidates, opts);
   for (let start = 0; start < candidates.length; start += MAX_CONCURRENT_READS) {
     const group = candidates.slice(start, start + MAX_CONCURRENT_READS);
-    const outcomes = await Promise.all(group.map((file2) => rebuildOne(client, file2, opts)));
+    const outcomes = await Promise.all(group.map((file2) => rebuildOne(client, file2, opts, baseRef)));
     for (const outcome of outcomes) {
       if ("patch" in outcome) {
         patches.set(outcome.path, outcome.patch);
@@ -195589,21 +195686,47 @@ async function rebuildMissingPatches(client, files, opts) {
     snapshotDiffs
   };
 }
-function isCandidate(file2) {
+async function mergeBaseOf(client, candidates, opts) {
+  if (!candidates.some(needsBaseRead))
+    return opts.baseSha;
+  try {
+    const compared = client.compareCommits?.({
+      owner: opts.owner,
+      repo: opts.repo,
+      base: opts.baseSha,
+      head: opts.headSha
+    });
+    const result = await Promise.resolve(compared).catch(() => null);
+    return result?.mergeBaseSha ?? opts.baseSha;
+  } catch {
+    return opts.baseSha;
+  }
+}
+function needsBaseRead(file2) {
+  if (file2.status === "added")
+    return snapshotOf(file2) !== null;
+  return true;
+}
+function isCandidate(file2, exclude) {
   if (file2.changes <= 0)
     return false;
   if (!REBUILDABLE_STATUSES.has(file2.status))
     return false;
   if (isSensitivePath(file2.path))
     return false;
+  if (file2.previousPath !== void 0 && isSensitivePath(file2.previousPath))
+    return false;
+  const classification = classifyFile({ path: file2.path, status: file2.status, patch: "+", changes: file2.changes }, { exclude: [...exclude], isSensitivePath });
+  if (classification !== "review")
+    return false;
   if (snapshotOf(file2))
     return true;
   return !file2.patch;
 }
-async function rebuildOne(client, file2, opts) {
+async function rebuildOne(client, file2, opts, baseRef) {
   try {
     if (file2.status === "added") {
-      const snapshot = await snapshotOutcome(client, file2, opts);
+      const snapshot = await snapshotOutcome(client, file2, opts, baseRef);
       if (snapshot.kind === "diff") {
         return { path: file2.path, patch: snapshot.patch, previous: snapshot.previous };
       }
@@ -195621,18 +195744,20 @@ async function rebuildOne(client, file2, opts) {
       return patch2 === void 0 ? { path: file2.path, reason: TOO_LARGE } : { path: file2.path, patch: patch2 };
     }
     const basePath = file2.previousPath ?? file2.path;
-    const base = await readAtRef(client, opts.owner, opts.repo, opts.baseSha, basePath);
+    const base = await readAtRef(client, opts.owner, opts.repo, baseRef, basePath);
     const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
     if (base === null || head === null)
       return { path: file2.path, reason: NOT_RETURNED };
     if (isBinary(base) || isBinary(head))
       return { path: file2.path, reason: BINARY };
     const patch = modifiedPatch(base, head);
-    if (patch === void 0)
+    if (patch.kind === "costly")
+      return { path: file2.path, reason: DIFF_TOO_COSTLY };
+    if (patch.kind === "large")
       return { path: file2.path, reason: TOO_LARGE };
-    if (patch === "")
+    if (patch.kind === "same")
       return { path: file2.path, reason: NO_CHANGE };
-    return { path: file2.path, patch };
+    return { path: file2.path, patch: patch.patch };
   } catch {
     return { path: file2.path, reason: NOT_RETURNED };
   }
@@ -195652,14 +195777,20 @@ function addedPatch(content) {
   return lineCount(patch) > MAX_REBUILT_PATCH_LINES ? void 0 : patch;
 }
 function modifiedPatch(base, head) {
-  const diff = structuredPatch("", "", base, head, "", "", { context: 3 });
+  const diff = structuredPatch("", "", base, head, "", "", DIFF_OPTIONS);
+  if (!diff)
+    return { kind: "costly" };
   const lines = [];
   for (const hunk of diff.hunks) {
     lines.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
     lines.push(...hunkLines(hunk.lines));
   }
   const patch = lines.join("\n");
-  return lineCount(patch) > MAX_REBUILT_PATCH_LINES ? void 0 : patch;
+  if (lineCount(patch) > MAX_REBUILT_PATCH_LINES)
+    return { kind: "large" };
+  if (patch === "")
+    return { kind: "same" };
+  return { kind: "text", patch };
 }
 function hunkLines(lines) {
   const body = [];
@@ -195686,12 +195817,12 @@ function folderOf(path12) {
   const slash = path12.lastIndexOf("/");
   return slash === -1 ? "" : path12.slice(0, slash);
 }
-async function snapshotOutcome(client, file2, opts) {
+async function snapshotOutcome(client, file2, opts, baseRef) {
   const snapshot = snapshotOf(file2);
   if (!snapshot)
     return { kind: "none" };
   try {
-    const previous = await findPreviousSnapshot(client, snapshot, opts);
+    const previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
     if (!previous)
       return { kind: "none" };
     const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
@@ -195705,23 +195836,25 @@ async function snapshotOutcome(client, file2, opts) {
     const patch = snapshotPatch(before, after, previous.name);
     if (patch.kind === "same")
       return { kind: "same", previous: previous.name };
-    if (patch.kind === "large")
+    if (patch.kind === "empty" || patch.kind === "large" || patch.kind === "costly")
       return { kind: "none" };
     return { kind: "diff", patch: patch.text, previous: previous.name };
   } catch {
     return { kind: "none" };
   }
 }
-async function findPreviousSnapshot(client, snapshot, opts) {
-  const base = await listAtRef(client, opts.owner, opts.repo, opts.baseSha, snapshot.folder);
+async function findPreviousSnapshot(client, snapshot, opts, baseRef) {
+  const [base, head] = await Promise.all([
+    listAtRef(client, opts.owner, opts.repo, baseRef, snapshot.folder),
+    listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder)
+  ]);
   const fromBase = previousSnapshotIn(base, snapshot.number);
-  if (fromBase) {
-    return { name: fromBase, path: `${snapshot.folder}/${fromBase}`, sha: opts.baseSha };
-  }
-  const head = await listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder);
   const fromHead = previousSnapshotIn(head, snapshot.number);
-  if (fromHead) {
-    return { name: fromHead, path: `${snapshot.folder}/${fromHead}`, sha: opts.headSha };
+  if (fromHead && (!fromBase || fromHead.number >= fromBase.number)) {
+    return { name: fromHead.name, path: `${snapshot.folder}/${fromHead.name}`, sha: opts.headSha };
+  }
+  if (fromBase) {
+    return { name: fromBase.name, path: `${snapshot.folder}/${fromBase.name}`, sha: baseRef };
   }
   return null;
 }
@@ -195729,21 +195862,25 @@ function previousSnapshotIn(files, number4) {
   if (!files)
     return null;
   let best = null;
-  let bestNumber = -1;
   for (const file2 of files) {
     const digits = SNAPSHOT_NAME_RE.exec(file2.slice(file2.lastIndexOf("/") + 1))?.[1];
     if (!digits)
       continue;
     const value = Number(digits);
-    if (value >= number4 || value <= bestNumber)
+    if (value >= number4)
       continue;
-    bestNumber = value;
-    best = `${digits}_snapshot.json`;
+    if (best && value <= best.number)
+      continue;
+    best = { name: `${digits}_snapshot.json`, number: value };
   }
   return best;
 }
 function snapshotPatch(before, after, previousName) {
-  const diff = structuredPatch("", "", before, after, "", "", { context: 3 });
+  const diff = structuredPatch("", "", before, after, "", "", DIFF_OPTIONS);
+  if (!diff)
+    return { kind: "costly" };
+  if (diff.hunks.length === 0)
+    return { kind: "same" };
   const lines = [];
   let hunks = 0;
   for (const hunk of diff.hunks) {
@@ -195756,7 +195893,7 @@ function snapshotPatch(before, after, previousName) {
     lines.push(...kept.lines);
   }
   if (hunks === 0)
-    return { kind: "same" };
+    return { kind: "empty" };
   const text = lines.join("\n");
   if (lineCount(text) > MAX_REBUILT_PATCH_LINES)
     return { kind: "large" };
@@ -196190,6 +196327,7 @@ function withoutBaseHunks(comparePatch, basePatch, prPatch) {
 var REVIEW_REQUESTED_REASON = "review requested";
 var REVIEWS_PAGE_SIZE2 = 100;
 var MAX_COMPARE_FILES = 300;
+var SNAPSHOT_PATH_RE2 = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
 async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
   let page = 1;
   let lastMarker = null;
@@ -196280,18 +196418,23 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
     if (!prFile) {
       continue;
     }
+    const status = compareFile.status ?? prFile.status;
     const mapped = {
       path: compareFile.filename,
-      status: compareFile.status ?? prFile.status,
+      status,
       additions: compareFile.additions ?? prFile.additions,
       deletions: compareFile.deletions ?? prFile.deletions,
       changes: compareFile.changes ?? prFile.changes
     };
-    if (compareFile.patch !== void 0) {
+    if (status === "added" && SNAPSHOT_PATH_RE2.test(compareFile.filename) && prFile.patch !== void 0) {
+      mapped.patch = prFile.patch;
+    } else if (compareFile.patch !== void 0) {
       const own2 = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own2 === void 0)
         continue;
       mapped.patch = own2;
+    } else if (prFile.patch !== void 0) {
+      mapped.patch = prFile.patch;
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== void 0) {
@@ -197699,7 +197842,13 @@ async function reviewPullRequest(ctx) {
     repo,
     pull_number: pullNumber
   });
-  const rebuilt = await rebuildMissingPatches(client, listed.files, { owner, repo, baseSha, headSha });
+  const rebuilt = await rebuildMissingPatches(client, listed.files, {
+    owner,
+    repo,
+    baseSha,
+    headSha,
+    exclude: config2.review.exclude
+  });
   const prFiles = rebuilt.files;
   log?.(`Found ${prFiles.length} files in PR diff`);
   if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {

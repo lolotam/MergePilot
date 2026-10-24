@@ -324,6 +324,7 @@ async function sharedSteps(
         repo,
         baseSha: job.baseSha,
         headSha: job.headSha,
+        exclude: mainConfig.effectiveConfig.review.exclude,
       });
       prFiles = rebuilt.files;
       if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {

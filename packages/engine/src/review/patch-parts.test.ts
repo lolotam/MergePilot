@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parsePatch } from '../diff/parse-patch.js';
 import { estimateTokens } from './budget.js';
-import { splitPatchIntoParts } from './patch-parts.js';
+import { LINE_CUT_MARKER, splitPatchIntoParts } from './patch-parts.js';
 import { buildReviewPrompt } from './prompt.js';
 
 /** The body lines of a part: every line but the hunk headers. */
@@ -24,7 +24,7 @@ function linesOf(parts: string[]): { right: Set<number>; left: Set<number> } {
 describe('splitPatchIntoParts (ADR-0045)', () => {
   it('returns a patch that fits the cap whole', () => {
     const patch = '@@ -1,2 +1,2 @@\n line 1\n-line 2\n+line 2';
-    expect(splitPatchIntoParts(patch, 1000)).toEqual([patch]);
+    expect(splitPatchIntoParts(patch, 1000)).toEqual({ parts: [patch], cutLines: 0 });
   });
 
   it('packs whole hunks into parts of at most the cap', () => {
@@ -36,7 +36,7 @@ describe('splitPatchIntoParts (ADR-0045)', () => {
       '@@ -20,1 +20,1 @@',
       ' c',
     ].join('\n');
-    const parts = splitPatchIntoParts(patch, 10);
+    const { parts } = splitPatchIntoParts(patch, 10);
 
     expect(parts.length).toBeGreaterThan(1);
     for (const part of parts) {
@@ -49,7 +49,7 @@ describe('splitPatchIntoParts (ADR-0045)', () => {
   it('splits one huge added hunk into sub-hunks whose new-side numbers continue', () => {
     const lines = Array.from({ length: 300 }, (_, i) => `+const v${i} = ${i};`);
     const patch = [`@@ -0,0 +1,300 @@`, ...lines].join('\n');
-    const parts = splitPatchIntoParts(patch, 500);
+    const { parts } = splitPatchIntoParts(patch, 500);
 
     expect(parts.length).toBeGreaterThan(1);
     const headers = parts.map((part) => parsePatch(part).hunks[0]!);
@@ -73,7 +73,7 @@ describe('splitPatchIntoParts (ADR-0045)', () => {
   it('splits a modified hunk with the right old and new starts and counts', () => {
     const patch = ['@@ -10,3 +10,4 @@', ' context1', '-old1', '+new1', '+new2', ' context2'].join('\n');
     // A cap of one token leaves every line in a sub-hunk of its own.
-    const parts = splitPatchIntoParts(patch, 1);
+    const { parts } = splitPatchIntoParts(patch, 1);
 
     expect(parts).toEqual([
       '@@ -10,1 +10,1 @@\n context1',
@@ -99,7 +99,7 @@ describe('splitPatchIntoParts (ADR-0045)', () => {
       '+new',
       ' keep2',
     ].join('\n');
-    const parts = splitPatchIntoParts(patch, 1);
+    const { parts } = splitPatchIntoParts(patch, 1);
 
     const withMarker = parts.find((part) => part.includes('\\ No newline at end of file'))!;
     const markerLines = withMarker.split('\n');
@@ -120,9 +120,39 @@ describe('splitPatchIntoParts (ADR-0045)', () => {
       ' more',
       '-less',
     ].join('\n');
-    const parts = splitPatchIntoParts(patch, 1);
+    const { parts } = splitPatchIntoParts(patch, 1);
 
     expect(parts.flatMap(bodyOf)).toEqual(bodyOf(patch));
+  });
+
+  it('cuts a line too big for the cap and counts it', () => {
+    // A minified file on one line: the line alone is far over the cap.
+    const patch = ['@@ -0,0 +1,2 @@', `+${'x'.repeat(500_000)}`, '+small'].join('\n');
+    const { parts, cutLines } = splitPatchIntoParts(patch, 500);
+
+    expect(cutLines).toBe(1);
+    const cut = parts.find((part) => part.includes(LINE_CUT_MARKER))!;
+    expect(cut).toBeDefined();
+    // The part stays about the cap.
+    expect(estimateTokens(cut)).toBeLessThanOrEqual(500);
+    // The line keeps its prefix and says it was cut.
+    const cutLine = cut.split('\n').find((line) => line.includes(LINE_CUT_MARKER))!;
+    expect(cutLine.startsWith('+')).toBe(true);
+    expect(cutLine.endsWith(LINE_CUT_MARKER)).toBe(true);
+    // The line keeps its number: it is still the first line of the file.
+    expect([...parsePatch(cut).addedLines]).toContain(1);
+  });
+
+  it('cuts a removed line too big for the cap, keeping its prefix', () => {
+    const patch = ['@@ -1,2 +1,1 @@', `-${'y'.repeat(500_000)}`, ' keep'].join('\n');
+    const { parts, cutLines } = splitPatchIntoParts(patch, 500);
+
+    expect(cutLines).toBe(1);
+    const cut = parts.find((part) => part.includes(LINE_CUT_MARKER))!;
+    const cutLine = cut.split('\n').find((line) => line.includes(LINE_CUT_MARKER))!;
+    expect(cutLine.startsWith('-')).toBe(true);
+    expect(cutLine.endsWith(LINE_CUT_MARKER)).toBe(true);
+    expect(estimateTokens(cut)).toBeLessThanOrEqual(500);
   });
 });
 

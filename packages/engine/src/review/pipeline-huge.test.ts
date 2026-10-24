@@ -126,7 +126,7 @@ describe('runReview — huge PRs (ADR-0013)', () => {
     const { model, calls } = scripted((req) => answerFor(req));
     const result = await run(hugeConfig({ batchTokens: 500 }), model, files);
 
-    const total = splitPatchIntoParts(patchOf(2000), 500).length;
+    const total = splitPatchIntoParts(patchOf(2000), 500).parts.length;
     expect(total).toBeGreaterThan(8);
     // The small file, then one call per part of the big one (review.maxFileParts parts).
     expect(calls).toHaveLength(9);
@@ -140,6 +140,50 @@ describe('runReview — huge PRs (ADR-0013)', () => {
       );
       // The file is reviewed in parts, so the old reason of a cut patch is gone.
       expect(result.result.incompleteReasons.join(' ')).not.toContain('patch truncated to fit review.batchTokens');
+    }
+  });
+
+  it('says how many over-long lines were cut to fit the batch cap', async () => {
+    // A minified file on one line: the line alone is far over the cap.
+    const files: PrFile[] = [
+      {
+        path: 'src/long.ts',
+        status: 'added',
+        patch: ['@@ -0,0 +1,2 @@', `+${'x'.repeat(500_000)}`, '+small'].join('\n'),
+        changes: 2,
+      },
+    ];
+    const { model, calls } = scripted(() => ({ text: makeAnswerJson([]), finishReason: 'stop' }));
+    const result = await run(hugeConfig({ batchTokens: 500 }), model, files);
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.result.incompleteReasons).toContain(
+        'src/long.ts: 1 over-long line(s) cut to fit review.batchTokens',
+      );
+    }
+  });
+
+  it('reviews a file whose batches fit the input budget, even when the whole PR does not', async () => {
+    const files: PrFile[] = [
+      { path: 'src/huge.ts', status: 'added', patch: patchOf(2000), changes: 2000 },
+    ];
+    const total = splitPatchIntoParts(patchOf(2000), 500).parts.length;
+    const { model, calls } = scripted(() => ({ text: makeAnswerJson([]), finishReason: 'stop' }));
+    // The whole pull request is over maxInputTokens, but every batch of it fits: the review runs.
+    const result = await run(
+      hugeConfig({ batchTokens: 500 }, { perReviewUsd: 1, maxInputTokens: 8_000 }),
+      model,
+      files,
+    );
+
+    expect(result.status).toBe('completed');
+    expect(calls).toHaveLength(8);
+    if (result.status === 'completed') {
+      expect(result.result.incompleteReasons).toContain(
+        `src/huge.ts: parts 9–${total} of ${total} not reviewed (review.maxFileParts)`,
+      );
     }
   });
 
