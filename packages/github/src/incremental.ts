@@ -104,6 +104,8 @@ export async function findLastReviewedHead(
  * - Same head: incremental with 0 files (nothing new to review)
  * - Ahead: incremental with intersecting files between compare and prFiles, using the compare
  *   patch without the hunks proven to come from a base-branch merge (needs `baseSha`)
+ * - Ahead, but a compared file has no patch (its diff was too big for the compare API): full
+ *   ("the new changes of <path> are too large for the compare API")
  * - Compare at GitHub's 300-file cap (possibly truncated): full ("comparison too large")
  * - Compare error: full ("comparison unavailable")
  * - Diverged, behind, or 404: full ("history rewritten since last review")
@@ -207,7 +209,8 @@ export async function selectIncrementalFiles(
       changes: compareFile.changes ?? prFile.changes,
     };
 
-    if (status === 'added' && SNAPSHOT_PATH_RE.test(compareFile.filename) && prFile.patch !== undefined) {
+    const isSnapshot = status === 'added' && SNAPSHOT_PATH_RE.test(compareFile.filename);
+    if (isSnapshot && prFile.patch !== undefined) {
       // A snapshot's patch is the diff against its previous snapshot (ADR-0045, rule 5): the
       // compare API's patch is the whole new file, so the rebuilt one is reviewed instead.
       mapped.patch = prFile.patch;
@@ -216,10 +219,15 @@ export async function selectIncrementalFiles(
       const own = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own === undefined) continue;
       mapped.patch = own;
-    } else if (prFile.patch !== undefined) {
-      // The compare API left the patch out (its diff was too big for it): the pull request's own
-      // patch is reviewed instead of nothing.
-      mapped.patch = prFile.patch;
+    } else if (!isSnapshot) {
+      // The compare API left the patch out (its diff was too big for it). The pull request's own
+      // patch covers the changes from before the last reviewed commit too, so it is not shown as
+      // new: the whole pull request is reviewed instead.
+      return {
+        mode: 'full',
+        files: prFiles,
+        reason: `the new changes of ${compareFile.filename} are too large for the compare API`,
+      };
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== undefined) {

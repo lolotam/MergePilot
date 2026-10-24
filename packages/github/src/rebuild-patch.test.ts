@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parsePatch } from '@mergepilot/engine';
+import type { GitHubClient } from './client.js';
 import type { PullRequestFile } from './pr-files.js';
 import {
   MAX_DIFF_EDIT_LENGTH,

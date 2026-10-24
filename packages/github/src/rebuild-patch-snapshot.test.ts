@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { parsePatch } from '@mergepilot/engine';
 import type { PullRequestFile } from './pr-files.js';
-import { rebuildMissingPatches } from './rebuild-patch.js';
+import {
+  MAX_DIFF_EDIT_LENGTH,
+  MAX_REBUILT_PATCH_LINES,
+  rebuildMissingPatches,
+} from './rebuild-patch.js';
 import { fakeClient, OPTS } from './rebuild-patch.fixtures.js';
 
 const SNAPSHOT_DIR = 'packages/db/migrations/meta';
@@ -27,6 +31,22 @@ const ID_COLUMN = '"id": { "type": "integer" }';
 const NAME_TEXT = '"name": { "type": "text" }';
 const NAME_VARCHAR = '"name": { "type": "varchar" }';
 const LEGACY_COLUMN = '"legacy": { "type": "text" }';
+
+/** The patch GitHub sent for a snapshot: the whole new file. */
+const WHOLE_FILE_PATCH = '@@ -0,0 +1,2 @@\n+{\n+  "version": "7",';
+
+/**
+ * A snapshot with `changes` changed lines, each far enough from the next to be a hunk of its own:
+ * nine unchanged lines between them, more than the three lines of context on each side.
+ */
+function wideSnapshot(changes: number, tag: string): string {
+  const lines: string[] = [];
+  for (let i = 0; i < changes; i++) {
+    for (let j = 0; j < 9; j++) lines.push(`same ${i} ${j}`);
+    lines.push(`${tag} ${i}`);
+  }
+  return lines.join('\n');
+}
 
 /** A snapshot of nine lines, with a "name" column of type text. */
 const SNAPSHOT_TEXT = snapshot([ID_COLUMN, NAME_TEXT]);
@@ -247,5 +267,96 @@ describe('rebuildMissingPatches on a migration snapshot (ADR-0045, rule 5)', () 
     expect(result.snapshotDiffs).toEqual([]);
     expect(result.rebuilt).toEqual(['packages/db/seed.json']);
     expect(result.files[0]!.patch).toBe('@@ -0,0 +1,1 @@\n+{"a": 1}');
+  });
+
+  it('gives up on a snapshot diff that is too costly, and drops the file patch', async () => {
+    // Two snapshots that differ in more lines than a diff may compute.
+    const base = Array.from({ length: MAX_DIFF_EDIT_LENGTH + 1 }, (_, i) => `line ${i}`).join('\n');
+    const head = Array.from({ length: MAX_DIFF_EDIT_LENGTH + 1 }, (_, i) => `changed ${i}`).join('\n');
+    const { client } = fakeClient(
+      {
+        [`base-sha:${PREVIOUS_SNAPSHOT}`]: base,
+        [`head-sha:${NEW_SNAPSHOT}`]: head,
+      },
+      { [`base-sha:${SNAPSHOT_DIR}`]: ['0175_snapshot.json'] },
+    );
+    const files: PullRequestFile[] = [
+      {
+        path: NEW_SNAPSHOT,
+        status: 'added',
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        patch: WHOLE_FILE_PATCH,
+      },
+    ];
+
+    const result = await rebuildMissingPatches(client, files, OPTS);
+
+    expect(result.failed).toEqual([{ path: NEW_SNAPSHOT, reason: 'snapshot diff failed (costly)' }]);
+    expect(result.rebuilt).toEqual([]);
+    expect(result.snapshotDiffs).toEqual([]);
+    // The whole snapshot is never sent instead: the patch is dropped, so the review says truncated.
+    expect(result.files[0]!.patch).toBeUndefined();
+  }, 120_000);
+
+  it('gives up on a huge snapshot diff, and drops the file patch', async () => {
+    // A hunk of one changed line is eight patch lines: its header, three lines of context, the
+    // line itself and three more lines of context. That many hunks is over the line limit, and a
+    // diff of so many changes needs more edits than it may compute: it gives up before the patch
+    // is ever built, so the reason is the costly one and never the large one.
+    const hunks = Math.ceil(MAX_REBUILT_PATCH_LINES / 8) + 50;
+    const { client } = fakeClient(
+      {
+        [`base-sha:${PREVIOUS_SNAPSHOT}`]: wideSnapshot(hunks, 'old'),
+        [`head-sha:${NEW_SNAPSHOT}`]: wideSnapshot(hunks, 'new'),
+      },
+      { [`base-sha:${SNAPSHOT_DIR}`]: ['0175_snapshot.json'] },
+    );
+    const files: PullRequestFile[] = [
+      {
+        path: NEW_SNAPSHOT,
+        status: 'added',
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        patch: WHOLE_FILE_PATCH,
+      },
+    ];
+
+    const result = await rebuildMissingPatches(client, files, OPTS);
+
+    expect(result.failed).toEqual([{ path: NEW_SNAPSHOT, reason: 'snapshot diff failed (costly)' }]);
+    expect(result.rebuilt).toEqual([]);
+    expect(result.snapshotDiffs).toEqual([]);
+    // The whole snapshot is never sent instead: the patch is dropped, so the review says truncated.
+    expect(result.files[0]!.patch).toBeUndefined();
+  }, 120_000);
+
+  it('gives up on a snapshot diff with nothing left to show, and drops the file patch', async () => {
+    // The new snapshot is empty: the diff holds only removed lines, so no region differs.
+    const { client } = fakeClient(
+      {
+        [`base-sha:${PREVIOUS_SNAPSHOT}`]: 'line 1\nline 2\nline 3\n',
+        [`head-sha:${NEW_SNAPSHOT}`]: '',
+      },
+      { [`base-sha:${SNAPSHOT_DIR}`]: ['0175_snapshot.json'] },
+    );
+    const files: PullRequestFile[] = [
+      {
+        path: NEW_SNAPSHOT,
+        status: 'added',
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        patch: WHOLE_FILE_PATCH,
+      },
+    ];
+
+    const result = await rebuildMissingPatches(client, files, OPTS);
+
+    expect(result.failed).toEqual([{ path: NEW_SNAPSHOT, reason: 'snapshot diff failed (empty)' }]);
+    expect(result.rebuilt).toEqual([]);
+    expect(result.files[0]!.patch).toBeUndefined();
   });
 });

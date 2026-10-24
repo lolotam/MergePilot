@@ -166,24 +166,45 @@ describe('runReview — huge PRs (ADR-0013)', () => {
   });
 
   it('reviews a file whose batches fit the input budget, even when the whole PR does not', async () => {
+    const patch = patchOf(8000);
     const files: PrFile[] = [
-      { path: 'src/huge.ts', status: 'added', patch: patchOf(2000), changes: 2000 },
+      { path: 'src/huge.ts', status: 'added', patch, changes: 8000 },
     ];
-    const total = splitPatchIntoParts(patchOf(2000), 500).parts.length;
+    const total = splitPatchIntoParts(patch, 500).parts.length;
     const { model, calls } = scripted(() => ({ text: makeAnswerJson([]), finishReason: 'stop' }));
-    // The whole pull request is over maxInputTokens, but every batch of it fits: the review runs.
+    // The whole patch is over maxInputTokens, but the planned batches fit in total: the review runs.
     const result = await run(
-      hugeConfig({ batchTokens: 500 }, { perReviewUsd: 1, maxInputTokens: 8_000 }),
+      hugeConfig({ batchTokens: 500, maxFileParts: 4 }, { perReviewUsd: 1, maxInputTokens: 40_000 }),
       model,
       files,
     );
 
+    expect(estimateTokens(patch)).toBeGreaterThan(40_000);
     expect(result.status).toBe('completed');
-    expect(calls).toHaveLength(8);
+    expect(calls).toHaveLength(4);
     if (result.status === 'completed') {
       expect(result.result.incompleteReasons).toContain(
-        `src/huge.ts: parts 9–${total} of ${total} not reviewed (review.maxFileParts)`,
+        `src/huge.ts: parts 5–${total} of ${total} not reviewed (review.maxFileParts)`,
       );
+    }
+  });
+
+  it('skips a batched review whose planned batches are over the input budget in total', async () => {
+    const files: PrFile[] = [
+      { path: 'src/huge.ts', status: 'added', patch: patchOf(8000), changes: 8000 },
+    ];
+    const { model, calls } = scripted(() => ({ text: makeAnswerJson([]), finishReason: 'stop' }));
+    // Every planned batch fits on its own, but the batches together do not: the review is skipped.
+    const result = await run(
+      hugeConfig({ batchTokens: 500, maxFileParts: 4 }, { perReviewUsd: 1, maxInputTokens: 8_000 }),
+      model,
+      files,
+    );
+
+    expect(result.status).toBe('skipped-budget');
+    expect(calls).toHaveLength(0);
+    if (result.status === 'skipped-budget') {
+      expect(result.reason).toMatch(/^Estimated prompt tokens \(\d+\) exceed maxInputTokens limit \(8000\)\.$/);
     }
   });
 

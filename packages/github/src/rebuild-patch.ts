@@ -66,7 +66,8 @@ export interface RebuildPatchesResult {
 
 type RebuildOutcome =
   | { path: string; patch: string; previous?: string }
-  | { path: string; reason: string }
+  // `dropPatch`: the file's patch is dropped, so the review sees no patch at all.
+  | { path: string; reason: string; dropPatch?: boolean }
   | { path: string; unchanged: true };
 
 /**
@@ -85,6 +86,8 @@ export async function rebuildMissingPatches(
   const failed: Array<{ path: string; reason: string }> = [];
   const snapshotDiffs: Array<{ path: string; previous: string }> = [];
   const patches = new Map<string, string>();
+  // The files whose patch is dropped: a snapshot whose diff failed is never sent whole.
+  const dropped = new Set<string>();
   // The base content is read at the merge base of the pull request, not at the base branch's tip.
   const baseRef = await mergeBaseOf(client, candidates, opts);
 
@@ -101,6 +104,7 @@ export async function rebuildMissingPatches(
         }
       } else if ('reason' in outcome) {
         failed.push({ path: outcome.path, reason: outcome.reason });
+        if (outcome.dropPatch) dropped.add(outcome.path);
       }
     }
   }
@@ -108,12 +112,20 @@ export async function rebuildMissingPatches(
   return {
     files: files.map((file) => {
       const patch = patches.get(file.path);
-      return patch === undefined ? file : { ...file, patch };
+      if (patch !== undefined) return { ...file, patch };
+      // A dropped patch leaves the file with none: the review reports it as a truncated patch.
+      return dropped.has(file.path) ? withoutPatch(file) : file;
     }),
     rebuilt,
     failed,
     snapshotDiffs,
   };
+}
+
+/** The file without its patch: the review reports it as a truncated patch. */
+function withoutPatch(file: PullRequestFile): PullRequestFile {
+  const { patch: _patch, ...rest } = file;
+  return rest;
 }
 
 /**
@@ -182,6 +194,11 @@ async function rebuildOne(
       }
       if (snapshot.kind === 'same') {
         return { path: file.path, reason: `no content change from ${snapshot.previous}` };
+      }
+      if (snapshot.kind === 'failed') {
+        // The diff against the previous snapshot failed: the snapshot is never reviewed as a
+        // whole file (ADR-0045, rule 5). Its patch is dropped, so the review says it is truncated.
+        return { path: file.path, reason: `snapshot diff failed (${snapshot.reason})`, dropPatch: true };
       }
       // Without a previous snapshot the file is rebuilt like any other added file.
       if (file.patch) return { path: file.path, unchanged: true };
@@ -282,7 +299,11 @@ function folderOf(path: string): string {
 type SnapshotOutcome =
   | { kind: 'diff'; patch: string; previous: string }
   | { kind: 'same'; previous: string }
+  | { kind: 'failed'; reason: SnapshotFailure }
   | { kind: 'none' };
+
+/** Why the diff against the previous snapshot failed. */
+type SnapshotFailure = 'large' | 'costly' | 'empty';
 
 /**
  * The diff of a snapshot against the previous snapshot of the same folder: the snapshot is a new
@@ -306,7 +327,10 @@ async function snapshotOutcome(
     if (isBinary(before) || isBinary(after)) return { kind: 'none' };
     const patch = snapshotPatch(before, after, previous.name);
     if (patch.kind === 'same') return { kind: 'same', previous: previous.name };
-    if (patch.kind === 'empty' || patch.kind === 'large' || patch.kind === 'costly') return { kind: 'none' };
+    // The diff failed: the whole snapshot is never sent instead of the regions that differ.
+    if (patch.kind === 'empty' || patch.kind === 'large' || patch.kind === 'costly') {
+      return { kind: 'failed', reason: patch.kind };
+    }
     return { kind: 'diff', patch: patch.text, previous: previous.name };
   } catch {
     // A read that fails leaves the file to the added-file rebuild.
@@ -326,10 +350,10 @@ async function findPreviousSnapshot(
   opts: RebuildPatchesOptions,
   baseRef: string,
 ): Promise<{ name: string; path: string; sha: string } | null> {
-  const [base, head] = await Promise.all([
-    listAtRef(client, opts.owner, opts.repo, baseRef, snapshot.folder),
-    listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder),
-  ]);
+  // The two listings run one after the other: four candidates at the same time would send eight
+  // requests at once, over the four-read cap.
+  const base = await listAtRef(client, opts.owner, opts.repo, baseRef, snapshot.folder);
+  const head = await listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder);
   const fromBase = previousSnapshotIn(base, snapshot.number);
   const fromHead = previousSnapshotIn(head, snapshot.number);
   if (fromHead && (!fromBase || fromHead.number >= fromBase.number)) {

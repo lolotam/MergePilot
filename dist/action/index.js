@@ -142957,6 +142957,14 @@ async function runReview(input2) {
     if (!callBudget.ok)
       return { status: "skipped-budget", reason: callBudget.reason };
   }
+  if (plan) {
+    const totalBudget = checkBudget({
+      promptTokens: callPromptTokens.reduce((sum, tokens) => sum + tokens, 0),
+      maxInputTokens: budgetCfg.maxInputTokens
+    });
+    if (!totalBudget.ok)
+      return { status: "skipped-budget", reason: totalBudget.reason };
+  }
   const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
   const verifyOutputTokens = model.outputTokensFor(verifyOutputTokensFor(reviewCfg.maxFindings * callPromptTokens.length));
@@ -195660,6 +195668,7 @@ async function rebuildMissingPatches(client, files, opts) {
   const failed = [];
   const snapshotDiffs = [];
   const patches = /* @__PURE__ */ new Map();
+  const dropped = /* @__PURE__ */ new Set();
   const baseRef = await mergeBaseOf(client, candidates, opts);
   for (let start = 0; start < candidates.length; start += MAX_CONCURRENT_READS) {
     const group = candidates.slice(start, start + MAX_CONCURRENT_READS);
@@ -195673,18 +195682,26 @@ async function rebuildMissingPatches(client, files, opts) {
         }
       } else if ("reason" in outcome) {
         failed.push({ path: outcome.path, reason: outcome.reason });
+        if (outcome.dropPatch)
+          dropped.add(outcome.path);
       }
     }
   }
   return {
     files: files.map((file2) => {
       const patch = patches.get(file2.path);
-      return patch === void 0 ? file2 : { ...file2, patch };
+      if (patch !== void 0)
+        return { ...file2, patch };
+      return dropped.has(file2.path) ? withoutPatch(file2) : file2;
     }),
     rebuilt,
     failed,
     snapshotDiffs
   };
+}
+function withoutPatch(file2) {
+  const { patch: _patch, ...rest } = file2;
+  return rest;
 }
 async function mergeBaseOf(client, candidates, opts) {
   if (!candidates.some(needsBaseRead))
@@ -195732,6 +195749,9 @@ async function rebuildOne(client, file2, opts, baseRef) {
       }
       if (snapshot.kind === "same") {
         return { path: file2.path, reason: `no content change from ${snapshot.previous}` };
+      }
+      if (snapshot.kind === "failed") {
+        return { path: file2.path, reason: `snapshot diff failed (${snapshot.reason})`, dropPatch: true };
       }
       if (file2.patch)
         return { path: file2.path, unchanged: true };
@@ -195836,18 +195856,17 @@ async function snapshotOutcome(client, file2, opts, baseRef) {
     const patch = snapshotPatch(before, after, previous.name);
     if (patch.kind === "same")
       return { kind: "same", previous: previous.name };
-    if (patch.kind === "empty" || patch.kind === "large" || patch.kind === "costly")
-      return { kind: "none" };
+    if (patch.kind === "empty" || patch.kind === "large" || patch.kind === "costly") {
+      return { kind: "failed", reason: patch.kind };
+    }
     return { kind: "diff", patch: patch.text, previous: previous.name };
   } catch {
     return { kind: "none" };
   }
 }
 async function findPreviousSnapshot(client, snapshot, opts, baseRef) {
-  const [base, head] = await Promise.all([
-    listAtRef(client, opts.owner, opts.repo, baseRef, snapshot.folder),
-    listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder)
-  ]);
+  const base = await listAtRef(client, opts.owner, opts.repo, baseRef, snapshot.folder);
+  const head = await listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder);
   const fromBase = previousSnapshotIn(base, snapshot.number);
   const fromHead = previousSnapshotIn(head, snapshot.number);
   if (fromHead && (!fromBase || fromHead.number >= fromBase.number)) {
@@ -196426,15 +196445,20 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       deletions: compareFile.deletions ?? prFile.deletions,
       changes: compareFile.changes ?? prFile.changes
     };
-    if (status === "added" && SNAPSHOT_PATH_RE2.test(compareFile.filename) && prFile.patch !== void 0) {
+    const isSnapshot = status === "added" && SNAPSHOT_PATH_RE2.test(compareFile.filename);
+    if (isSnapshot && prFile.patch !== void 0) {
       mapped.patch = prFile.patch;
     } else if (compareFile.patch !== void 0) {
       const own2 = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own2 === void 0)
         continue;
       mapped.patch = own2;
-    } else if (prFile.patch !== void 0) {
-      mapped.patch = prFile.patch;
+    } else if (!isSnapshot) {
+      return {
+        mode: "full",
+        files: prFiles,
+        reason: `the new changes of ${compareFile.filename} are too large for the compare API`
+      };
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== void 0) {

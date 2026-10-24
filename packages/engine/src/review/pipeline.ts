@@ -268,8 +268,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   // Token and cost budgets count only the context retained in the prompt.
   // A review that will be batched sends no whole-PR prompt: only its batches are checked, each
-  // against maxInputTokens below. Counting the whole PR here would skip a review whose batches
-  // fit, so the check is only for the unbatched review.
+  // against maxInputTokens below, and their total below too. Counting the whole PR here would
+  // skip a review whose batches fit, so the check is only for the unbatched review.
   const batched = withoutContextTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0;
   if (!batched) {
     const budgetResult = checkBudget({
@@ -319,6 +319,16 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   for (const callTokens of callPromptTokens) {
     const callBudget = checkBudget({ promptTokens: callTokens, maxInputTokens: budgetCfg.maxInputTokens });
     if (!callBudget.ok) return { status: 'skipped-budget', reason: callBudget.reason };
+  }
+  // A batched review sends no whole-PR prompt, but it does send every planned batch: their
+  // total is the input the review really costs, so it is bounded as well (ADR-0045, rule 3).
+  // Only the planned batches count: the parts beyond review.maxFileParts are never sent.
+  if (plan) {
+    const totalBudget = checkBudget({
+      promptTokens: callPromptTokens.reduce((sum, tokens) => sum + tokens, 0),
+      maxInputTokens: budgetCfg.maxInputTokens,
+    });
+    if (!totalBudget.ok) return { status: 'skipped-budget', reason: totalBudget.reason };
   }
 
   // Each call may return up to maxFindings findings, so its answer budget grows with them (ADR-0033).

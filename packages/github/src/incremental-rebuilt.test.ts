@@ -4,7 +4,11 @@ import { buildMarker } from './marker.js';
 import type { PullRequestFile } from './pr-files.js';
 import { selectIncrementalFiles } from './incremental.js';
 
-/** Incremental reviews keep the patches rebuilt for the whole PR (ADR-0045), and markers of other accounts. */
+/**
+ * Incremental reviews keep the patches rebuilt for the whole PR (ADR-0045), and markers of other
+ * accounts. A compared file without a patch is never shown as new changes: the whole pull request
+ * is reviewed instead.
+ */
 describe('selectIncrementalFiles with rebuilt patches (ADR-0045)', () => {
   const publisherLogin = 'github-actions[bot]';
 
@@ -27,7 +31,7 @@ describe('selectIncrementalFiles with rebuilt patches (ADR-0045)', () => {
     },
   ];
 
-  it('uses the pull request patch when the comparison has none', async () => {
+  it('reviews the whole pull request when the comparison has no patch for a file', async () => {
     const lastSha = 'last-sha-no-patch';
     const headSha = 'head-sha-no-patch';
     const marker = buildMarker({ headSha: lastSha, configHash: 'conf-1' });
@@ -58,20 +62,12 @@ describe('selectIncrementalFiles with rebuilt patches (ADR-0045)', () => {
       publisherLogin, prFiles: mockPrFiles,
     });
 
-    // The whole patch of the file is reviewed instead of nothing.
+    // The pull request's own patch holds the changes from before the last reviewed commit too:
+    // they are not shown as new ones, so the whole pull request is reviewed.
     expect(result).toEqual({
-      mode: 'incremental',
-      files: [
-        {
-          path: 'src/main.ts',
-          status: 'modified',
-          patch: mockPrFiles[0]!.patch,
-          additions: 1,
-          deletions: 1,
-          changes: 2,
-        },
-      ],
-      sinceSha: lastSha,
+      mode: 'full',
+      files: mockPrFiles,
+      reason: 'the new changes of src/main.ts are too large for the compare API',
     });
   });
 
