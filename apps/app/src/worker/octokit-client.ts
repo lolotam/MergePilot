@@ -121,6 +121,14 @@ export interface OctokitLike {
         name: string;
       }): Promise<{ data: unknown }>;
     };
+    git?: {
+      getTree?(params: {
+        owner: string;
+        repo: string;
+        tree_sha: string;
+        recursive?: string;
+      }): Promise<{ data: { tree?: Array<{ path?: string; type?: string }>; truncated?: boolean } }>;
+    };
   };
 }
 
@@ -209,6 +217,35 @@ export function wrapOctokit(octokit: OctokitLike): GitHubClient {
           ref: params.ref,
         });
         return directoryFilesOf(response.data);
+      } catch (error: unknown) {
+        if (isNotFoundError(error)) return null;
+        throw error;
+      }
+    },
+
+    async listTreePaths(params: {
+      owner: string;
+      repo: string;
+      ref: string;
+    }): Promise<{ paths: string[]; truncated: boolean } | null> {
+      const git = octokit.rest.git;
+      if (!git?.getTree) return null;
+      try {
+        const response = await git.getTree({
+          owner: params.owner,
+          repo: params.repo,
+          tree_sha: params.ref,
+          recursive: 'true',
+        });
+        const tree = Array.isArray(response.data.tree) ? response.data.tree : [];
+        // A truncated tree still holds what the API returned; the rest is simply not listed, and
+        // the caller says so.
+        return {
+          paths: tree.flatMap((entry) =>
+            entry.type === 'blob' && typeof entry.path === 'string' ? [entry.path] : [],
+          ),
+          truncated: response.data.truncated === true,
+        };
       } catch (error: unknown) {
         if (isNotFoundError(error)) return null;
         throw error;

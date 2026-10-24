@@ -13,7 +13,8 @@ import { z } from 'zod';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { checkBudget, estimateTokens } from './budget.js';
-import { JSON_ONLY_REMINDER, retryUnusableAnswer, type ReviewDeadline } from './call.js';
+import { JSON_ONLY_REMINDER, retryUnusableAnswer, ReviewDeadline } from './call.js';
+import { runExploration, type ExplorePassInput } from './explore.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { combineUsage, needsTruncationRetry, type ReviewableFileWithPatch } from './split.js';
 import { verifyOutputTokensFor, verifyRetryOutputTokens } from './output-budget.js';
@@ -60,6 +61,12 @@ export interface VerifyPassInput {
   spend: SpendTracker;
   knownSecrets: readonly Secret[];
   totalUsage: TokenUsage | undefined;
+  /**
+   * The read-only exploration of the verifier (ADR-0046): one round from the remaining read
+   * budget, so a finding whose evidence sits in a file that was not shown is checked against
+   * that file.
+   */
+  explore?: ExplorePassInput | undefined;
   signal?: AbortSignal | undefined;
   deadline?: ReviewDeadline | undefined;
 }
@@ -130,10 +137,41 @@ function buildFittingVerifyPrompt(
   return { prompt: withoutRules, promptTokens: withoutRulesTokens };
 }
 
+/**
+ * Whether the verification prompt of `tokens` still fits the limit the JSON-only retry needs
+ * (ADR-0044): the explored results are left out when they do not.
+ */
+function fitsVerifyPrompt(input: VerifyPassInput, tokens: number): boolean {
+  return (
+    input.maxInputTokens === undefined ||
+    tokens + estimateTokens(JSON_ONLY_REMINDER) <= input.maxInputTokens
+  );
+}
+
+/**
+ * The verification prompt with a block appended: the prompt keeps every field it has, only the
+ * user part grows. An empty block and a block that does not fit the limit the JSON-only retry
+ * needs leave the prompt as it was (ADR-0044).
+ */
+function withBlock(
+  input: VerifyPassInput,
+  prompt: BuiltVerifyPrompt,
+  promptTokens: number,
+  block: string,
+): { prompt: BuiltVerifyPrompt; promptTokens: number; appended: boolean } {
+  if (!block) return { prompt, promptTokens, appended: false };
+  const user = `${prompt.user}\n\n${block}`;
+  const tokens = estimateTokens(prompt.system + user);
+  if (!fitsVerifyPrompt(input, tokens)) return { prompt, promptTokens, appended: false };
+  return { prompt: { ...prompt, user }, promptTokens: tokens, appended: true };
+}
+
 /** How many times the rules cap is lowered by the overflow before the rules are left out. */
 const SHORTEN_ATTEMPTS = 5;
 /** The least each step lowers the cap: a cut drops whole lines, so a smaller step may drop none. */
 const SHORTEN_MIN_STEP = 50;
+/** The deadline of a verify pass that was given none: it never expires on its own. */
+const NO_DEADLINE_MS = Number.MAX_SAFE_INTEGER;
 
 /**
  * The verification prompt with the rules cap lowered by the overflow until the prompt fits, or
@@ -181,8 +219,16 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     incompleteReasons: [...incompleteReasons, `verification skipped: ${reason}`],
   });
 
-  const verifyPrompt = fitted.prompt;
-  const promptTokens = fitted.promptTokens;
+  let verifyPrompt = fitted.prompt;
+  let promptTokens = fitted.promptTokens;
+  // The prompt that passed the budget check: the explored blocks are added to it only when the
+  // call still fits them (ADR-0046).
+  const plainPrompt = verifyPrompt;
+  const plainTokens = promptTokens;
+  // The prompt with the review's block alone: the fallback the verifier prefers when the blocks
+  // do not fit the spend (ADR-0046).
+  let priorPrompt: BuiltVerifyPrompt | undefined;
+  let priorTokens = 0;
   // The answer has one verdict per finding, so its budget grows with them (ADR-0033).
   const maxOutputTokens = verifyOutputTokensFor(input.findings.length);
   const retryOutputTokens = verifyRetryOutputTokens(maxOutputTokens);
@@ -200,6 +246,69 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
   }
   if (!spend.canAfford(promptTokens, firstRequested)) {
     return unchanged('budget limit reached');
+  }
+
+  // The verifier explores before it judges (ADR-0046): one round from the remaining read budget.
+  if (input.explore) {
+    // The evidence the review read comes first: the verifier judges the findings against it, even
+    // when the read budget is used up and the verifier cannot read anything itself.
+    const withPrior = withBlock(input, verifyPrompt, promptTokens, input.explore.priorBlock);
+    if (withPrior.appended) {
+      // The review's block alone: the first fallback when the blocks do not fit the spend.
+      priorPrompt = withPrior.prompt;
+      priorTokens = withPrior.promptTokens;
+    }
+    verifyPrompt = withPrior.prompt;
+    promptTokens = withPrior.promptTokens;
+    // The verifier explores only when the read budget still has tokens for it.
+    if (!input.explore.budget.usedUp) {
+      const explored = await runExploration({
+        model,
+        spend,
+        deadline: input.deadline ?? new ReviewDeadline(NO_DEADLINE_MS),
+        signal,
+        system: verifyPrompt.system,
+        user: verifyPrompt.user,
+        rounds: 1,
+        limits: input.explore.limits,
+        budget: input.explore.budget,
+        reader: input.explore.reader,
+        heldTexts: input.explore.heldTexts,
+        allowPath: input.explore.allowPath,
+        knownSecrets: input.knownSecrets,
+        purpose: 'verify',
+        // The money the verification call needs stays out of the exploration's reach.
+        reserve: { promptTokens, outputTokens: firstRequested },
+        // A round whose prompt is over the input-token limit is not sent.
+        promptLimit: inputLimit,
+        // The entries the review already showed are not shown again when its block is in the
+        // prompt (ADR-0046).
+        shownEntries: withPrior.appended ? input.explore.priorEntries : undefined,
+      });
+      totalUsage = combineUsage(totalUsage, explored.usage);
+      const withExplored = withBlock(input, verifyPrompt, promptTokens, explored.block);
+      verifyPrompt = withExplored.prompt;
+      promptTokens = withExplored.promptTokens;
+    }
+  }
+
+  // The verifier's own round may have used the time the review had: no verification call then.
+  if (input.deadline?.expired) {
+    return unchanged('time limit reached');
+  }
+  // The blocks are in the prompt now: the call must still fit the budget. When it does not, the
+  // call goes with the prompt that keeps what the spend can afford: the review's block alone
+  // first, then the plain prompt (ADR-0046).
+  if (!spend.canAfford(promptTokens, firstRequested)) {
+    const affordable =
+      priorPrompt && spend.canAfford(priorTokens, firstRequested)
+        ? { prompt: priorPrompt, promptTokens: priorTokens }
+        : spend.canAfford(plainTokens, firstRequested)
+          ? { prompt: plainPrompt, promptTokens: plainTokens }
+          : undefined;
+    if (!affordable) return unchanged('budget limit reached');
+    verifyPrompt = affordable.prompt;
+    promptTokens = affordable.promptTokens;
   }
 
   const parse = (res: ReviewModelResponse): ReturnType<typeof parseVerifyAnswer> =>

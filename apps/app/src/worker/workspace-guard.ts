@@ -33,6 +33,7 @@ export function guardWritesForWorkspace(
     listReviewCommentsPage: bind(client.listReviewCommentsPage),
     listReviewThreads: bind(client.listReviewThreads),
     listDirectoryFiles: bind(client.listDirectoryFiles),
+    listTreePaths: bind(client.listTreePaths),
     listIssueCommentsPage: bind(client.listIssueCommentsPage),
     getCollaboratorPermission: bind(client.getCollaboratorPermission),
     createIssue: guarded(bind(client.createIssue)),

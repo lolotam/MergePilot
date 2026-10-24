@@ -80,6 +80,34 @@ export const DEFAULT_PR_CONTEXT_TOKENS = 15_000;
 export const DEFAULT_MAX_FINDINGS = 5;
 export const MAX_FINDINGS_LIMIT = 50;
 
+/** The exploration limits as the pipeline reads them (ADR-0046). */
+export interface ExploreLimits {
+  maxRounds: number;
+  maxRequestsPerRound: number;
+  maxReadTokens: number;
+  maxLinesPerRead: number;
+}
+
+/** The exploration limits, defaulted for a config built in code without the schema. */
+export const EXPLORE_LIMIT_DEFAULTS: Readonly<ExploreLimits> = Object.freeze({
+  maxRounds: 3,
+  maxRequestsPerRound: 8,
+  maxReadTokens: 30_000,
+  maxLinesPerRead: 400,
+});
+
+/** The limits of the read-only repository exploration (ADR-0046). */
+export const ExploreSettingsSchema = z.strictObject({
+  /** Exploration rounds before the review answer; each one is a model call. */
+  maxRounds: z.number().int().min(1).max(3).default(EXPLORE_LIMIT_DEFAULTS.maxRounds),
+  /** Requests one round may ask for. */
+  maxRequestsPerRound: z.number().int().min(1).max(8).default(EXPLORE_LIMIT_DEFAULTS.maxRequestsPerRound),
+  /** Estimated tokens of read content per review, across the rounds and the verifier. */
+  maxReadTokens: z.number().int().min(1000).max(200_000).default(EXPLORE_LIMIT_DEFAULTS.maxReadTokens),
+  /** Lines one read may return. */
+  maxLinesPerRead: z.number().int().min(20).max(2000).default(EXPLORE_LIMIT_DEFAULTS.maxLinesPerRead),
+});
+
 const ReviewSettingsSchema = z.strictObject({
   maxFindings: z.number().int().min(1).max(MAX_FINDINGS_LIMIT).default(DEFAULT_MAX_FINDINGS),
   minSeverity: SeveritySchema.default('medium'),
@@ -109,6 +137,11 @@ const ReviewSettingsSchema = z.strictObject({
    * rest. Taken out of `contextTokens`, never added to it. 0 turns PR context off (ADR-0030).
    */
   prContextTokens: z.number().int().min(0).default(DEFAULT_PR_CONTEXT_TOKENS),
+  /**
+   * Limits of read-only repository exploration (ADR-0046); it runs only when the caller passes a
+   * reader.
+   */
+  explore: ExploreSettingsSchema.prefault({}),
   pathInstructions: z.array(PathInstructionSchema).default([]),
   /** Second model pass that re-checks every finding against the code before publishing. */
   verify: z.boolean().default(true),

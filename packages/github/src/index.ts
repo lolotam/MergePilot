@@ -121,6 +121,7 @@ export * from './judge-summary.js';
 export * from './review-notes.js';
 export * from './rules-files.js';
 export * from './review-context.js';
+export { createRepositoryReader, isExplorablePath, type RepositoryReaderParams } from './explore-reader.js';
 export * from './review-inputs.js';
 export * from './review-threads.js';
 export * from './open-findings.js';
