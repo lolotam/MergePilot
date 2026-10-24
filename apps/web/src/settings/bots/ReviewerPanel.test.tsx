@@ -68,7 +68,7 @@ describe('Reviewer panel settings (bot tabs)', () => {
   });
 
   it('"Copy from main bot" fills the form without saving; Save then sends it', async () => {
-    const server = fakeBotsServer({ bots: [extraBot(2, { name: 'Owl bot' })] });
+    const server = fakeBotsServer({ bots: [extraBot(2, { name: 'Owl bot', exploreEnabled: true })] });
     renderPanel();
     await openTab(user, /Owl bot/);
     await user.click(screen.getByRole('button', { name: 'Copy from main bot' }));
@@ -88,8 +88,8 @@ describe('Reviewer panel settings (bot tabs)', () => {
       effort: 'high',
       fallback: [{ provider: 'openrouter', model: 'fb/one', effort: null }],
       skillId: null,
-      exploreEnabled: false,
     });
+    expect(server.state.bots[0]?.exploreEnabled).toBe(true);
   });
 
   it('the active switch saves the bot at once', async () => {

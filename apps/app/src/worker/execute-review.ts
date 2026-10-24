@@ -226,6 +226,7 @@ export async function executeReview(
       ...fallbackSummary,
       outcome: 'failed',
       reason,
+      exploration: run.exploration,
       ...shown,
     });
   }

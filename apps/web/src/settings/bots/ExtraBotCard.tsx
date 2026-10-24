@@ -120,7 +120,6 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
       fallback: cleanFallback(fallback),
       // Always sent: saving the bot confirms the skill choice and clears a deleted-skill note.
       skillId,
-      exploreEnabled: bot.exploreEnabled,
     };
     try {
       await save.mutateAsync({ slot: bot.slot, input });

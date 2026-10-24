@@ -161,6 +161,15 @@ describe('PUT settings validation and key base URLs (J2)', { timeout: 25000 }, (
     });
   });
 
+  it('keeps exploration enabled when a settings PUT omits exploreEnabled', async () => {
+    expect((await put({ exploreEnabled: true })).statusCode).toBe(200);
+
+    const response = await put({ monthlyBudgetUsd: 75 });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().settings.exploreEnabled).toBe(true);
+  });
+
   it('validates the merged result, so a patch cannot leave a heavy model without its provider', async () => {
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openrouter', apiKey: keyFor('or'), userId: 'u-admin' });
     expect((await put({ heavyProvider: 'openrouter', heavyModel: 'm' })).statusCode).toBe(200);

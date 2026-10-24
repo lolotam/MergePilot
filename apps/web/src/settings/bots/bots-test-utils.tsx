@@ -87,7 +87,9 @@ export function fakeBotsServer(
         ...(body as unknown as ReviewerBotDto),
         slot,
         effort: (body?.['effort'] as string | null) ?? null,
-        exploreEnabled: (body?.['exploreEnabled'] as boolean) ?? false,
+        exploreEnabled: body && 'exploreEnabled' in body
+          ? (body['exploreEnabled'] as boolean)
+          : (state.bots.find((b) => b.slot === slot)?.exploreEnabled ?? false),
       };
       state.bots = [...state.bots.filter((b) => b.slot !== slot), bot].sort((a, b) => a.slot - b.slot);
       return { bot };

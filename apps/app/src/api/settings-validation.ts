@@ -49,7 +49,7 @@ export function mergeSettings(
     botLogo: update.botLogo ?? current?.botLogo,
     panelMode: update.panelMode ?? current?.panelMode,
     panelMinAgreement: update.panelMinAgreement ?? current?.panelMinAgreement,
-    exploreEnabled: update.exploreEnabled ?? current?.exploreEnabled ?? false,
+    ...(update.exploreEnabled !== undefined ? { exploreEnabled: update.exploreEnabled } : {}),
     // ADR-0034: undefined keeps the stored skill (and its deleted-skill note); null is Default.
     ...(update.skillId !== undefined
       ? { skillId: update.skillId }
