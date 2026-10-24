@@ -18,6 +18,30 @@ describe('repository context limits', () => {
   });
 });
 
+describe('the limits of the read-only exploration (ADR-0046)', () => {
+  const parse = (review = {}) => MergePilotConfigSchema.parse({ provider: 'anthropic', model: 'm', review }).review;
+
+  it('defaults every exploration limit', () => {
+    expect(parse().explore).toEqual({
+      maxRounds: 3,
+      maxRequestsPerRound: 8,
+      maxReadTokens: 30_000,
+      maxLinesPerRead: 400,
+    });
+  });
+
+  it('rejects rounds outside the range', () => {
+    expect(() => parse({ explore: { maxRounds: 0 } })).toThrow();
+    expect(() => parse({ explore: { maxRounds: 6 } })).toThrow();
+    expect(() => parse({ explore: { maxRequestsPerRound: 0 } })).toThrow();
+    expect(() => parse({ explore: { maxRequestsPerRound: 21 } })).toThrow();
+    expect(() => parse({ explore: { maxReadTokens: 999 } })).toThrow();
+    expect(() => parse({ explore: { maxReadTokens: 200_001 } })).toThrow();
+    expect(() => parse({ explore: { maxLinesPerRead: 19 } })).toThrow();
+    expect(() => parse({ explore: { maxLinesPerRead: 2_001 } })).toThrow();
+  });
+});
+
 describe('AuditSchema', () => {
   it('applies defaults correctly', () => {
     const parsed = AuditSchema.parse({});

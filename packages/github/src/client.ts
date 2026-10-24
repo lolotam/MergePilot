@@ -178,6 +178,25 @@ export function createOctokitClient(token: string): GitHubClient {
         }
       },
 
+      async listTreePaths(params: { owner: string; repo: string; ref: string }): Promise<string[] | null> {
+        try {
+          const response = await octokit.rest.git.getTree({
+            owner: params.owner,
+            repo: params.repo,
+            tree_sha: params.ref,
+            recursive: 'true',
+          });
+          const tree = Array.isArray(response.data.tree) ? response.data.tree : [];
+          // A truncated tree still holds what the API returned; the rest is simply not listed.
+          return tree.flatMap((entry) =>
+            entry.type === 'blob' && typeof entry.path === 'string' ? [entry.path] : [],
+          );
+        } catch (error: unknown) {
+          if (isNotFoundError(error)) return null;
+          sanitizeError(error, token);
+        }
+      },
+
       async compareCommits(params: CompareCommitsParams): Promise<CompareCommitsResult | null> {
         try {
           const PAGE_SIZE = 100;

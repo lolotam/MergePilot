@@ -27,6 +27,7 @@ import { buildBatchPrompt } from './batch-run.js';
 import { checkBudget, costOverBudgetReason, estimateTokens } from './budget.js';
 import { ReviewDeadline, withCallTimeout } from './call.js';
 import { ContextPlan, type ContextDisclosure, type RepositoryContextFile } from './context.js';
+import { exploreBeforeSinglePass, type ExploreInput, type ExplorationDisclosure } from './explore-step.js';
 import { runFalsePositiveFilter, type FalsePositiveOutcome } from '../judge/false-positive.js';
 import { hasJudgeUse, type JudgeUses } from '../judge/uses.js';
 import type { Judge } from '../judge/judge.js';
@@ -40,7 +41,7 @@ import type { Finding, ReviewResult, Severity } from './types.js';
 import { redactWithheld, type WithheldItem } from './withheld.js';
 import { anchorIndexOf, redactPatches } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
-import { batchFilesByTokenCap, type CappedBatches } from './split.js';
+import { batchFilesByTokenCap, combineUsage, type CappedBatches } from './split.js';
 import { estimateReviewCostUsd, paidSwitchFits, SpendTracker } from './spend.js';
 import type { ReviewSkill } from './skill.js';
 import { runVerifyPass } from './verify-pass.js';
@@ -97,6 +98,11 @@ export interface RunReviewInput {
    * redacts and fits them to each call's `review.contextTokens` share; untrusted like the patches.
    */
   contextFiles?: RepositoryContextFile[] | undefined;
+  /**
+   * Read-only repository exploration (ADR-0046): the reader the exploration rounds use, at the PR
+   * head. Without it the exploration stays off, whatever `review.explore` says.
+   */
+  explore?: ExploreInput | undefined;
   signal?: AbortSignal | undefined;
   /**
    * Optional Jev judge (ADR-0015); its false-positive check runs after the verify pass when `uses`
@@ -129,6 +135,8 @@ export type ReviewRunResult =
       judge?: JudgeFilterSummary | undefined;
       /** Repository context sent and left out (ADR-0029); a disclosure, not an incomplete reason. */
       context?: ContextDisclosure | undefined;
+      /** What the read-only exploration did (ADR-0046); a disclosure, not an incomplete reason. */
+      exploration?: ExplorationDisclosure | undefined;
       /** The model's output limit clamped the answer budget below what maxFindings needs (ADR-0033). */
       outputLimit?: OutputLimitDisclosure | undefined;
       /** Each answer that left the findings list out (secret-redacted preview); for logs only, never the summary. */
@@ -148,6 +156,8 @@ export type ReviewRunResult =
       usage?: TokenUsage | undefined;
       /** What those calls cost, by the same rule as a completed run; absent when unknown. */
       costUsd?: number | undefined;
+      /** What the read-only exploration did (ADR-0046); a disclosure, not an incomplete reason. */
+      exploration?: ExplorationDisclosure | undefined;
       onlySubscriptionCalls: boolean;
     } & Partial<FallbackDisclosure>);
 
@@ -363,6 +373,14 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const spend = new SpendTracker(currentPricing, budgetCfg.perReviewUsd);
 
   // ── Steps d + e: model call(s), parse, recovery ────────────────────────
+  // Read-only exploration before the answer (ADR-0046): only when the caller passes a reader,
+  // and only in a single-call review; a batched one discloses that it did not explore.
+  const explored = await exploreBeforeSinglePass({
+    explore: input.explore, review: reviewCfg, batched: plan !== undefined, model, spend, deadline, signal,
+    prompt, promptTokens, promptLimit: wholePromptLimit, files: redactedReviewableFiles,
+    contextFiles: context.sentFiles(), knownSecrets, reviewOutputTokens,
+  });
+
   const passContext: ReviewPassContext = {
     config: promptConfig,
     model,
@@ -370,8 +388,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     knownSecrets,
     signal,
     deadline,
-    prompt,
-    promptTokens,
+    prompt: explored.prompt,
+    promptTokens: explored.promptTokens,
     maxOutputTokens,
     reviewOutputTokens,
     promptPr,
@@ -381,23 +399,26 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     contextFor: context.forBatch,
     manifestFiles,
   };
+
   const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
   if (!pass.ok) {
     // Calls that answered before the failure were still paid for (ADR-0027 amendment).
     const disclosure = model.disclosure(knownSecrets);
     const failedCostUsd = knownCostUsd(model, disclosure, budgetCfg.pricing, spend);
+    const failedUsage = combineUsage(pass.totalUsage, explored.usage);
     return {
       status: 'failed',
       reason: pass.reason,
       ...(pass.detail ? { detail: pass.detail } : {}),
       ...(pass.answerAttempts ? { answerAttempts: pass.answerAttempts } : {}),
-      ...(pass.totalUsage ? { usage: pass.totalUsage } : {}),
+      ...(failedUsage ? { usage: failedUsage } : {}),
       ...(failedCostUsd !== undefined ? { costUsd: failedCostUsd } : {}),
+      ...explored.disclosure(),
       ...disclosure,
       onlySubscriptionCalls: model.onlySubscriptionCalls,
     };
   }
-  let totalUsage = pass.totalUsage;
+  let totalUsage = combineUsage(pass.totalUsage, explored.usage);
   incompleteReasons.push(...pass.incompleteReasons);
   // The answer budget of the model that answered the review (a fallback's own limit after a
   // fallback), read before verification can move the chain on: the summary then says the answer
@@ -429,6 +450,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       totalUsage,
       signal,
       deadline,
+      // The verifier explores too, from the same remaining read budget (ADR-0046).
+      explore: explored.explorePass,
     });
     modelFindings = verified.findings;
     totalUsage = verified.totalUsage;
@@ -499,6 +522,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     ...(verifyRejected.length > 0 ? { verifyRejected } : {}),
     ...(judge ? { judge } : {}),
     ...(contextDisclosure ? { context: contextDisclosure } : {}),
+    ...explored.disclosure(),
     ...(outputLimit ? { outputLimit } : {}),
     ...(pass.answerAttempts ? { answerAttempts: pass.answerAttempts } : {}),
     ...disclosure,

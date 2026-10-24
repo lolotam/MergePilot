@@ -13,7 +13,8 @@ import { z } from 'zod';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { checkBudget, estimateTokens } from './budget.js';
-import { JSON_ONLY_REMINDER, retryUnusableAnswer, type ReviewDeadline } from './call.js';
+import { JSON_ONLY_REMINDER, retryUnusableAnswer, ReviewDeadline } from './call.js';
+import { runExploration, type ExplorePassInput } from './explore.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { combineUsage, needsTruncationRetry, type ReviewableFileWithPatch } from './split.js';
 import { verifyOutputTokensFor, verifyRetryOutputTokens } from './output-budget.js';
@@ -60,6 +61,12 @@ export interface VerifyPassInput {
   spend: SpendTracker;
   knownSecrets: readonly Secret[];
   totalUsage: TokenUsage | undefined;
+  /**
+   * The read-only exploration of the verifier (ADR-0046): one round from the remaining read
+   * budget, so a finding whose evidence sits in a file that was not shown is checked against
+   * that file.
+   */
+  explore?: ExplorePassInput | undefined;
   signal?: AbortSignal | undefined;
   deadline?: ReviewDeadline | undefined;
 }
@@ -134,6 +141,8 @@ function buildFittingVerifyPrompt(
 const SHORTEN_ATTEMPTS = 5;
 /** The least each step lowers the cap: a cut drops whole lines, so a smaller step may drop none. */
 const SHORTEN_MIN_STEP = 50;
+/** The deadline of a verify pass that was given none: it never expires on its own. */
+const NO_DEADLINE_MS = Number.MAX_SAFE_INTEGER;
 
 /**
  * The verification prompt with the rules cap lowered by the overflow until the prompt fits, or
@@ -181,8 +190,8 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     incompleteReasons: [...incompleteReasons, `verification skipped: ${reason}`],
   });
 
-  const verifyPrompt = fitted.prompt;
-  const promptTokens = fitted.promptTokens;
+  let verifyPrompt = fitted.prompt;
+  let promptTokens = fitted.promptTokens;
   // The answer has one verdict per finding, so its budget grows with them (ADR-0033).
   const maxOutputTokens = verifyOutputTokensFor(input.findings.length);
   const retryOutputTokens = verifyRetryOutputTokens(maxOutputTokens);
@@ -200,6 +209,42 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
   }
   if (!spend.canAfford(promptTokens, firstRequested)) {
     return unchanged('budget limit reached');
+  }
+
+  // The verifier explores before it judges (ADR-0046): one round from the remaining read budget.
+  if (input.explore) {
+    const explored = await runExploration({
+      model,
+      spend,
+      deadline: input.deadline ?? new ReviewDeadline(NO_DEADLINE_MS),
+      signal,
+      system: verifyPrompt.system,
+      user: verifyPrompt.user,
+      rounds: 1,
+      limits: input.explore.limits,
+      budget: input.explore.budget,
+      reader: input.explore.reader,
+      heldTexts: input.explore.heldTexts,
+      allowPath: input.explore.allowPath,
+      knownSecrets: input.knownSecrets,
+      purpose: 'verify',
+      // The money the verification call needs stays out of the exploration's reach.
+      reserve: { promptTokens, outputTokens: firstRequested },
+    });
+    totalUsage = combineUsage(totalUsage, explored.usage);
+    if (explored.block) {
+      const user = `${verifyPrompt.user}\n\n${explored.block}`;
+      const tokens = estimateTokens(verifyPrompt.system + user);
+      // The prompt with the explored results must still fit the limit the retry needs.
+      const fits =
+        input.maxInputTokens === undefined ||
+        tokens + estimateTokens(JSON_ONLY_REMINDER) <= input.maxInputTokens;
+      if (fits) {
+        // The prompt keeps every field it has; only the user part grows.
+        verifyPrompt = { ...verifyPrompt, user };
+        promptTokens = tokens;
+      }
+    }
   }
 
   const parse = (res: ReviewModelResponse): ReturnType<typeof parseVerifyAnswer> =>

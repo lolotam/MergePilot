@@ -19,6 +19,8 @@ export * from './review/batch-run.js';
 export * from './review/truncation.js';
 export * from './review/call.js';
 export * from './review/context.js';
+export type { RepositoryReader, ExploreInput, ExplorationDisclosure } from './review/explore.js';
+export { normalizeExplorePath, isUnsafeExplorePath } from './review/explore-requests.js';
 export * from './review/follow-up.js';
 export * from './review/skill.js';
 export * from './review/withheld.js';

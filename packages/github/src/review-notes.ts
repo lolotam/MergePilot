@@ -1,4 +1,4 @@
-import type { ContextDisclosure, ContextPaths, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
+import type { ContextDisclosure, ContextPaths, ExplorationDisclosure, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
 import { escapeInline } from './bot-identity.js';
 import { neutralize } from './text-safety.js';
 
@@ -88,6 +88,32 @@ export function renderContextNote(context: ContextDisclosure | undefined, isArab
     openFindingsLine(context.openFindings, isArabic),
   ].filter((line): line is string => line !== undefined);
   return lines.length > 0 ? lines.join('\n>\n') : undefined;
+}
+
+/**
+ * «Explored: N files in R rounds»: how much of the repository the review looked at on its own
+ * before it answered (ADR-0046). A disclosure, not an incomplete review: the diff itself was
+ * fully reviewed.
+ */
+export function renderExplorationNote(
+  exploration: ExplorationDisclosure | undefined,
+  isArabic: boolean,
+): string | undefined {
+  if (!exploration) return undefined;
+  if (exploration.rounds === 0 && !exploration.skipped) return undefined;
+  const files = exploration.filesRead.length;
+  const rounds = exploration.rounds;
+  const refused = exploration.refused;
+  // The reason comes from the engine, but it may hold a provider's message: it is neutralized.
+  const skipped = exploration.skipped ? neutralize(exploration.skipped) : undefined;
+  if (isArabic) {
+    const refusedPart = refused > 0 ? `، ${refused} طلب مرفوض` : '';
+    const skippedPart = skipped ? ` (اتخطى: ${skipped})` : '';
+    return `> ℹ️ الاستكشاف: ${files} ملف في ${rounds} جولة${refusedPart}${skippedPart}`;
+  }
+  const refusedPart = refused > 0 ? `, ${refused} requests refused` : '';
+  const skippedPart = skipped ? ` (skipped: ${skipped})` : '';
+  return `> ℹ️ Explored: ${files} files in ${rounds} rounds${refusedPart}${skippedPart}`;
 }
 
 /** The cited files of a disclosure: at most five names, the rest counted (ADR-0041). */
