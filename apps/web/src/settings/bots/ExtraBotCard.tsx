@@ -44,8 +44,11 @@ type Errors = Partial<Record<'name' | 'model' | 'fallback' | 'skill' | 'form', s
 const cleanFallback = (list: readonly FallbackEntry[]): FallbackEntry[] =>
   list.map((f) => ({ provider: f.provider, model: f.model.trim(), effort: f.effort ?? null }));
 
-/** The saved bot as a PUT body, with `active` changed (the switch saves at once). */
-const savedInput = (bot: ReviewerBotDto, active: boolean, exploreEnabled = bot.exploreEnabled): ReviewerBotInput => ({
+/**
+ * The saved bot as a PUT body, with `active` changed (the switch saves at once). `exploreEnabled`
+ * goes only from its own switch: left out, the server keeps the stored value (ADR-0046).
+ */
+const savedInput = (bot: ReviewerBotDto, active: boolean, exploreEnabled?: boolean): ReviewerBotInput => ({
   name: bot.name,
   logo: bot.logo,
   active,
@@ -53,7 +56,7 @@ const savedInput = (bot: ReviewerBotDto, active: boolean, exploreEnabled = bot.e
   model: bot.model,
   effort: bot.effort,
   fallback: bot.fallback,
-  exploreEnabled,
+  ...(exploreEnabled !== undefined ? { exploreEnabled } : {}),
 });
 
 const secondaryButton =
