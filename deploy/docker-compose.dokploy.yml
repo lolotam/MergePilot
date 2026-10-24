@@ -7,12 +7,12 @@
 
 # The release is pinned here (x-image) so shipping or rolling back is one edit of this file,
 # independent of the secrets kept in Dokploy's Environment tab.
-x-image: &image ghcr.io/lolotam/mergepilot:4c32dee68dcc08d4626995d755054c9bc3971cbc
+x-image: &image ghcr.io/lolotam/mergepilot:5d0abe543c4a2c9acb6f085c492432bc769d4a2b@sha256:ff0999f7a6752efb705f6c7a78c82de9849b53510205551f496e048a60276830
 
 # The worker runs its own pin (x-worker-image) so a release can update the web first and the
 # worker in a second phase: recreating the worker waits for its drain, which must not keep the
 # site down (ADR-0025 amendment). Both pins name the same image until a release splits them.
-x-worker-image: &worker-image ghcr.io/lolotam/mergepilot:4c32dee68dcc08d4626995d755054c9bc3971cbc
+x-worker-image: &worker-image ghcr.io/lolotam/mergepilot:a3309481e6cd5b158827e0e0e0b32eeaec2960f1@sha256:8813184a405b19940a06cec573a609a7cdd2a7cc91370d3507edcd3c0d21928f
 
 x-app-env: &app-env
   NODE_ENV: production
