@@ -305,7 +305,7 @@ function explorePass(overrides: Partial<ExplorePassInput> = {}): ExplorePassInpu
   return {
     reader: fakeReader({ 'src/guard.ts': 'export function guard() {}' }),
     budget: new ExploreBudget(LIMITS),
-    heldTexts: { texts: new Map(), patches: new Set() },
+    heldTexts: { sources: [] },
     allowPath: () => true,
     limits: LIMITS,
     priorBlock: '',
