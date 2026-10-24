@@ -71,7 +71,14 @@ function ctx(
     budget,
     limits,
     allowPath,
-    heldTexts: { texts: new Map(Object.entries(heldFiles)), patches: new Set(patches) },
+    // Every held text is a source of its own: the paths in `patches` hold a unified patch.
+    heldTexts: {
+      sources: Object.entries(heldFiles).map(([path, text]) => ({
+        path,
+        text,
+        isPatch: patches.includes(path),
+      })),
+    },
     knownSecrets,
   };
 }
@@ -231,6 +238,32 @@ describe('the requests of an exploration round (ADR-0046)', () => {
     const result = await executeRequests([{ find: { text: 'found' } }], ctx(reader, budget, held));
 
     expect(result.entries[0]!.content).toContain('src/held.ts:1: const found = 0;');
+    expect(result.entries[0]!.content).toContain('src/read.ts:1: const found = 1;');
+  });
+
+  it('searches a file that was read once, not twice', async () => {
+    const reader = fakeReader({ 'src/read.ts': 'const found = 1;' });
+    const budget = new ExploreBudget(LIMITS);
+    const held = { 'src/read.ts': 'const found = 0;' };
+
+    await executeRequests([{ read: { path: 'src/read.ts' } }], ctx(reader, budget, held));
+    const result = await executeRequests([{ find: { text: 'found' } }], ctx(reader, budget, held));
+
+    // The held head file of the path is searched once, through the file that was read.
+    expect(result.entries[0]!.content).toBe('src/read.ts:1: const found = 1;');
+  });
+
+  it('searches the patch of a path that was read, beside the file that was read', async () => {
+    const reader = fakeReader({ 'src/read.ts': 'const found = 1;' });
+    const budget = new ExploreBudget(LIMITS);
+    const patch = ['@@ -1,1 +40,1 @@', '+const found = 2;'].join('\n');
+    const held = { 'src/read.ts': patch };
+
+    await executeRequests([{ read: { path: 'src/read.ts' } }], ctx(reader, budget, held, ['src/read.ts']));
+    const result = await executeRequests([{ find: { text: 'found' } }], ctx(reader, budget, held, ['src/read.ts']));
+
+    // The patch is the change itself: it is searched beside the file that was read.
+    expect(result.entries[0]!.content).toContain('src/read.ts:40: const found = 2;');
     expect(result.entries[0]!.content).toContain('src/read.ts:1: const found = 1;');
   });
 

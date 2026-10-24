@@ -142015,32 +142015,41 @@ async function executeRead(request2, ctx) {
   ctx.budget.markServed(key, cut3.text);
   return { entry: { label, content: cut3.text }, refused: false };
 }
+function findSources(ctx) {
+  const reads = /* @__PURE__ */ new Map();
+  for (const [path12, text] of ctx.budget.readFiles) {
+    if (text !== null)
+      reads.set(path12, text);
+  }
+  const sources = [];
+  for (const source of ctx.heldTexts.sources) {
+    if (!source.isPatch && reads.has(source.path))
+      continue;
+    sources.push(source);
+  }
+  for (const [path12, text] of reads) {
+    sources.push({ path: path12, text, isPatch: false });
+  }
+  return sources;
+}
 async function executeFind(request2, ctx) {
   const label = `find: ${request2.text}`;
   const prefix = request2.path === void 0 ? void 0 : normalizeExplorePath(request2.path);
   if (prefix !== void 0 && isUnsafeExplorePath(prefix)) {
     return { entry: { label: `refused: ${prefix}`, content: REFUSED_CONTENT }, refused: true };
   }
-  const sources = /* @__PURE__ */ new Map();
-  for (const [path12, text] of ctx.heldTexts.texts) {
-    sources.set(path12, { text, isPatch: ctx.heldTexts.patches.has(path12) });
-  }
-  for (const [path12, text] of ctx.budget.readFiles) {
-    if (text !== null)
-      sources.set(path12, { text, isPatch: false });
-  }
   const matches = [];
-  for (const [path12, source] of sources) {
+  for (const source of findSources(ctx)) {
     if (matches.length >= MAX_FIND_MATCHES)
       break;
-    if (prefix !== void 0 && !path12.startsWith(prefix))
+    if (prefix !== void 0 && !source.path.startsWith(prefix))
       continue;
-    if (!ctx.allowPath(path12))
+    if (!ctx.allowPath(source.path))
       continue;
     const room = MAX_FIND_MATCHES - matches.length;
     const found = source.isPatch ? matchesInPatch(source.text, request2.text, room) : matchesInFile(source.text, request2.text, room);
     for (const match3 of found) {
-      matches.push(`${matchPlace(path12, match3)}: ${match3.text}`);
+      matches.push(`${matchPlace(source.path, match3)}: ${match3.text}`);
     }
   }
   let listing;
@@ -142214,21 +142223,14 @@ function exploreLimits(review) {
   };
 }
 function heldTextsOf(files, contextFiles) {
-  const texts = /* @__PURE__ */ new Map();
-  const patches = /* @__PURE__ */ new Set();
+  const sources = [];
   for (const file2 of files) {
-    texts.set(file2.path, file2.patch);
-    patches.add(file2.path);
+    sources.push({ path: file2.path, text: file2.patch, isPatch: true });
   }
   for (const file2 of contextFiles) {
-    texts.set(file2.path, file2.content);
-    if (file2.source === "pull-request") {
-      patches.add(file2.path);
-    } else {
-      patches.delete(file2.path);
-    }
+    sources.push({ path: file2.path, text: file2.content, isPatch: file2.source === "pull-request" });
   }
-  return { texts, patches };
+  return { sources };
 }
 function allowPathOf(exclude) {
   const patterns = [...exclude];

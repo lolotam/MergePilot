@@ -67,7 +67,7 @@ function options(overrides: Partial<Parameters<typeof runExploration>[0]> = {}):
     limits: LIMITS,
     budget: new ExploreBudget(LIMITS),
     reader: fakeReader(),
-    heldTexts: { texts: new Map(), patches: new Set() },
+    heldTexts: { sources: [] },
     allowPath: () => true,
     knownSecrets: [],
     purpose: 'review',

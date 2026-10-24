@@ -15,7 +15,7 @@ import type { Secret } from '../credentials/secret.js';
 import { redactSecrets } from '../security/redact.js';
 import { extractCandidateObjects } from './answer.js';
 import { estimateTokens } from './budget.js';
-import type { ExploreBudget, HeldTexts, RepositoryReader } from './explore.js';
+import type { ExploreBudget, HeldSource, HeldTexts, RepositoryReader } from './explore.js';
 import { matchPlace, matchesInFile, matchesInPatch } from './explore-find.js';
 import { parseJsonLenient } from './json-lenient.js';
 
@@ -260,6 +260,28 @@ async function executeRead(
   return { entry: { label, content: cut.text }, refused: false };
 }
 
+/**
+ * The sources a search goes over: every held text of the review on its own, and the files this
+ * review read. A file that was read is the file at the head, so the held head file of the same
+ * path is searched once, through the read one; a held patch of the same path stays, because it is
+ * the change itself, and a path may be held twice (ADR-0030).
+ */
+function findSources(ctx: ExecuteRequestsContext): HeldSource[] {
+  const reads = new Map<string, string>();
+  for (const [path, text] of ctx.budget.readFiles) {
+    if (text !== null) reads.set(path, text);
+  }
+  const sources: HeldSource[] = [];
+  for (const source of ctx.heldTexts.sources) {
+    if (!source.isPatch && reads.has(source.path)) continue;
+    sources.push(source);
+  }
+  for (const [path, text] of reads) {
+    sources.push({ path, text, isPatch: false });
+  }
+  return sources;
+}
+
 /** One search: the lines of the held files that hold the text, and the paths that name it. */
 async function executeFind(
   request: z.infer<typeof ExploreFindSchema>,
@@ -270,25 +292,17 @@ async function executeFind(
   if (prefix !== undefined && isUnsafeExplorePath(prefix)) {
     return { entry: { label: `refused: ${prefix}`, content: REFUSED_CONTENT }, refused: true };
   }
-  const sources = new Map<string, { text: string; isPatch: boolean }>();
-  for (const [path, text] of ctx.heldTexts.texts) {
-    sources.set(path, { text, isPatch: ctx.heldTexts.patches.has(path) });
-  }
-  // A file that was read is shown as it is at the head, not as the patch of the change.
-  for (const [path, text] of ctx.budget.readFiles) {
-    if (text !== null) sources.set(path, { text, isPatch: false });
-  }
   const matches: string[] = [];
-  for (const [path, source] of sources) {
+  for (const source of findSources(ctx)) {
     if (matches.length >= MAX_FIND_MATCHES) break;
-    if (prefix !== undefined && !path.startsWith(prefix)) continue;
-    if (!ctx.allowPath(path)) continue;
+    if (prefix !== undefined && !source.path.startsWith(prefix)) continue;
+    if (!ctx.allowPath(source.path)) continue;
     const room = MAX_FIND_MATCHES - matches.length;
     const found = source.isPatch
       ? matchesInPatch(source.text, request.text, room)
       : matchesInFile(source.text, request.text, room);
     for (const match of found) {
-      matches.push(`${matchPlace(path, match)}: ${match.text}`);
+      matches.push(`${matchPlace(source.path, match)}: ${match.text}`);
     }
   }
   // A failed listing costs the paths only: the matches the review holds stay, and the error text

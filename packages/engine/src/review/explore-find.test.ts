@@ -52,7 +52,14 @@ async function find(
       budget: new ExploreBudget(LIMITS),
       limits: LIMITS,
       allowPath,
-      heldTexts: { texts: new Map(Object.entries(held)), patches: new Set(patches) },
+      // Every held text is a source of its own: the paths in `patches` hold a unified patch.
+      heldTexts: {
+        sources: Object.entries(held).map(([path, content]) => ({
+          path,
+          text: content,
+          isPatch: patches.includes(path),
+        })),
+      },
       knownSecrets: [],
     },
   );
@@ -156,6 +163,31 @@ describe('the matches of one search (ADR-0046)', () => {
       { path: 'src/a.ts', content: 'const found = 1;' },
     ]);
 
+    expect(content).toContain('src/a.ts:1: const found = 1;');
+  });
+
+  it('searches a path held twice: the patch of the change and the file at the head', async () => {
+    const patch = ['@@ -1,1 +40,1 @@', '+const found = 2;'].join('\n');
+
+    const content = await findHeld('const found', [{ path: 'src/a.ts', patch }], [
+      { path: 'src/a.ts', content: 'const found = 1;' },
+    ]);
+
+    // The patch's match takes the head's line from the hunk header, the head file its own.
+    expect(content).toContain('src/a.ts:40: const found = 2;');
+    expect(content).toContain('src/a.ts:1: const found = 1;');
+  });
+
+  it('searches a path held twice as PR_CONTEXT and as repository context', async () => {
+    const patch = ['@@ -1,1 +40,1 @@', '+const found = 2;'].join('\n');
+
+    const content = await findHeld('const found', [], [
+      { path: 'src/a.ts', content: patch, source: 'pull-request' },
+      { path: 'src/a.ts', content: 'const found = 1;' },
+    ]);
+
+    // Both go, deliberately (ADR-0030): the pull request's patch of the file and the head file.
+    expect(content).toContain('src/a.ts:40: const found = 2;');
     expect(content).toContain('src/a.ts:1: const found = 1;');
   });
 });

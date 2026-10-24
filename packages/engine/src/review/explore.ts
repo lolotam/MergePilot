@@ -197,39 +197,39 @@ export function exploreLimits(review: { explore?: Partial<ExploreLimits> | undef
 
 /**
  * The files a review holds, for the searches of an exploration round (ADR-0046): the patches of
- * the changed files and the context files. The patches are marked, because their line numbers
- * are the diff's and not the head's.
+ * the changed files and the context files. Every held text is a source of its own: a path may be
+ * held twice (ADR-0030), as the file at the head and as the pull request's patch of it.
  */
 export interface HeldTexts {
-  /** The text of every held file, by path. */
-  readonly texts: ReadonlyMap<string, string>;
-  /** The paths whose held text is a unified patch. */
-  readonly patches: ReadonlySet<string>;
+  /** Every held text of the review, one by one. */
+  readonly sources: ReadonlyArray<HeldSource>;
 }
 
-/** The files a review holds, for the searches of an exploration round. */
+/** One held text of a review: the file it belongs to, its content and what it is. */
+export interface HeldSource {
+  /** The path of the file the text belongs to. */
+  readonly path: string;
+  /** The text itself: the file at the head or the pull request's patch of it. */
+  readonly text: string;
+  /** Whether the text is a unified patch: its matches take their lines from its hunk headers. */
+  readonly isPatch: boolean;
+}
+
+/** The files a review holds, for the searches of an exploration round: nothing is merged. */
 export function heldTextsOf(
   files: readonly { path: string; patch: string }[],
   contextFiles: readonly { path: string; content: string; source?: 'pull-request' | undefined }[],
 ): HeldTexts {
-  const texts = new Map<string, string>();
-  const patches = new Set<string>();
+  const sources: HeldSource[] = [];
   for (const file of files) {
-    texts.set(file.path, file.patch);
-    patches.add(file.path);
+    sources.push({ path: file.path, text: file.patch, isPatch: true });
   }
   for (const file of contextFiles) {
-    texts.set(file.path, file.content);
-    if (file.source === 'pull-request') {
-      // A PR_CONTEXT file holds the pull request's patch of the file (ADR-0030): its matches take
-      // their line numbers from its hunk headers, like the patches do.
-      patches.add(file.path);
-    } else {
-      // A repository context file is the file itself, not a patch of it.
-      patches.delete(file.path);
-    }
+    // A PR_CONTEXT file holds the pull request's patch of the file (ADR-0030): its matches take
+    // their lines from its hunk headers. A repository context file is the file itself.
+    sources.push({ path: file.path, text: file.content, isPatch: file.source === 'pull-request' });
   }
-  return { texts, patches };
+  return { sources };
 }
 
 /** Whether a path may be read: the review's own skip rules (sensitive paths, `review.exclude`). */
