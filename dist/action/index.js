@@ -195858,7 +195858,7 @@ async function snapshotOutcome(client, file2, opts, baseRef) {
   try {
     previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
   } catch {
-    return { kind: "none" };
+    return { kind: "failed", reason: "read" };
   }
   if (!previous)
     return { kind: "none" };
@@ -196462,14 +196462,17 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       continue;
     }
     const status = compareFile.status ?? prFile.status;
+    const isSnapshot = status === "added" && SNAPSHOT_PATH_RE2.test(compareFile.filename);
     const mapped = {
       path: compareFile.filename,
       status,
-      additions: compareFile.additions ?? prFile.additions,
-      deletions: compareFile.deletions ?? prFile.deletions,
-      changes: compareFile.changes ?? prFile.changes
+      // A snapshot's counters come from the rebuilt result, not from the comparison: the
+      // comparison counts the whole new file, so a snapshot that did not change would reach the
+      // engine with changes and no patch, and be reported as a truncated patch.
+      additions: isSnapshot ? prFile.additions : compareFile.additions ?? prFile.additions,
+      deletions: isSnapshot ? prFile.deletions : compareFile.deletions ?? prFile.deletions,
+      changes: isSnapshot ? prFile.changes : compareFile.changes ?? prFile.changes
     };
-    const isSnapshot = status === "added" && SNAPSHOT_PATH_RE2.test(compareFile.filename);
     if (isSnapshot) {
       if (prFile.patch !== void 0)
         mapped.patch = prFile.patch;

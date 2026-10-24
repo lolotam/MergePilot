@@ -339,7 +339,8 @@ type PreviousSnapshot = { name: string; path: string; sha: string };
  * Without a previous snapshot there is nothing to compare against, and the file is rebuilt like
  * any other added file. Once the previous snapshot is found, its content is what the review
  * needs: a content that cannot be read leaves the diff unknown, and the whole file is never sent
- * instead of the regions that differ.
+ * instead of the regions that differ. A folder listing that fails leaves the diff unknown too:
+ * there is no telling whether there is a previous snapshot, so the whole file is never sent.
  */
 async function snapshotOutcome(
   client: GitHubClient,
@@ -353,9 +354,12 @@ async function snapshotOutcome(
   try {
     previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
   } catch {
-    // The folder listing is unavailable: there is no previous snapshot to compare against.
-    return { kind: 'none' };
+    // The folder listing failed: there is no telling whether there is a previous snapshot, so
+    // the diff is unknown and the whole snapshot is never sent instead of it.
+    return { kind: 'failed', reason: 'read' };
   }
+  // A listing that answers null (the folder is not there, or the client cannot list) and a
+  // listing without an earlier snapshot both mean there is no previous snapshot.
   if (!previous) return { kind: 'none' };
   const contents = await readSnapshotContents(client, file, opts, previous);
   // The previous snapshot was found, so the diff against it is what the review needs: a content
@@ -403,7 +407,8 @@ async function readSnapshotContents(
  * The previous snapshot of a snapshot file: the highest number below it in the same folder, in
  * the head commit's listing or in the merge base's, whichever has the higher one. The pull
  * request's own snapshot wins, so a pull request that adds two snapshots diffs the newer one
- * against the older one it adds itself.
+ * against the older one it adds itself. A listing that fails is not swallowed here: the caller
+ * turns it into a failed diff, so the whole snapshot is never sent instead of it.
  */
 async function findPreviousSnapshot(
   client: GitHubClient,

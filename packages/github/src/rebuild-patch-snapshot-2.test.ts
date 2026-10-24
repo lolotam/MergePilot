@@ -111,4 +111,40 @@ describe('rebuildMissingPatches on a snapshot that cannot be compared (ADR-0045,
     // There was no previous snapshot to show only the differences of, so the whole file stands.
     expect(result.files[0]!.patch).toBe(WHOLE_FILE_PATCH);
   });
+
+  it('keeps the whole file GitHub sent when the folder cannot be listed', async () => {
+    // The listing answers null: the folder is not there, or the client cannot list it. There is
+    // no previous snapshot, so the file is rebuilt like any other added file.
+    const client = {
+      listDirectoryFiles: async () => null,
+      getFileContent: async () => null,
+    } as unknown as GitHubClient;
+
+    const result = await rebuildMissingPatches(client, [snapshotFile()], OPTS);
+
+    expect(result.failed).toEqual([]);
+    expect(result.rebuilt).toEqual([]);
+    expect(result.snapshotDiffs).toEqual([]);
+    // The whole file stands: there was no previous snapshot to show only the differences of.
+    expect(result.files[0]!.patch).toBe(WHOLE_FILE_PATCH);
+  });
+
+  it('drops the whole file when the folder listing fails', async () => {
+    // The listing fails: there is no telling whether there is a previous snapshot, so the diff
+    // is unknown and the whole snapshot is never sent instead of the regions that differ.
+    const client = {
+      listDirectoryFiles: async () => {
+        throw new Error('the contents API is down');
+      },
+      getFileContent: async () => null,
+    } as unknown as GitHubClient;
+
+    const result = await rebuildMissingPatches(client, [snapshotFile()], OPTS);
+
+    expect(result.failed).toEqual([{ path: NEW_SNAPSHOT, reason: 'snapshot diff failed (read)' }]);
+    expect(result.rebuilt).toEqual([]);
+    expect(result.snapshotDiffs).toEqual([]);
+    // The patch GitHub sent is dropped too: the whole snapshot is never sent.
+    expect(result.files[0]!.patch).toBeUndefined();
+  });
 });

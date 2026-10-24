@@ -201,15 +201,18 @@ export async function selectIncrementalFiles(
     }
 
     const status = compareFile.status ?? prFile.status;
+    const isSnapshot = status === 'added' && SNAPSHOT_PATH_RE.test(compareFile.filename);
     const mapped: PullRequestFile = {
       path: compareFile.filename,
       status,
-      additions: compareFile.additions ?? prFile.additions,
-      deletions: compareFile.deletions ?? prFile.deletions,
-      changes: compareFile.changes ?? prFile.changes,
+      // A snapshot's counters come from the rebuilt result, not from the comparison: the
+      // comparison counts the whole new file, so a snapshot that did not change would reach the
+      // engine with changes and no patch, and be reported as a truncated patch.
+      additions: isSnapshot ? prFile.additions : compareFile.additions ?? prFile.additions,
+      deletions: isSnapshot ? prFile.deletions : compareFile.deletions ?? prFile.deletions,
+      changes: isSnapshot ? prFile.changes : compareFile.changes ?? prFile.changes,
     };
 
-    const isSnapshot = status === 'added' && SNAPSHOT_PATH_RE.test(compareFile.filename);
     if (isSnapshot) {
       // A snapshot's patch is the diff against its previous snapshot (ADR-0045, rule 5): the
       // compare API's patch is the whole new file, so it is never used. Without a rebuilt patch

@@ -176,6 +176,61 @@ describe('selectIncrementalFiles with rebuilt patches (ADR-0045)', () => {
     });
   });
 
+  it('keeps an unchanged snapshot with no changes, not the whole new file of the comparison', async () => {
+    const lastSha = 'last-sha-unchanged-snapshot';
+    const headSha = 'head-sha-unchanged-snapshot';
+    const marker = buildMarker({ headSha: lastSha, configHash: 'conf-1' });
+    const snapshotPath = 'packages/db/migrations/meta/0176_snapshot.json';
+    // The rebuild compared the snapshot with the previous one and nothing differs: the file is
+    // left with no patch and no changes at all.
+    const prFiles: PullRequestFile[] = [
+      { path: snapshotPath, status: 'added', additions: 0, deletions: 0, changes: 0 },
+    ];
+
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [{ id: 1, user: { login: publisherLogin }, body: marker }];
+      },
+      async compareCommits() {
+        return {
+          status: 'ahead',
+          files: [
+            {
+              filename: snapshotPath,
+              status: 'added',
+              // The comparison counts the whole new file.
+              additions: 20400,
+              deletions: 0,
+              changes: 20400,
+              patch: '@@ -0,0 +1,20400 @@\n+{',
+            },
+          ],
+        };
+      },
+    };
+
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha,
+      publisherLogin, prFiles,
+    });
+
+    // The counters are the rebuilt ones: the snapshot reaches the engine with no changes and no
+    // patch, so it is skipped instead of being reported as a truncated patch.
+    expect(result).toEqual({
+      mode: 'incremental',
+      files: [
+        {
+          path: snapshotPath,
+          status: 'added',
+          additions: 0,
+          deletions: 0,
+          changes: 0,
+        },
+      ],
+      sinceSha: lastSha,
+    });
+  });
+
   it('ignores markers from other accounts', async () => {
     const marker = buildMarker({ headSha: 'pasted', configHash: 'conf-1' });
     const client: Partial<GitHubClient> = {
