@@ -38,6 +38,13 @@ describe('SpendTracker', () => {
     expect(s.spentUsd).toBe(0);
     expect(s.canAfford(1e6, 1e6)).toBe(true);
   });
+
+  it('requires the next affordability check only after it is requested', () => {
+    const s = new SpendTracker(pricing, 1);
+    expect(s.mustCheckNext).toBe(false);
+    s.requireAffordableNext();
+    expect(s.mustCheckNext).toBe(true);
+  });
 });
 
 describe('spend helpers', () => {

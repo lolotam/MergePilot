@@ -88,6 +88,24 @@ describe('redactSecrets', () => {
     expect(result.found).toEqual([{ kind: 'pem', line: 2 }]);
   });
 
+  it('keeps every line break of a five-line PEM key when asked', () => {
+    const pemBlock = [
+      `-----BEGIN RSA ${'PRIVATE'} KEY-----`,
+      'firstFakeBase64Line',
+      'secondFakeBase64Line',
+      'thirdFakeBase64Line',
+      '-----END RSA PRIVATE KEY-----',
+    ].join('\n');
+    const input = `preface\n${pemBlock}\npostscript`;
+
+    const kept = redactSecrets(input, [], { keepLineBreaks: true });
+
+    expect(kept.text.split('\n')).toHaveLength(input.split('\n').length);
+    expect(kept.text.split('\n')[6]).toBe('postscript');
+    expect(kept.text).toBe('preface\n[REDACTED:pem]\n\n\n\n\npostscript');
+    expect(redactSecrets(input).text).toBe('preface\n[REDACTED:pem]\npostscript');
+  });
+
   it('redacts generic assignments with quoted values of 8+ chars (= and :)', () => {
     const input = [
       'password = "mySecretPassword123"',

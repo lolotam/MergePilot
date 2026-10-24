@@ -1,9 +1,10 @@
-import type { ContextDisclosure, Finding, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
+import type { ContextDisclosure, ExplorationDisclosure, Finding, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
 import type { FallbackReason } from './fallback-reason.js';
 import { renderBotIdentity, type BotIdentity } from './bot-identity.js';
 import type { JudgeSummaryInput } from './judge-summary.js';
 import {
   renderContextNote,
+  renderExplorationNote,
   renderOutputLimitNote,
   renderRulesLeftOut,
   renderVerifyRejected,
@@ -52,6 +53,8 @@ export interface ReviewSummaryInput {
   rulesLeftOut?: readonly string[] | undefined;
   /** Repository context sent and left out (ADR-0029). */
   context?: ContextDisclosure | undefined;
+  /** Read-only exploration before the answer (ADR-0046). */
+  exploration?: ExplorationDisclosure | undefined;
   /** The model's output limit clamped the answer budget (ADR-0033). */
   outputLimit?: OutputLimitDisclosure | undefined;
 }
@@ -288,6 +291,8 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
   if (rulesLeftOut) sections.push(rulesLeftOut);
   const contextNote = renderContextNote(input.context, isArabic);
   if (contextNote) sections.push(contextNote);
+  const explorationNote = renderExplorationNote(input.exploration, isArabic);
+  if (explorationNote) sections.push(explorationNote);
   const outputLimitNote = renderOutputLimitNote(input.outputLimit, isArabic);
   if (outputLimitNote) sections.push(outputLimitNote);
 

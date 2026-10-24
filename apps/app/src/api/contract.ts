@@ -103,6 +103,8 @@ export const SettingsSchema = z.object({
   panelMode: PanelModeSchema.optional(),
   /** Consensus only: bots that must find a finding to keep it (critical and high are always kept). */
   panelMinAgreement: PanelMinAgreementSchema.optional(),
+  /** Read-only exploration for the main bot; left out on PUT keeps it (ADR-0046). */
+  exploreEnabled: z.boolean().optional(),
   /** The main bot's review skill (ADR-0034); null = Default. Left out on PUT keeps it. */
   skillId: SkillIdSchema.nullable().optional(),
   /** Read only: the name of the main bot's skill that was deleted, until a skill is chosen again. */

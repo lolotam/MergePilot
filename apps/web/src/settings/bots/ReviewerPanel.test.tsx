@@ -68,7 +68,7 @@ describe('Reviewer panel settings (bot tabs)', () => {
   });
 
   it('"Copy from main bot" fills the form without saving; Save then sends it', async () => {
-    const server = fakeBotsServer({ bots: [extraBot(2, { name: 'Owl bot' })] });
+    const server = fakeBotsServer({ bots: [extraBot(2, { name: 'Owl bot', exploreEnabled: true })] });
     renderPanel();
     await openTab(user, /Owl bot/);
     await user.click(screen.getByRole('button', { name: 'Copy from main bot' }));
@@ -89,6 +89,7 @@ describe('Reviewer panel settings (bot tabs)', () => {
       fallback: [{ provider: 'openrouter', model: 'fb/one', effort: null }],
       skillId: null,
     });
+    expect(server.state.bots[0]?.exploreEnabled).toBe(true);
   });
 
   it('the active switch saves the bot at once', async () => {
@@ -101,6 +102,24 @@ describe('Reviewer panel settings (bot tabs)', () => {
     await waitFor(() => expect(server.writes()).toHaveLength(1));
     expect(server.writes()[0]).toMatchObject({ method: 'PUT', path: '/api/workspaces/ws-1/bots/2', body: { name: 'Owl bot', active: true } });
     await waitFor(() => expect(screen.getByRole('switch', { name: 'Bot active' }).getAttribute('aria-checked')).toBe('true'));
+  });
+
+  it('the exploration switch saves exploreEnabled true at once', async () => {
+    const server = fakeBotsServer({ bots: [extraBot(2, { name: 'Owl bot', exploreEnabled: false })] });
+    renderPanel();
+    await openTab(user, /Owl bot/);
+    const toggle = screen.getByRole('switch', { name: 'Explore the repository' });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(server.writes()).toHaveLength(1));
+    expect(server.writes()[0]).toMatchObject({
+      method: 'PUT',
+      path: '/api/workspaces/ws-1/bots/2',
+      body: { name: 'Owl bot', exploreEnabled: true },
+    });
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Explore the repository' }).getAttribute('aria-checked')).toBe('true'));
   });
 
   it('deletes a bot only after the confirm dialog, then shows the main bot', async () => {

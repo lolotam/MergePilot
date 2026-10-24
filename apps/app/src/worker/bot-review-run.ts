@@ -2,6 +2,7 @@ import {
   redactSecrets,
   runReview,
   type ContextDisclosure,
+  type ExplorationDisclosure,
   type MergePilotConfig,
   type ReviewModel,
   type ReviewRunResult,
@@ -10,6 +11,7 @@ import {
 } from '@mergepilot/engine';
 import {
   contextDisclosureOf,
+  createRepositoryReader,
   fallbackReasonOf,
   gatherReviewInputs,
   hasNothingNewToReview,
@@ -62,6 +64,8 @@ export interface BotReviewParams {
   force?: boolean | undefined;
   /** The bot's review skill (ADR-0034): added on top of the core review prompt. */
   skill?: ReviewSkill | undefined;
+  /** Read-only exploration at this PR head; absent or false stays off (ADR-0046). */
+  explore?: boolean | undefined;
 }
 
 export type BotReviewRun =
@@ -76,6 +80,7 @@ export type BotReviewRun =
       scope: ReviewScope;
       rulesLeftOut: string[];
       context?: ContextDisclosure | undefined;
+      exploration?: ExplorationDisclosure | undefined;
     };
 
 export const DEFAULT_PUBLISHER_LOGIN = 'github-actions[bot]';
@@ -177,6 +182,18 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     knownSecrets,
     judge,
     ...(params.skill ? { skill: params.skill } : {}),
+    ...(params.explore
+      ? {
+          explore: {
+            reader: createRepositoryReader(params.client, {
+              owner: params.owner,
+              repo: params.repo,
+              headSha: params.headSha,
+              exclude: config.review.exclude,
+            }),
+          },
+        }
+      : {}),
   });
   log?.(`Review completed with status: ${reviewResult.status}`);
   const context = contextDisclosureOf(
@@ -184,7 +201,14 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     inputs.contextLeftOut,
     inputs.openFindings,
   );
-  return { kind: 'reviewed', reviewResult, scope, rulesLeftOut: inputs.rulesLeftOut, ...(context ? { context } : {}) };
+  return {
+    kind: 'reviewed',
+    reviewResult,
+    scope,
+    rulesLeftOut: inputs.rulesLeftOut,
+    ...(context ? { context } : {}),
+    ...(reviewResult.status !== 'skipped-budget' && reviewResult.exploration ? { exploration: reviewResult.exploration } : {}),
+  };
 }
 
 /**
@@ -225,6 +249,7 @@ export interface ReviewOnlyOutcome {
   rulesLeftOut?: string[] | undefined;
   /** Repository context sent and left out (ADR-0029). */
   context?: ContextDisclosure | undefined;
+  exploration?: ExplorationDisclosure | undefined;
 }
 
 /** Status, cost (with the judge's) and a redacted detail, as `executeReview` records them. */
@@ -232,7 +257,7 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
   if (run.kind === 'nothing-new') return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL };
   const secrets = params.knownSecrets ?? [];
   const r = run.reviewResult;
-  const base = { runResult: r, scope: run.scope, rulesLeftOut: run.rulesLeftOut, context: run.context };
+  const base = { runResult: r, scope: run.scope, rulesLeftOut: run.rulesLeftOut, context: run.context, exploration: run.exploration };
   if (r.status === 'completed') {
     const totals = withJudgeUsage(r.costUsd, r.usage, params.judge?.judge.report());
     return {

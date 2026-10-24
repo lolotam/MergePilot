@@ -42,6 +42,7 @@ export function extraBot(slot: number, overrides: Partial<ReviewerBotDto> = {}):
     model: 'other/model',
     effort: null,
     fallback: [],
+    exploreEnabled: false,
     ...overrides,
   };
 }
@@ -82,7 +83,14 @@ export function fakeBotsServer(
       if (options.takenName && body?.['name'] === options.takenName) {
         throw new ApiClientError('Another bot in this workspace already has this name', 'bot_name_taken', 409);
       }
-      const bot = { ...(body as unknown as ReviewerBotDto), slot, effort: (body?.['effort'] as string | null) ?? null };
+      const bot = {
+        ...(body as unknown as ReviewerBotDto),
+        slot,
+        effort: (body?.['effort'] as string | null) ?? null,
+        exploreEnabled: body && 'exploreEnabled' in body
+          ? (body['exploreEnabled'] as boolean)
+          : (state.bots.find((b) => b.slot === slot)?.exploreEnabled ?? false),
+      };
       state.bots = [...state.bots.filter((b) => b.slot !== slot), bot].sort((a, b) => a.slot - b.slot);
       return { bot };
     }
@@ -97,6 +105,7 @@ export function fakeBotsServer(
           model: state.settings.model,
           effort: state.settings.effort ?? null,
           fallback: state.settings.fallback ?? [],
+          exploreEnabled: state.settings.exploreEnabled ?? false,
         },
         bots: state.bots,
         panel: { mode: state.settings.panelMode ?? 'separate', minAgreement: state.settings.panelMinAgreement ?? 1 },

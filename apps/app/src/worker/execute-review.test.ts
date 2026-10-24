@@ -158,7 +158,7 @@ describe('executeReview — incremental review and deduplication', () => {
     };
   }
 
-  const run = (env: ReturnType<typeof setup>) =>
+  const run = (env: ReturnType<typeof setup>, explore = false) =>
     executeReview({
       client: env.client,
       owner: 'acme',
@@ -174,6 +174,7 @@ describe('executeReview — incremental review and deduplication', () => {
       model: env.model,
       publisherLogin: 'mergepilot[bot]',
       log: env.log,
+      ...(explore ? { explore: true } : {}),
     });
 
   const reviewBy = (login: string, sha: string, extra = '') => ({
@@ -206,11 +207,12 @@ describe('executeReview — incremental review and deduplication', () => {
     expect(env.createdReviews[0]?.body).toContain('Full review (first review)');
   });
 
-  it('marks a failed review partial so the next push reviews its commits again', async () => {
+  it('marks a failed review partial and discloses its exploration', async () => {
     const env = setup({ modelThrows: true });
-    const result = await run(env);
+    const result = await run(env, true);
     expect(result.outcome).toBe('failed');
     expect(env.createdReviews[0]?.body).toContain(`head=${headSha} config=${configHash} status=partial`);
+    expect(env.createdReviews[0]?.body).toContain('> ℹ️ Explored:');
   });
 
   it('performs incremental review when previous review marker exists and commits are ahead', async () => {

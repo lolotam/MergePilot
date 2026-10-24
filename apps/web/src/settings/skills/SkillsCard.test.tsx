@@ -34,8 +34,8 @@ const skill = (overrides: Partial<SkillSummary> = {}): SkillSummary => ({
 });
 
 const BOTS: BotsResponse = {
-  main: { slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: 'anthropic', model: 'm', effort: null, fallback: [] },
-  bots: [{ slot: 3, name: 'Fox bot', logo: 'fox', active: true, provider: 'openai', model: 'o', effort: null, fallback: [] }],
+  main: { slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: 'anthropic', model: 'm', effort: null, fallback: [], exploreEnabled: false },
+  bots: [{ slot: 3, name: 'Fox bot', logo: 'fox', active: true, provider: 'openai', model: 'o', effort: null, fallback: [], exploreEnabled: false }],
   panel: { mode: 'separate', minAgreement: 1 },
   logos: ['pilot', 'fox'],
 };

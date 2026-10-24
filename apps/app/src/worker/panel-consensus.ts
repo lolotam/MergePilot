@@ -131,6 +131,10 @@ export async function publishConsensus(
     ),
     ...rows.filter((r) => r.status === 'failed').map((r) => `${r.name}: did not complete`),
   ];
+  const explorations = runs.flatMap(({ bot }) => {
+    const exploration = outcomes.find((outcome) => outcome.slot === bot.slot)?.pending?.outcome.exploration;
+    return exploration ? [{ ...exploration, bot: bot.name }] : [];
+  });
   const summaryMarkdown = renderPanelSummary({
     language,
     baseUrl: ctx.baseUrl,
@@ -148,6 +152,7 @@ export async function publishConsensus(
     verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),
+    explorations,
     outputLimits: completed.flatMap(({ br, rr }) => (rr.outputLimit ? [{ ...rr.outputLimit, bot: br.bot.name }] : [])),
     findingsFates,
   });

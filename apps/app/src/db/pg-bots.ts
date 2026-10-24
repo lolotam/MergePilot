@@ -31,6 +31,7 @@ function mapBotRow(row: typeof reviewerBots.$inferSelect): ReviewerBot {
     model: row.model,
     effort: row.effort ?? null,
     fallback: Array.isArray(row.fallback) ? (row.fallback as FallbackSetting[]) : [],
+    exploreEnabled: row.exploreEnabled,
     ...skillFields(row),
   };
 }
@@ -73,6 +74,7 @@ export async function upsertPgReviewerBot(db: AppDb, workspaceId: string, bot: R
     model: bot.model,
     effort: bot.effort,
     fallback: bot.fallback,
+    ...(bot.exploreEnabled !== undefined ? { exploreEnabled: bot.exploreEnabled } : {}),
     // Left out (undefined), the update keeps the stored skill and note; a new row starts on Default.
     ...(bot.skillId !== undefined ? { skillId: bot.skillId, skillRemovedName: bot.skillRemovedName ?? null } : {}),
     updatedAt: new Date(),

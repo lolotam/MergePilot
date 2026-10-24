@@ -53,6 +53,7 @@ export async function getPgSettings(db: AppDb | AppTx, workspaceId: string): Pro
     botLogo: row.botLogo as BotLogo,
     panelMode: row.panelMode as PanelMode,
     panelMinAgreement: Number(row.panelMinAgreement),
+    exploreEnabled: row.exploreEnabled,
     ...skillFields(row),
   };
 }
@@ -134,6 +135,7 @@ export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings, op
   if (settings.botLogo !== undefined) values.botLogo = settings.botLogo;
   if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
   if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
+  if (settings.exploreEnabled !== undefined) values.exploreEnabled = settings.exploreEnabled;
   if (settings.skillId !== undefined) {
     // The bot-name lock before the row, like deleting a skill (pg-skills.ts), so the two cannot deadlock.
     await lockBotNames(tx, settings.workspaceId);

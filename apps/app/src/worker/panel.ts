@@ -40,6 +40,7 @@ export function panelBots(
     model: settings.model,
     effort: settings.effort ?? null,
     fallback: settings.fallback ?? [],
+    exploreEnabled: settings.exploreEnabled ?? false,
     ...skillOf(settings.skillId),
   };
   const active = extras
@@ -47,6 +48,7 @@ export function panelBots(
     .sort((a, b) => a.slot - b.slot)
     .map((b) => ({
       slot: b.slot, name: b.name, logo: b.logo, provider: b.provider, model: b.model, effort: b.effort, fallback: b.fallback,
+      exploreEnabled: b.exploreEnabled ?? false,
       ...skillOf(b.skillId),
     }));
   return [main, ...active];

@@ -129,6 +129,8 @@ export interface WorkspaceSettings {
   botLogo?: BotLogo | undefined;
   panelMode?: PanelMode | undefined;
   panelMinAgreement?: number | undefined;
+  /** Read-only repository exploration for the main bot; undefined = false (ADR-0046). */
+  exploreEnabled?: boolean | undefined;
   /**
    * The main bot's review skill (ADR-0034); null = Default. Stores leave it out while unset;
    * undefined on save keeps the stored value, and any value (null included) clears

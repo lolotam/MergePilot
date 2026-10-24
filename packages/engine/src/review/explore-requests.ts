@@ -239,7 +239,7 @@ async function executeRead(
     // The content is redacted before anything else looks at it: the line numbers, the cut to the
     // budget and every later search see the redacted text only, so a secret is never shown in
     // part, not even where a cut would have split it (ADR-0046).
-    content = raw === null ? null : redactSecrets(raw, [...ctx.knownSecrets]).text;
+    content = raw === null ? null : redactSecrets(raw, [...ctx.knownSecrets], { keepLineBreaks: true }).text;
     ctx.budget.readFiles.set(path, content);
   } else {
     content = cached;

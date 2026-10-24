@@ -42,7 +42,7 @@ describe('reviewer panel bots API (ADR-0017)', { timeout: 25000 }, () => {
     const res = await get();
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      main: { slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: null, model: null, effort: null, fallback: [] },
+      main: { slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: null, model: null, effort: null, fallback: [], exploreEnabled: false },
       bots: [],
       panel: { mode: 'separate', minAgreement: 1 },
       logos: [...BOT_LOGOS],
@@ -56,14 +56,14 @@ describe('reviewer panel bots API (ADR-0017)', { timeout: 25000 }, () => {
     const fox = { name: '  Fox  ', logo: 'fox', provider: 'anthropic', model: 'claude-haiku-5' };
     const saved = await put(4, fox);
     expect(saved.statusCode).toBe(200);
-    expect(saved.json().bot).toEqual({ slot: 4, name: 'Fox', logo: 'fox', active: true, provider: 'anthropic', model: 'claude-haiku-5', effort: null, fallback: [] });
-    expect((await put(2, owl)).statusCode).toBe(200);
-    expect((await put(2, { ...owl, active: false, fallback: [] })).json().bot).toMatchObject({ slot: 2, active: false, fallback: [] });
+    expect(saved.json().bot).toEqual({ slot: 4, name: 'Fox', logo: 'fox', active: true, provider: 'anthropic', model: 'claude-haiku-5', effort: null, fallback: [], exploreEnabled: false });
+    expect((await put(2, { ...owl, exploreEnabled: true })).statusCode).toBe(200);
+    expect((await put(2, { ...owl, active: false, fallback: [] })).json().bot).toMatchObject({ slot: 2, active: false, fallback: [], exploreEnabled: true });
 
     const listed = (await get()).json();
     expect(listed.main).toEqual({
       slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: 'anthropic', model: 'claude-sonnet-5-5', effort: 'high',
-      fallback: [{ provider: 'anthropic', model: 'claude-opus-5' }],
+      fallback: [{ provider: 'anthropic', model: 'claude-opus-5' }], exploreEnabled: false,
     });
     expect(listed.bots.map((b: { slot: number; name: string; active: boolean }) => [b.slot, b.name, b.active])).toEqual([
       [2, 'Owl', false],
@@ -75,6 +75,18 @@ describe('reviewer panel bots API (ADR-0017)', { timeout: 25000 }, () => {
     expect((await del(4)).statusCode).toBe(204);
     expect((await del(4)).statusCode).toBe(404);
     expect((await get()).json().bots.map((b: { slot: number }) => b.slot)).toEqual([2]);
+  });
+
+  it('defaults exploration off on creation and keeps it enabled when omitted later', async () => {
+    const bot = { ...owl, provider: 'anthropic', model: 'claude-haiku-5', fallback: [] };
+    const created = await put(2, bot);
+    expect(created.statusCode).toBe(200);
+    expect(created.json().bot.exploreEnabled).toBe(false);
+
+    expect((await put(2, { ...bot, exploreEnabled: true })).statusCode).toBe(200);
+    const updated = await put(2, bot);
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().bot.exploreEnabled).toBe(true);
   });
 
   it('validates the name, logo and slot', async () => {
@@ -128,7 +140,7 @@ describe('reviewer panel bots API (ADR-0017)', { timeout: 25000 }, () => {
   });
 
   it('settings PUT saves the main bot name and logo and the panel mode, keeping them when left out', async () => {
-    const panel = { botName: ' Pilot One ', botLogo: 'rocket', panelMode: 'consensus', panelMinAgreement: 2 };
+    const panel = { botName: ' Pilot One ', botLogo: 'rocket', panelMode: 'consensus', panelMinAgreement: 2, exploreEnabled: true };
     expect((await putSettings(panel, h.memberCookie())).statusCode).toBe(403);
     const res = await putSettings(panel);
     expect(res.statusCode).toBe(200);

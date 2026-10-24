@@ -80,7 +80,11 @@ const TOKEN_PATTERNS: readonly TokenPattern[] = [
  * Replaces known secret values and well-known credential formats with `[REDACTED:<kind>]`
  * before any text leaves the runner. Overlaps resolve by priority, then length, then position.
  */
-export function redactSecrets(text: string, knownSecrets: Secret[] = []): RedactResult {
+export function redactSecrets(
+  text: string,
+  knownSecrets: Secret[] = [],
+  options?: { keepLineBreaks?: boolean },
+): RedactResult {
   const lineOffsets = computeLineOffsets(text);
   const candidates: MatchCandidate[] = [];
 
@@ -175,6 +179,9 @@ export function redactSecrets(text: string, knownSecrets: Secret[] = []): Redact
   for (const match of accepted) {
     redactedText += text.slice(lastIndex, match.start);
     redactedText += match.replacement;
+    if (options?.keepLineBreaks) {
+      redactedText += '\n'.repeat((text.slice(match.start, match.end).match(/\n/g) ?? []).length);
+    }
     lastIndex = match.end;
     found.push({ kind: match.kind, line: match.line });
   }

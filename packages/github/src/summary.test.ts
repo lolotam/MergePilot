@@ -439,5 +439,19 @@ describe('renderReviewSummary', () => {
       expect(rendered).toContain('> مراجعة كاملة');
     });
   });
+
+  describe('exploration disclosure (ADR-0046)', () => {
+    it('renders the note after the context note when the bot explored', () => {
+      const rendered = renderReviewSummary({
+        ...baseInput,
+        context: { sent: ['src/a.ts'], leftOut: [] },
+        exploration: { rounds: 2, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 0 },
+      });
+
+      expect(rendered).toContain('> ℹ️ Explored: 2 files in 2 rounds');
+      expect(rendered.indexOf('Repository context:')).toBeLessThan(rendered.indexOf('Explored:'));
+      expect(renderReviewSummary(baseInput)).not.toContain('Explored:');
+    });
+  });
 });
 

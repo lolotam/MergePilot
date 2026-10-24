@@ -21,6 +21,7 @@ const bot = (overrides: Partial<ReviewerBot> = {}): ReviewerBot => ({
   model: 'gpt-5',
   effort: 'high',
   fallback: [{ provider: 'anthropic', model: 'claude-sonnet-5-5', effort: null }],
+  exploreEnabled: false,
   ...overrides,
 });
 
@@ -69,6 +70,30 @@ export function defineReviewerBotContract(
     }
   });
 
+  it('stores the exploration flag of a bot', async () => {
+    const store = await createStore();
+    try {
+      await store.upsertReviewerBot(WS, bot({ exploreEnabled: true }));
+      expect((await store.listReviewerBots(WS))[0]?.exploreEnabled).toBe(true);
+      await store.upsertReviewerBot(WS, bot({ exploreEnabled: false }));
+      expect((await store.listReviewerBots(WS))[0]?.exploreEnabled).toBe(false);
+    } finally {
+      await cleanup?.();
+    }
+  });
+
+  it('keeps the stored exploration flag when an upsert leaves it undefined', async () => {
+    const store = await createStore();
+    try {
+      await store.upsertReviewerBot(WS, bot({ exploreEnabled: true }));
+      const saved = await store.upsertReviewerBot(WS, bot({ exploreEnabled: undefined }));
+      expect(saved.exploreEnabled).toBe(true);
+      expect((await store.listReviewerBots(WS))[0]?.exploreEnabled).toBe(true);
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   it('rejects slots outside 2-5 and names taken by another bot, ignoring case, including the main bot', async () => {
     const store = await createStore();
     try {
@@ -109,8 +134,9 @@ export function defineReviewerBotContract(
         botLogo: 'pilot',
         panelMode: 'separate',
         panelMinAgreement: 1,
+        exploreEnabled: false,
       });
-      const panel = { botName: 'Pilot One', botLogo: 'rocket' as const, panelMode: 'consensus' as const, panelMinAgreement: 2 };
+      const panel = { botName: 'Pilot One', botLogo: 'rocket' as const, panelMode: 'consensus' as const, panelMinAgreement: 2, exploreEnabled: true };
       await store.saveSettings({ ...base, ...panel });
       expect(await store.getSettings(WS)).toMatchObject(panel);
       await store.saveSettings({ ...base, model: 'm2' });

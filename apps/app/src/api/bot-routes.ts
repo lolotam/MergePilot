@@ -55,10 +55,11 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
           model: settings?.model ?? null,
           effort: settings?.effort ?? null,
           fallback: settings?.fallback ?? [],
+          exploreEnabled: settings?.exploreEnabled ?? false,
           ...(settings?.skillId ? { skillId: settings.skillId } : {}),
           ...(settings?.skillRemovedName ? { skillRemovedName: settings.skillRemovedName } : {}),
         },
-        bots,
+        bots: bots.map((bot) => ({ ...bot, exploreEnabled: bot.exploreEnabled ?? false })),
         panel: {
           mode: settings?.panelMode ?? DEFAULT_PANEL_MODE,
           minAgreement: settings?.panelMinAgreement ?? DEFAULT_PANEL_MIN_AGREEMENT,
@@ -97,6 +98,7 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
         model: input.model,
         effort: input.effort ?? null,
         fallback: input.fallback,
+        exploreEnabled: input.exploreEnabled,
         ...skillChoice,
       };
       const problem = unavailableProviderProblem(bot, previous, subscriptionAvailability(deps))

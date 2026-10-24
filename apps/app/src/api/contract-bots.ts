@@ -35,6 +35,8 @@ export const ReviewerBotInputSchema = z.object({
   model: ModelIdSchema,
   effort: EffortSchema.nullable().optional(),
   fallback: z.array(FallbackEntrySchema).max(MAX_FALLBACK_MODELS).optional().default([]),
+  /** Read-only exploration; left out keeps the stored value, a new bot starts off (ADR-0046). */
+  exploreEnabled: z.boolean().optional(),
   /** The bot's review skill (ADR-0034); null = Default. Left out keeps the stored skill. */
   skillId: SkillIdSchema.nullable().optional(),
 });
@@ -49,6 +51,7 @@ export const ReviewerBotSchema = z.object({
   model: z.string(),
   effort: z.string().nullable(),
   fallback: z.array(FallbackEntrySchema),
+  exploreEnabled: z.boolean(),
   /** The bot's review skill (ADR-0034); left out on Default. */
   skillId: z.string().nullable().optional(),
   /** The name of the bot's skill that was deleted; left out unless the bot fell back to Default. */

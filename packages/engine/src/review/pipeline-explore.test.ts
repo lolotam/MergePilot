@@ -240,6 +240,37 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
     });
   });
 
+  it('makes no review call when a paid switch leaves the plain prompt unaffordable', async () => {
+    const paid = recordingModel([READ_GUARD]);
+    const primaryRequests: ReviewModelRequest[] = [];
+    // The subscription answers nothing (quota), so the chain moves to the paid API model.
+    const primary: ReviewModel = { label: paid.model.label, includedInSubscription: true, generate: async (request) => {
+      primaryRequests.push(request);
+      throw Object.assign(new Error('quota'), { code: 'QUOTA' });
+    } };
+    const base = makeConfig();
+    const config = makeConfig({
+      review: { ...base.review, verify: false },
+      budget: { ...base.budget, perReviewUsd: 5, pricing: { inputPerMTok: 1000, outputPerMTok: 1000, cacheReadPerMTok: 1000, cacheWritePerMTok: 1000 } },
+    });
+
+    const result = await runReview({
+      ...input(primary, {
+        explore: { reader: fakeReader({ 'src/guard.ts': 'export function guard() {}' }) },
+        fallbackModels: [paid.model],
+      }),
+      config,
+    });
+
+    expect(primaryRequests).toHaveLength(1);
+    expect(paid.requests).toHaveLength(1);
+    expect(result).toMatchObject({
+      status: 'failed',
+      reason: 'budget limit reached after exploration',
+      exploration: { rounds: 1, skipped: 'explored results left out: budget limit reached' },
+    });
+  });
+
   it('keeps the money of the verification call out of the exploration', async () => {
     const base = makeConfig();
     const pricing = { inputPerMTok: 1000, outputPerMTok: 1000, cacheReadPerMTok: 1000, cacheWritePerMTok: 1000 };

@@ -66,7 +66,7 @@ describe('processReviewJob — consensus mode', () => {
   it('a failed bot is shown in the table and counted out of N', async () => {
     const h = await panelSetup({
       settings: consensus(1),
-      bots: [{ slot: 2, name: 'Owl' }],
+      bots: [{ slot: 2, name: 'Owl', exploreEnabled: true }],
       failing: ['bot2-model'],
       findings: { 'main-model': [finding('Null dereference')] },
     });
@@ -79,6 +79,7 @@ describe('processReviewJob — consensus mode', () => {
     // A failed member never saw these changes: the panel review stays partial, so the head is reviewed again.
     expect(h.created[0]?.body).toMatch(/<!-- mergepilot:review head=\S+ config=[a-f0-9]{12} status=partial -->$/);
     expect(h.created[0]?.body).toContain('Owl: did not complete');
+    expect(h.created[0]?.body).toContain('> ℹ️ **Owl**: Explored:');
   });
 
   it('does not run or publish when another job holds the main bot run (no slot-1 race)', async () => {

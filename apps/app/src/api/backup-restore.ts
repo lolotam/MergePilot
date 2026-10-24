@@ -308,8 +308,10 @@ async function planSettings(
     const field = problem.code.startsWith('judge_') ? 'settings.judge' : (SETTINGS_PROBLEM_FIELDS[problem.code] ?? 'settings');
     throw new RestoreProblem(400, problem.code, problem.message, field);
   }
+  // A backup from before exploration restores the main bot with exploration off.
+  const withExploration = { ...merged, exploreEnabled: update.exploreEnabled ?? false };
   // A file without skillName keeps the stored skill: the store keeps it inside the write.
-  return ref.present ? merged : withoutSkillFields(merged);
+  return ref.present ? withExploration : withoutSkillFields(withExploration);
 }
 
 /** Each bot through PUT /bots/:slot's slot rule, schema and fallback check; names must not clash. */
@@ -342,6 +344,7 @@ async function planBots(
       model: input.model,
       effort: input.effort ?? null,
       fallback: input.fallback,
+      exploreEnabled: input.exploreEnabled ?? false,
       // Always set: a restore replaces the bots, and a bot the file leaves on Default (or whose skill
       // is missing) must come back on Default, never keep a stored skill.
       skillId,

@@ -18,7 +18,11 @@ import type { WorkspaceSettings } from './types.js';
 export type MemoryBots = Map<string, ReviewerBot>;
 
 const key = (workspaceId: string, slot: number) => `${workspaceId}\u0000${slot}`;
-const copy = (bot: ReviewerBot): ReviewerBot => withSetSkillFields({ ...bot, fallback: bot.fallback.map((f) => ({ ...f })) });
+const copy = (bot: ReviewerBot): ReviewerBot => withSetSkillFields({
+  ...bot,
+  exploreEnabled: bot.exploreEnabled ?? false,
+  fallback: bot.fallback.map((f) => ({ ...f })),
+});
 
 export function listMemoryBots(bots: MemoryBots, workspaceId: string): ReviewerBot[] {
   return [...bots.entries()]

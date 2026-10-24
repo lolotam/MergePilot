@@ -10,8 +10,8 @@ vi.mock('../api/client.js', async () => ({ ...(await vi.importActual('../api/cli
 vi.mock('react-router', async () => ({ ...(await vi.importActual('react-router')), useNavigate: () => vi.fn() }));
 
 const BOTS: BotsResponse = {
-  main: { slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: 'anthropic', model: 'm', effort: null, fallback: [] },
-  bots: [{ slot: 2, name: 'Owl bot', logo: 'owl', active: true, provider: 'openai', model: 'o', effort: null, fallback: [] }],
+  main: { slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: 'anthropic', model: 'm', effort: null, fallback: [], exploreEnabled: false },
+  bots: [{ slot: 2, name: 'Owl bot', logo: 'owl', active: true, provider: 'openai', model: 'o', effort: null, fallback: [], exploreEnabled: false }],
   panel: { mode: 'separate', minAgreement: 1 },
   logos: ['pilot', 'owl'],
 };

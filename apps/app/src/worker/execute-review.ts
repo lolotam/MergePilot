@@ -172,6 +172,7 @@ export async function executeReview(
       withheld: reviewResult.withheld,
       rulesLeftOut: run.rulesLeftOut,
       context: run.context,
+      exploration: reviewResult.exploration,
       outputLimit: reviewResult.outputLimit,
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
@@ -225,6 +226,7 @@ export async function executeReview(
       ...fallbackSummary,
       outcome: 'failed',
       reason,
+      exploration: run.exploration,
       ...shown,
     });
   }

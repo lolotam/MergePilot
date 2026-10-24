@@ -28,6 +28,8 @@ export const enBots: Record<keyof typeof arBots, string> = {
   botLogoWave: 'Wave',
   botExtraDesc: 'An extra bot that reviews the same pull requests with its own model and fallbacks.',
   botNoHeavyHint: 'Extra bots have no heavy-duty model.',
+  botExploreLabel: 'Explore the repository',
+  botExploreHint: 'Before answering, the bot may read files at the PR head, up to 3 rounds (read-only, nothing runs).',
   botCopyFromMain: 'Copy from main bot',
   botCopiedHint: 'The main bot\'s model was copied. Press "Save bot" to keep it.',
   botSaveButton: 'Save bot',

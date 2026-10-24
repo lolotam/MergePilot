@@ -193,6 +193,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       publisherLogin: ctx.publisherLogin,
       ...(deps.log ? { log: deps.log } : {}),
       judge: judgeSetup.judge,
+      explore: br.bot.exploreEnabled,
       ...(ctx.panelActive ? { botSlot: slot, prFiles: ctx.prFiles } : {}),
       ...(job.force ? { force: true } : {}),
       ...(br.bot.skill ? { skill: { name: br.bot.skill.name, content: br.bot.skill.content } } : {}),

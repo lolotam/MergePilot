@@ -46,6 +46,7 @@ const bot = (overrides: Partial<ReviewerBot> = {}): ReviewerBot => ({
   model: 'gpt-5',
   effort: null,
   fallback: [],
+  exploreEnabled: false,
   ...overrides,
 });
 
