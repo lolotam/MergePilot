@@ -122,8 +122,13 @@ const ReviewSettingsSchema = z.strictObject({
     .prefault({}),
   /** Above this prompt size without context, use batches; context fills only the room left below it. */
   maxPromptTokens: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.maxPromptTokens),
-  /** Diff tokens per batch; a single file bigger than this is its own batch, its patch truncated. */
+  /** Diff tokens per batch; a single file bigger than this is split into parts, not cut. */
   batchTokens: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.batchTokens),
+  /**
+   * Parts a file over review.batchTokens is split into (ADR-0045); parts beyond it are not
+   * reviewed and the run is incomplete.
+   */
+  maxFileParts: z.number().int().min(1).max(50).default(8),
   /** Timeout of every single model call, retries included. */
   callTimeoutMs: z.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.callTimeoutMs),
   /** Overall review time: once reached, no new batch starts and the review finishes with what is done. */

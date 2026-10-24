@@ -279,9 +279,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // Size guard (ADR-0013): a prompt too big for one reliable call goes straight to capped batches.
   let plan: CappedBatches | undefined;
   if (withoutContextTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0) {
-    plan = batchFilesByTokenCap(redactedReviewableFiles, limits.batchTokens);
-    for (const path of plan.truncatedPaths) {
-      incompleteReasons.push(`${path}: patch truncated to fit review.batchTokens`);
+    plan = batchFilesByTokenCap(redactedReviewableFiles, limits.batchTokens, reviewCfg.maxFileParts);
+    // A file too big for one batch is reviewed in parts (ADR-0045); the parts beyond
+    // review.maxFileParts are not sent, and the file is reported as not fully reviewed.
+    for (const skipped of plan.skippedParts) {
+      incompleteReasons.push(
+        `${skipped.path}: parts ${skipped.from}–${skipped.total} of ${skipped.total} not reviewed (review.maxFileParts)`,
+      );
     }
   } else {
     context.markSent(wholeContext);

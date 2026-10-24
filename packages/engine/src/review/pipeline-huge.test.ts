@@ -8,7 +8,7 @@ import { estimateTokens } from './budget.js';
 import { modelFromAdapter, type ReviewModel, type ReviewModelRequest, type ReviewModelResponse } from './model.js';
 import { makeAnswerJson, makeConfig, validFindingJson } from './pipeline.fixtures.js';
 import { runReview, type PrFile } from './pipeline.js';
-import { PATCH_TRUNCATED_NOTE } from './split.js';
+import { splitPatchIntoParts } from './patch-parts.js';
 
 /** ~100 diff tokens of added lines, anchored from line 1. */
 function patchOf(lines = 25): string {
@@ -118,7 +118,7 @@ describe('runReview — huge PRs (ADR-0013)', () => {
     expect(fiveFiles.every((f) => calls[0]?.user.includes(f.path))).toBe(true);
   });
 
-  it('reviews a file bigger than the cap alone, truncated, and names it in incompleteReasons', async () => {
+  it('reviews a file bigger than the cap in parts, one call each, and names the parts left out', async () => {
     const files: PrFile[] = [
       { path: 'src/f0.ts', status: 'added', patch: patchOf(), changes: 25 },
       { path: 'src/huge.ts', status: 'added', patch: patchOf(2000), changes: 2000 },
@@ -126,13 +126,20 @@ describe('runReview — huge PRs (ADR-0013)', () => {
     const { model, calls } = scripted((req) => answerFor(req));
     const result = await run(hugeConfig({ batchTokens: 500 }), model, files);
 
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.user).toContain(PATCH_TRUNCATED_NOTE);
-    expect(calls[1]?.user.length).toBeLessThan(patchOf(2000).length);
+    const total = splitPatchIntoParts(patchOf(2000), 500).length;
+    expect(total).toBeGreaterThan(8);
+    // The small file, then one call per part of the big one (review.maxFileParts parts).
+    expect(calls).toHaveLength(9);
+    expect(calls[1]?.user).toContain(`### src/huge.ts (part 1 of ${total})`);
+    expect(calls[8]?.user).toContain(`### src/huge.ts (part 8 of ${total})`);
     expect(result.status).toBe('completed');
     if (result.status === 'completed') {
       expect(result.complete).toBe(false);
-      expect(result.result.incompleteReasons).toContain('src/huge.ts: patch truncated to fit review.batchTokens');
+      expect(result.result.incompleteReasons).toContain(
+        `src/huge.ts: parts 9–${total} of ${total} not reviewed (review.maxFileParts)`,
+      );
+      // The file is reviewed in parts, so the old reason of a cut patch is gone.
+      expect(result.result.incompleteReasons.join(' ')).not.toContain('patch truncated to fit review.batchTokens');
     }
   });
 

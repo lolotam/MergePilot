@@ -7,11 +7,14 @@ import type { TokenUsage } from '../llm/types.js';
 import { FileTier, groupFilesForBatches, type BatchNode } from './batch-groups.js';
 import { estimateTokens } from './budget.js';
 import { ReviewAnswerSchema } from './answer.js';
+import { splitPatchIntoParts } from './patch-parts.js';
 import type { Finding } from './types.js';
 
 export interface ReviewableFileWithPatch {
   path: string;
   patch: string;
+  /** Set when the file's patch was split into parts (ADR-0045): which part, of how many. */
+  part?: { index: number; total: number };
 }
 
 export interface RulesFileInput {
@@ -116,7 +119,11 @@ export function needsTruncationRetry(
 /** Appended to a patch cut to fit one batch, so the model knows the rest was not shown. */
 export const PATCH_TRUNCATED_NOTE = '[patch truncated: the rest of this file was not sent for review]';
 
-/** Cuts a patch to about `capTokens` (at a line break) and appends PATCH_TRUNCATED_NOTE. */
+/**
+ * Cuts a patch to about `capTokens` (at a line break) and appends PATCH_TRUNCATED_NOTE. Only the
+ * truncation-recovery retry (ADR-0013) cuts a patch: a file too big for one batch is split into
+ * parts instead (ADR-0045).
+ */
 export function truncatePatch(patch: string, capTokens: number): string {
   const maxChars = Math.max(0, Math.floor(capTokens * 3.5) - PATCH_TRUNCATED_NOTE.length - 1);
   let cut = patch.slice(0, maxChars);
@@ -127,22 +134,24 @@ export function truncatePatch(patch: string, capTokens: number): string {
 
 export interface CappedBatches {
   batches: ReviewableFileWithPatch[][];
-  /** Files whose patch alone exceeded the cap and was truncated to it. */
-  truncatedPaths: string[];
+  /** Files whose patch was split into more parts than `maxFileParts`: the parts left out. */
+  skippedParts: Array<{ path: string; from: number; total: number }>;
 }
 
 /**
  * Splits files into batches of at most `capTokens` diff tokens each (ADR-0013), grouped and
  * ordered by `groupFilesForBatches` (ADR-0031): a group that fits the cap shares one batch; a
  * bigger group is split between implementations, then between files. A single file bigger than
- * the cap is its own batch, its patch truncated to the cap.
+ * the cap is split into parts of at most the cap, one part per batch (ADR-0045); the parts beyond
+ * `maxFileParts` are not sent and are reported as skipped.
  */
 export function batchFilesByTokenCap(
   files: readonly ReviewableFileWithPatch[],
   capTokens: number,
+  maxFileParts = 8,
 ): CappedBatches {
   const batches: ReviewableFileWithPatch[][] = [];
-  const truncatedPaths: string[] = [];
+  const skippedParts: Array<{ path: string; from: number; total: number }> = [];
   let current: ReviewableFileWithPatch[] = [];
   let currentTokens = 0;
   const flush = (): void => {
@@ -169,8 +178,13 @@ export function batchFilesByTokenCap(
     } else {
       const file = node.files[0]!;
       flush();
-      batches.push([{ path: file.path, patch: truncatePatch(file.patch, capTokens) }]);
-      truncatedPaths.push(file.path);
+      const parts = splitPatchIntoParts(file.patch, capTokens);
+      parts.slice(0, maxFileParts).forEach((part, index) => {
+        batches.push([{ path: file.path, patch: part, part: { index: index + 1, total: parts.length } }]);
+      });
+      if (parts.length > maxFileParts) {
+        skippedParts.push({ path: file.path, from: maxFileParts + 1, total: parts.length });
+      }
     }
   };
 
@@ -180,5 +194,5 @@ export function batchFilesByTokenCap(
   }
   placeDeferred();
   flush();
-  return { batches, truncatedPaths };
+  return { batches, skippedParts };
 }

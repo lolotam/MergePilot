@@ -27,6 +27,8 @@ export interface PathInstruction {
 export interface ReviewableFile {
   path: string;
   patch: string;
+  /** Set when the file's patch was split into parts (ADR-0045): which part, of how many. */
+  part?: { index: number; total: number };
 }
 
 export interface PromptInput {
@@ -404,7 +406,16 @@ function buildUserPrompt(input: PromptInput): string {
   // Each reviewable file with annotated patch
   for (const file of input.files) {
     const annotated = annotatePatch(file.patch);
-    parts.push(`### ${file.path}\n${wrapUntrusted(`PATCH:${file.path}`, annotated)}`);
+    // A file too big for one batch is shown in parts (ADR-0045): the header names the part, and
+    // the model is told the other parts are reviewed elsewhere. The block label stays the path,
+    // so the line mapping of a finding does not change.
+    const part = file.part;
+    const header = part ? `### ${file.path} (part ${part.index} of ${part.total})` : `### ${file.path}`;
+    const note = part
+      ? `This is part ${part.index} of ${part.total} of this file's diff; the other parts are reviewed in other batches.`
+      : '';
+    const block = wrapUntrusted(`PATCH:${file.path}`, annotated);
+    parts.push(note ? `${header}\n${note}\n${block}` : `${header}\n${block}`);
   }
 
   // On a follow-up review the rest of the PR (PR_CONTEXT) comes first, then repository files.

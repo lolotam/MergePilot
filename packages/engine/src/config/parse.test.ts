@@ -34,6 +34,7 @@ describe('parseConfig', () => {
           libraryDocs: { source: 'npm', maxCharsPerLibrary: 8000, maxLibraries: 5 },
           maxPromptTokens: 90_000,
           batchTokens: 24_000,
+          maxFileParts: 8,
           callTimeoutMs: 300_000,
           totalTimeoutMs: 1_200_000,
         },

@@ -64809,9 +64809,9 @@ var require_event_target = __commonJS({
         }
         let wrapper;
         if (type === "message") {
-          wrapper = function onMessage(data, isBinary) {
+          wrapper = function onMessage(data, isBinary2) {
             const event = new MessageEvent("message", {
-              data: isBinary ? data : data.toString()
+              data: isBinary2 ? data : data.toString()
             });
             event[kTarget] = this;
             callListener(handler2, this, event);
@@ -65869,8 +65869,8 @@ var require_websocket = __commonJS({
     function receiverOnFinish() {
       this[kWebSocket].emitClose();
     }
-    function receiverOnMessage(data, isBinary) {
-      this[kWebSocket].emit("message", data, isBinary);
+    function receiverOnMessage(data, isBinary2) {
+      this[kWebSocket].emit("message", data, isBinary2);
     }
     function receiverOnPing(data) {
       const websocket = this[kWebSocket];
@@ -65974,8 +65974,8 @@ var require_stream = __commonJS({
         objectMode: false,
         writableObjectMode: false
       });
-      ws.on("message", function message(msg, isBinary) {
-        const data = !isBinary && duplex._readableState.objectMode ? msg.toString() : msg;
+      ws.on("message", function message(msg, isBinary2) {
+        const data = !isBinary2 && duplex._readableState.objectMode ? msg.toString() : msg;
         if (!duplex.push(data)) ws.pause();
       });
       ws.once("error", function error62(err) {
@@ -94175,7 +94175,7 @@ var require_resolve_block_scalar = __commonJS({
       if (!header2)
         return { value: "", type: null, comment: "", range: [start, start, start] };
       const type = header2.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
-      const lines = scalar.source ? splitLines(scalar.source) : [];
+      const lines = scalar.source ? splitLines2(scalar.source) : [];
       let chompStart = lines.length;
       for (let i2 = lines.length - 1; i2 >= 0; --i2) {
         const content = lines[i2][1];
@@ -94333,7 +94333,7 @@ var require_resolve_block_scalar = __commonJS({
       }
       return { mode, indent, chomp, comment, length };
     }
-    function splitLines(source) {
+    function splitLines2(source) {
       const split = source.split(/\n( *)/);
       const first = split[0];
       const m2 = first.match(/^( *)/);
@@ -139474,8 +139474,13 @@ var ReviewSettingsSchema = external_exports.strictObject({
   }).prefault({}),
   /** Above this prompt size without context, use batches; context fills only the room left below it. */
   maxPromptTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.maxPromptTokens),
-  /** Diff tokens per batch; a single file bigger than this is its own batch, its patch truncated. */
+  /** Diff tokens per batch; a single file bigger than this is split into parts, not cut. */
   batchTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.batchTokens),
+  /**
+   * Parts a file over review.batchTokens is split into (ADR-0045); parts beyond it are not
+   * reviewed and the run is incomplete.
+   */
+  maxFileParts: external_exports.number().int().min(1).max(50).default(8),
   /** Timeout of every single model call, retries included. */
   callTimeoutMs: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.callTimeoutMs),
   /** Overall review time: once reached, no new batch starts and the review finishes with what is done. */
@@ -140409,9 +140414,9 @@ function compareFindings(a, b) {
   if (pathDiff !== 0) {
     return pathDiff;
   }
-  const lineDiff = a.line - b.line;
-  if (lineDiff !== 0) {
-    return lineDiff;
+  const lineDiff2 = a.line - b.line;
+  if (lineDiff2 !== 0) {
+    return lineDiff2;
   }
   const titleDiff = compareText(a.title, b.title);
   if (titleDiff !== 0) {
@@ -140993,8 +140998,14 @@ ${prBody}`;
   }
   for (const file2 of input2.files) {
     const annotated = annotatePatch(file2.patch);
-    parts.push(`### ${file2.path}
-${wrapUntrusted(`PATCH:${file2.path}`, annotated)}`);
+    const part = file2.part;
+    const header2 = part ? `### ${file2.path} (part ${part.index} of ${part.total})` : `### ${file2.path}`;
+    const note = part ? `This is part ${part.index} of ${part.total} of this file's diff; the other parts are reviewed in other batches.` : "";
+    const block = wrapUntrusted(`PATCH:${file2.path}`, annotated);
+    parts.push(note ? `${header2}
+${note}
+${block}` : `${header2}
+${block}`);
   }
   for (const context of input2.contextFiles ?? []) {
     parts.push(wrapUntrusted(contextLabel(context), renderContextFile(context)));
@@ -141107,6 +141118,116 @@ function groupFilesForBatches(files, tokensOf) {
   return ordered.sort((a, b) => a.tier - b.tier || a.first - b.first).map((group) => group.node);
 }
 
+var HUNK_HEADER_RE2 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+function splitPatchIntoParts(patch, capTokens) {
+  if (estimateTokens(patch) <= capTokens)
+    return [patch];
+  const hunks = parseHunks(patch);
+  if (hunks.length === 0)
+    return [patch];
+  const pieces = [];
+  for (const hunk of hunks) {
+    const rendered = renderHunk(hunk);
+    if (estimateTokens(rendered) <= capTokens)
+      pieces.push(rendered);
+    else
+      pieces.push(...splitHunk(hunk, capTokens));
+  }
+  const parts = [];
+  let current = [];
+  for (const piece of pieces) {
+    if (current.length > 0 && estimateTokens([...current, piece].join("\n")) > capTokens) {
+      parts.push(current.join("\n"));
+      current = [];
+    }
+    current.push(piece);
+  }
+  if (current.length > 0)
+    parts.push(current.join("\n"));
+  return parts;
+}
+function parseHunks(patch) {
+  const hunks = [];
+  let current;
+  for (const line of patch.split("\n")) {
+    const match3 = HUNK_HEADER_RE2.exec(line);
+    if (match3) {
+      current = {
+        header: line,
+        heading: (match3[5] ?? "").replace(/\r$/, ""),
+        oldStart: Number(match3[1]),
+        oldLines: match3[2] === void 0 ? 1 : Number(match3[2]),
+        newStart: Number(match3[3]),
+        newLines: match3[4] === void 0 ? 1 : Number(match3[4]),
+        lines: []
+      };
+      hunks.push(current);
+      continue;
+    }
+    if (current)
+      current.lines.push(line);
+  }
+  return hunks;
+}
+function renderHunk(hunk) {
+  return [hunk.header, ...hunk.lines].join("\n");
+}
+function splitHunk(hunk, capTokens) {
+  let oldLine = hunk.oldLines > 0 ? hunk.oldStart : hunk.oldStart + 1;
+  let newLine = hunk.newLines > 0 ? hunk.newStart : hunk.newStart + 1;
+  const subHunks = [];
+  let lines = [];
+  let oldStart = oldLine;
+  let newStart = newLine;
+  let oldCount = 0;
+  let newCount = 0;
+  let heading = hunk.heading;
+  const flush = () => {
+    if (lines.length === 0)
+      return;
+    subHunks.push(renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines));
+    lines = [];
+    oldCount = 0;
+    newCount = 0;
+    heading = "";
+  };
+  for (const unit of groupUnits(hunk.lines)) {
+    const line = unit[0] ?? "";
+    const unitOld = line.startsWith(" ") || line.startsWith("-") ? 1 : 0;
+    const unitNew = line.startsWith(" ") || line.startsWith("+") ? 1 : 0;
+    const candidate = [...lines, ...unit];
+    const candidateText = renderSubHunk(oldStart, oldCount + unitOld, newStart, newCount + unitNew, heading, candidate);
+    if (lines.length > 0 && estimateTokens(candidateText) > capTokens) {
+      flush();
+      oldStart = oldLine;
+      newStart = newLine;
+    }
+    lines.push(...unit);
+    oldCount += unitOld;
+    newCount += unitNew;
+    oldLine += unitOld;
+    newLine += unitNew;
+  }
+  flush();
+  return subHunks;
+}
+function renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines) {
+  const old = oldCount > 0 ? oldStart : Math.max(0, oldStart - 1);
+  const current = newCount > 0 ? newStart : Math.max(0, newStart - 1);
+  return [`@@ -${old},${oldCount} +${current},${newCount} @@${heading}`, ...lines].join("\n");
+}
+function groupUnits(lines) {
+  const units = [];
+  for (const line of lines) {
+    if (line.startsWith("\\") && units.length > 0) {
+      units[units.length - 1].push(line);
+    } else {
+      units.push([line]);
+    }
+  }
+  return units;
+}
+
 function combineUsage(u1, u2) {
   if (!u1 && !u2)
     return void 0;
@@ -141172,19 +141293,9 @@ var reviewJsonSchema = () => external_exports.toJSONSchema(ReviewAnswerSchema);
 function needsTruncationRetry(parsed, finishReason) {
   return !parsed.ok && (parsed.code === "truncated" || finishReason === "max-tokens");
 }
-var PATCH_TRUNCATED_NOTE = "[patch truncated: the rest of this file was not sent for review]";
-function truncatePatch(patch, capTokens) {
-  const maxChars = Math.max(0, Math.floor(capTokens * 3.5) - PATCH_TRUNCATED_NOTE.length - 1);
-  let cut3 = patch.slice(0, maxChars);
-  const lastBreak = cut3.lastIndexOf("\n");
-  if (lastBreak > 0)
-    cut3 = cut3.slice(0, lastBreak);
-  return `${cut3}
-${PATCH_TRUNCATED_NOTE}`;
-}
-function batchFilesByTokenCap(files, capTokens) {
+function batchFilesByTokenCap(files, capTokens, maxFileParts = 8) {
   const batches = [];
-  const truncatedPaths = [];
+  const skippedParts = [];
   let current = [];
   let currentTokens = 0;
   const flush = () => {
@@ -141213,8 +141324,13 @@ function batchFilesByTokenCap(files, capTokens) {
     } else {
       const file2 = node2.files[0];
       flush();
-      batches.push([{ path: file2.path, patch: truncatePatch(file2.patch, capTokens) }]);
-      truncatedPaths.push(file2.path);
+      const parts = splitPatchIntoParts(file2.patch, capTokens);
+      parts.slice(0, maxFileParts).forEach((part, index) => {
+        batches.push([{ path: file2.path, patch: part, part: { index: index + 1, total: parts.length } }]);
+      });
+      if (parts.length > maxFileParts) {
+        skippedParts.push({ path: file2.path, from: maxFileParts + 1, total: parts.length });
+      }
     }
   };
   for (const group of groupFilesForBatches(files, (f3) => estimateTokens(f3.patch))) {
@@ -141224,7 +141340,7 @@ function batchFilesByTokenCap(files, capTokens) {
   }
   placeDeferred();
   flush();
-  return { batches, truncatedPaths };
+  return { batches, skippedParts };
 }
 
 function parseReviewResponse(response) {
@@ -142072,7 +142188,7 @@ function wrapUntrusted2(label, content) {
 ${escapeDelimiters(content)}
 <<<END UNTRUSTED:${safeLabel}>>>`;
 }
-var HUNK_HEADER_RE2 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+var HUNK_HEADER_RE3 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 function parseHunkHeader(header2) {
   return {
     oldLine: parseInt(header2[1] ?? "1", 10),
@@ -142090,7 +142206,7 @@ function hunkRanges(hunk) {
 function patchRanges(patch) {
   const ranges = [];
   for (const line of patch.split(/\r?\n/)) {
-    const header2 = line.match(HUNK_HEADER_RE2);
+    const header2 = line.match(HUNK_HEADER_RE3);
     if (header2)
       ranges.push(...hunkRanges(parseHunkHeader(header2)));
   }
@@ -142101,7 +142217,7 @@ function patchChunks(patch) {
   let oldLine = 0;
   let newLine = 0;
   for (const line of patch.split(/\r?\n/)) {
-    const header2 = line.match(HUNK_HEADER_RE2);
+    const header2 = line.match(HUNK_HEADER_RE3);
     if (header2) {
       const hunk = parseHunkHeader(header2);
       oldLine = hunk.oldLine;
@@ -142733,9 +142849,9 @@ async function runReview(input2) {
   }
   let plan;
   if (withoutContextTokens > limits2.maxPromptTokens && redactedReviewableFiles.length > 0) {
-    plan = batchFilesByTokenCap(redactedReviewableFiles, limits2.batchTokens);
-    for (const path12 of plan.truncatedPaths) {
-      incompleteReasons.push(`${path12}: patch truncated to fit review.batchTokens`);
+    plan = batchFilesByTokenCap(redactedReviewableFiles, limits2.batchTokens, reviewCfg.maxFileParts);
+    for (const skipped of plan.skippedParts) {
+      incompleteReasons.push(`${skipped.path}: parts ${skipped.from}\u2013${skipped.total} of ${skipped.total} not reviewed (review.maxFileParts)`);
     }
   } else {
     context.markSent(wholeContext);
@@ -195038,6 +195154,641 @@ async function listPullRequestFiles(client, { owner, repo, pull_number }) {
   };
 }
 
+var Diff = class {
+  diff(oldStr, newStr, options = {}) {
+    let callback;
+    if (typeof options === "function") {
+      callback = options;
+      options = {};
+    } else if ("callback" in options) {
+      callback = options.callback;
+    }
+    const oldString = this.castInput(oldStr, options);
+    const newString = this.castInput(newStr, options);
+    const oldTokens = this.removeEmpty(this.tokenize(oldString, options));
+    const newTokens = this.removeEmpty(this.tokenize(newString, options));
+    return this.diffWithOptionsObj(oldTokens, newTokens, options, callback);
+  }
+  diffWithOptionsObj(oldTokens, newTokens, options, callback) {
+    var _a15;
+    const done = (value) => {
+      value = this.postProcess(value, options);
+      if (callback) {
+        setTimeout(function() {
+          callback(value);
+        }, 0);
+        return void 0;
+      } else {
+        return value;
+      }
+    };
+    const newLen = newTokens.length, oldLen = oldTokens.length;
+    let editLength = 1;
+    let maxEditLength = newLen + oldLen;
+    if (options.maxEditLength != null) {
+      maxEditLength = Math.min(maxEditLength, options.maxEditLength);
+    }
+    const maxExecutionTime = (_a15 = options.timeout) !== null && _a15 !== void 0 ? _a15 : Infinity;
+    const abortAfterTimestamp = Date.now() + maxExecutionTime;
+    const bestPath = [{ oldPos: -1, lastComponent: void 0 }];
+    let newPos = this.extractCommon(bestPath[0], newTokens, oldTokens, 0, options);
+    if (bestPath[0].oldPos + 1 >= oldLen && newPos + 1 >= newLen) {
+      return done(this.buildValues(bestPath[0].lastComponent, newTokens, oldTokens));
+    }
+    let minDiagonalToConsider = -Infinity, maxDiagonalToConsider = Infinity;
+    const execEditLength = () => {
+      for (let diagonalPath = Math.max(minDiagonalToConsider, -editLength); diagonalPath <= Math.min(maxDiagonalToConsider, editLength); diagonalPath += 2) {
+        let basePath;
+        const removePath = bestPath[diagonalPath - 1], addPath = bestPath[diagonalPath + 1];
+        if (removePath) {
+          bestPath[diagonalPath - 1] = void 0;
+        }
+        let canAdd = false;
+        if (addPath) {
+          const addPathNewPos = addPath.oldPos - diagonalPath;
+          canAdd = addPath && 0 <= addPathNewPos && addPathNewPos < newLen;
+        }
+        const canRemove = removePath && removePath.oldPos + 1 < oldLen;
+        if (!canAdd && !canRemove) {
+          bestPath[diagonalPath] = void 0;
+          continue;
+        }
+        if (!canRemove || canAdd && removePath.oldPos < addPath.oldPos) {
+          basePath = this.addToPath(addPath, true, false, 0, options);
+        } else {
+          basePath = this.addToPath(removePath, false, true, 1, options);
+        }
+        newPos = this.extractCommon(basePath, newTokens, oldTokens, diagonalPath, options);
+        if (basePath.oldPos + 1 >= oldLen && newPos + 1 >= newLen) {
+          return done(this.buildValues(basePath.lastComponent, newTokens, oldTokens)) || true;
+        } else {
+          bestPath[diagonalPath] = basePath;
+          if (basePath.oldPos + 1 >= oldLen) {
+            maxDiagonalToConsider = Math.min(maxDiagonalToConsider, diagonalPath - 1);
+          }
+          if (newPos + 1 >= newLen) {
+            minDiagonalToConsider = Math.max(minDiagonalToConsider, diagonalPath + 1);
+          }
+        }
+      }
+      editLength++;
+    };
+    if (callback) {
+      (function exec() {
+        setTimeout(function() {
+          if (editLength > maxEditLength || Date.now() > abortAfterTimestamp) {
+            return callback(void 0);
+          }
+          if (!execEditLength()) {
+            exec();
+          }
+        }, 0);
+      })();
+    } else {
+      while (editLength <= maxEditLength && Date.now() <= abortAfterTimestamp) {
+        const ret = execEditLength();
+        if (ret) {
+          return ret;
+        }
+      }
+    }
+  }
+  addToPath(path12, added, removed, oldPosInc, options) {
+    const last = path12.lastComponent;
+    if (last && !options.oneChangePerToken && last.added === added && last.removed === removed) {
+      return {
+        oldPos: path12.oldPos + oldPosInc,
+        lastComponent: { count: last.count + 1, added, removed, previousComponent: last.previousComponent }
+      };
+    } else {
+      return {
+        oldPos: path12.oldPos + oldPosInc,
+        lastComponent: { count: 1, added, removed, previousComponent: last }
+      };
+    }
+  }
+  extractCommon(basePath, newTokens, oldTokens, diagonalPath, options) {
+    const newLen = newTokens.length, oldLen = oldTokens.length;
+    let oldPos = basePath.oldPos, newPos = oldPos - diagonalPath, commonCount = 0;
+    while (newPos + 1 < newLen && oldPos + 1 < oldLen && this.equals(oldTokens[oldPos + 1], newTokens[newPos + 1], options)) {
+      newPos++;
+      oldPos++;
+      commonCount++;
+      if (options.oneChangePerToken) {
+        basePath.lastComponent = { count: 1, previousComponent: basePath.lastComponent, added: false, removed: false };
+      }
+    }
+    if (commonCount && !options.oneChangePerToken) {
+      basePath.lastComponent = { count: commonCount, previousComponent: basePath.lastComponent, added: false, removed: false };
+    }
+    basePath.oldPos = oldPos;
+    return newPos;
+  }
+  equals(left, right, options) {
+    if (options.comparator) {
+      return options.comparator(left, right);
+    } else {
+      return left === right || !!options.ignoreCase && left.toLowerCase() === right.toLowerCase();
+    }
+  }
+  removeEmpty(array2) {
+    const ret = [];
+    for (let i2 = 0; i2 < array2.length; i2++) {
+      if (array2[i2]) {
+        ret.push(array2[i2]);
+      }
+    }
+    return ret;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  castInput(value, options) {
+    return value;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  tokenize(value, options) {
+    return Array.from(value);
+  }
+  join(chars) {
+    return chars.join("");
+  }
+  postProcess(changeObjects, options) {
+    return changeObjects;
+  }
+  get useLongestToken() {
+    return false;
+  }
+  buildValues(lastComponent, newTokens, oldTokens) {
+    const components = [];
+    let nextComponent;
+    while (lastComponent) {
+      components.push(lastComponent);
+      nextComponent = lastComponent.previousComponent;
+      delete lastComponent.previousComponent;
+      lastComponent = nextComponent;
+    }
+    components.reverse();
+    const componentLen = components.length;
+    let componentPos = 0, newPos = 0, oldPos = 0;
+    for (; componentPos < componentLen; componentPos++) {
+      const component = components[componentPos];
+      if (!component.removed) {
+        if (!component.added && this.useLongestToken) {
+          let value = newTokens.slice(newPos, newPos + component.count);
+          value = value.map(function(value2, i2) {
+            const oldValue = oldTokens[oldPos + i2];
+            return oldValue.length > value2.length ? oldValue : value2;
+          });
+          component.value = this.join(value);
+        } else {
+          component.value = this.join(newTokens.slice(newPos, newPos + component.count));
+        }
+        newPos += component.count;
+        if (!component.added) {
+          oldPos += component.count;
+        }
+      } else {
+        component.value = this.join(oldTokens.slice(oldPos, oldPos + component.count));
+        oldPos += component.count;
+      }
+    }
+    return components;
+  }
+};
+
+var LineDiff = class extends Diff {
+  constructor() {
+    super(...arguments);
+    this.tokenize = tokenize3;
+  }
+  equals(left, right, options) {
+    if (options.ignoreWhitespace) {
+      if (!options.newlineIsToken || !left.includes("\n")) {
+        left = left.trim();
+      }
+      if (!options.newlineIsToken || !right.includes("\n")) {
+        right = right.trim();
+      }
+    } else if (options.ignoreNewlineAtEof && !options.newlineIsToken) {
+      if (left.endsWith("\n")) {
+        left = left.slice(0, -1);
+      }
+      if (right.endsWith("\n")) {
+        right = right.slice(0, -1);
+      }
+    }
+    return super.equals(left, right, options);
+  }
+};
+var lineDiff = new LineDiff();
+function diffLines(oldStr, newStr, options) {
+  return lineDiff.diff(oldStr, newStr, options);
+}
+function tokenize3(value, options) {
+  if (options.stripTrailingCr) {
+    value = value.replace(/\r\n/g, "\n");
+  }
+  const retLines = [], linesAndNewlines = value.split(/(\n|\r\n)/);
+  if (!linesAndNewlines[linesAndNewlines.length - 1]) {
+    linesAndNewlines.pop();
+  }
+  for (let i2 = 0; i2 < linesAndNewlines.length; i2++) {
+    const line = linesAndNewlines[i2];
+    if (i2 % 2 && !options.newlineIsToken) {
+      retLines[retLines.length - 1] += line;
+    } else {
+      retLines.push(line);
+    }
+  }
+  return retLines;
+}
+
+function structuredPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, newHeader, options) {
+  let optionsObj;
+  if (!options) {
+    optionsObj = {};
+  } else if (typeof options === "function") {
+    optionsObj = { callback: options };
+  } else {
+    optionsObj = options;
+  }
+  if (typeof optionsObj.context === "undefined") {
+    optionsObj.context = 4;
+  }
+  const context = optionsObj.context;
+  if (optionsObj.newlineIsToken) {
+    throw new Error("newlineIsToken may not be used with patch-generation functions, only with diffing functions");
+  }
+  if (!optionsObj.callback) {
+    return diffLinesResultToPatch(diffLines(oldStr, newStr, optionsObj));
+  } else {
+    const { callback } = optionsObj;
+    diffLines(oldStr, newStr, Object.assign(Object.assign({}, optionsObj), { callback: (diff) => {
+      const patch = diffLinesResultToPatch(diff);
+      callback(patch);
+    } }));
+  }
+  function diffLinesResultToPatch(diff) {
+    if (!diff) {
+      return;
+    }
+    diff.push({ value: "", lines: [] });
+    function contextLines(lines) {
+      return lines.map(function(entry) {
+        return " " + entry;
+      });
+    }
+    const hunks = [];
+    let oldRangeStart = 0, newRangeStart = 0, curRange = [], oldLine = 1, newLine = 1;
+    for (let i2 = 0; i2 < diff.length; i2++) {
+      const current = diff[i2], lines = current.lines || splitLines(current.value);
+      current.lines = lines;
+      if (current.added || current.removed) {
+        if (!oldRangeStart) {
+          const prev = diff[i2 - 1];
+          oldRangeStart = oldLine;
+          newRangeStart = newLine;
+          if (prev) {
+            curRange = context > 0 ? contextLines(prev.lines.slice(-context)) : [];
+            oldRangeStart -= curRange.length;
+            newRangeStart -= curRange.length;
+          }
+        }
+        for (const line of lines) {
+          curRange.push((current.added ? "+" : "-") + line);
+        }
+        if (current.added) {
+          newLine += lines.length;
+        } else {
+          oldLine += lines.length;
+        }
+      } else {
+        if (oldRangeStart) {
+          if (lines.length <= context * 2 && i2 < diff.length - 2) {
+            for (const line of contextLines(lines)) {
+              curRange.push(line);
+            }
+          } else {
+            const contextSize = Math.min(lines.length, context);
+            for (const line of contextLines(lines.slice(0, contextSize))) {
+              curRange.push(line);
+            }
+            const hunk = {
+              oldStart: oldRangeStart,
+              oldLines: oldLine - oldRangeStart + contextSize,
+              newStart: newRangeStart,
+              newLines: newLine - newRangeStart + contextSize,
+              lines: curRange
+            };
+            hunks.push(hunk);
+            oldRangeStart = 0;
+            newRangeStart = 0;
+            curRange = [];
+          }
+        }
+        oldLine += lines.length;
+        newLine += lines.length;
+      }
+    }
+    for (const hunk of hunks) {
+      for (let i2 = 0; i2 < hunk.lines.length; i2++) {
+        if (hunk.lines[i2].endsWith("\n")) {
+          hunk.lines[i2] = hunk.lines[i2].slice(0, -1);
+        } else {
+          hunk.lines.splice(i2 + 1, 0, "\\ No newline at end of file");
+          i2++;
+        }
+      }
+    }
+    return {
+      oldFileName,
+      newFileName,
+      oldHeader,
+      newHeader,
+      hunks
+    };
+  }
+}
+function splitLines(text) {
+  const hasTrailingNl = text.endsWith("\n");
+  const result = text.split("\n").map((line) => line + "\n");
+  if (hasTrailingNl) {
+    result.pop();
+  } else {
+    result.push(result.pop().slice(0, -1));
+  }
+  return result;
+}
+
+var readCache = /* @__PURE__ */ new WeakMap();
+var listCache = /* @__PURE__ */ new WeakMap();
+function shared(caches, client, key, start) {
+  let cache2 = caches.get(client);
+  if (!cache2) {
+    cache2 = /* @__PURE__ */ new Map();
+    caches.set(client, cache2);
+  }
+  let request2 = cache2.get(key);
+  if (!request2) {
+    const pending = start();
+    pending.catch(() => {
+      if (cache2?.get(key) === pending)
+        cache2.delete(key);
+    });
+    request2 = pending;
+    cache2.set(key, request2);
+  }
+  return request2;
+}
+function readAtRef(client, owner, repo, ref, path12) {
+  return shared(readCache, client, `${owner}/${repo}@${ref}:${path12}`, () => client.getFileContent({ owner, repo, path: path12, ref }));
+}
+function listAtRef(client, owner, repo, ref, path12) {
+  const list = client.listDirectoryFiles?.bind(client);
+  if (!list)
+    return Promise.resolve(null);
+  return shared(listCache, client, `${owner}/${repo}@${ref}:${path12}`, () => list({ owner, repo, path: path12, ref }));
+}
+
+var MAX_REBUILT_PATCH_LINES = 5e4;
+var MAX_CONCURRENT_READS = 4;
+var REBUILDABLE_STATUSES = /* @__PURE__ */ new Set(["added", "modified", "renamed", "copied"]);
+var SNAPSHOT_PATH_RE = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
+var SNAPSHOT_NAME_RE = /^(\d+)_snapshot\.json$/;
+var NOT_RETURNED = "not returned by the contents API";
+var BINARY = "binary";
+var TOO_LARGE = `over ${MAX_REBUILT_PATCH_LINES.toLocaleString("en-US")} diff lines`;
+var NO_CHANGE = "no content change";
+async function rebuildMissingPatches(client, files, opts) {
+  const candidates = files.filter(isCandidate);
+  const rebuilt = [];
+  const failed = [];
+  const snapshotDiffs = [];
+  const patches = /* @__PURE__ */ new Map();
+  for (let start = 0; start < candidates.length; start += MAX_CONCURRENT_READS) {
+    const group = candidates.slice(start, start + MAX_CONCURRENT_READS);
+    const outcomes = await Promise.all(group.map((file2) => rebuildOne(client, file2, opts)));
+    for (const outcome of outcomes) {
+      if ("patch" in outcome) {
+        patches.set(outcome.path, outcome.patch);
+        rebuilt.push(outcome.path);
+        if (outcome.previous !== void 0) {
+          snapshotDiffs.push({ path: outcome.path, previous: outcome.previous });
+        }
+      } else if ("reason" in outcome) {
+        failed.push({ path: outcome.path, reason: outcome.reason });
+      }
+    }
+  }
+  return {
+    files: files.map((file2) => {
+      const patch = patches.get(file2.path);
+      return patch === void 0 ? file2 : { ...file2, patch };
+    }),
+    rebuilt,
+    failed,
+    snapshotDiffs
+  };
+}
+function isCandidate(file2) {
+  if (file2.changes <= 0)
+    return false;
+  if (!REBUILDABLE_STATUSES.has(file2.status))
+    return false;
+  if (isSensitivePath(file2.path))
+    return false;
+  if (snapshotOf(file2))
+    return true;
+  return !file2.patch;
+}
+async function rebuildOne(client, file2, opts) {
+  try {
+    if (file2.status === "added") {
+      const snapshot = await snapshotOutcome(client, file2, opts);
+      if (snapshot.kind === "diff") {
+        return { path: file2.path, patch: snapshot.patch, previous: snapshot.previous };
+      }
+      if (snapshot.kind === "same") {
+        return { path: file2.path, reason: `no content change from ${snapshot.previous}` };
+      }
+      if (file2.patch)
+        return { path: file2.path, unchanged: true };
+      const head2 = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+      if (head2 === null)
+        return { path: file2.path, reason: NOT_RETURNED };
+      if (isBinary(head2))
+        return { path: file2.path, reason: BINARY };
+      const patch2 = addedPatch(head2);
+      return patch2 === void 0 ? { path: file2.path, reason: TOO_LARGE } : { path: file2.path, patch: patch2 };
+    }
+    const basePath = file2.previousPath ?? file2.path;
+    const base = await readAtRef(client, opts.owner, opts.repo, opts.baseSha, basePath);
+    const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+    if (base === null || head === null)
+      return { path: file2.path, reason: NOT_RETURNED };
+    if (isBinary(base) || isBinary(head))
+      return { path: file2.path, reason: BINARY };
+    const patch = modifiedPatch(base, head);
+    if (patch === void 0)
+      return { path: file2.path, reason: TOO_LARGE };
+    if (patch === "")
+      return { path: file2.path, reason: NO_CHANGE };
+    return { path: file2.path, patch };
+  } catch {
+    return { path: file2.path, reason: NOT_RETURNED };
+  }
+}
+function isBinary(content) {
+  return content.includes("\0");
+}
+function addedPatch(content) {
+  const endsWithNewline = content.endsWith("\n");
+  const body = endsWithNewline ? content.slice(0, -1) : content;
+  const lines = body === "" ? [] : body.split("\n");
+  const patch = [
+    `@@ -0,0 +1,${lines.length} @@`,
+    ...lines.map((line) => `+${line}`),
+    ...endsWithNewline || lines.length === 0 ? [] : ["\\ No newline at end of file"]
+  ].join("\n");
+  return lineCount(patch) > MAX_REBUILT_PATCH_LINES ? void 0 : patch;
+}
+function modifiedPatch(base, head) {
+  const diff = structuredPatch("", "", base, head, "", "", { context: 3 });
+  const lines = [];
+  for (const hunk of diff.hunks) {
+    lines.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+    lines.push(...hunkLines(hunk.lines));
+  }
+  const patch = lines.join("\n");
+  return lineCount(patch) > MAX_REBUILT_PATCH_LINES ? void 0 : patch;
+}
+function hunkLines(lines) {
+  const body = [];
+  for (const line of lines) {
+    const parts = line.split("\n");
+    if (parts[parts.length - 1] === "")
+      parts.pop();
+    body.push(...parts);
+  }
+  return body;
+}
+function lineCount(patch) {
+  return patch.split("\n").length;
+}
+function snapshotOf(file2) {
+  if (file2.status !== "added")
+    return null;
+  const digits = SNAPSHOT_PATH_RE.exec(file2.path)?.[2];
+  if (!digits)
+    return null;
+  return { number: Number(digits), folder: folderOf(file2.path) };
+}
+function folderOf(path12) {
+  const slash = path12.lastIndexOf("/");
+  return slash === -1 ? "" : path12.slice(0, slash);
+}
+async function snapshotOutcome(client, file2, opts) {
+  const snapshot = snapshotOf(file2);
+  if (!snapshot)
+    return { kind: "none" };
+  try {
+    const previous = await findPreviousSnapshot(client, snapshot, opts);
+    if (!previous)
+      return { kind: "none" };
+    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
+    if (before === null)
+      return { kind: "none" };
+    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+    if (after === null)
+      return { kind: "none" };
+    if (isBinary(before) || isBinary(after))
+      return { kind: "none" };
+    const patch = snapshotPatch(before, after, previous.name);
+    if (patch.kind === "same")
+      return { kind: "same", previous: previous.name };
+    if (patch.kind === "large")
+      return { kind: "none" };
+    return { kind: "diff", patch: patch.text, previous: previous.name };
+  } catch {
+    return { kind: "none" };
+  }
+}
+async function findPreviousSnapshot(client, snapshot, opts) {
+  const base = await listAtRef(client, opts.owner, opts.repo, opts.baseSha, snapshot.folder);
+  const fromBase = previousSnapshotIn(base, snapshot.number);
+  if (fromBase) {
+    return { name: fromBase, path: `${snapshot.folder}/${fromBase}`, sha: opts.baseSha };
+  }
+  const head = await listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder);
+  const fromHead = previousSnapshotIn(head, snapshot.number);
+  if (fromHead) {
+    return { name: fromHead, path: `${snapshot.folder}/${fromHead}`, sha: opts.headSha };
+  }
+  return null;
+}
+function previousSnapshotIn(files, number4) {
+  if (!files)
+    return null;
+  let best = null;
+  let bestNumber = -1;
+  for (const file2 of files) {
+    const digits = SNAPSHOT_NAME_RE.exec(file2.slice(file2.lastIndexOf("/") + 1))?.[1];
+    if (!digits)
+      continue;
+    const value = Number(digits);
+    if (value >= number4 || value <= bestNumber)
+      continue;
+    bestNumber = value;
+    best = `${digits}_snapshot.json`;
+  }
+  return best;
+}
+function snapshotPatch(before, after, previousName) {
+  const diff = structuredPatch("", "", before, after, "", "", { context: 3 });
+  const lines = [];
+  let hunks = 0;
+  for (const hunk of diff.hunks) {
+    const kept = keptHunkLines(hunk.lines);
+    if (kept.count === 0)
+      continue;
+    const header2 = `@@ -0,0 +${hunk.newStart},${kept.count} @@`;
+    lines.push(hunks === 0 ? `${header2} compared with ${previousName}: only the regions that differ are shown` : header2);
+    hunks++;
+    lines.push(...kept.lines);
+  }
+  if (hunks === 0)
+    return { kind: "same" };
+  const text = lines.join("\n");
+  if (lineCount(text) > MAX_REBUILT_PATCH_LINES)
+    return { kind: "large" };
+  return { kind: "text", text };
+}
+function keptHunkLines(lines) {
+  const kept = [];
+  let count2 = 0;
+  let keptLast = false;
+  for (const line of hunkLines(lines)) {
+    if (line.startsWith("\\")) {
+      if (keptLast)
+        kept.push(line);
+      continue;
+    }
+    if (line.startsWith("-")) {
+      keptLast = false;
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      kept.push(`+${line.slice(1)}`);
+    } else if (line.startsWith("+")) {
+      kept.push(line);
+    } else {
+      kept.push(`+${line}`);
+    }
+    count2++;
+    keptLast = true;
+  }
+  return { lines: kept, count: count2 };
+}
+
 var MAIN_BOT_SLOT = 1;
 var MARKER_REGEX = /<!--\s*mergepilot:review\s+head=([^\s>]+)\s+config=([^\s>]+)(?:\s+status=(partial))?(?:\s+bot=(\d{1,2}))?\s*-->/;
 var COMMENT_BOT_REGEX = /<!--\s*mergepilot:bot=(\d{1,2})\s*-->\s*$/;
@@ -196181,36 +196932,6 @@ function withJudgeUsage(costUsd2, usage, report) {
   };
 }
 
-var readCache = /* @__PURE__ */ new WeakMap();
-var listCache = /* @__PURE__ */ new WeakMap();
-function shared(caches, client, key, start) {
-  let cache2 = caches.get(client);
-  if (!cache2) {
-    cache2 = /* @__PURE__ */ new Map();
-    caches.set(client, cache2);
-  }
-  let request2 = cache2.get(key);
-  if (!request2) {
-    const pending = start();
-    pending.catch(() => {
-      if (cache2?.get(key) === pending)
-        cache2.delete(key);
-    });
-    request2 = pending;
-    cache2.set(key, request2);
-  }
-  return request2;
-}
-function readAtRef(client, owner, repo, ref, path12) {
-  return shared(readCache, client, `${owner}/${repo}@${ref}:${path12}`, () => client.getFileContent({ owner, repo, path: path12, ref }));
-}
-function listAtRef(client, owner, repo, ref, path12) {
-  const list = client.listDirectoryFiles?.bind(client);
-  if (!list)
-    return Promise.resolve(null);
-  return shared(listCache, client, `${owner}/${repo}@${ref}:${path12}`, () => list({ owner, repo, path: path12, ref }));
-}
-
 var NESTED_RULES_NAMES = ["AGENTS.md", "CLAUDE.md"];
 var MAX_RULES_DIRECTORIES = 40;
 var READ_CONCURRENCY = 8;
@@ -196334,7 +197055,7 @@ function citationKind(source, path12) {
   }
   return { kind: "cited", reason: `cited by ${file2.path}` };
 }
-function hunkLines(patch) {
+function hunkLines2(patch) {
   const added = [];
   const context = [];
   let inHunk = false;
@@ -196428,7 +197149,7 @@ async function runCitedLookups(reader, reviewed, exclude, prBody) {
       await reader.run(named);
     }
   };
-  const patches = reviewed.map((file2) => ({ file: file2, lines: hunkLines(file2.patch ?? "") }));
+  const patches = reviewed.map((file2) => ({ file: file2, lines: hunkLines2(file2.patch ?? "") }));
   await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.added, source: { kind: "added-line", file: file2 } })));
   await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.context, source: { kind: "context-line", file: file2 } })));
   if (reviewed.length > 0) {
@@ -196973,12 +197694,20 @@ async function reviewPullRequest(ctx) {
     };
   }
   log?.(`Listing files for pull request #${pullNumber}...`);
-  const { files: prFiles } = await listPullRequestFiles(client, {
+  const listed = await listPullRequestFiles(client, {
     owner,
     repo,
     pull_number: pullNumber
   });
+  const rebuilt = await rebuildMissingPatches(client, listed.files, { owner, repo, baseSha, headSha });
+  const prFiles = rebuilt.files;
   log?.(`Found ${prFiles.length} files in PR diff`);
+  if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {
+    log?.(`Rebuilt ${rebuilt.rebuilt.length} missing patches, failed ${rebuilt.failed.length}`);
+    if (rebuilt.failed.length > 0) {
+      log?.(`Patches not rebuilt: ${rebuilt.failed.map((f3) => `${f3.path} (${f3.reason})`).join(", ")}`);
+    }
+  }
   const selection = await selectIncrementalFiles(client, {
     owner,
     repo,

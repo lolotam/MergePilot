@@ -35,6 +35,13 @@ export {
 } from './pr-files.js';
 
 export {
+  rebuildMissingPatches,
+  MAX_REBUILT_PATCH_LINES,
+  type RebuildPatchesOptions,
+  type RebuildPatchesResult,
+} from './rebuild-patch.js';
+
+export {
   buildMarker,
   buildBotCommentMarker,
   commentBotSlot,

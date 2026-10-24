@@ -3,6 +3,7 @@ import {
   listPullRequestFiles,
   loadRepoConfig,
   publishReview,
+  rebuildMissingPatches,
   renderReviewSummary,
 } from '@mergepilot/github';
 import {
@@ -186,7 +187,7 @@ async function sharedSteps(
   mainSkillKey: string | undefined,
 ): Promise<SharedOutcome> {
   const { settings, ...base } = shared;
-  const { job, deps, workspaceId } = base;
+  const { job, deps, logger, workspaceId } = base;
   let releaseBudget: (() => void) | undefined;
   const [owner, repo] = job.repoFullName.split('/');
   if (!owner || !repo) throw new Error(`Invalid repoFullName: ${job.repoFullName}`);
@@ -314,9 +315,26 @@ async function sharedSteps(
     // Judge prices (workspace override, then catalog; ADR-0016), read once for every bot's judge.
     judgePrices = await judgePriceLookup(deps.store, settings);
     // The panel lists the PR's files once for every bot; a lone main bot lists them itself.
-    prFiles = panelActive
-      ? (await listPullRequestFiles(client, { owner, repo, pull_number: job.pullNumber })).files
-      : undefined;
+    if (panelActive) {
+      const listed = await listPullRequestFiles(client, { owner, repo, pull_number: job.pullNumber });
+      // A file whose diff is too big for GitHub's files API comes without a patch (ADR-0045): its
+      // patch is rebuilt from the file contents, so the bots see the file at all.
+      const rebuilt = await rebuildMissingPatches(client, listed.files, {
+        owner,
+        repo,
+        baseSha: job.baseSha,
+        headSha: job.headSha,
+      });
+      prFiles = rebuilt.files;
+      if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {
+        const message = `Rebuilt ${rebuilt.rebuilt.length} missing patches, failed ${rebuilt.failed.length}`;
+        deps.log?.(message);
+        logger.info(
+          { event: 'patches.rebuilt', rebuilt: rebuilt.rebuilt.length, failed: rebuilt.failed.map((f) => f.path) },
+          message,
+        );
+      }
+    }
   } catch (error) {
     releaseBudget?.(); // the job never reaches the caller's release
     throw error;

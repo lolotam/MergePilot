@@ -15,6 +15,7 @@ import {
   hasNothingNewToReview,
   listPullRequestFiles,
   NOTHING_NEW_DETAIL,
+  rebuildMissingPatches,
   reviewScopeOf,
   selectIncrementalFiles,
   withJudgeUsage,
@@ -94,8 +95,23 @@ export async function selectBotFiles(
   let prFiles = params.prFiles;
   if (!prFiles) {
     log?.(`Listing files for pull request #${pullNumber}...`);
-    prFiles = (await listPullRequestFiles(client, { owner, repo, pull_number: pullNumber })).files;
+    const listed = await listPullRequestFiles(client, { owner, repo, pull_number: pullNumber });
+    // A file whose diff is too big for GitHub's files API comes without a patch (ADR-0045): its
+    // patch is rebuilt from the file contents, so the bots see the file at all.
+    const rebuilt = await rebuildMissingPatches(client, listed.files, {
+      owner,
+      repo,
+      baseSha: params.baseSha,
+      headSha: params.headSha,
+    });
+    prFiles = rebuilt.files;
     log?.(`Found ${prFiles.length} files in PR diff`);
+    if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {
+      log?.(`Rebuilt ${rebuilt.rebuilt.length} missing patches, failed ${rebuilt.failed.length}`);
+      if (rebuilt.failed.length > 0) {
+        log?.(`Patches not rebuilt: ${rebuilt.failed.map((f) => `${f.path} (${f.reason})`).join(', ')}`);
+      }
+    }
   }
   log?.('Selecting files for review (incremental check)...');
   const selection = await selectIncrementalFiles(client, {
