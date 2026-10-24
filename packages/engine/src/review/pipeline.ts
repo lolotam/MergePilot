@@ -377,8 +377,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // and only in a single-call review; a batched one discloses that it did not explore.
   const explored = await exploreBeforeSinglePass({
     explore: input.explore, review: reviewCfg, batched: plan !== undefined, model, spend, deadline, signal,
-    prompt, promptTokens, promptLimit: wholePromptLimit, files: redactedReviewableFiles,
-    contextFiles: context.sentFiles(), knownSecrets, reviewOutputTokens,
+    prompt, promptTokens, promptLimit: wholePromptLimit, files: redactedReviewableFiles, contextFiles: context.sentFiles(),
+    knownSecrets, reviewOutputTokens, verifyReserve: reviewCfg.verify ? { promptTokens, outputTokens: verifyOutputTokens } : undefined,
   });
 
   const passContext: ReviewPassContext = {

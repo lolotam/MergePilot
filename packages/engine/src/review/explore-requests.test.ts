@@ -5,8 +5,10 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ExploreLimits } from '../config/schema.js';
+import { Secret } from '../credentials/secret.js';
 import { isContextPathAllowed } from '../diff/classify-file.js';
 import { isSensitivePath } from '../security/sensitive-path.js';
+import { estimateTokens } from './budget.js';
 import { ExploreBudget, type RepositoryReader } from './explore.js';
 import { executeRequests, type ExploreRequest } from './explore-requests.js';
 
@@ -60,8 +62,9 @@ function ctx(
   budget: ExploreBudget,
   heldTexts: Map<string, string> = new Map(),
   limits: ExploreLimits = LIMITS,
+  knownSecrets: readonly Secret[] = [],
 ): Parameters<typeof executeRequests>[1] {
-  return { reader, budget, limits, allowPath, heldTexts };
+  return { reader, budget, limits, allowPath, heldTexts, knownSecrets };
 }
 
 describe('the requests of an exploration round (ADR-0046)', () => {
@@ -158,6 +161,24 @@ describe('the requests of an exploration round (ADR-0046)', () => {
     expect(budget.remainingTokens).toBe(left);
     expect(reader.reads).toEqual(['src/a.ts']);
     expect(second.entries[0]!.content).toBe('1| const a = 1;\n2| const b = 2;');
+  });
+
+  it('serves a repeated read with the content it showed the first time', async () => {
+    const readBudget = 1000;
+    const content = Array.from({ length: 400 }, (_, index) => `const value${index} = ${index};`).join('\n');
+    const reader = fakeReader({ 'src/a.ts': content });
+    const budget = new ExploreBudget({ ...LIMITS, maxReadTokens: readBudget });
+
+    const result = await executeRequests(
+      [{ read: { path: 'src/a.ts' } }, { read: { path: 'src/a.ts' } }],
+      ctx(reader, budget),
+    );
+
+    // The read was cut to the budget: the repeat shows the same cut, and it is free.
+    expect(result.entries[0]!.content).toContain('… (cut to the read budget)');
+    expect(result.entries[0]!.content).not.toContain('const value399');
+    expect(result.entries[1]!.content).toBe(result.entries[0]!.content);
+    expect(readBudget - budget.remainingTokens).toBe(estimateTokens(result.entries[0]!.content));
   });
 
   it('charges another range of a file that was read before', async () => {
@@ -315,7 +336,7 @@ describe('the requests of an exploration round (ADR-0046)', () => {
     expect(result.entries[1]!.content).toBe('not found');
   });
 
-  it('answers a failed path listing with "read failed" and goes on with the next request', async () => {
+  it('keeps the matches the review holds when the path listing fails', async () => {
     const reader: RepositoryReader = {
       async readFile() {
         return null;
@@ -328,15 +349,83 @@ describe('the requests of an exploration round (ADR-0046)', () => {
       },
     };
     const budget = new ExploreBudget(LIMITS);
+    const held = new Map([['src/held.ts', 'const found = 1;']]);
 
     const result = await executeRequests(
-      [{ find: { text: 'guard' } }, { read: { path: 'src/a.ts' } }],
-      ctx(reader, budget),
+      [{ find: { text: 'found' } }, { read: { path: 'src/a.ts' } }],
+      ctx(reader, budget, held),
     );
 
     expect(result.entries).toHaveLength(2);
-    expect(result.entries[0]!.content).toBe('read failed');
+    // The failed listing costs the paths of the head only: the matches stay.
+    expect(result.entries[0]!.content).toContain('src/held.ts:1: const found = 1;');
     expect(result.entries[0]!.content).not.toContain('the server is down');
     expect(result.entries[1]!.content).toBe('not found');
+  });
+
+  it('tries the path listing again after a failed one', async () => {
+    let calls = 0;
+    const reader: RepositoryReader = {
+      async readFile() {
+        return null;
+      },
+      async listDirectory() {
+        return null;
+      },
+      async listPaths() {
+        calls += 1;
+        if (calls === 1) throw new Error('the server is down');
+        return ['src/guard.ts'];
+      },
+    };
+    const budget = new ExploreBudget(LIMITS);
+
+    const first = await executeRequests([{ find: { text: 'guard' } }], ctx(reader, budget));
+    const second = await executeRequests([{ find: { text: 'guard' } }], ctx(reader, budget));
+
+    expect(calls).toBe(2);
+    expect(first.entries[0]!.content).toBe('');
+    expect(second.entries[0]!.content).toContain('src/guard.ts');
+  });
+
+  it('redacts a secret before the line cut, so no part of it is shown', async () => {
+    const secret = new Secret('explore-secret-one\nexplore-secret-two');
+    // The secret sits on the twentieth line and runs into the twenty-first: a read cut at twenty
+    // lines would show its first half.
+    const lines = Array.from({ length: 19 }, (_, index) => `const value${index} = ${index};`);
+    const reader = fakeReader({
+      'src/a.ts': [...lines, `const key = "${secret.reveal()}";`, 'const after = 1;'].join('\n'),
+    });
+    const budget = new ExploreBudget(LIMITS);
+    const limits = { ...LIMITS, maxLinesPerRead: 20 };
+
+    const result = await executeRequests(
+      [{ read: { path: 'src/a.ts' } }],
+      ctx(reader, budget, new Map(), limits, [secret]),
+    );
+
+    expect(result.entries[0]!.content).toContain('[REDACTED:known]');
+    expect(result.entries[0]!.content).not.toContain('explore-secret-one');
+    expect(result.entries[0]!.content).not.toContain('explore-secret-two');
+  });
+
+  it('redacts a secret before the find slice, so no part of it is shown', async () => {
+    const secret = new Secret('explore-secret-value-42');
+    // The secret starts at the two-hundredth character of the line: the slice of a match would cut
+    // it in half.
+    const reader = fakeReader({
+      'src/a.ts': `${'a'.repeat(190)}${secret.reveal()}${'b'.repeat(50)}`,
+    });
+    const budget = new ExploreBudget(LIMITS);
+
+    await executeRequests([{ read: { path: 'src/a.ts' } }], ctx(reader, budget, new Map(), LIMITS, [secret]));
+    const result = await executeRequests(
+      [{ find: { text: 'a' } }],
+      ctx(reader, budget, new Map(), LIMITS, [secret]),
+    );
+
+    expect(result.entries[0]!.content).toContain('src/a.ts:1');
+    expect(result.entries[0]!.content).not.toContain('explore-secret');
+    expect(result.entries[0]!.content).not.toContain(secret.reveal());
   });
 });

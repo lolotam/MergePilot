@@ -64,6 +64,11 @@ function input(
 const READ_GUARD = JSON.stringify({ explore: [{ read: { path: 'src/guard.ts' } }] });
 const NOTHING = JSON.stringify({ explore: [] });
 
+/** A read of this file costs exactly the read budget of the review, so the budget ends with it. */
+const BIG_FILE = 'x'.repeat(3494);
+const READ_BIG = JSON.stringify({ explore: [{ read: { path: 'src/big.ts' } }] });
+const VERDICTS = JSON.stringify({ verdicts: [{ id: 'f1', verdict: 'confirmed', reason: 'shown' }] });
+
 describe('the exploration in the pipeline (ADR-0046)', () => {
   it('sends exactly the same requests as before when no reader is passed', async () => {
     const { model, requests } = recordingModel([makeAnswerJson([])]);
@@ -114,13 +119,13 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
     });
   });
 
-  it('gives the verifier its own explored block when the review explored', async () => {
+  it('gives the verifier the explored block of the review and its own', async () => {
     const { model, requests } = recordingModel([
       READ_GUARD,
       NOTHING,
       makeAnswerJson([validFindingJson()]),
       JSON.stringify({ explore: [{ read: { path: 'src/other.ts' } }] }),
-      JSON.stringify({ verdicts: [{ id: 'f1', verdict: 'confirmed', reason: 'shown' }] }),
+      VERDICTS,
     ]);
 
     const result = await runReview(input(model, {
@@ -135,10 +140,35 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
     // Two exploration rounds, the review, the verifier's own round and the verify call.
     expect(requests).toHaveLength(5);
     expect(requests[4]!.user).toContain('EXPLORED (read-only files and searches you asked for');
+    // The verifier judges against what the review read, and against what it read itself.
+    expect(requests[4]!.user).toContain('<<<UNTRUSTED:EXPLORED:src/guard.ts>>>');
     expect(requests[4]!.user).toContain('<<<UNTRUSTED:EXPLORED:src/other.ts>>>');
     expect(result).toMatchObject({
       status: 'completed',
       exploration: { rounds: 3, requests: 2, filesRead: ['src/guard.ts', 'src/other.ts'] },
+    });
+  });
+
+  it('gives the verifier the explored block of the review when the read budget is used up', async () => {
+    const { model, requests } = recordingModel([
+      READ_BIG,
+      makeAnswerJson([validFindingJson()]),
+      VERDICTS,
+    ]);
+
+    const result = await runReview(input(model, {
+      explore: { reader: fakeReader({ 'src/big.ts': BIG_FILE }) },
+    }, { verify: true, explore: { maxReadTokens: 1000 } }));
+
+    // The review's round, the review call and the verify call: the budget was used up, so the
+    // verifier did not explore, but it still sees what the review read.
+    expect(requests).toHaveLength(3);
+    expect(requests.filter((request) => request.system.includes('EXPLORATION (round'))).toHaveLength(1);
+    expect(requests[2]!.user).toContain('<<<UNTRUSTED:EXPLORED:src/big.ts>>>');
+    expect(requests[2]!.user).toContain('x'.repeat(200));
+    expect(result).toMatchObject({
+      status: 'completed',
+      exploration: { rounds: 1, requests: 1, filesRead: ['src/big.ts'] },
     });
   });
 
@@ -181,6 +211,47 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
 
     // The exploration does not fit next to the reserved review call: the review runs anyway.
     expect(requests).toHaveLength(1);
+    expect(result).toMatchObject({
+      status: 'completed',
+      exploration: { rounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'budget limit reached' },
+    });
+  });
+
+  it('keeps the money of the verification call out of the exploration', async () => {
+    const base = makeConfig();
+    const pricing = { inputPerMTok: 1000, outputPerMTok: 1000, cacheReadPerMTok: 1000, cacheWritePerMTok: 1000 };
+    const explore = { reader: fakeReader({ 'src/guard.ts': 'export function guard() {}' }) };
+    // The prompt of the review call, measured without an exploration.
+    const baseline = recordingModel([makeAnswerJson([])]);
+    await runReview(input(baseline.model));
+    const reviewTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user);
+    // The prompt of an exploration round, measured with a review that explores and verifies nothing.
+    const probe = recordingModel([READ_GUARD, NOTHING, makeAnswerJson([])]);
+    await runReview({
+      ...input(probe.model, { explore }),
+      config: makeConfig({
+        review: { ...base.review, verify: false, explore: { maxReadTokens: 1000 } },
+        budget: { ...base.budget, perReviewUsd: 100, pricing },
+      }),
+    });
+    const roundTokens = estimateTokens(probe.requests[0]!.system + probe.requests[0]!.user);
+    // The spend that pays for the review call, the verification call and the exploration beside
+    // them, but not for the exploration beside the verification call as well. The prices are 1000
+    // per million tokens, so a thousand tokens cost a dollar: the read budget (1000), the answer
+    // of an exploration round (2000) and the answer of the review call (4096).
+    const perReviewUsd = (roundTokens + reviewTokens + 1000 + 2000 + 4096) / 1000 + 0.0001;
+    const { model, requests } = recordingModel([makeAnswerJson([])]);
+
+    const result = await runReview({
+      ...input(model, { explore }),
+      config: makeConfig({
+        review: { ...base.review, verify: true, explore: { maxReadTokens: 1000 } },
+        budget: { ...base.budget, perReviewUsd, pricing },
+      }),
+    });
+
+    // The exploration does not fit next to the reserved review and verification calls.
+    expect(requests.filter((request) => request.system.includes('EXPLORATION (round'))).toHaveLength(0);
     expect(result).toMatchObject({
       status: 'completed',
       exploration: { rounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'budget limit reached' },

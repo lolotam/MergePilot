@@ -16,7 +16,6 @@ import {
   type RepositoryReader,
 } from '@mergepilot/engine';
 import type { GitHubClient } from './client.js';
-import { capFileContent } from './contents.js';
 import { listAtRef, readAtRef } from './read-cache.js';
 
 export interface RepositoryReaderParams {
@@ -53,8 +52,9 @@ export function createRepositoryReader(
     async readFile(path: string): Promise<string | null> {
       const normalized = normalizeExplorePath(path);
       if (!allowed(normalized)) return null;
-      const content = await readAtRef(client, owner, repo, headSha, normalized);
-      return content === null ? null : capFileContent(content);
+      // The content is not capped here: the engine bounds what it shows (maxLinesPerRead and the
+      // read budget) and redacts it before anything of it reaches a prompt.
+      return readAtRef(client, owner, repo, headSha, normalized);
     },
 
     async listDirectory(dir: string): Promise<string[] | null> {
@@ -70,8 +70,17 @@ export function createRepositoryReader(
     async listPaths(): Promise<string[] | null> {
       const list = client.listTreePaths?.bind(client);
       if (!list) return null;
-      treePaths ??= list({ owner, repo, ref: headSha });
-      const paths = await treePaths;
+      let pending = treePaths;
+      if (!pending) {
+        const fresh: Promise<string[] | null> = list({ owner, repo, ref: headSha });
+        pending = fresh.catch((err: unknown) => {
+          // A rejected listing is not kept: a later find tries again.
+          if (treePaths === pending) treePaths = undefined;
+          throw err;
+        });
+        treePaths = pending;
+      }
+      const paths = await pending;
       return paths === null ? null : paths.filter((path) => allowed(path));
     },
   };

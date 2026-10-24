@@ -137,6 +137,35 @@ function buildFittingVerifyPrompt(
   return { prompt: withoutRules, promptTokens: withoutRulesTokens };
 }
 
+/**
+ * Whether the verification prompt of `tokens` still fits the limit the JSON-only retry needs
+ * (ADR-0044): the explored results are left out when they do not.
+ */
+function fitsVerifyPrompt(input: VerifyPassInput, tokens: number): boolean {
+  return (
+    input.maxInputTokens === undefined ||
+    tokens + estimateTokens(JSON_ONLY_REMINDER) <= input.maxInputTokens
+  );
+}
+
+/**
+ * The verification prompt with a block appended: the prompt keeps every field it has, only the
+ * user part grows. An empty block and a block that does not fit the limit the JSON-only retry
+ * needs leave the prompt as it was (ADR-0044).
+ */
+function withBlock(
+  input: VerifyPassInput,
+  prompt: BuiltVerifyPrompt,
+  promptTokens: number,
+  block: string,
+): { prompt: BuiltVerifyPrompt; promptTokens: number } {
+  if (!block) return { prompt, promptTokens };
+  const user = `${prompt.user}\n\n${block}`;
+  const tokens = estimateTokens(prompt.system + user);
+  if (!fitsVerifyPrompt(input, tokens)) return { prompt, promptTokens };
+  return { prompt: { ...prompt, user }, promptTokens: tokens };
+}
+
 /** How many times the rules cap is lowered by the overflow before the rules are left out. */
 const SHORTEN_ATTEMPTS = 5;
 /** The least each step lowers the cap: a cut drops whole lines, so a smaller step may drop none. */
@@ -213,37 +242,35 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
 
   // The verifier explores before it judges (ADR-0046): one round from the remaining read budget.
   if (input.explore) {
-    const explored = await runExploration({
-      model,
-      spend,
-      deadline: input.deadline ?? new ReviewDeadline(NO_DEADLINE_MS),
-      signal,
-      system: verifyPrompt.system,
-      user: verifyPrompt.user,
-      rounds: 1,
-      limits: input.explore.limits,
-      budget: input.explore.budget,
-      reader: input.explore.reader,
-      heldTexts: input.explore.heldTexts,
-      allowPath: input.explore.allowPath,
-      knownSecrets: input.knownSecrets,
-      purpose: 'verify',
-      // The money the verification call needs stays out of the exploration's reach.
-      reserve: { promptTokens, outputTokens: firstRequested },
-    });
-    totalUsage = combineUsage(totalUsage, explored.usage);
-    if (explored.block) {
-      const user = `${verifyPrompt.user}\n\n${explored.block}`;
-      const tokens = estimateTokens(verifyPrompt.system + user);
-      // The prompt with the explored results must still fit the limit the retry needs.
-      const fits =
-        input.maxInputTokens === undefined ||
-        tokens + estimateTokens(JSON_ONLY_REMINDER) <= input.maxInputTokens;
-      if (fits) {
-        // The prompt keeps every field it has; only the user part grows.
-        verifyPrompt = { ...verifyPrompt, user };
-        promptTokens = tokens;
-      }
+    // The evidence the review read comes first: the verifier judges the findings against it, even
+    // when the read budget is used up and the verifier cannot read anything itself.
+    const withPrior = withBlock(input, verifyPrompt, promptTokens, input.explore.priorBlock);
+    verifyPrompt = withPrior.prompt;
+    promptTokens = withPrior.promptTokens;
+    // The verifier explores only when the read budget still has tokens for it.
+    if (!input.explore.budget.usedUp) {
+      const explored = await runExploration({
+        model,
+        spend,
+        deadline: input.deadline ?? new ReviewDeadline(NO_DEADLINE_MS),
+        signal,
+        system: verifyPrompt.system,
+        user: verifyPrompt.user,
+        rounds: 1,
+        limits: input.explore.limits,
+        budget: input.explore.budget,
+        reader: input.explore.reader,
+        heldTexts: input.explore.heldTexts,
+        allowPath: input.explore.allowPath,
+        knownSecrets: input.knownSecrets,
+        purpose: 'verify',
+        // The money the verification call needs stays out of the exploration's reach.
+        reserve: { promptTokens, outputTokens: firstRequested },
+      });
+      totalUsage = combineUsage(totalUsage, explored.usage);
+      const withExplored = withBlock(input, verifyPrompt, promptTokens, explored.block);
+      verifyPrompt = withExplored.prompt;
+      promptTokens = withExplored.promptTokens;
     }
   }
 

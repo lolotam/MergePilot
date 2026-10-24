@@ -10,14 +10,16 @@
 
 import { z } from 'zod';
 import type { ExploreLimits } from '../config/schema.js';
+import type { Secret } from '../credentials/secret.js';
+import { redactSecrets } from '../security/redact.js';
 import { estimateTokens } from './budget.js';
 import type { ExploreBudget, RepositoryReader } from './explore.js';
 
 /** Lines of a file at the PR head, 1-based and inclusive. */
 export const ExploreReadSchema = z.strictObject({
   path: z.string().min(1),
-  startLine: z.number().int().min(1).optional(),
-  endLine: z.number().int().min(1).optional(),
+  startLine: z.number().int().min(1).nullish(),
+  endLine: z.number().int().min(1).nullish(),
 });
 
 /** A literal, case-sensitive search in the files this review holds and in the head's paths. */
@@ -41,15 +43,22 @@ export const ExploreRequestSchema = z.union([
 
 export type ExploreRequest = z.infer<typeof ExploreRequestSchema>;
 
-/** The answer of an exploration round: the requests, or an empty list when nothing more is needed. */
+/**
+ * The answer of an exploration round, as it is parsed: the requests are checked one by one, so a
+ * malformed request is dropped and the rest of the answer still runs (ADR-0046).
+ */
 export const ExploreAnswerSchema = z.object({
-  explore: z.array(ExploreRequestSchema).max(20),
+  explore: z.array(z.unknown()),
 });
 
+/** The shape of the answer, sent to the model as its response schema. */
+export const ExploreAnswerShapeSchema = z.object({
+  explore: z.array(ExploreRequestSchema),
+});
 
 /** The JSON schema of the exploration answer, sent with the request. */
 export const exploreJsonSchema = (): Record<string, unknown> =>
-  z.toJSONSchema(ExploreAnswerSchema) as Record<string, unknown>;
+  z.toJSONSchema(ExploreAnswerShapeSchema) as Record<string, unknown>;
 
 /** At most this many matches of one search are returned. */
 export const MAX_FIND_MATCHES = 50;
@@ -78,6 +87,8 @@ export interface ExecuteRequestsContext {
   allowPath: (path: string) => boolean;
   /** The files this review already holds: the patches and the context files. */
   heldTexts: ReadonlyMap<string, string>;
+  /** The secrets of the review: the read content is redacted with them before it is shown. */
+  knownSecrets: readonly Secret[];
 }
 
 export interface ExecuteRequestsResult {
@@ -127,8 +138,8 @@ function cutToBudget(text: string, remainingTokens: number): { text: string; tok
 /** The lines of a file a read asks for, with their line numbers. */
 function numberedLines(
   content: string,
-  startLine: number | undefined,
-  endLine: number | undefined,
+  startLine: number | null | undefined,
+  endLine: number | null | undefined,
   maxLines: number,
 ): { text: string; start: number } {
   const lines = content.split(/\r?\n/);
@@ -167,7 +178,11 @@ async function executeRead(
   const cached = ctx.budget.readFiles.get(path);
   let content: string | null;
   if (cached === undefined) {
-    content = await ctx.reader.readFile(path);
+    const raw = await ctx.reader.readFile(path);
+    // The content is redacted before anything else looks at it: the line numbers, the cut to the
+    // budget and every later search see the redacted text only, so a secret is never shown in
+    // part, not even where a cut would have split it (ADR-0046).
+    content = raw === null ? null : redactSecrets(raw, [...ctx.knownSecrets]).text;
     ctx.budget.readFiles.set(path, content);
   } else {
     content = cached;
@@ -177,13 +192,14 @@ async function executeRead(
   if (text.length === 0) return { entry: { label: path, content: 'no such lines' }, refused: false };
   const label = start === 1 ? path : `${path}:${start}`;
   ctx.budget.addFileRead(path);
-  // The same range of a file that was served before is free; every other range of it is charged
-  // and cut like a first read.
+  // The same range of a file that was served before shows what it showed then, and it is free: a
+  // read that was cut to the budget stays cut, so a repeat never gets more than the first one.
   const key = servedKey(path, request);
-  if (ctx.budget.served(key)) return { entry: { label, content: text }, refused: false };
+  const served = ctx.budget.servedContent(key);
+  if (served !== undefined) return { entry: { label, content: served }, refused: false };
   const cut = cutToBudget(text, ctx.budget.remainingTokens);
   ctx.budget.charge(cut.tokens);
-  ctx.budget.markServed(key);
+  ctx.budget.markServed(key, cut.text);
   return { entry: { label, content: cut.text }, refused: false };
 }
 
@@ -213,7 +229,14 @@ async function executeFind(
       }
     }
   }
-  const paths = await ctx.budget.listPaths(ctx.reader);
+  // A failed listing costs the paths only: the matches the review holds stay, and the error text
+  // never reaches the prompt (ADR-0046).
+  let paths: string[] | null;
+  try {
+    paths = await ctx.budget.listPaths(ctx.reader);
+  } catch {
+    paths = null;
+  }
   for (const path of paths ?? []) {
     if (matches.length >= MAX_FIND_MATCHES) break;
     if (!path.includes(request.text)) continue;

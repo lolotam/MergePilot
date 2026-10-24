@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExploreLimits } from '../config/schema.js';
 import { Secret } from '../credentials/secret.js';
+import { estimateTokens } from './budget.js';
 import { ReviewDeadline } from './call.js';
 import { ExploreBudget, runExploration, type RepositoryReader } from './explore.js';
 import type { ReviewModel, ReviewModelRequest } from './model.js';
@@ -19,6 +20,9 @@ const LIMITS: ExploreLimits = {
 };
 
 const READ_A = JSON.stringify({ explore: [{ read: { path: 'src/a.ts' } }] });
+const READ_A_NULL_LINES = JSON.stringify({
+  explore: [{ read: { path: 'src/a.ts', startLine: null, endLine: null } }],
+});
 const READ_B = JSON.stringify({ explore: [{ read: { path: 'src/b.ts' } }] });
 const NOTHING = JSON.stringify({ explore: [] });
 
@@ -176,6 +180,34 @@ describe('the exploration rounds (ADR-0046)', () => {
     expect(requests).toHaveLength(1);
   });
 
+  it('reserves the results of the earlier rounds for the call that follows', async () => {
+    const file = { 'src/a.ts': 'const a = 1;\nconst b = 2;\nconst c = 3;' };
+    // The block the first round produced: the call that follows carries it again in its prompt.
+    const learned = await runExploration(options({
+      model: makeModel([READ_A, NOTHING]).model,
+      budget: new ExploreBudget(LIMITS),
+      reader: fakeReader(file),
+    }));
+    const blockTokens = estimateTokens(learned.block);
+    const { model, requests } = makeModel([READ_A, READ_A]);
+    const reserved: number[] = [];
+    const spend = {
+      canAfford: (promptTokens: number) => {
+        const growth = promptTokens - (reserved[0] ?? promptTokens);
+        reserved.push(promptTokens);
+        // The first round fits; the next one reserves the results of the first one too, so the
+        // reserved total grows by the block: the round is refused.
+        return reserved.length === 1 || growth < blockTokens;
+      },
+      record: () => {},
+    } as unknown as SpendTracker;
+
+    await runExploration(options({ model, spend, reader: fakeReader(file) }));
+
+    expect(requests).toHaveLength(1);
+    expect(reserved).toHaveLength(2);
+  });
+
   it('never fails the review when the reader fails', async () => {
     const { model } = makeModel([READ_A, NOTHING]);
     const reader: RepositoryReader = {
@@ -232,5 +264,75 @@ describe('the exploration rounds (ADR-0046)', () => {
     expect(requests[0]!.system).toContain('EXPLORATION (round 1 of 3)');
     expect(requests[0]!.system).toContain('about to judge the findings');
     expect(requests[0]!.system).toContain('"explore"');
+  });
+
+  it('reads the whole file when the answer sends null lines', async () => {
+    const { model } = makeModel([READ_A_NULL_LINES, NOTHING]);
+    const reader = fakeReader({ 'src/a.ts': 'const a = 1;\nconst b = 2;\nconst c = 3;' });
+
+    const result = await runExploration(options({ model, reader }));
+
+    expect(result.block).toContain('1| const a = 1;');
+    expect(result.block).toContain('3| const c = 3;');
+  });
+
+  it('runs the valid requests of an answer that holds an invalid one', async () => {
+    const answer = JSON.stringify({
+      explore: [{ read: { path: 42 } }, { read: { path: 'src/a.ts' } }],
+    });
+    const { model } = makeModel([answer, NOTHING]);
+    const budget = new ExploreBudget(LIMITS);
+
+    const result = await runExploration(options({
+      model,
+      budget,
+      reader: fakeReader({ 'src/a.ts': 'const a = 1;' }),
+    }));
+
+    expect(result.block).toContain('src/a.ts');
+    expect(budget.requests).toBe(1);
+  });
+
+  it('runs at most the requests one round allows', async () => {
+    const asked = Array.from({ length: 25 }, (_, index) => ({ read: { path: `src/file${index}.ts` } }));
+    const { model } = makeModel([JSON.stringify({ explore: asked }), NOTHING]);
+    const files = Object.fromEntries(
+      asked.map((_, index) => [`src/file${index}.ts`, `const value${index} = ${index};`]),
+    );
+    const budget = new ExploreBudget(LIMITS);
+
+    await runExploration(options({ model, budget, reader: fakeReader(files) }));
+
+    expect(budget.requests).toBe(LIMITS.maxRequestsPerRound);
+  });
+
+  it('redacts and flattens the label of a result', async () => {
+    const secret = new Secret('workspace-explore-secret-42');
+    const answer = JSON.stringify({ explore: [{ find: { text: `${secret.reveal()}\nsecond line` } }] });
+    const { model } = makeModel([answer, NOTHING]);
+
+    const result = await runExploration(options({ model, knownSecrets: [secret] }));
+
+    expect(result.block).toContain('<<<UNTRUSTED:EXPLORED:find: [REDACTED:known] second line>>>');
+    expect(result.block).not.toContain(secret.reveal());
+  });
+
+  it('shows an identical read once, even when the round asks for it twice', async () => {
+    const answer = JSON.stringify({
+      explore: [{ read: { path: 'src/a.ts' } }, { read: { path: 'src/a.ts' } }],
+    });
+    const { model } = makeModel([answer, NOTHING]);
+    const budget = new ExploreBudget(LIMITS);
+
+    const result = await runExploration(options({
+      model,
+      budget,
+      reader: fakeReader({ 'src/a.ts': 'const a = 1;' }),
+    }));
+
+    const markers = result.block.match(/<<<UNTRUSTED:EXPLORED:src\/a\.ts>>>/g) ?? [];
+
+    expect(markers).toHaveLength(1);
+    expect(budget.requests).toBe(2);
   });
 });

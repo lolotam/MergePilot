@@ -54,6 +54,11 @@ export interface ExploreStepOptions {
   knownSecrets: readonly Secret[];
   /** The output tokens the review call requests: the money the exploration must not spend. */
   reviewOutputTokens: number;
+  /**
+   * The money the verification call needs, when the review verifies: the exploration may not
+   * spend it either (ADR-0046).
+   */
+  verifyReserve?: { promptTokens: number; outputTokens: number } | undefined;
 }
 
 export interface ExploreStepResult {
@@ -63,7 +68,7 @@ export interface ExploreStepResult {
   promptTokens: number;
   /** The tokens the exploration rounds spent. */
   usage: TokenUsage | undefined;
-  /** What the verifier explores with, when a round ran. */
+  /** What the verifier explores with, when a round ran: the budget and the review's results. */
   explorePass: ExplorePassInput | undefined;
   /**
    * What the run discloses about its exploration, as the result carries it. It is read after the
@@ -84,6 +89,8 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
   let prompt = opts.prompt;
   let promptTokens = opts.promptTokens;
   let usage: TokenUsage | undefined;
+  // The block the review's prompt carries: the verifier judges against the same evidence.
+  let priorBlock = '';
 
   if (budget && opts.explore && !opts.batched) {
     const explored = await runExploration({
@@ -101,8 +108,11 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       allowPath,
       knownSecrets: opts.knownSecrets,
       purpose: 'review',
-      // The money the review call needs stays out of the exploration's reach.
-      reserve: { promptTokens: opts.promptTokens, outputTokens: opts.reviewOutputTokens },
+      // The money the review call and the verification call need stays out of the exploration's reach.
+      reserve: {
+        promptTokens: opts.promptTokens + (opts.verifyReserve?.promptTokens ?? 0),
+        outputTokens: opts.reviewOutputTokens + (opts.verifyReserve?.outputTokens ?? 0),
+      },
     });
     usage = explored.usage;
     if (explored.block) {
@@ -111,16 +121,18 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       if (tokens <= opts.promptLimit) {
         prompt = { system: opts.prompt.system, user };
         promptTokens = tokens;
+        priorBlock = explored.block;
       } else {
         budget.noteSkipped('explored results did not fit the input-token limit');
       }
     }
   }
 
-  // The verifier explores from the same read budget, but only when a round ran.
+  // The verifier explores from the same read budget, but only when a round ran. It also judges
+  // against the results the review explored, even when the read budget is used up by then.
   const explorePass =
     budget && opts.explore && !opts.batched && budget.rounds > 0
-      ? { reader: opts.explore.reader, budget, heldTexts, allowPath, limits }
+      ? { reader: opts.explore.reader, budget, heldTexts, allowPath, limits, priorBlock }
       : undefined;
 
   return {

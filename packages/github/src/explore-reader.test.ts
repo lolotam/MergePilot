@@ -25,16 +25,15 @@ describe('the repository reader of the exploration (ADR-0046)', () => {
     expect(reads).toEqual(['sha1:src/a.ts']);
   });
 
-  it('caps a file over 100 KB', async () => {
+  it('reads a file over 100 KB in full, the engine bounds what it shows', async () => {
     const big = 'x'.repeat(200 * 1024);
     const client = { getFileContent: async () => big } as unknown as GitHubClient;
 
     const reader = createRepositoryReader(client, PARAMS);
     const content = await reader.readFile('src/big.ts');
 
-    expect(content).not.toBeNull();
-    expect(content!.length).toBeLessThan(big.length);
-    expect(content).toContain('[Truncated: file exceeds 100 KB]');
+    // The reader caps nothing: the engine cuts what it shows (maxLinesPerRead, the read budget).
+    expect(content).toBe(big);
   });
 
   it('never reads a refused path', async () => {
@@ -92,5 +91,22 @@ describe('the repository reader of the exploration (ADR-0046)', () => {
     const reader = createRepositoryReader(client, PARAMS);
 
     expect(await reader.listPaths()).toBeNull();
+  });
+
+  it('lists the tree again after a failed listing', async () => {
+    let calls = 0;
+    const client = {
+      listTreePaths: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('the server is down');
+        return ['src/a.ts'];
+      },
+    } as unknown as GitHubClient;
+
+    const reader = createRepositoryReader(client, PARAMS);
+
+    await expect(reader.listPaths()).rejects.toThrow('the server is down');
+    expect(await reader.listPaths()).toEqual(['src/a.ts']);
+    expect(calls).toBe(2);
   });
 });
