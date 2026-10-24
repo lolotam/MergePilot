@@ -195669,6 +195669,7 @@ async function rebuildMissingPatches(client, files, opts) {
   const snapshotDiffs = [];
   const patches = /* @__PURE__ */ new Map();
   const dropped = /* @__PURE__ */ new Set();
+  const unchangedSnapshots = /* @__PURE__ */ new Set();
   const baseRef = await mergeBaseOf(client, candidates, opts);
   for (let start = 0; start < candidates.length; start += MAX_CONCURRENT_READS) {
     const group = candidates.slice(start, start + MAX_CONCURRENT_READS);
@@ -195684,6 +195685,8 @@ async function rebuildMissingPatches(client, files, opts) {
         failed.push({ path: outcome.path, reason: outcome.reason });
         if (outcome.dropPatch)
           dropped.add(outcome.path);
+        if (outcome.unchangedSnapshot)
+          unchangedSnapshots.add(outcome.path);
       }
     }
   }
@@ -195692,6 +195695,8 @@ async function rebuildMissingPatches(client, files, opts) {
       const patch = patches.get(file2.path);
       if (patch !== void 0)
         return { ...file2, patch };
+      if (unchangedSnapshots.has(file2.path))
+        return withoutChanges(file2);
       return dropped.has(file2.path) ? withoutPatch(file2) : file2;
     }),
     rebuilt,
@@ -195702,6 +195707,10 @@ async function rebuildMissingPatches(client, files, opts) {
 function withoutPatch(file2) {
   const { patch: _patch, ...rest } = file2;
   return rest;
+}
+function withoutChanges(file2) {
+  const { patch: _patch, additions: _additions, deletions: _deletions, changes: _changes, ...rest } = file2;
+  return { ...rest, additions: 0, deletions: 0, changes: 0 };
 }
 async function mergeBaseOf(client, candidates, opts) {
   if (!candidates.some(needsBaseRead))
@@ -195748,7 +195757,11 @@ async function rebuildOne(client, file2, opts, baseRef) {
         return { path: file2.path, patch: snapshot.patch, previous: snapshot.previous };
       }
       if (snapshot.kind === "same") {
-        return { path: file2.path, reason: `no content change from ${snapshot.previous}`, dropPatch: true };
+        return {
+          path: file2.path,
+          reason: `no content change from ${snapshot.previous}`,
+          unchangedSnapshot: true
+        };
       }
       if (snapshot.kind === "failed") {
         return { path: file2.path, reason: `snapshot diff failed (${snapshot.reason})`, dropPatch: true };
@@ -195841,27 +195854,38 @@ async function snapshotOutcome(client, file2, opts, baseRef) {
   const snapshot = snapshotOf(file2);
   if (!snapshot)
     return { kind: "none" };
+  let previous;
   try {
-    const previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
-    if (!previous)
-      return { kind: "none" };
-    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
-    if (before === null)
-      return { kind: "none" };
-    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
-    if (after === null)
-      return { kind: "none" };
-    if (isBinary(before) || isBinary(after))
-      return { kind: "none" };
-    const patch = snapshotPatch(before, after, previous.name);
-    if (patch.kind === "same")
-      return { kind: "same", previous: previous.name };
-    if (patch.kind === "empty" || patch.kind === "large" || patch.kind === "costly") {
-      return { kind: "failed", reason: patch.kind };
-    }
-    return { kind: "diff", patch: patch.text, previous: previous.name };
+    previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
   } catch {
     return { kind: "none" };
+  }
+  if (!previous)
+    return { kind: "none" };
+  const contents = await readSnapshotContents(client, file2, opts, previous);
+  if (contents.kind === "unreadable")
+    return { kind: "failed", reason: "read" };
+  const patch = snapshotPatch(contents.before, contents.after, previous.name);
+  if (patch.kind === "same")
+    return { kind: "same", previous: previous.name };
+  if (patch.kind === "empty" || patch.kind === "large" || patch.kind === "costly") {
+    return { kind: "failed", reason: patch.kind };
+  }
+  return { kind: "diff", patch: patch.text, previous: previous.name };
+}
+async function readSnapshotContents(client, file2, opts, previous) {
+  try {
+    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
+    if (before === null)
+      return { kind: "unreadable" };
+    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+    if (after === null)
+      return { kind: "unreadable" };
+    if (isBinary(before) || isBinary(after))
+      return { kind: "unreadable" };
+    return { kind: "contents", before, after };
+  } catch {
+    return { kind: "unreadable" };
   }
 }
 async function findPreviousSnapshot(client, snapshot, opts, baseRef) {

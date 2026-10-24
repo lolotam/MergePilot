@@ -232,7 +232,7 @@ describe('rebuildMissingPatches on a migration snapshot (ADR-0045, rule 5)', () 
     expect(result.files[0]!.patch).not.toContain('@@ -0,0 +1,9 @@');
   });
 
-  it('drops the whole-file patch GitHub sent for a snapshot that did not change', async () => {
+  it('leaves a snapshot that did not change with no changes at all', async () => {
     const { client } = fakeClient(
       {
         [`base-sha:${PREVIOUS_SNAPSHOT}`]: SNAPSHOT_TEXT,
@@ -246,7 +246,13 @@ describe('rebuildMissingPatches on a migration snapshot (ADR-0045, rule 5)', () 
 
     const result = await rebuildMissingPatches(client, files, OPTS);
 
+    // The snapshot was compared with the previous one and nothing differs: it is a file with no
+    // changes, not a file whose patch is missing, so the review skips it without saying that
+    // its patch was truncated.
     expect(result.files[0]!.patch).toBeUndefined();
+    expect(result.files[0]!.changes).toBe(0);
+    expect(result.files[0]!.additions).toBe(0);
+    expect(result.files[0]!.deletions).toBe(0);
     expect(result.failed).toEqual([
       { path: NEW_SNAPSHOT, reason: 'no content change from 0175_snapshot.json' },
     ]);
@@ -267,6 +273,10 @@ describe('rebuildMissingPatches on a migration snapshot (ADR-0045, rule 5)', () 
     const result = await rebuildMissingPatches(client, files, OPTS);
 
     expect(result.files[0]!.patch).toBeUndefined();
+    // Nothing differs from the previous snapshot: the file is left with no changes at all.
+    expect(result.files[0]!.changes).toBe(0);
+    expect(result.files[0]!.additions).toBe(0);
+    expect(result.files[0]!.deletions).toBe(0);
     expect(result.rebuilt).toEqual([]);
     expect(result.snapshotDiffs).toEqual([]);
     expect(result.failed).toEqual([

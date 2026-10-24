@@ -67,7 +67,9 @@ export interface RebuildPatchesResult {
 type RebuildOutcome =
   | { path: string; patch: string; previous?: string }
   // `dropPatch`: the file's patch is dropped, so the review sees no patch at all.
-  | { path: string; reason: string; dropPatch?: boolean }
+  // `unchangedSnapshot`: the file is identical to the snapshot before it, so it is left with no
+  // changes at all: the review skips it instead of reporting a truncated patch.
+  | { path: string; reason: string; dropPatch?: boolean; unchangedSnapshot?: boolean }
   | { path: string; unchanged: true };
 
 /**
@@ -88,6 +90,8 @@ export async function rebuildMissingPatches(
   const patches = new Map<string, string>();
   // The files whose patch is dropped: a snapshot whose diff failed is never sent whole.
   const dropped = new Set<string>();
+  // The files that did not change at all: they are left with no changes, not with a missing patch.
+  const unchangedSnapshots = new Set<string>();
   // The base content is read at the merge base of the pull request, not at the base branch's tip.
   const baseRef = await mergeBaseOf(client, candidates, opts);
 
@@ -105,6 +109,7 @@ export async function rebuildMissingPatches(
       } else if ('reason' in outcome) {
         failed.push({ path: outcome.path, reason: outcome.reason });
         if (outcome.dropPatch) dropped.add(outcome.path);
+        if (outcome.unchangedSnapshot) unchangedSnapshots.add(outcome.path);
       }
     }
   }
@@ -113,6 +118,9 @@ export async function rebuildMissingPatches(
     files: files.map((file) => {
       const patch = patches.get(file.path);
       if (patch !== undefined) return { ...file, patch };
+      // A file that did not change at all is left with no changes: the review skips it as a file
+      // with nothing to review, instead of reporting a patch that is not there as truncated.
+      if (unchangedSnapshots.has(file.path)) return withoutChanges(file);
       // A dropped patch leaves the file with none: the review reports it as a truncated patch.
       return dropped.has(file.path) ? withoutPatch(file) : file;
     }),
@@ -126,6 +134,16 @@ export async function rebuildMissingPatches(
 function withoutPatch(file: PullRequestFile): PullRequestFile {
   const { patch: _patch, ...rest } = file;
   return rest;
+}
+
+/**
+ * The file without its patch and without its changes: nothing of it is left to review. The file
+ * was compared and nothing differs, so it is a file with no changes, not a file whose patch is
+ * missing: the review skips it without calling it truncated.
+ */
+function withoutChanges(file: PullRequestFile): PullRequestFile {
+  const { patch: _patch, additions: _additions, deletions: _deletions, changes: _changes, ...rest } = file;
+  return { ...rest, additions: 0, deletions: 0, changes: 0 };
 }
 
 /**
@@ -193,8 +211,14 @@ async function rebuildOne(
         return { path: file.path, patch: snapshot.patch, previous: snapshot.previous };
       }
       if (snapshot.kind === 'same') {
-        // Nothing differs from the previous snapshot: the whole file is never sent instead.
-        return { path: file.path, reason: `no content change from ${snapshot.previous}`, dropPatch: true };
+        // Nothing differs from the previous snapshot: the whole file is never sent instead, and
+        // the file is left with no changes at all. Nothing of it is missing, so the review must
+        // not report it as a truncated patch: it skips it as a file with no changes.
+        return {
+          path: file.path,
+          reason: `no content change from ${snapshot.previous}`,
+          unchangedSnapshot: true,
+        };
       }
       if (snapshot.kind === 'failed') {
         // The diff against the previous snapshot failed: the snapshot is never reviewed as a
@@ -304,11 +328,18 @@ type SnapshotOutcome =
   | { kind: 'none' };
 
 /** Why the diff against the previous snapshot failed. */
-type SnapshotFailure = 'large' | 'costly' | 'empty';
+type SnapshotFailure = 'large' | 'costly' | 'empty' | 'read';
+
+/** The previous snapshot of a folder: its name, its path and the commit it is read at. */
+type PreviousSnapshot = { name: string; path: string; sha: string };
 
 /**
  * The diff of a snapshot against the previous snapshot of the same folder: the snapshot is a new
  * file in the pull request, so the patch holds the new file's side only (ADR-0045, rule 5).
+ * Without a previous snapshot there is nothing to compare against, and the file is rebuilt like
+ * any other added file. Once the previous snapshot is found, its content is what the review
+ * needs: a content that cannot be read leaves the diff unknown, and the whole file is never sent
+ * instead of the regions that differ.
  */
 async function snapshotOutcome(
   client: GitHubClient,
@@ -318,24 +349,53 @@ async function snapshotOutcome(
 ): Promise<SnapshotOutcome> {
   const snapshot = snapshotOf(file);
   if (!snapshot) return { kind: 'none' };
+  let previous: PreviousSnapshot | null;
   try {
-    const previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
-    if (!previous) return { kind: 'none' };
-    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
-    if (before === null) return { kind: 'none' };
-    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path);
-    if (after === null) return { kind: 'none' };
-    if (isBinary(before) || isBinary(after)) return { kind: 'none' };
-    const patch = snapshotPatch(before, after, previous.name);
-    if (patch.kind === 'same') return { kind: 'same', previous: previous.name };
-    // The diff failed: the whole snapshot is never sent instead of the regions that differ.
-    if (patch.kind === 'empty' || patch.kind === 'large' || patch.kind === 'costly') {
-      return { kind: 'failed', reason: patch.kind };
-    }
-    return { kind: 'diff', patch: patch.text, previous: previous.name };
+    previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
   } catch {
-    // A read that fails leaves the file to the added-file rebuild.
+    // The folder listing is unavailable: there is no previous snapshot to compare against.
     return { kind: 'none' };
+  }
+  if (!previous) return { kind: 'none' };
+  const contents = await readSnapshotContents(client, file, opts, previous);
+  // The previous snapshot was found, so the diff against it is what the review needs: a content
+  // that could not be read leaves the diff unknown, and the whole file is never sent instead.
+  if (contents.kind === 'unreadable') return { kind: 'failed', reason: 'read' };
+  const patch = snapshotPatch(contents.before, contents.after, previous.name);
+  if (patch.kind === 'same') return { kind: 'same', previous: previous.name };
+  // The diff failed: the whole snapshot is never sent instead of the regions that differ.
+  if (patch.kind === 'empty' || patch.kind === 'large' || patch.kind === 'costly') {
+    return { kind: 'failed', reason: patch.kind };
+  }
+  return { kind: 'diff', patch: patch.text, previous: previous.name };
+}
+
+/** The two contents a snapshot diff compares: the previous snapshot and the new one. */
+type SnapshotContents =
+  | { kind: 'contents'; before: string; after: string }
+  | { kind: 'unreadable' };
+
+/**
+ * The contents the snapshot diff compares: the previous snapshot and the new one. A content that
+ * the contents API does not return, that is binary, or that a read fails on leaves the diff
+ * unknown.
+ */
+async function readSnapshotContents(
+  client: GitHubClient,
+  file: PullRequestFile,
+  opts: RebuildPatchesOptions,
+  previous: PreviousSnapshot,
+): Promise<SnapshotContents> {
+  try {
+    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
+    if (before === null) return { kind: 'unreadable' };
+    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path);
+    if (after === null) return { kind: 'unreadable' };
+    if (isBinary(before) || isBinary(after)) return { kind: 'unreadable' };
+    return { kind: 'contents', before, after };
+  } catch {
+    // A read that fails (a rate limit, a 5xx) leaves the diff unknown.
+    return { kind: 'unreadable' };
   }
 }
 
@@ -350,7 +410,7 @@ async function findPreviousSnapshot(
   snapshot: { number: number; folder: string },
   opts: RebuildPatchesOptions,
   baseRef: string,
-): Promise<{ name: string; path: string; sha: string } | null> {
+): Promise<PreviousSnapshot | null> {
   // The two listings run one after the other: four candidates at the same time would send eight
   // requests at once, over the four-read cap.
   const base = await listAtRef(client, opts.owner, opts.repo, baseRef, snapshot.folder);
