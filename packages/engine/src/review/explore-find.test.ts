@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExploreLimits } from '../config/schema.js';
 import { isContextPathAllowed } from '../diff/classify-file.js';
 import { isSensitivePath } from '../security/sensitive-path.js';
-import { ExploreBudget, type RepositoryReader } from './explore.js';
+import { ExploreBudget, heldTextsOf, type RepositoryReader } from './explore.js';
 import { matchPlace, matchesInFile, matchesInPatch } from './explore-find.js';
 import { executeRequests } from './explore-requests.js';
 
@@ -53,6 +53,26 @@ async function find(
       limits: LIMITS,
       allowPath,
       heldTexts: { texts: new Map(Object.entries(held)), patches: new Set(patches) },
+      knownSecrets: [],
+    },
+  );
+  return result.entries[0]!.content;
+}
+
+/** The search of `text` over the files a review holds: its patches and its context files. */
+async function findHeld(
+  text: string,
+  files: readonly { path: string; patch: string }[],
+  contextFiles: readonly { path: string; content: string; source?: 'pull-request' | undefined }[],
+): Promise<string> {
+  const result = await executeRequests(
+    [{ find: { text } }],
+    {
+      reader: fakeReader(),
+      budget: new ExploreBudget(LIMITS),
+      limits: LIMITS,
+      allowPath,
+      heldTexts: heldTextsOf(files, contextFiles),
       knownSecrets: [],
     },
   );
@@ -118,5 +138,24 @@ describe('the matches of one search (ADR-0046)', () => {
 
     expect(content).toContain('src/guard.ts');
     expect(content.trimEnd().endsWith('(the repository path list is partial: GitHub truncated the tree)')).toBe(true);
+  });
+
+  it('takes the line of a match in a PR_CONTEXT file from its hunk header', async () => {
+    const patch = ['@@ -1,1 +40,2 @@', ' const a = 1;', '+const found = 2;'].join('\n');
+
+    const content = await findHeld('const found', [], [
+      { path: 'src/pr.ts', content: patch, source: 'pull-request' },
+    ]);
+
+    // The PR_CONTEXT file holds the pull request's patch of the file, so the line is the head's.
+    expect(content).toContain('src/pr.ts:41: const found = 2;');
+  });
+
+  it('keeps a repository context file the file at the head', async () => {
+    const content = await findHeld('const found', [], [
+      { path: 'src/a.ts', content: 'const found = 1;' },
+    ]);
+
+    expect(content).toContain('src/a.ts:1: const found = 1;');
   });
 });

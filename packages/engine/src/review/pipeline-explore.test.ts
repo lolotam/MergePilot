@@ -20,6 +20,7 @@ import type { ReviewModel, ReviewModelRequest } from './model.js';
 import { makeAnswerJson, makeConfig, SIMPLE_PATCH, validFindingJson } from './pipeline.fixtures.js';
 import { runReview, type RunReviewInput } from './pipeline.js';
 import { SpendTracker } from './spend.js';
+import type { Finding } from './types.js';
 import { runVerifyPass, type VerifyPassInput } from './verify-pass.js';
 
 const LIMITS: ExploreLimits = {
@@ -313,10 +314,40 @@ function explorePass(overrides: Partial<ExplorePassInput> = {}): ExplorePassInpu
   };
 }
 
+/**
+ * A spend that affords only the checks it is given: the first check is the plain verification
+ * call, the second the exploration's round, the third the call that carries the blocks, and the
+ * two after it the fallbacks (the prior block alone, then the plain prompt).
+ */
+function spendAffording(checks: readonly number[]): SpendTracker {
+  let seen = 0;
+  return {
+    canAfford: () => {
+      seen += 1;
+      return checks.includes(seen);
+    },
+    record: () => {},
+  } as unknown as SpendTracker;
+}
+
 describe("the verifier's own exploration (ADR-0046)", () => {
   const READ_GUARD_JSON = JSON.stringify({ explore: [{ read: { path: 'src/guard.ts' } }] });
+  const READ_OTHER_JSON = JSON.stringify({ explore: [{ read: { path: 'src/other.ts' } }] });
   // The entry the review's exploration gathered: the file at the head, with its line numbers.
   const PRIOR_ENTRIES = [{ label: 'src/guard.ts', content: '1| export function guard() {}' }];
+  // The finding the verifier judges: the verdict confirms it.
+  const VERIFY_FINDING: Finding = {
+    id: 'f1',
+    path: 'src/a.ts',
+    line: 2,
+    side: 'RIGHT',
+    title: 'Potential null deref',
+    body: 'x could be null',
+    severity: 'high',
+    category: 'correctness',
+    evidence: 'x.doSomething()',
+    confidence: 0.9,
+  };
 
   it('does not show the review\'s entry again when its block is in the verifier\'s prompt', async () => {
     const { model, requests } = recordingModel([READ_GUARD_JSON, VERDICTS]);
@@ -355,31 +386,66 @@ describe("the verifier's own exploration (ADR-0046)", () => {
     expect(markers).toHaveLength(1);
   });
 
-  it('sends the plain verification prompt when the prior block does not fit the spend', async () => {
-    // The spend pays for the plain verification call and for the exploration, but not for the
-    // verification call that carries the prior block.
-    let checks = 0;
-    const spend = {
-      canAfford: () => {
-        checks += 1;
-        // The first check is the plain verification call, the second is the exploration's round.
-        return checks <= 2;
-      },
-      record: () => {},
-    } as unknown as SpendTracker;
-    const { model, requests } = recordingModel([READ_GUARD_JSON, VERDICTS]);
+  it('sends the prompt with the prior block when the verifier\'s own block does not fit the spend', async () => {
+    // The spend pays for the plain call, the exploration and the call with the review's block,
+    // but not for the one that carries the verifier's own block too.
+    const spend = spendAffording([1, 2, 4]);
+    const { model, requests } = recordingModel([READ_OTHER_JSON, VERDICTS]);
 
     await runVerifyPass(verifyInput(model, {
       spend,
       explore: explorePass({
+        reader: fakeReader({ 'src/other.ts': 'export const other = 1;' }),
         priorBlock: renderExploredBlock(PRIOR_ENTRIES, []),
         priorEntries: PRIOR_ENTRIES,
       }),
     }));
 
-    // The call went with the prompt that passed the earlier check: the blocks are not in it.
+    // The call kept the review's block and left the verifier's own block out.
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.user).toContain('<<<UNTRUSTED:EXPLORED:src/guard.ts>>>');
+    expect(requests[1]!.user).not.toContain('<<<UNTRUSTED:EXPLORED:src/other.ts>>>');
+  });
+
+  it('sends the plain verification prompt when neither the blocks nor the prior block fit the spend', async () => {
+    // The spend pays for the plain verification call and for the exploration, but not for the
+    // verification call that carries the blocks, nor for the one that carries the prior block.
+    const spend = spendAffording([1, 2, 5]);
+    const { model, requests } = recordingModel([READ_OTHER_JSON, VERDICTS]);
+
+    await runVerifyPass(verifyInput(model, {
+      spend,
+      explore: explorePass({
+        reader: fakeReader({ 'src/other.ts': 'export const other = 1;' }),
+        priorBlock: renderExploredBlock(PRIOR_ENTRIES, []),
+        priorEntries: PRIOR_ENTRIES,
+      }),
+    }));
+
+    // The call went with the prompt that passed the check: the blocks are not in it.
     expect(requests).toHaveLength(2);
     expect(requests[1]!.user).not.toContain('EXPLORED:');
+  });
+
+  it('makes no verification call when the spend affords none of the prompts', async () => {
+    // The spend pays for the plain call and the exploration, but not for the verification call.
+    const spend = spendAffording([1, 2]);
+    const { model, requests } = recordingModel([READ_OTHER_JSON, VERDICTS]);
+
+    const result = await runVerifyPass(verifyInput(model, {
+      spend,
+      findings: [VERIFY_FINDING],
+      explore: explorePass({
+        reader: fakeReader({ 'src/other.ts': 'export const other = 1;' }),
+        priorBlock: renderExploredBlock(PRIOR_ENTRIES, []),
+        priorEntries: PRIOR_ENTRIES,
+      }),
+    }));
+
+    // The exploration ran, but no verification call did: the findings stay as they were.
+    expect(requests).toHaveLength(1);
+    expect(result.findings).toEqual([VERIFY_FINDING]);
+    expect(result.incompleteReasons).toContain('verification skipped: budget limit reached');
   });
 
   it('makes no verification call when the deadline expires during the verifier\'s round', async () => {

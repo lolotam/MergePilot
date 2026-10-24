@@ -142222,7 +142222,11 @@ function heldTextsOf(files, contextFiles) {
   }
   for (const file2 of contextFiles) {
     texts.set(file2.path, file2.content);
-    patches.delete(file2.path);
+    if (file2.source === "pull-request") {
+      patches.add(file2.path);
+    } else {
+      patches.delete(file2.path);
+    }
   }
   return { texts, patches };
 }
@@ -143384,6 +143388,8 @@ async function runVerifyPass(input2) {
   let promptTokens = fitted.promptTokens;
   const plainPrompt = verifyPrompt;
   const plainTokens = promptTokens;
+  let priorPrompt;
+  let priorTokens = 0;
   const maxOutputTokens = verifyOutputTokensFor(input2.findings.length);
   const retryOutputTokens = verifyRetryOutputTokens(maxOutputTokens);
   const firstRequested = requestedOutputTokens(model, maxOutputTokens);
@@ -143402,6 +143408,10 @@ async function runVerifyPass(input2) {
   }
   if (input2.explore) {
     const withPrior = withBlock(input2, verifyPrompt, promptTokens, input2.explore.priorBlock);
+    if (withPrior.appended) {
+      priorPrompt = withPrior.prompt;
+      priorTokens = withPrior.promptTokens;
+    }
     verifyPrompt = withPrior.prompt;
     promptTokens = withPrior.promptTokens;
     if (!input2.explore.budget.usedUp) {
@@ -143438,8 +143448,11 @@ async function runVerifyPass(input2) {
     return unchanged("time limit reached");
   }
   if (!spend.canAfford(promptTokens, firstRequested)) {
-    verifyPrompt = plainPrompt;
-    promptTokens = plainTokens;
+    const affordable = priorPrompt && spend.canAfford(priorTokens, firstRequested) ? { prompt: priorPrompt, promptTokens: priorTokens } : spend.canAfford(plainTokens, firstRequested) ? { prompt: plainPrompt, promptTokens: plainTokens } : void 0;
+    if (!affordable)
+      return unchanged("budget limit reached");
+    verifyPrompt = affordable.prompt;
+    promptTokens = affordable.promptTokens;
   }
   const parse5 = (res) => parseVerifyAnswer(res.text, { finishReason: res.finishReason, outputTokens: res.usage?.outputTokens });
   const request2 = {

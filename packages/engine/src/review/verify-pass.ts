@@ -225,6 +225,10 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
   // call still fits them (ADR-0046).
   const plainPrompt = verifyPrompt;
   const plainTokens = promptTokens;
+  // The prompt with the review's block alone: the fallback the verifier prefers when the blocks
+  // do not fit the spend (ADR-0046).
+  let priorPrompt: BuiltVerifyPrompt | undefined;
+  let priorTokens = 0;
   // The answer has one verdict per finding, so its budget grows with them (ADR-0033).
   const maxOutputTokens = verifyOutputTokensFor(input.findings.length);
   const retryOutputTokens = verifyRetryOutputTokens(maxOutputTokens);
@@ -249,6 +253,11 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     // The evidence the review read comes first: the verifier judges the findings against it, even
     // when the read budget is used up and the verifier cannot read anything itself.
     const withPrior = withBlock(input, verifyPrompt, promptTokens, input.explore.priorBlock);
+    if (withPrior.appended) {
+      // The review's block alone: the first fallback when the blocks do not fit the spend.
+      priorPrompt = withPrior.prompt;
+      priorTokens = withPrior.promptTokens;
+    }
     verifyPrompt = withPrior.prompt;
     promptTokens = withPrior.promptTokens;
     // The verifier explores only when the read budget still has tokens for it.
@@ -288,10 +297,18 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     return unchanged('time limit reached');
   }
   // The blocks are in the prompt now: the call must still fit the budget. When it does not, the
-  // call goes with the prompt that passed the earlier check, without any explored block (ADR-0046).
+  // call goes with the prompt that keeps what the spend can afford: the review's block alone
+  // first, then the plain prompt (ADR-0046).
   if (!spend.canAfford(promptTokens, firstRequested)) {
-    verifyPrompt = plainPrompt;
-    promptTokens = plainTokens;
+    const affordable =
+      priorPrompt && spend.canAfford(priorTokens, firstRequested)
+        ? { prompt: priorPrompt, promptTokens: priorTokens }
+        : spend.canAfford(plainTokens, firstRequested)
+          ? { prompt: plainPrompt, promptTokens: plainTokens }
+          : undefined;
+    if (!affordable) return unchanged('budget limit reached');
+    verifyPrompt = affordable.prompt;
+    promptTokens = affordable.promptTokens;
   }
 
   const parse = (res: ReviewModelResponse): ReturnType<typeof parseVerifyAnswer> =>

@@ -210,7 +210,7 @@ export interface HeldTexts {
 /** The files a review holds, for the searches of an exploration round. */
 export function heldTextsOf(
   files: readonly { path: string; patch: string }[],
-  contextFiles: readonly { path: string; content: string }[],
+  contextFiles: readonly { path: string; content: string; source?: 'pull-request' | undefined }[],
 ): HeldTexts {
   const texts = new Map<string, string>();
   const patches = new Set<string>();
@@ -220,8 +220,14 @@ export function heldTextsOf(
   }
   for (const file of contextFiles) {
     texts.set(file.path, file.content);
-    // A context file is the file itself, not a patch of it.
-    patches.delete(file.path);
+    if (file.source === 'pull-request') {
+      // A PR_CONTEXT file holds the pull request's patch of the file (ADR-0030): its matches take
+      // their line numbers from its hunk headers, like the patches do.
+      patches.add(file.path);
+    } else {
+      // A repository context file is the file itself, not a patch of it.
+      patches.delete(file.path);
+    }
   }
   return { texts, patches };
 }
