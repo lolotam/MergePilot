@@ -139474,7 +139474,7 @@ var ReviewSettingsSchema = external_exports.strictObject({
   }).prefault({}),
   /** Above this prompt size without context, use batches; context fills only the room left below it. */
   maxPromptTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.maxPromptTokens),
-  /** Diff tokens per batch; a single file bigger than this is split into parts, not cut. */
+  /** Diff tokens per batch; in a batched review a file bigger than this is split into parts (ADR-0045). */
   batchTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.batchTokens),
   /**
    * Parts a file over review.batchTokens is split into (ADR-0045); parts beyond it are not
