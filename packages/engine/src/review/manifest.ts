@@ -73,19 +73,39 @@ export function renderManifest(
   files: readonly ManifestFile[],
   batches: ReadonlyArray<ReadonlyArray<{ path: string }>>,
 ): string {
-  const batchOf = new Map<string, number>();
-  batches.forEach((batch, index) => batch.forEach((f) => batchOf.set(f.path, index + 1)));
-  const order = (f: ManifestFile): number => batchOf.get(f.path) ?? batches.length + 1;
+  const batchOf = new Map<string, number[]>();
+  batches.forEach((batch, index) =>
+    batch.forEach((f) => {
+      const seen = batchOf.get(f.path);
+      if (seen) seen.push(index + 1);
+      else batchOf.set(f.path, [index + 1]);
+    }),
+  );
+  const lastBatchOf = (path: string): number | undefined => {
+    const seen = batchOf.get(path);
+    return seen?.[seen.length - 1];
+  };
+  const order = (f: ManifestFile): number => lastBatchOf(f.path) ?? batches.length + 1;
   const sorted = files
     .map((file, index) => ({ file, index }))
     .sort((a, b) => order(a.file) - order(b.file) || a.index - b.index)
     .map(({ file }) => file);
 
   const lines = sorted.slice(0, MANIFEST_MAX_FILES).map((f) => {
-    const batch = batchOf.get(f.path);
-    const where = batch === undefined ? 'not reviewed' : `batch ${batch}`;
+    const where = whereOf(batchOf.get(f.path));
     return `${where} | ${shown(f.status)} | +${f.additions} -${f.deletions} | ${shown(f.label)}`;
   });
   if (sorted.length > MANIFEST_MAX_FILES) lines.push(`+${sorted.length - MANIFEST_MAX_FILES} more files`);
   return [`${files.length} changed files in ${batches.length} batches (batch | status | lines | path):`, ...lines].join('\n');
+}
+
+/**
+ * Where a file is reviewed: the batch it is in, or the range of batches when it is in several
+ * (a file split into parts is reviewed in one batch per part).
+ */
+function whereOf(batches: number[] | undefined): string {
+  if (!batches || batches.length === 0) return 'not reviewed';
+  const first = batches[0]!;
+  const last = batches[batches.length - 1]!;
+  return first === last ? `batch ${first}` : `batches ${first}–${last}`;
 }

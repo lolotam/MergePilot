@@ -42,6 +42,9 @@ export type SelectIncrementalFilesResult =
 const REVIEWS_PAGE_SIZE = 100;
 const MAX_COMPARE_FILES = 300;
 
+/** A drizzle migration snapshot: `packages/db/migrations/meta/0175_snapshot.json`. */
+const SNAPSHOT_PATH_RE = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
+
 /**
  * Finds the hidden MergePilot marker of the most recent review
  * authored by publisherLogin, or null if no such review exists.
@@ -101,6 +104,8 @@ export async function findLastReviewedHead(
  * - Same head: incremental with 0 files (nothing new to review)
  * - Ahead: incremental with intersecting files between compare and prFiles, using the compare
  *   patch without the hunks proven to come from a base-branch merge (needs `baseSha`)
+ * - Ahead, but a compared file has no patch (its diff was too big for the compare API): full
+ *   ("the new changes of <path> are too large for the compare API")
  * - Compare at GitHub's 300-file cap (possibly truncated): full ("comparison too large")
  * - Compare error: full ("comparison unavailable")
  * - Diverged, behind, or 404: full ("history rewritten since last review")
@@ -195,19 +200,39 @@ export async function selectIncrementalFiles(
       continue;
     }
 
+    const status = compareFile.status ?? prFile.status;
+    const isSnapshot = status === 'added' && SNAPSHOT_PATH_RE.test(compareFile.filename);
     const mapped: PullRequestFile = {
       path: compareFile.filename,
-      status: compareFile.status ?? prFile.status,
-      additions: compareFile.additions ?? prFile.additions,
-      deletions: compareFile.deletions ?? prFile.deletions,
-      changes: compareFile.changes ?? prFile.changes,
+      status,
+      // A snapshot's counters come from the rebuilt result, not from the comparison: the
+      // comparison counts the whole new file, so a snapshot that did not change would reach the
+      // engine with changes and no patch, and be reported as a truncated patch.
+      additions: isSnapshot ? prFile.additions : compareFile.additions ?? prFile.additions,
+      deletions: isSnapshot ? prFile.deletions : compareFile.deletions ?? prFile.deletions,
+      changes: isSnapshot ? prFile.changes : compareFile.changes ?? prFile.changes,
     };
 
-    if (compareFile.patch !== undefined) {
+    if (isSnapshot) {
+      // A snapshot's patch is the diff against its previous snapshot (ADR-0045, rule 5): the
+      // compare API's patch is the whole new file, so it is never used. Without a rebuilt patch
+      // (its diff failed and was dropped) the snapshot stays without one.
+      if (prFile.patch !== undefined) mapped.patch = prFile.patch;
+    } else if (compareFile.patch !== undefined) {
       // A base-branch merge brings in changes the PR did not make: those hunks are left out.
       const own = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own === undefined) continue;
       mapped.patch = own;
+    } else if ((compareFile.changes ?? 0) > 0) {
+      // The compare API left the patch of a changed text file out (its diff was too big for it).
+      // The pull request's own patch covers the changes from before the last reviewed commit too,
+      // so it is not shown as new: the whole pull request is reviewed instead. A binary file, a
+      // pure rename or a mode change has no patch and no line changes, and stays incremental.
+      return {
+        mode: 'full',
+        files: prFiles,
+        reason: `the new changes of ${compareFile.filename} are too large for the compare API`,
+      };
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== undefined) {

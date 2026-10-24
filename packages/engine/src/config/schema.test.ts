@@ -193,3 +193,19 @@ describe('review limits for huge PRs (ADR-0013)', () => {
     ).toThrow();
   });
 });
+
+describe('the parts a big file is split into (ADR-0045)', () => {
+  const parse = (review = {}) => MergePilotConfigSchema.parse({ provider: 'anthropic', model: 'm', review }).review;
+
+  it('defaults to 8 parts and takes the range 1 to 50', () => {
+    expect(parse().maxFileParts).toBe(8);
+    expect(parse({ maxFileParts: 1 }).maxFileParts).toBe(1);
+    expect(parse({ maxFileParts: 50 }).maxFileParts).toBe(50);
+  });
+
+  it('rejects a number of parts outside the range', () => {
+    expect(() => parse({ maxFileParts: 0 })).toThrow();
+    expect(() => parse({ maxFileParts: 51 })).toThrow();
+    expect(() => parse({ maxFileParts: 1.5 })).toThrow();
+  });
+});

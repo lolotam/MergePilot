@@ -148,6 +148,10 @@ export function createOctokitClient(token: string): GitHubClient {
           if (item.type !== 'file' || typeof item.content !== 'string') {
             return null;
           }
+          // A file over 1 MB comes back with the encoding "none" and no content at all.
+          if (item.encoding === 'none') {
+            return null;
+          }
           const encoding = item.encoding ?? 'base64';
           if (encoding === 'base64') {
             return Buffer.from(item.content, 'base64').toString('utf8');
@@ -182,6 +186,8 @@ export function createOctokitClient(token: string): GitHubClient {
           const allFiles: GitHubPullRequestFile[] = [];
 
           let totalCommits: number | undefined;
+          // The merge base comes with the first page only.
+          let mergeBaseSha: string | undefined;
 
           while (true) {
             const response = await octokit.rest.repos.compareCommitsWithBasehead({
@@ -196,6 +202,9 @@ export function createOctokitClient(token: string): GitHubClient {
             if (response.data.total_commits !== undefined) {
               totalCommits = response.data.total_commits;
             }
+            if (page === 1) {
+              mergeBaseSha = response.data.merge_base_commit?.sha;
+            }
             const pageFiles = (response.data.files ?? []) as GitHubPullRequestFile[];
             allFiles.push(...pageFiles);
 
@@ -209,6 +218,7 @@ export function createOctokitClient(token: string): GitHubClient {
             status,
             files: allFiles,
             ...(totalCommits !== undefined ? { totalCommits } : {}),
+            ...(mergeBaseSha !== undefined ? { mergeBaseSha } : {}),
           };
         } catch (error: unknown) {
           if (

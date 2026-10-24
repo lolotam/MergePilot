@@ -84,6 +84,8 @@ export interface CompareCommitsResult {
   status: CompareCommitsStatus;
   files: GitHubPullRequestFile[];
   totalCommits?: number;
+  /** The merge base of the two commits: where the common history ends (ADR-0045). */
+  mergeBaseSha?: string;
 }
 
 export interface GitHubReviewComment {

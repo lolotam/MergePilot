@@ -23,6 +23,7 @@ import { dedupeJudgeOf, judgeSummaryInput, withJudgeUsage, type ReviewJudge } fr
 import { isPrPaused, postPauseNoticeOnce } from './pause.js';
 import { listPullRequestFiles } from './pr-files.js';
 import { publishReview, type PublishReviewResult } from './publish.js';
+import { rebuildMissingPatches } from './rebuild-patch.js';
 import { contextDisclosureOf } from './review-context.js';
 import { gatherReviewInputs } from './review-inputs.js';
 import { renderReviewSummary } from './summary.js';
@@ -167,12 +168,28 @@ export async function reviewPullRequest(
   }
 
   log?.(`Listing files for pull request #${pullNumber}...`);
-  const { files: prFiles } = await listPullRequestFiles(client, {
+  const listed = await listPullRequestFiles(client, {
     owner,
     repo,
     pull_number: pullNumber,
   });
+  // A file whose diff is too big for GitHub's files API comes without a patch (ADR-0045): its
+  // patch is rebuilt from the file contents, so the bots see the file at all.
+  const rebuilt = await rebuildMissingPatches(client, listed.files, {
+    owner,
+    repo,
+    baseSha,
+    headSha,
+    exclude: config.review.exclude,
+  });
+  const prFiles = rebuilt.files;
   log?.(`Found ${prFiles.length} files in PR diff`);
+  if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {
+    log?.(`Rebuilt ${rebuilt.rebuilt.length} missing patches, failed ${rebuilt.failed.length}`);
+    if (rebuilt.failed.length > 0) {
+      log?.(`Patches not rebuilt: ${rebuilt.failed.map((f) => `${f.path} (${f.reason})`).join(', ')}`);
+    }
+  }
 
   const selection = await selectIncrementalFiles(client, {
     owner,

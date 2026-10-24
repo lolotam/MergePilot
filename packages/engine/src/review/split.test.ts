@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { estimateTokens } from './budget.js';
+import { LINE_CUT_MARKER, splitPatchIntoParts } from './patch-parts.js';
 import {
   batchFilesBySize,
   batchFilesByTokenCap,
@@ -77,13 +78,13 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
   it('fills batches up to the cap instead of splitting in halves', () => {
     // 10 files of ~100 tokens each, cap 300 → 4 batches (3+3+3+1), never 2 halves.
     const files = Array.from({ length: 10 }, (_, i) => ({ path: `src/f${i}.ts`, patch: 'x'.repeat(350) }));
-    const { batches, truncatedPaths } = batchFilesByTokenCap(files, 300);
+    const { batches, skippedParts } = batchFilesByTokenCap(files, 300);
     expect(batches.map((b) => b.length)).toEqual([3, 3, 3, 1]);
     for (const batch of batches) {
       expect(batch.reduce((sum, f) => sum + estimateTokens(f.patch), 0)).toBeLessThanOrEqual(300);
     }
     expect(batches.flat().map((f) => f.path)).toEqual(files.map((f) => f.path));
-    expect(truncatedPaths).toEqual([]);
+    expect(skippedParts).toEqual([]);
   });
 
   it('keeps a small PR in one batch', () => {
@@ -94,20 +95,55 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
     expect(batchFilesByTokenCap(files, 1000).batches).toHaveLength(1);
   });
 
-  it('puts a file bigger than the cap in its own batch, its patch truncated with a note', () => {
-    const huge = lines('huge', 2000);
+  it('splits a file bigger than the cap into parts, one batch each', () => {
+    const huge = ['@@ -0,0 +1,2000 @@', ...Array.from({ length: 2000 }, (_, i) => `+huge line ${i}`)].join('\n');
+    const { parts } = splitPatchIntoParts(huge, 500);
+    const total = parts.length;
+    expect(total).toBeGreaterThan(3);
     const files = [
       { path: 'src/small.ts', patch: lines('s', 3) },
       { path: 'src/huge.ts', patch: huge },
       { path: 'src/after.ts', patch: lines('t', 3) },
     ];
-    const { batches, truncatedPaths } = batchFilesByTokenCap(files, 500);
-    expect(batches.map((b) => b.map((f) => f.path))).toEqual([['src/small.ts'], ['src/huge.ts'], ['src/after.ts']]);
-    expect(truncatedPaths).toEqual(['src/huge.ts']);
-    const cut = batches[1]![0]!.patch;
-    expect(cut.endsWith(`\n${PATCH_TRUNCATED_NOTE}`)).toBe(true);
-    expect(estimateTokens(cut)).toBeLessThanOrEqual(500);
-    expect(huge.startsWith(cut.slice(0, cut.length - PATCH_TRUNCATED_NOTE.length - 1))).toBe(true);
+    const { batches, skippedParts } = batchFilesByTokenCap(files, 500, 3);
+
+    expect(batches.map((b) => b.length)).toEqual([1, 1, 1, 1, 1]);
+    expect(batches.map((b) => b[0]!.path)).toEqual([
+      'src/small.ts',
+      'src/huge.ts',
+      'src/huge.ts',
+      'src/huge.ts',
+      'src/after.ts',
+    ]);
+    // Every part is a whole part of the file, labelled for the model.
+    expect(batches[1]![0]!.part).toEqual({ index: 1, total });
+    expect(batches[3]![0]!.part).toEqual({ index: 3, total });
+    expect(batches[1]![0]!.patch).toBe(parts[0]);
+    expect(batches[1]![0]!.patch.endsWith(PATCH_TRUNCATED_NOTE)).toBe(false);
+    // The parts beyond maxFileParts are not sent, and the file says so.
+    expect(skippedParts).toEqual([{ path: 'src/huge.ts', from: 4, total }]);
+  });
+
+  it('keeps the first maxFileParts parts and reports the ones left out', () => {
+    const patch = ['@@ -0,0 +1,30 @@', ...Array.from({ length: 30 }, () => '+x')].join('\n');
+    expect(splitPatchIntoParts(patch, 10).parts).toHaveLength(5);
+
+    const { batches, skippedParts } = batchFilesByTokenCap([{ path: 'src/a.ts', patch }], 10, 2);
+
+    expect(batches).toHaveLength(2);
+    expect(batches.map((b) => b[0]!.part)).toEqual([
+      { index: 1, total: 5 },
+      { index: 2, total: 5 },
+    ]);
+    expect(skippedParts).toEqual([{ path: 'src/a.ts', from: 3, total: 5 }]);
+  });
+
+  it('reports the lines that were cut to fit the cap', () => {
+    const patch = ['@@ -0,0 +1,2 @@', `+${'x'.repeat(500_000)}`, '+small'].join('\n');
+    const { batches, cutLines } = batchFilesByTokenCap([{ path: 'src/big.ts', patch }], 500);
+
+    expect(cutLines).toEqual([{ path: 'src/big.ts', count: 1 }]);
+    expect(batches.flat().map((f) => f.patch).join('\n')).toContain(LINE_CUT_MARKER);
   });
 
   // ~`tokens` estimated diff tokens (3.5 characters per token).
@@ -126,9 +162,9 @@ describe('split - batchFilesByTokenCap (ADR-0013)', () => {
 
   it('splits a group bigger than the cap between its files without truncating them', () => {
     const files = [sized('src/x.ts', 200), sized('src/x.test.ts', 200)];
-    const { batches, truncatedPaths } = batchFilesByTokenCap(files, 300);
+    const { batches, skippedParts } = batchFilesByTokenCap(files, 300);
     expect(pathsOf(batches)).toEqual([['src/x.ts'], ['src/x.test.ts']]);
-    expect(truncatedPaths).toEqual([]);
+    expect(skippedParts).toEqual([]);
   });
 
   it('in a mixed directory split over the cap, schedules source units before test-only units', () => {

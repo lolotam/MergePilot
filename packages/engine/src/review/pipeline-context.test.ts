@@ -131,9 +131,13 @@ describe('runReview — repository context (ADR-0029)', () => {
   it('checks each planned batch prompt with context against maxInputTokens before dispatch', async () => {
     const baseline = recordingModel();
     const files = ['src/a.ts', 'src/b.ts'].map((path) => ({ path, status: 'modified', patch: bigPatch(30), changes: 31 }));
-    await runReview(input(baseline.model, { files }));
-    const maxInputTokens = estimateTokens(baseline.requests[0]!.system + baseline.requests[0]!.user) + 2_000;
-    const review = { maxPromptTokens: 1, batchTokens: 300, batchContextTokens: 6_000, contextTokens: 12_000 };
+    const review = { maxPromptTokens: 1, batchTokens: 300, batchContextTokens: 50_000, contextTokens: 50_000 };
+    // The baseline is the same batched review without context: its two calls are the planned batches.
+    await runReview(input(baseline.model, { files }, review));
+    const baselineTokens = baseline.requests.map((r) => estimateTokens(r.system + r.user));
+    expect(baselineTokens).toHaveLength(2);
+    // The review really costs the sum of its planned batches: the limit leaves room above it.
+    const maxInputTokens = baselineTokens.reduce((sum, tokens) => sum + tokens, 0) + 2_000;
     const boundedInput = (model: ReviewModel, contextFiles: RepositoryContextFile[]) => {
       const value = input(model, { files, contextFiles }, review);
       value.config.budget = { perReviewUsd: 10, maxInputTokens };
@@ -143,8 +147,14 @@ describe('runReview — repository context (ADR-0029)', () => {
     expect((await runReview(boundedInput(without.model, []))).status).toBe('completed');
     expect(without.requests).toHaveLength(2);
 
+    // The context is big enough to push the batch that holds it over the limit on its own.
+    const needed = baselineTokens[0]! + 2_000;
+    const content = 'const value = 1;\n'.repeat(Math.ceil((needed * 4) / 15));
     const withContext = recordingModel();
-    const result = await runReview(boundedInput(withContext.model, [context('src/dep.ts', 'src/b.ts', 'const value = 1;\n'.repeat(700))]));
+    const result = await runReview(boundedInput(withContext.model, [
+      context('src/dep0.ts', 'src/b.ts', content),
+      context('src/dep1.ts', 'src/b.ts', content),
+    ]));
     expect(result.status).toBe('skipped-budget');
     expect(result.status === 'skipped-budget' && result.reason).toContain(`exceed maxInputTokens limit (${maxInputTokens})`);
     expect(withContext.requests).toHaveLength(0);

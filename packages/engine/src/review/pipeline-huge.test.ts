@@ -8,7 +8,7 @@ import { estimateTokens } from './budget.js';
 import { modelFromAdapter, type ReviewModel, type ReviewModelRequest, type ReviewModelResponse } from './model.js';
 import { makeAnswerJson, makeConfig, validFindingJson } from './pipeline.fixtures.js';
 import { runReview, type PrFile } from './pipeline.js';
-import { PATCH_TRUNCATED_NOTE } from './split.js';
+import { splitPatchIntoParts } from './patch-parts.js';
 
 /** ~100 diff tokens of added lines, anchored from line 1. */
 function patchOf(lines = 25): string {
@@ -118,7 +118,7 @@ describe('runReview — huge PRs (ADR-0013)', () => {
     expect(fiveFiles.every((f) => calls[0]?.user.includes(f.path))).toBe(true);
   });
 
-  it('reviews a file bigger than the cap alone, truncated, and names it in incompleteReasons', async () => {
+  it('reviews a file bigger than the cap in parts, one call each, and names the parts left out', async () => {
     const files: PrFile[] = [
       { path: 'src/f0.ts', status: 'added', patch: patchOf(), changes: 25 },
       { path: 'src/huge.ts', status: 'added', patch: patchOf(2000), changes: 2000 },
@@ -126,13 +126,85 @@ describe('runReview — huge PRs (ADR-0013)', () => {
     const { model, calls } = scripted((req) => answerFor(req));
     const result = await run(hugeConfig({ batchTokens: 500 }), model, files);
 
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.user).toContain(PATCH_TRUNCATED_NOTE);
-    expect(calls[1]?.user.length).toBeLessThan(patchOf(2000).length);
+    const total = splitPatchIntoParts(patchOf(2000), 500).parts.length;
+    expect(total).toBeGreaterThan(8);
+    // The small file, then one call per part of the big one (review.maxFileParts parts).
+    expect(calls).toHaveLength(9);
+    expect(calls[1]?.user).toContain(`### src/huge.ts (part 1 of ${total})`);
+    expect(calls[8]?.user).toContain(`### src/huge.ts (part 8 of ${total})`);
     expect(result.status).toBe('completed');
     if (result.status === 'completed') {
       expect(result.complete).toBe(false);
-      expect(result.result.incompleteReasons).toContain('src/huge.ts: patch truncated to fit review.batchTokens');
+      expect(result.result.incompleteReasons).toContain(
+        `src/huge.ts: parts 9–${total} of ${total} not reviewed (review.maxFileParts)`,
+      );
+      // The file is reviewed in parts, so the old reason of a cut patch is gone.
+      expect(result.result.incompleteReasons.join(' ')).not.toContain('patch truncated to fit review.batchTokens');
+    }
+  });
+
+  it('says how many over-long lines were cut to fit the batch cap', async () => {
+    // A minified file on one line: the line alone is far over the cap.
+    const files: PrFile[] = [
+      {
+        path: 'src/long.ts',
+        status: 'added',
+        patch: ['@@ -0,0 +1,2 @@', `+${'x'.repeat(500_000)}`, '+small'].join('\n'),
+        changes: 2,
+      },
+    ];
+    const { model, calls } = scripted(() => ({ text: makeAnswerJson([]), finishReason: 'stop' }));
+    const result = await run(hugeConfig({ batchTokens: 500 }), model, files);
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.result.incompleteReasons).toContain(
+        'src/long.ts: 1 over-long line(s) cut to fit review.batchTokens',
+      );
+    }
+  });
+
+  it('reviews a file whose batches fit the input budget, even when the whole PR does not', async () => {
+    const patch = patchOf(8000);
+    const files: PrFile[] = [
+      { path: 'src/huge.ts', status: 'added', patch, changes: 8000 },
+    ];
+    const total = splitPatchIntoParts(patch, 500).parts.length;
+    const { model, calls } = scripted(() => ({ text: makeAnswerJson([]), finishReason: 'stop' }));
+    // The whole patch is over maxInputTokens, but the planned batches fit in total: the review runs.
+    const result = await run(
+      hugeConfig({ batchTokens: 500, maxFileParts: 4 }, { perReviewUsd: 1, maxInputTokens: 40_000 }),
+      model,
+      files,
+    );
+
+    expect(estimateTokens(patch)).toBeGreaterThan(40_000);
+    expect(result.status).toBe('completed');
+    expect(calls).toHaveLength(4);
+    if (result.status === 'completed') {
+      expect(result.result.incompleteReasons).toContain(
+        `src/huge.ts: parts 5–${total} of ${total} not reviewed (review.maxFileParts)`,
+      );
+    }
+  });
+
+  it('skips a batched review whose planned batches are over the input budget in total', async () => {
+    const files: PrFile[] = [
+      { path: 'src/huge.ts', status: 'added', patch: patchOf(8000), changes: 8000 },
+    ];
+    const { model, calls } = scripted(() => ({ text: makeAnswerJson([]), finishReason: 'stop' }));
+    // Every planned batch fits on its own, but the batches together do not: the review is skipped.
+    const result = await run(
+      hugeConfig({ batchTokens: 500, maxFileParts: 4 }, { perReviewUsd: 1, maxInputTokens: 8_000 }),
+      model,
+      files,
+    );
+
+    expect(result.status).toBe('skipped-budget');
+    expect(calls).toHaveLength(0);
+    if (result.status === 'skipped-budget') {
+      expect(result.reason).toMatch(/^Estimated prompt tokens \(\d+\) exceed maxInputTokens limit \(8000\)\.$/);
     }
   });
 

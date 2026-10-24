@@ -15,6 +15,7 @@ import {
   hasNothingNewToReview,
   listPullRequestFiles,
   NOTHING_NEW_DETAIL,
+  rebuildMissingPatches,
   reviewScopeOf,
   selectIncrementalFiles,
   withJudgeUsage,
@@ -88,14 +89,33 @@ export interface BotFiles {
 
 /** The PR files a bot reviews: listed (unless given), then narrowed since its last review. */
 export async function selectBotFiles(
-  params: Pick<BotReviewParams, 'client' | 'owner' | 'repo' | 'pullNumber' | 'headSha' | 'baseSha' | 'configHash' | 'publisherLogin' | 'log' | 'botSlot' | 'prFiles' | 'force'>,
+  params: Pick<BotReviewParams, 'client' | 'owner' | 'repo' | 'pullNumber' | 'headSha' | 'baseSha' | 'configHash' | 'publisherLogin' | 'log' | 'botSlot' | 'prFiles' | 'force'> & {
+    /** The paths the review excludes: their content is never read to rebuild a patch. */
+    exclude?: string[];
+  },
 ): Promise<BotFiles> {
   const { client, owner, repo, pullNumber, headSha, configHash, log, botSlot } = params;
   let prFiles = params.prFiles;
   if (!prFiles) {
     log?.(`Listing files for pull request #${pullNumber}...`);
-    prFiles = (await listPullRequestFiles(client, { owner, repo, pull_number: pullNumber })).files;
+    const listed = await listPullRequestFiles(client, { owner, repo, pull_number: pullNumber });
+    // A file whose diff is too big for GitHub's files API comes without a patch (ADR-0045): its
+    // patch is rebuilt from the file contents, so the bots see the file at all.
+    const rebuilt = await rebuildMissingPatches(client, listed.files, {
+      owner,
+      repo,
+      baseSha: params.baseSha,
+      headSha: params.headSha,
+      ...(params.exclude ? { exclude: params.exclude } : {}),
+    });
+    prFiles = rebuilt.files;
     log?.(`Found ${prFiles.length} files in PR diff`);
+    if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {
+      log?.(`Rebuilt ${rebuilt.rebuilt.length} missing patches, failed ${rebuilt.failed.length}`);
+      if (rebuilt.failed.length > 0) {
+        log?.(`Patches not rebuilt: ${rebuilt.failed.map((f) => `${f.path} (${f.reason})`).join(', ')}`);
+      }
+    }
   }
   log?.('Selecting files for review (incremental check)...');
   const selection = await selectIncrementalFiles(client, {
@@ -119,7 +139,7 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
   const { prFiles, selection: incremental } =
     params.selection && params.prFiles
       ? { prFiles: params.prFiles, selection: params.selection }
-      : await selectBotFiles(params);
+      : await selectBotFiles({ ...params, exclude: params.config.review.exclude });
   const filesToReview = incremental.files;
   const scope = reviewScopeOf(incremental);
   log?.(`Review scope: ${scope.mode} (${filesToReview.length} files)`);

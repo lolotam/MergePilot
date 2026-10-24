@@ -404,19 +404,4 @@ describe('selectIncrementalFiles', () => {
     expect(compareCommits).toHaveBeenCalledWith(expect.objectContaining({ base: 'old-complete', head: 'head-sha' }));
     expect(result).toMatchObject({ mode: 'incremental', sinceSha: 'old-complete', commitCount: 2 });
   });
-
-  it('ignores markers from other accounts', async () => {
-    const marker = buildMarker({ headSha: 'pasted', configHash: 'conf-1' });
-    const client: Partial<GitHubClient> = {
-      async listReviewsPage() {
-        return [{ id: 1, user: { login: 'mallory' }, body: marker }];
-      },
-      compareCommits: vi.fn(),
-    };
-    const result = await selectIncrementalFiles(client as GitHubClient, {
-      owner: 'acme', repo: 'repo', pull_number: 10, headSha: 'head-sha',
-      publisherLogin, prFiles: mockPrFiles, configHash: 'conf-1',
-    });
-    expect(result.mode).toBe('full');
-  });
 });

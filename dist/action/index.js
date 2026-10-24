@@ -64809,9 +64809,9 @@ var require_event_target = __commonJS({
         }
         let wrapper;
         if (type === "message") {
-          wrapper = function onMessage(data, isBinary) {
+          wrapper = function onMessage(data, isBinary2) {
             const event = new MessageEvent("message", {
-              data: isBinary ? data : data.toString()
+              data: isBinary2 ? data : data.toString()
             });
             event[kTarget] = this;
             callListener(handler2, this, event);
@@ -65869,8 +65869,8 @@ var require_websocket = __commonJS({
     function receiverOnFinish() {
       this[kWebSocket].emitClose();
     }
-    function receiverOnMessage(data, isBinary) {
-      this[kWebSocket].emit("message", data, isBinary);
+    function receiverOnMessage(data, isBinary2) {
+      this[kWebSocket].emit("message", data, isBinary2);
     }
     function receiverOnPing(data) {
       const websocket = this[kWebSocket];
@@ -65974,8 +65974,8 @@ var require_stream = __commonJS({
         objectMode: false,
         writableObjectMode: false
       });
-      ws.on("message", function message(msg, isBinary) {
-        const data = !isBinary && duplex._readableState.objectMode ? msg.toString() : msg;
+      ws.on("message", function message(msg, isBinary2) {
+        const data = !isBinary2 && duplex._readableState.objectMode ? msg.toString() : msg;
         if (!duplex.push(data)) ws.pause();
       });
       ws.once("error", function error62(err) {
@@ -94175,7 +94175,7 @@ var require_resolve_block_scalar = __commonJS({
       if (!header2)
         return { value: "", type: null, comment: "", range: [start, start, start] };
       const type = header2.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
-      const lines = scalar.source ? splitLines(scalar.source) : [];
+      const lines = scalar.source ? splitLines2(scalar.source) : [];
       let chompStart = lines.length;
       for (let i2 = lines.length - 1; i2 >= 0; --i2) {
         const content = lines[i2][1];
@@ -94333,7 +94333,7 @@ var require_resolve_block_scalar = __commonJS({
       }
       return { mode, indent, chomp, comment, length };
     }
-    function splitLines(source) {
+    function splitLines2(source) {
       const split = source.split(/\n( *)/);
       const first = split[0];
       const m2 = first.match(/^( *)/);
@@ -139474,8 +139474,13 @@ var ReviewSettingsSchema = external_exports.strictObject({
   }).prefault({}),
   /** Above this prompt size without context, use batches; context fills only the room left below it. */
   maxPromptTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.maxPromptTokens),
-  /** Diff tokens per batch; a single file bigger than this is its own batch, its patch truncated. */
+  /** Diff tokens per batch; in a batched review a file bigger than this is split into parts (ADR-0045). */
   batchTokens: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.batchTokens),
+  /**
+   * Parts a file over review.batchTokens is split into (ADR-0045); parts beyond it are not
+   * reviewed and the run is incomplete.
+   */
+  maxFileParts: external_exports.number().int().min(1).max(50).default(8),
   /** Timeout of every single model call, retries included. */
   callTimeoutMs: external_exports.number().int().positive().default(REVIEW_LIMIT_DEFAULTS.callTimeoutMs),
   /** Overall review time: once reached, no new batch starts and the review finishes with what is done. */
@@ -140409,9 +140414,9 @@ function compareFindings(a, b) {
   if (pathDiff !== 0) {
     return pathDiff;
   }
-  const lineDiff = a.line - b.line;
-  if (lineDiff !== 0) {
-    return lineDiff;
+  const lineDiff2 = a.line - b.line;
+  if (lineDiff2 !== 0) {
+    return lineDiff2;
   }
   const titleDiff = compareText(a.title, b.title);
   if (titleDiff !== 0) {
@@ -140701,17 +140706,33 @@ function shown(text) {
 }
 function renderManifest(files, batches) {
   const batchOf = /* @__PURE__ */ new Map();
-  batches.forEach((batch, index) => batch.forEach((f3) => batchOf.set(f3.path, index + 1)));
-  const order = (f3) => batchOf.get(f3.path) ?? batches.length + 1;
+  batches.forEach((batch, index) => batch.forEach((f3) => {
+    const seen = batchOf.get(f3.path);
+    if (seen)
+      seen.push(index + 1);
+    else
+      batchOf.set(f3.path, [index + 1]);
+  }));
+  const lastBatchOf = (path12) => {
+    const seen = batchOf.get(path12);
+    return seen?.[seen.length - 1];
+  };
+  const order = (f3) => lastBatchOf(f3.path) ?? batches.length + 1;
   const sorted = files.map((file2, index) => ({ file: file2, index })).sort((a, b) => order(a.file) - order(b.file) || a.index - b.index).map(({ file: file2 }) => file2);
   const lines = sorted.slice(0, MANIFEST_MAX_FILES).map((f3) => {
-    const batch = batchOf.get(f3.path);
-    const where = batch === void 0 ? "not reviewed" : `batch ${batch}`;
+    const where = whereOf(batchOf.get(f3.path));
     return `${where} | ${shown(f3.status)} | +${f3.additions} -${f3.deletions} | ${shown(f3.label)}`;
   });
   if (sorted.length > MANIFEST_MAX_FILES)
     lines.push(`+${sorted.length - MANIFEST_MAX_FILES} more files`);
   return [`${files.length} changed files in ${batches.length} batches (batch | status | lines | path):`, ...lines].join("\n");
+}
+function whereOf(batches) {
+  if (!batches || batches.length === 0)
+    return "not reviewed";
+  const first = batches[0];
+  const last = batches[batches.length - 1];
+  return first === last ? `batch ${first}` : `batches ${first}\u2013${last}`;
 }
 
 var DESIGN_DOC_GLOBS = [
@@ -140993,8 +141014,14 @@ ${prBody}`;
   }
   for (const file2 of input2.files) {
     const annotated = annotatePatch(file2.patch);
-    parts.push(`### ${file2.path}
-${wrapUntrusted(`PATCH:${file2.path}`, annotated)}`);
+    const part = file2.part;
+    const header2 = part ? `### ${file2.path} (part ${part.index} of ${part.total})` : `### ${file2.path}`;
+    const note = part ? `This is part ${part.index} of ${part.total} of this file's diff; the other parts are reviewed in other batches.` : "";
+    const block = wrapUntrusted(`PATCH:${file2.path}`, annotated);
+    parts.push(note ? `${header2}
+${note}
+${block}` : `${header2}
+${block}`);
   }
   for (const context of input2.contextFiles ?? []) {
     parts.push(wrapUntrusted(contextLabel(context), renderContextFile(context)));
@@ -141107,6 +141134,174 @@ function groupFilesForBatches(files, tokensOf) {
   return ordered.sort((a, b) => a.tier - b.tier || a.first - b.first).map((group) => group.node);
 }
 
+var HUNK_HEADER_RE2 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+var LINE_CUT_MARKER = " [line cut to fit review.batchTokens]";
+function splitPatchIntoParts(patch, capTokens) {
+  if (estimateTokens(patch) <= capTokens)
+    return { parts: [patch], cutLines: 0 };
+  const hunks = parseHunks(patch);
+  if (hunks.length === 0)
+    return { parts: [patch], cutLines: 0 };
+  const pieces = [];
+  let cutLines = 0;
+  for (const hunk of hunks) {
+    const rendered = renderHunk(hunk);
+    if (estimateTokens(rendered) <= capTokens) {
+      pieces.push(rendered);
+    } else {
+      const split = splitHunk(hunk, capTokens);
+      pieces.push(...split.pieces);
+      cutLines += split.cutLines;
+    }
+  }
+  const parts = [];
+  let current = [];
+  let currentChars = 0;
+  for (const piece of pieces) {
+    const joined = currentChars + piece.length + current.length;
+    if (current.length > 0 && estimateChars(joined) > capTokens) {
+      parts.push(current.join("\n"));
+      current = [];
+      currentChars = 0;
+    }
+    current.push(piece);
+    currentChars += piece.length;
+  }
+  if (current.length > 0)
+    parts.push(current.join("\n"));
+  return { parts, cutLines };
+}
+function estimateChars(chars) {
+  return Math.ceil(chars / 3.5);
+}
+function parseHunks(patch) {
+  const hunks = [];
+  let current;
+  for (const line of patch.split("\n")) {
+    const match3 = HUNK_HEADER_RE2.exec(line);
+    if (match3) {
+      current = {
+        header: line,
+        heading: (match3[5] ?? "").replace(/\r$/, ""),
+        oldStart: Number(match3[1]),
+        oldLines: match3[2] === void 0 ? 1 : Number(match3[2]),
+        newStart: Number(match3[3]),
+        newLines: match3[4] === void 0 ? 1 : Number(match3[4]),
+        lines: []
+      };
+      hunks.push(current);
+      continue;
+    }
+    if (current)
+      current.lines.push(line);
+  }
+  return hunks;
+}
+function renderHunk(hunk) {
+  return [hunk.header, ...hunk.lines].join("\n");
+}
+function splitHunk(hunk, capTokens) {
+  let oldLine = hunk.oldLines > 0 ? hunk.oldStart : hunk.oldStart + 1;
+  let newLine = hunk.newLines > 0 ? hunk.newStart : hunk.newStart + 1;
+  const pieces = [];
+  let lines = [];
+  let oldStart = oldLine;
+  let newStart = newLine;
+  let oldCount = 0;
+  let newCount = 0;
+  let heading = hunk.heading;
+  let bodyChars = 0;
+  let cutLines = 0;
+  const flush = () => {
+    if (lines.length === 0)
+      return;
+    pieces.push(renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines));
+    lines = [];
+    oldCount = 0;
+    newCount = 0;
+    bodyChars = 0;
+    heading = "";
+  };
+  for (const unit of groupUnits(hunk.lines)) {
+    const line = unit[0] ?? "";
+    const unitOld = line.startsWith(" ") || line.startsWith("-") ? 1 : 0;
+    const unitNew = line.startsWith(" ") || line.startsWith("+") ? 1 : 0;
+    const unitChars = charsOf(unit);
+    if (isOverLong(unit, capTokens)) {
+      flush();
+      const cut3 = cutUnit(unit, capTokens);
+      cutLines += 1;
+      lines = cut3;
+      oldCount = unitOld;
+      newCount = unitNew;
+      bodyChars = charsOf(cut3);
+      oldStart = oldLine;
+      newStart = newLine;
+      flush();
+      oldLine += unitOld;
+      newLine += unitNew;
+      oldStart = oldLine;
+      newStart = newLine;
+      continue;
+    }
+    const candidate = headerChars(oldStart, oldCount + unitOld, newStart, newCount + unitNew, heading) + lines.length + unit.length + bodyChars + unitChars;
+    if (lines.length > 0 && estimateChars(candidate) > capTokens) {
+      flush();
+      oldStart = oldLine;
+      newStart = newLine;
+    }
+    lines.push(...unit);
+    oldCount += unitOld;
+    newCount += unitNew;
+    bodyChars += unitChars;
+    oldLine += unitOld;
+    newLine += unitNew;
+  }
+  flush();
+  return { pieces, cutLines };
+}
+function isOverLong(unit, capTokens) {
+  if (estimateChars(charsOf(unit)) <= capTokens)
+    return false;
+  const cutChars = 1 + Math.floor(capTokens * 3) + LINE_CUT_MARKER.length;
+  return estimateChars(cutChars) <= capTokens;
+}
+function renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines) {
+  return [subHunkHeader(oldStart, oldCount, newStart, newCount, heading), ...lines].join("\n");
+}
+function subHunkHeader(oldStart, oldCount, newStart, newCount, heading) {
+  const old = oldCount > 0 ? oldStart : Math.max(0, oldStart - 1);
+  const current = newCount > 0 ? newStart : Math.max(0, newStart - 1);
+  return `@@ -${old},${oldCount} +${current},${newCount} @@${heading}`;
+}
+function headerChars(oldStart, oldCount, newStart, newCount, heading) {
+  return subHunkHeader(oldStart, oldCount, newStart, newCount, heading).length;
+}
+function charsOf(lines) {
+  let chars = 0;
+  for (const line of lines)
+    chars += line.length;
+  return chars;
+}
+function cutUnit(unit, capTokens) {
+  const line = unit[0] ?? "";
+  const prefix = line.slice(0, 1);
+  const text = line.slice(1);
+  const maxChars = Math.max(0, Math.floor(capTokens * 3));
+  return [`${prefix}${text.slice(0, maxChars)}${LINE_CUT_MARKER}`, ...unit.slice(1)];
+}
+function groupUnits(lines) {
+  const units = [];
+  for (const line of lines) {
+    if (line.startsWith("\\") && units.length > 0) {
+      units[units.length - 1].push(line);
+    } else {
+      units.push([line]);
+    }
+  }
+  return units;
+}
+
 function combineUsage(u1, u2) {
   if (!u1 && !u2)
     return void 0;
@@ -141172,19 +141367,10 @@ var reviewJsonSchema = () => external_exports.toJSONSchema(ReviewAnswerSchema);
 function needsTruncationRetry(parsed, finishReason) {
   return !parsed.ok && (parsed.code === "truncated" || finishReason === "max-tokens");
 }
-var PATCH_TRUNCATED_NOTE = "[patch truncated: the rest of this file was not sent for review]";
-function truncatePatch(patch, capTokens) {
-  const maxChars = Math.max(0, Math.floor(capTokens * 3.5) - PATCH_TRUNCATED_NOTE.length - 1);
-  let cut3 = patch.slice(0, maxChars);
-  const lastBreak = cut3.lastIndexOf("\n");
-  if (lastBreak > 0)
-    cut3 = cut3.slice(0, lastBreak);
-  return `${cut3}
-${PATCH_TRUNCATED_NOTE}`;
-}
-function batchFilesByTokenCap(files, capTokens) {
+function batchFilesByTokenCap(files, capTokens, maxFileParts = 8) {
   const batches = [];
-  const truncatedPaths = [];
+  const skippedParts = [];
+  const cutLines = [];
   let current = [];
   let currentTokens = 0;
   const flush = () => {
@@ -141213,8 +141399,16 @@ function batchFilesByTokenCap(files, capTokens) {
     } else {
       const file2 = node2.files[0];
       flush();
-      batches.push([{ path: file2.path, patch: truncatePatch(file2.patch, capTokens) }]);
-      truncatedPaths.push(file2.path);
+      const split = splitPatchIntoParts(file2.patch, capTokens);
+      split.parts.slice(0, maxFileParts).forEach((part, index) => {
+        batches.push([{ path: file2.path, patch: part, part: { index: index + 1, total: split.parts.length } }]);
+      });
+      if (split.parts.length > maxFileParts) {
+        skippedParts.push({ path: file2.path, from: maxFileParts + 1, total: split.parts.length });
+      }
+      if (split.cutLines > 0) {
+        cutLines.push({ path: file2.path, count: split.cutLines });
+      }
     }
   };
   for (const group of groupFilesForBatches(files, (f3) => estimateTokens(f3.patch))) {
@@ -141224,7 +141418,7 @@ function batchFilesByTokenCap(files, capTokens) {
   }
   placeDeferred();
   flush();
-  return { batches, truncatedPaths };
+  return { batches, skippedParts, cutLines };
 }
 
 function parseReviewResponse(response) {
@@ -142072,7 +142266,7 @@ function wrapUntrusted2(label, content) {
 ${escapeDelimiters(content)}
 <<<END UNTRUSTED:${safeLabel}>>>`;
 }
-var HUNK_HEADER_RE2 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+var HUNK_HEADER_RE3 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 function parseHunkHeader(header2) {
   return {
     oldLine: parseInt(header2[1] ?? "1", 10),
@@ -142090,7 +142284,7 @@ function hunkRanges(hunk) {
 function patchRanges(patch) {
   const ranges = [];
   for (const line of patch.split(/\r?\n/)) {
-    const header2 = line.match(HUNK_HEADER_RE2);
+    const header2 = line.match(HUNK_HEADER_RE3);
     if (header2)
       ranges.push(...hunkRanges(parseHunkHeader(header2)));
   }
@@ -142101,7 +142295,7 @@ function patchChunks(patch) {
   let oldLine = 0;
   let newLine = 0;
   for (const line of patch.split(/\r?\n/)) {
-    const header2 = line.match(HUNK_HEADER_RE2);
+    const header2 = line.match(HUNK_HEADER_RE3);
     if (header2) {
       const hunk = parseHunkHeader(header2);
       oldLine = hunk.oldLine;
@@ -142724,18 +142918,24 @@ async function runReview(input2) {
     prompt = buildReviewPrompt({ ...promptInput, contextFiles: wholeContext });
     promptTokens = estimateTokens(prompt.system + prompt.user);
   }
-  const budgetResult = checkBudget({
-    promptTokens,
-    maxInputTokens: budgetCfg.maxInputTokens
-  });
-  if (!budgetResult.ok) {
-    return { status: "skipped-budget", reason: budgetResult.reason };
+  const batched = withoutContextTokens > limits2.maxPromptTokens && redactedReviewableFiles.length > 0;
+  if (!batched) {
+    const budgetResult = checkBudget({
+      promptTokens,
+      maxInputTokens: budgetCfg.maxInputTokens
+    });
+    if (!budgetResult.ok) {
+      return { status: "skipped-budget", reason: budgetResult.reason };
+    }
   }
   let plan;
-  if (withoutContextTokens > limits2.maxPromptTokens && redactedReviewableFiles.length > 0) {
-    plan = batchFilesByTokenCap(redactedReviewableFiles, limits2.batchTokens);
-    for (const path12 of plan.truncatedPaths) {
-      incompleteReasons.push(`${path12}: patch truncated to fit review.batchTokens`);
+  if (batched) {
+    plan = batchFilesByTokenCap(redactedReviewableFiles, limits2.batchTokens, reviewCfg.maxFileParts);
+    for (const skipped of plan.skippedParts) {
+      incompleteReasons.push(`${skipped.path}: parts ${skipped.from}\u2013${skipped.total} of ${skipped.total} not reviewed (review.maxFileParts)`);
+    }
+    for (const cut3 of plan.cutLines) {
+      incompleteReasons.push(`${cut3.path}: ${cut3.count} over-long line(s) cut to fit review.batchTokens`);
     }
   } else {
     context.markSent(wholeContext);
@@ -142756,6 +142956,14 @@ async function runReview(input2) {
     const callBudget = checkBudget({ promptTokens: callTokens, maxInputTokens: budgetCfg.maxInputTokens });
     if (!callBudget.ok)
       return { status: "skipped-budget", reason: callBudget.reason };
+  }
+  if (plan) {
+    const totalBudget = checkBudget({
+      promptTokens: callPromptTokens.reduce((sum, tokens) => sum + tokens, 0),
+      maxInputTokens: budgetCfg.maxInputTokens
+    });
+    if (!totalBudget.ok)
+      return { status: "skipped-budget", reason: totalBudget.reason };
   }
   const maxOutputTokens = reviewOutputTokensFor(reviewCfg.maxFindings);
   const reviewOutputTokens = model.outputTokensFor(maxOutputTokens);
@@ -194810,6 +195018,9 @@ function createOctokitClient(token) {
           if (item.type !== "file" || typeof item.content !== "string") {
             return null;
           }
+          if (item.encoding === "none") {
+            return null;
+          }
           const encoding = item.encoding ?? "base64";
           if (encoding === "base64") {
             return Buffer.from(item.content, "base64").toString("utf8");
@@ -194843,6 +195054,7 @@ function createOctokitClient(token) {
           let status = "identical";
           const allFiles = [];
           let totalCommits;
+          let mergeBaseSha;
           while (true) {
             const response = await octokit.rest.repos.compareCommitsWithBasehead({
               owner: params.owner,
@@ -194855,6 +195067,9 @@ function createOctokitClient(token) {
             if (response.data.total_commits !== void 0) {
               totalCommits = response.data.total_commits;
             }
+            if (page === 1) {
+              mergeBaseSha = response.data.merge_base_commit?.sha;
+            }
             const pageFiles = response.data.files ?? [];
             allFiles.push(...pageFiles);
             if (pageFiles.length < PAGE_SIZE2) {
@@ -194865,7 +195080,8 @@ function createOctokitClient(token) {
           return {
             status,
             files: allFiles,
-            ...totalCommits !== void 0 ? { totalCommits } : {}
+            ...totalCommits !== void 0 ? { totalCommits } : {},
+            ...mergeBaseSha !== void 0 ? { mergeBaseSha } : {}
           };
         } catch (error62) {
           if (typeof error62 === "object" && error62 !== null && "status" in error62 && error62.status === 404) {
@@ -195036,6 +195252,721 @@ async function listPullRequestFiles(client, { owner, repo, pull_number }) {
     files,
     truncatedList
   };
+}
+
+var Diff = class {
+  diff(oldStr, newStr, options = {}) {
+    let callback;
+    if (typeof options === "function") {
+      callback = options;
+      options = {};
+    } else if ("callback" in options) {
+      callback = options.callback;
+    }
+    const oldString = this.castInput(oldStr, options);
+    const newString = this.castInput(newStr, options);
+    const oldTokens = this.removeEmpty(this.tokenize(oldString, options));
+    const newTokens = this.removeEmpty(this.tokenize(newString, options));
+    return this.diffWithOptionsObj(oldTokens, newTokens, options, callback);
+  }
+  diffWithOptionsObj(oldTokens, newTokens, options, callback) {
+    var _a15;
+    const done = (value) => {
+      value = this.postProcess(value, options);
+      if (callback) {
+        setTimeout(function() {
+          callback(value);
+        }, 0);
+        return void 0;
+      } else {
+        return value;
+      }
+    };
+    const newLen = newTokens.length, oldLen = oldTokens.length;
+    let editLength = 1;
+    let maxEditLength = newLen + oldLen;
+    if (options.maxEditLength != null) {
+      maxEditLength = Math.min(maxEditLength, options.maxEditLength);
+    }
+    const maxExecutionTime = (_a15 = options.timeout) !== null && _a15 !== void 0 ? _a15 : Infinity;
+    const abortAfterTimestamp = Date.now() + maxExecutionTime;
+    const bestPath = [{ oldPos: -1, lastComponent: void 0 }];
+    let newPos = this.extractCommon(bestPath[0], newTokens, oldTokens, 0, options);
+    if (bestPath[0].oldPos + 1 >= oldLen && newPos + 1 >= newLen) {
+      return done(this.buildValues(bestPath[0].lastComponent, newTokens, oldTokens));
+    }
+    let minDiagonalToConsider = -Infinity, maxDiagonalToConsider = Infinity;
+    const execEditLength = () => {
+      for (let diagonalPath = Math.max(minDiagonalToConsider, -editLength); diagonalPath <= Math.min(maxDiagonalToConsider, editLength); diagonalPath += 2) {
+        let basePath;
+        const removePath = bestPath[diagonalPath - 1], addPath = bestPath[diagonalPath + 1];
+        if (removePath) {
+          bestPath[diagonalPath - 1] = void 0;
+        }
+        let canAdd = false;
+        if (addPath) {
+          const addPathNewPos = addPath.oldPos - diagonalPath;
+          canAdd = addPath && 0 <= addPathNewPos && addPathNewPos < newLen;
+        }
+        const canRemove = removePath && removePath.oldPos + 1 < oldLen;
+        if (!canAdd && !canRemove) {
+          bestPath[diagonalPath] = void 0;
+          continue;
+        }
+        if (!canRemove || canAdd && removePath.oldPos < addPath.oldPos) {
+          basePath = this.addToPath(addPath, true, false, 0, options);
+        } else {
+          basePath = this.addToPath(removePath, false, true, 1, options);
+        }
+        newPos = this.extractCommon(basePath, newTokens, oldTokens, diagonalPath, options);
+        if (basePath.oldPos + 1 >= oldLen && newPos + 1 >= newLen) {
+          return done(this.buildValues(basePath.lastComponent, newTokens, oldTokens)) || true;
+        } else {
+          bestPath[diagonalPath] = basePath;
+          if (basePath.oldPos + 1 >= oldLen) {
+            maxDiagonalToConsider = Math.min(maxDiagonalToConsider, diagonalPath - 1);
+          }
+          if (newPos + 1 >= newLen) {
+            minDiagonalToConsider = Math.max(minDiagonalToConsider, diagonalPath + 1);
+          }
+        }
+      }
+      editLength++;
+    };
+    if (callback) {
+      (function exec() {
+        setTimeout(function() {
+          if (editLength > maxEditLength || Date.now() > abortAfterTimestamp) {
+            return callback(void 0);
+          }
+          if (!execEditLength()) {
+            exec();
+          }
+        }, 0);
+      })();
+    } else {
+      while (editLength <= maxEditLength && Date.now() <= abortAfterTimestamp) {
+        const ret = execEditLength();
+        if (ret) {
+          return ret;
+        }
+      }
+    }
+  }
+  addToPath(path12, added, removed, oldPosInc, options) {
+    const last = path12.lastComponent;
+    if (last && !options.oneChangePerToken && last.added === added && last.removed === removed) {
+      return {
+        oldPos: path12.oldPos + oldPosInc,
+        lastComponent: { count: last.count + 1, added, removed, previousComponent: last.previousComponent }
+      };
+    } else {
+      return {
+        oldPos: path12.oldPos + oldPosInc,
+        lastComponent: { count: 1, added, removed, previousComponent: last }
+      };
+    }
+  }
+  extractCommon(basePath, newTokens, oldTokens, diagonalPath, options) {
+    const newLen = newTokens.length, oldLen = oldTokens.length;
+    let oldPos = basePath.oldPos, newPos = oldPos - diagonalPath, commonCount = 0;
+    while (newPos + 1 < newLen && oldPos + 1 < oldLen && this.equals(oldTokens[oldPos + 1], newTokens[newPos + 1], options)) {
+      newPos++;
+      oldPos++;
+      commonCount++;
+      if (options.oneChangePerToken) {
+        basePath.lastComponent = { count: 1, previousComponent: basePath.lastComponent, added: false, removed: false };
+      }
+    }
+    if (commonCount && !options.oneChangePerToken) {
+      basePath.lastComponent = { count: commonCount, previousComponent: basePath.lastComponent, added: false, removed: false };
+    }
+    basePath.oldPos = oldPos;
+    return newPos;
+  }
+  equals(left, right, options) {
+    if (options.comparator) {
+      return options.comparator(left, right);
+    } else {
+      return left === right || !!options.ignoreCase && left.toLowerCase() === right.toLowerCase();
+    }
+  }
+  removeEmpty(array2) {
+    const ret = [];
+    for (let i2 = 0; i2 < array2.length; i2++) {
+      if (array2[i2]) {
+        ret.push(array2[i2]);
+      }
+    }
+    return ret;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  castInput(value, options) {
+    return value;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  tokenize(value, options) {
+    return Array.from(value);
+  }
+  join(chars) {
+    return chars.join("");
+  }
+  postProcess(changeObjects, options) {
+    return changeObjects;
+  }
+  get useLongestToken() {
+    return false;
+  }
+  buildValues(lastComponent, newTokens, oldTokens) {
+    const components = [];
+    let nextComponent;
+    while (lastComponent) {
+      components.push(lastComponent);
+      nextComponent = lastComponent.previousComponent;
+      delete lastComponent.previousComponent;
+      lastComponent = nextComponent;
+    }
+    components.reverse();
+    const componentLen = components.length;
+    let componentPos = 0, newPos = 0, oldPos = 0;
+    for (; componentPos < componentLen; componentPos++) {
+      const component = components[componentPos];
+      if (!component.removed) {
+        if (!component.added && this.useLongestToken) {
+          let value = newTokens.slice(newPos, newPos + component.count);
+          value = value.map(function(value2, i2) {
+            const oldValue = oldTokens[oldPos + i2];
+            return oldValue.length > value2.length ? oldValue : value2;
+          });
+          component.value = this.join(value);
+        } else {
+          component.value = this.join(newTokens.slice(newPos, newPos + component.count));
+        }
+        newPos += component.count;
+        if (!component.added) {
+          oldPos += component.count;
+        }
+      } else {
+        component.value = this.join(oldTokens.slice(oldPos, oldPos + component.count));
+        oldPos += component.count;
+      }
+    }
+    return components;
+  }
+};
+
+var LineDiff = class extends Diff {
+  constructor() {
+    super(...arguments);
+    this.tokenize = tokenize3;
+  }
+  equals(left, right, options) {
+    if (options.ignoreWhitespace) {
+      if (!options.newlineIsToken || !left.includes("\n")) {
+        left = left.trim();
+      }
+      if (!options.newlineIsToken || !right.includes("\n")) {
+        right = right.trim();
+      }
+    } else if (options.ignoreNewlineAtEof && !options.newlineIsToken) {
+      if (left.endsWith("\n")) {
+        left = left.slice(0, -1);
+      }
+      if (right.endsWith("\n")) {
+        right = right.slice(0, -1);
+      }
+    }
+    return super.equals(left, right, options);
+  }
+};
+var lineDiff = new LineDiff();
+function diffLines(oldStr, newStr, options) {
+  return lineDiff.diff(oldStr, newStr, options);
+}
+function tokenize3(value, options) {
+  if (options.stripTrailingCr) {
+    value = value.replace(/\r\n/g, "\n");
+  }
+  const retLines = [], linesAndNewlines = value.split(/(\n|\r\n)/);
+  if (!linesAndNewlines[linesAndNewlines.length - 1]) {
+    linesAndNewlines.pop();
+  }
+  for (let i2 = 0; i2 < linesAndNewlines.length; i2++) {
+    const line = linesAndNewlines[i2];
+    if (i2 % 2 && !options.newlineIsToken) {
+      retLines[retLines.length - 1] += line;
+    } else {
+      retLines.push(line);
+    }
+  }
+  return retLines;
+}
+
+function structuredPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, newHeader, options) {
+  let optionsObj;
+  if (!options) {
+    optionsObj = {};
+  } else if (typeof options === "function") {
+    optionsObj = { callback: options };
+  } else {
+    optionsObj = options;
+  }
+  if (typeof optionsObj.context === "undefined") {
+    optionsObj.context = 4;
+  }
+  const context = optionsObj.context;
+  if (optionsObj.newlineIsToken) {
+    throw new Error("newlineIsToken may not be used with patch-generation functions, only with diffing functions");
+  }
+  if (!optionsObj.callback) {
+    return diffLinesResultToPatch(diffLines(oldStr, newStr, optionsObj));
+  } else {
+    const { callback } = optionsObj;
+    diffLines(oldStr, newStr, Object.assign(Object.assign({}, optionsObj), { callback: (diff) => {
+      const patch = diffLinesResultToPatch(diff);
+      callback(patch);
+    } }));
+  }
+  function diffLinesResultToPatch(diff) {
+    if (!diff) {
+      return;
+    }
+    diff.push({ value: "", lines: [] });
+    function contextLines(lines) {
+      return lines.map(function(entry) {
+        return " " + entry;
+      });
+    }
+    const hunks = [];
+    let oldRangeStart = 0, newRangeStart = 0, curRange = [], oldLine = 1, newLine = 1;
+    for (let i2 = 0; i2 < diff.length; i2++) {
+      const current = diff[i2], lines = current.lines || splitLines(current.value);
+      current.lines = lines;
+      if (current.added || current.removed) {
+        if (!oldRangeStart) {
+          const prev = diff[i2 - 1];
+          oldRangeStart = oldLine;
+          newRangeStart = newLine;
+          if (prev) {
+            curRange = context > 0 ? contextLines(prev.lines.slice(-context)) : [];
+            oldRangeStart -= curRange.length;
+            newRangeStart -= curRange.length;
+          }
+        }
+        for (const line of lines) {
+          curRange.push((current.added ? "+" : "-") + line);
+        }
+        if (current.added) {
+          newLine += lines.length;
+        } else {
+          oldLine += lines.length;
+        }
+      } else {
+        if (oldRangeStart) {
+          if (lines.length <= context * 2 && i2 < diff.length - 2) {
+            for (const line of contextLines(lines)) {
+              curRange.push(line);
+            }
+          } else {
+            const contextSize = Math.min(lines.length, context);
+            for (const line of contextLines(lines.slice(0, contextSize))) {
+              curRange.push(line);
+            }
+            const hunk = {
+              oldStart: oldRangeStart,
+              oldLines: oldLine - oldRangeStart + contextSize,
+              newStart: newRangeStart,
+              newLines: newLine - newRangeStart + contextSize,
+              lines: curRange
+            };
+            hunks.push(hunk);
+            oldRangeStart = 0;
+            newRangeStart = 0;
+            curRange = [];
+          }
+        }
+        oldLine += lines.length;
+        newLine += lines.length;
+      }
+    }
+    for (const hunk of hunks) {
+      for (let i2 = 0; i2 < hunk.lines.length; i2++) {
+        if (hunk.lines[i2].endsWith("\n")) {
+          hunk.lines[i2] = hunk.lines[i2].slice(0, -1);
+        } else {
+          hunk.lines.splice(i2 + 1, 0, "\\ No newline at end of file");
+          i2++;
+        }
+      }
+    }
+    return {
+      oldFileName,
+      newFileName,
+      oldHeader,
+      newHeader,
+      hunks
+    };
+  }
+}
+function splitLines(text) {
+  const hasTrailingNl = text.endsWith("\n");
+  const result = text.split("\n").map((line) => line + "\n");
+  if (hasTrailingNl) {
+    result.pop();
+  } else {
+    result.push(result.pop().slice(0, -1));
+  }
+  return result;
+}
+
+var readCache = /* @__PURE__ */ new WeakMap();
+var listCache = /* @__PURE__ */ new WeakMap();
+function shared(caches, client, key, start) {
+  let cache2 = caches.get(client);
+  if (!cache2) {
+    cache2 = /* @__PURE__ */ new Map();
+    caches.set(client, cache2);
+  }
+  let request2 = cache2.get(key);
+  if (!request2) {
+    const pending = start();
+    pending.catch(() => {
+      if (cache2?.get(key) === pending)
+        cache2.delete(key);
+    });
+    request2 = pending;
+    cache2.set(key, request2);
+  }
+  return request2;
+}
+function readAtRef(client, owner, repo, ref, path12) {
+  return shared(readCache, client, `${owner}/${repo}@${ref}:${path12}`, () => client.getFileContent({ owner, repo, path: path12, ref }));
+}
+function listAtRef(client, owner, repo, ref, path12) {
+  const list = client.listDirectoryFiles?.bind(client);
+  if (!list)
+    return Promise.resolve(null);
+  return shared(listCache, client, `${owner}/${repo}@${ref}:${path12}`, () => list({ owner, repo, path: path12, ref }));
+}
+
+var MAX_REBUILT_PATCH_LINES = 5e4;
+var DIFF_TIMEOUT_MS = 2e3;
+var MAX_DIFF_EDIT_LENGTH = 2e4;
+var DIFF_OPTIONS = { context: 3, timeout: DIFF_TIMEOUT_MS, maxEditLength: MAX_DIFF_EDIT_LENGTH };
+var MAX_CONCURRENT_READS = 4;
+var REBUILDABLE_STATUSES = /* @__PURE__ */ new Set(["added", "modified", "renamed", "copied"]);
+var SNAPSHOT_PATH_RE = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
+var SNAPSHOT_NAME_RE = /^(\d+)_snapshot\.json$/;
+var NOT_RETURNED = "not returned by the contents API";
+var BINARY = "binary";
+var TOO_LARGE = `over ${MAX_REBUILT_PATCH_LINES.toLocaleString("en-US")} diff lines`;
+var NO_CHANGE = "no content change";
+var DIFF_TOO_COSTLY = "diff too costly to compute";
+async function rebuildMissingPatches(client, files, opts) {
+  const candidates = files.filter((file2) => isCandidate(file2, opts.exclude ?? []));
+  const rebuilt = [];
+  const failed = [];
+  const snapshotDiffs = [];
+  const patches = /* @__PURE__ */ new Map();
+  const dropped = /* @__PURE__ */ new Set();
+  const unchangedSnapshots = /* @__PURE__ */ new Set();
+  const baseRef = await mergeBaseOf(client, candidates, opts);
+  for (let start = 0; start < candidates.length; start += MAX_CONCURRENT_READS) {
+    const group = candidates.slice(start, start + MAX_CONCURRENT_READS);
+    const outcomes = await Promise.all(group.map((file2) => rebuildOne(client, file2, opts, baseRef)));
+    for (const outcome of outcomes) {
+      if ("patch" in outcome) {
+        patches.set(outcome.path, outcome.patch);
+        rebuilt.push(outcome.path);
+        if (outcome.previous !== void 0) {
+          snapshotDiffs.push({ path: outcome.path, previous: outcome.previous });
+        }
+      } else if ("reason" in outcome) {
+        failed.push({ path: outcome.path, reason: outcome.reason });
+        if (outcome.dropPatch)
+          dropped.add(outcome.path);
+        if (outcome.unchangedSnapshot)
+          unchangedSnapshots.add(outcome.path);
+      }
+    }
+  }
+  return {
+    files: files.map((file2) => {
+      const patch = patches.get(file2.path);
+      if (patch !== void 0)
+        return { ...file2, patch };
+      if (unchangedSnapshots.has(file2.path))
+        return withoutChanges(file2);
+      return dropped.has(file2.path) ? withoutPatch(file2) : file2;
+    }),
+    rebuilt,
+    failed,
+    snapshotDiffs
+  };
+}
+function withoutPatch(file2) {
+  const { patch: _patch, ...rest } = file2;
+  return rest;
+}
+function withoutChanges(file2) {
+  const { patch: _patch, additions: _additions, deletions: _deletions, changes: _changes, ...rest } = file2;
+  return { ...rest, additions: 0, deletions: 0, changes: 0 };
+}
+async function mergeBaseOf(client, candidates, opts) {
+  if (!candidates.some(needsBaseRead))
+    return opts.baseSha;
+  try {
+    const compared = client.compareCommits?.({
+      owner: opts.owner,
+      repo: opts.repo,
+      base: opts.baseSha,
+      head: opts.headSha
+    });
+    const result = await Promise.resolve(compared).catch(() => null);
+    return result?.mergeBaseSha ?? opts.baseSha;
+  } catch {
+    return opts.baseSha;
+  }
+}
+function needsBaseRead(file2) {
+  if (file2.status === "added")
+    return snapshotOf(file2) !== null;
+  return true;
+}
+function isCandidate(file2, exclude) {
+  if (file2.changes <= 0)
+    return false;
+  if (!REBUILDABLE_STATUSES.has(file2.status))
+    return false;
+  if (isSensitivePath(file2.path))
+    return false;
+  if (file2.previousPath !== void 0 && isSensitivePath(file2.previousPath))
+    return false;
+  const classification = classifyFile({ path: file2.path, status: file2.status, patch: "+", changes: file2.changes }, { exclude: [...exclude], isSensitivePath });
+  if (classification !== "review")
+    return false;
+  if (snapshotOf(file2))
+    return true;
+  return !file2.patch;
+}
+async function rebuildOne(client, file2, opts, baseRef) {
+  try {
+    if (file2.status === "added") {
+      const snapshot = await snapshotOutcome(client, file2, opts, baseRef);
+      if (snapshot.kind === "diff") {
+        return { path: file2.path, patch: snapshot.patch, previous: snapshot.previous };
+      }
+      if (snapshot.kind === "same") {
+        return {
+          path: file2.path,
+          reason: `no content change from ${snapshot.previous}`,
+          unchangedSnapshot: true
+        };
+      }
+      if (snapshot.kind === "failed") {
+        return { path: file2.path, reason: `snapshot diff failed (${snapshot.reason})`, dropPatch: true };
+      }
+      if (file2.patch)
+        return { path: file2.path, unchanged: true };
+      const head2 = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+      if (head2 === null)
+        return { path: file2.path, reason: NOT_RETURNED };
+      if (isBinary(head2))
+        return { path: file2.path, reason: BINARY };
+      const patch2 = addedPatch(head2);
+      return patch2 === void 0 ? { path: file2.path, reason: TOO_LARGE } : { path: file2.path, patch: patch2 };
+    }
+    const basePath = file2.previousPath ?? file2.path;
+    const base = await readAtRef(client, opts.owner, opts.repo, baseRef, basePath);
+    const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+    if (base === null || head === null)
+      return { path: file2.path, reason: NOT_RETURNED };
+    if (isBinary(base) || isBinary(head))
+      return { path: file2.path, reason: BINARY };
+    const patch = modifiedPatch(base, head);
+    if (patch.kind === "costly")
+      return { path: file2.path, reason: DIFF_TOO_COSTLY };
+    if (patch.kind === "large")
+      return { path: file2.path, reason: TOO_LARGE };
+    if (patch.kind === "same")
+      return { path: file2.path, reason: NO_CHANGE };
+    return { path: file2.path, patch: patch.patch };
+  } catch {
+    return { path: file2.path, reason: NOT_RETURNED };
+  }
+}
+function isBinary(content) {
+  return content.includes("\0");
+}
+function addedPatch(content) {
+  const endsWithNewline = content.endsWith("\n");
+  const body = endsWithNewline ? content.slice(0, -1) : content;
+  const lines = body === "" ? [] : body.split("\n");
+  const patch = [
+    `@@ -0,0 +1,${lines.length} @@`,
+    ...lines.map((line) => `+${line}`),
+    ...endsWithNewline || lines.length === 0 ? [] : ["\\ No newline at end of file"]
+  ].join("\n");
+  return lineCount(patch) > MAX_REBUILT_PATCH_LINES ? void 0 : patch;
+}
+function modifiedPatch(base, head) {
+  const diff = structuredPatch("", "", base, head, "", "", DIFF_OPTIONS);
+  if (!diff)
+    return { kind: "costly" };
+  const lines = [];
+  for (const hunk of diff.hunks) {
+    lines.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+    lines.push(...hunkLines(hunk.lines));
+  }
+  const patch = lines.join("\n");
+  if (lineCount(patch) > MAX_REBUILT_PATCH_LINES)
+    return { kind: "large" };
+  if (patch === "")
+    return { kind: "same" };
+  return { kind: "text", patch };
+}
+function hunkLines(lines) {
+  const body = [];
+  for (const line of lines) {
+    const parts = line.split("\n");
+    if (parts[parts.length - 1] === "")
+      parts.pop();
+    body.push(...parts);
+  }
+  return body;
+}
+function lineCount(patch) {
+  return patch.split("\n").length;
+}
+function snapshotOf(file2) {
+  if (file2.status !== "added")
+    return null;
+  const digits = SNAPSHOT_PATH_RE.exec(file2.path)?.[2];
+  if (!digits)
+    return null;
+  return { number: Number(digits), folder: folderOf(file2.path) };
+}
+function folderOf(path12) {
+  const slash = path12.lastIndexOf("/");
+  return slash === -1 ? "" : path12.slice(0, slash);
+}
+async function snapshotOutcome(client, file2, opts, baseRef) {
+  const snapshot = snapshotOf(file2);
+  if (!snapshot)
+    return { kind: "none" };
+  let previous;
+  try {
+    previous = await findPreviousSnapshot(client, snapshot, opts, baseRef);
+  } catch {
+    return { kind: "failed", reason: "read" };
+  }
+  if (!previous)
+    return { kind: "none" };
+  const contents = await readSnapshotContents(client, file2, opts, previous);
+  if (contents.kind === "unreadable")
+    return { kind: "failed", reason: "read" };
+  const patch = snapshotPatch(contents.before, contents.after, previous.name);
+  if (patch.kind === "same")
+    return { kind: "same", previous: previous.name };
+  if (patch.kind === "empty" || patch.kind === "large" || patch.kind === "costly") {
+    return { kind: "failed", reason: patch.kind };
+  }
+  return { kind: "diff", patch: patch.text, previous: previous.name };
+}
+async function readSnapshotContents(client, file2, opts, previous) {
+  try {
+    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
+    if (before === null)
+      return { kind: "unreadable" };
+    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+    if (after === null)
+      return { kind: "unreadable" };
+    if (isBinary(before) || isBinary(after))
+      return { kind: "unreadable" };
+    return { kind: "contents", before, after };
+  } catch {
+    return { kind: "unreadable" };
+  }
+}
+async function findPreviousSnapshot(client, snapshot, opts, baseRef) {
+  const base = await listAtRef(client, opts.owner, opts.repo, baseRef, snapshot.folder);
+  const head = await listAtRef(client, opts.owner, opts.repo, opts.headSha, snapshot.folder);
+  const fromBase = previousSnapshotIn(base, snapshot.number);
+  const fromHead = previousSnapshotIn(head, snapshot.number);
+  if (fromHead && (!fromBase || fromHead.number >= fromBase.number)) {
+    return { name: fromHead.name, path: `${snapshot.folder}/${fromHead.name}`, sha: opts.headSha };
+  }
+  if (fromBase) {
+    return { name: fromBase.name, path: `${snapshot.folder}/${fromBase.name}`, sha: baseRef };
+  }
+  return null;
+}
+function previousSnapshotIn(files, number4) {
+  if (!files)
+    return null;
+  let best = null;
+  for (const file2 of files) {
+    const digits = SNAPSHOT_NAME_RE.exec(file2.slice(file2.lastIndexOf("/") + 1))?.[1];
+    if (!digits)
+      continue;
+    const value = Number(digits);
+    if (value >= number4)
+      continue;
+    if (best && value <= best.number)
+      continue;
+    best = { name: `${digits}_snapshot.json`, number: value };
+  }
+  return best;
+}
+function snapshotPatch(before, after, previousName) {
+  const diff = structuredPatch("", "", before, after, "", "", DIFF_OPTIONS);
+  if (!diff)
+    return { kind: "costly" };
+  if (diff.hunks.length === 0)
+    return { kind: "same" };
+  const lines = [];
+  let hunks = 0;
+  for (const hunk of diff.hunks) {
+    const kept = keptHunkLines(hunk.lines);
+    if (kept.count === 0)
+      continue;
+    const header2 = `@@ -0,0 +${hunk.newStart},${kept.count} @@`;
+    lines.push(hunks === 0 ? `${header2} compared with ${previousName}: only the regions that differ are shown` : header2);
+    hunks++;
+    lines.push(...kept.lines);
+  }
+  if (hunks === 0)
+    return { kind: "empty" };
+  const text = lines.join("\n");
+  if (lineCount(text) > MAX_REBUILT_PATCH_LINES)
+    return { kind: "large" };
+  return { kind: "text", text };
+}
+function keptHunkLines(lines) {
+  const kept = [];
+  let count2 = 0;
+  let keptLast = false;
+  for (const line of hunkLines(lines)) {
+    if (line.startsWith("\\")) {
+      if (keptLast)
+        kept.push(line);
+      continue;
+    }
+    if (line.startsWith("-")) {
+      keptLast = false;
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      kept.push(`+${line.slice(1)}`);
+    } else if (line.startsWith("+")) {
+      kept.push(line);
+    } else {
+      kept.push(`+${line}`);
+    }
+    count2++;
+    keptLast = true;
+  }
+  return { lines: kept, count: count2 };
 }
 
 var MAIN_BOT_SLOT = 1;
@@ -195439,6 +196370,7 @@ function withoutBaseHunks(comparePatch, basePatch, prPatch) {
 var REVIEW_REQUESTED_REASON = "review requested";
 var REVIEWS_PAGE_SIZE2 = 100;
 var MAX_COMPARE_FILES = 300;
+var SNAPSHOT_PATH_RE2 = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
 async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
   let page = 1;
   let lastMarker = null;
@@ -195529,18 +196461,32 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
     if (!prFile) {
       continue;
     }
+    const status = compareFile.status ?? prFile.status;
+    const isSnapshot = status === "added" && SNAPSHOT_PATH_RE2.test(compareFile.filename);
     const mapped = {
       path: compareFile.filename,
-      status: compareFile.status ?? prFile.status,
-      additions: compareFile.additions ?? prFile.additions,
-      deletions: compareFile.deletions ?? prFile.deletions,
-      changes: compareFile.changes ?? prFile.changes
+      status,
+      // A snapshot's counters come from the rebuilt result, not from the comparison: the
+      // comparison counts the whole new file, so a snapshot that did not change would reach the
+      // engine with changes and no patch, and be reported as a truncated patch.
+      additions: isSnapshot ? prFile.additions : compareFile.additions ?? prFile.additions,
+      deletions: isSnapshot ? prFile.deletions : compareFile.deletions ?? prFile.deletions,
+      changes: isSnapshot ? prFile.changes : compareFile.changes ?? prFile.changes
     };
-    if (compareFile.patch !== void 0) {
+    if (isSnapshot) {
+      if (prFile.patch !== void 0)
+        mapped.patch = prFile.patch;
+    } else if (compareFile.patch !== void 0) {
       const own2 = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own2 === void 0)
         continue;
       mapped.patch = own2;
+    } else if ((compareFile.changes ?? 0) > 0) {
+      return {
+        mode: "full",
+        files: prFiles,
+        reason: `the new changes of ${compareFile.filename} are too large for the compare API`
+      };
     }
     const previousPath = compareFile.previous_filename ?? prFile.previousPath;
     if (previousPath !== void 0) {
@@ -196181,36 +197127,6 @@ function withJudgeUsage(costUsd2, usage, report) {
   };
 }
 
-var readCache = /* @__PURE__ */ new WeakMap();
-var listCache = /* @__PURE__ */ new WeakMap();
-function shared(caches, client, key, start) {
-  let cache2 = caches.get(client);
-  if (!cache2) {
-    cache2 = /* @__PURE__ */ new Map();
-    caches.set(client, cache2);
-  }
-  let request2 = cache2.get(key);
-  if (!request2) {
-    const pending = start();
-    pending.catch(() => {
-      if (cache2?.get(key) === pending)
-        cache2.delete(key);
-    });
-    request2 = pending;
-    cache2.set(key, request2);
-  }
-  return request2;
-}
-function readAtRef(client, owner, repo, ref, path12) {
-  return shared(readCache, client, `${owner}/${repo}@${ref}:${path12}`, () => client.getFileContent({ owner, repo, path: path12, ref }));
-}
-function listAtRef(client, owner, repo, ref, path12) {
-  const list = client.listDirectoryFiles?.bind(client);
-  if (!list)
-    return Promise.resolve(null);
-  return shared(listCache, client, `${owner}/${repo}@${ref}:${path12}`, () => list({ owner, repo, path: path12, ref }));
-}
-
 var NESTED_RULES_NAMES = ["AGENTS.md", "CLAUDE.md"];
 var MAX_RULES_DIRECTORIES = 40;
 var READ_CONCURRENCY = 8;
@@ -196334,7 +197250,7 @@ function citationKind(source, path12) {
   }
   return { kind: "cited", reason: `cited by ${file2.path}` };
 }
-function hunkLines(patch) {
+function hunkLines2(patch) {
   const added = [];
   const context = [];
   let inHunk = false;
@@ -196428,7 +197344,7 @@ async function runCitedLookups(reader, reviewed, exclude, prBody) {
       await reader.run(named);
     }
   };
-  const patches = reviewed.map((file2) => ({ file: file2, lines: hunkLines(file2.patch ?? "") }));
+  const patches = reviewed.map((file2) => ({ file: file2, lines: hunkLines2(file2.patch ?? "") }));
   await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.added, source: { kind: "added-line", file: file2 } })));
   await runTier(patches.map(({ file: file2, lines }) => ({ text: lines.context, source: { kind: "context-line", file: file2 } })));
   if (reviewed.length > 0) {
@@ -196973,12 +197889,26 @@ async function reviewPullRequest(ctx) {
     };
   }
   log?.(`Listing files for pull request #${pullNumber}...`);
-  const { files: prFiles } = await listPullRequestFiles(client, {
+  const listed = await listPullRequestFiles(client, {
     owner,
     repo,
     pull_number: pullNumber
   });
+  const rebuilt = await rebuildMissingPatches(client, listed.files, {
+    owner,
+    repo,
+    baseSha,
+    headSha,
+    exclude: config2.review.exclude
+  });
+  const prFiles = rebuilt.files;
   log?.(`Found ${prFiles.length} files in PR diff`);
+  if (rebuilt.rebuilt.length > 0 || rebuilt.failed.length > 0) {
+    log?.(`Rebuilt ${rebuilt.rebuilt.length} missing patches, failed ${rebuilt.failed.length}`);
+    if (rebuilt.failed.length > 0) {
+      log?.(`Patches not rebuilt: ${rebuilt.failed.map((f3) => `${f3.path} (${f3.reason})`).join(", ")}`);
+    }
+  }
   const selection = await selectIncrementalFiles(client, {
     owner,
     repo,
