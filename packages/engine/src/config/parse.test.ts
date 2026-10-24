@@ -29,6 +29,7 @@ describe('parseConfig', () => {
           contextReads: 120,
           contextTokensPerFile: 0,
           prContextTokens: 15_000,
+          explore: { maxRounds: 3, maxRequestsPerRound: 8, maxReadTokens: 30_000, maxLinesPerRead: 400 },
           pathInstructions: [],
           verify: true,
           libraryDocs: { source: 'npm', maxCharsPerLibrary: 8000, maxLibraries: 5 },

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mergePanelFindings } from './consensus.js';
 import { renderPanelSummary } from './panel-summary.js';
+import { renderExplorationNote } from './review-notes.js';
 import { renderReviewSummary, type ReviewSummaryInput } from './summary.js';
 
 // ADR-0028: what verification rejected and which nested rules were left out are disclosed in the
@@ -55,6 +56,52 @@ describe('review summary — verification rejections and rules left out', () => 
     const ar = renderReviewSummary({ ...base, language: 'ar', rulesLeftOut: ['apps/api/AGENTS.md'] });
     expect(ar).toContain('ملفات قواعد لم تُرسل مع المراجعة');
     expect(ar).toContain('`apps/api/AGENTS.md`');
+  });
+});
+
+describe('the exploration note (ADR-0046)', () => {
+  it('says how many files the review explored and in how many rounds', () => {
+    const note = renderExplorationNote(
+      { rounds: 2, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 0 },
+      false,
+    );
+    expect(note).toBe('> ℹ️ Explored: 2 files in 2 rounds');
+  });
+
+  it('counts the requests the rules refused', () => {
+    const note = renderExplorationNote(
+      { rounds: 1, requests: 2, filesRead: ['src/a.ts'], refused: 1 },
+      false,
+    );
+    expect(note).toBe('> ℹ️ Explored: 1 files in 1 rounds, 1 requests refused');
+  });
+
+  it('says why the exploration was skipped', () => {
+    const note = renderExplorationNote(
+      { rounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'batched review' },
+      false,
+    );
+    expect(note).toBe('> ℹ️ Explored: 0 files in 0 rounds (skipped: batched review)');
+  });
+
+  it('says nothing when there was no exploration', () => {
+    expect(renderExplorationNote(undefined, false)).toBeUndefined();
+    expect(renderExplorationNote({ rounds: 0, requests: 0, filesRead: [], refused: 0 }, false)).toBeUndefined();
+  });
+
+  it('speaks Arabic too', () => {
+    expect(
+      renderExplorationNote(
+        { rounds: 2, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 1 },
+        true,
+      ),
+    ).toBe('> ℹ️ الاستكشاف: 2 ملف في 2 جولة، 1 طلب مرفوض');
+    expect(
+      renderExplorationNote(
+        { rounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'batched review' },
+        true,
+      ),
+    ).toBe('> ℹ️ الاستكشاف: 0 ملف في 0 جولة (اتخطى: batched review)');
   });
 });
 

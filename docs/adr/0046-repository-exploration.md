@@ -1,0 +1,35 @@
+# ADR-0046: Read-only repository exploration during a review
+
+**Date:** 2026-10-24 · **Status:** accepted · **Owner decision:** decisions log س59
+
+## Context
+
+The comparison against Codex and CodeRabbit (`MergePilot-review-comparison/weekly/2026-10-24-48h-v4.md`) shows the panel finding 47% of comparable Codex findings after review-quality v4. Of what it still misses, 65% is a plain miss: the code was in the prompt and no bot raised the defect. That share did not move with v4 (37% of all comparable findings before and after).
+
+Codex review (GPT-5.6 Sol since July 2026, a model older than the panel's) and CodeRabbit both explore the repository while they review: they open the files they need and confirm a suspicion before posting. OpenAI reports that diff-only review misses codebase-wide context and that repository access raised both recall and precision of its reviewer.
+
+A MergePilot bot gets one bundle that the caller assembled before the engine runs: the patches, the repository context of ADR-0029/ADR-0041 and the rules. A bot that suspects a defect cannot look further. It either guesses (hedged findings that turn out false) or stays silent (plain misses, withheld items that return later as real findings), and the verifier rejects findings whose evidence it cannot see.
+
+The LLM layer has no tool calling: `ReviewModelRequest` is one system and one user message, and adding native tools to every adapter (OpenAI, Anthropic, Gemini, compatible, the pi-ai subscription adapter, Claude Code, Antigravity) would be large and uneven.
+
+## Decision
+
+1. **Exploration rounds before the answer, through a JSON protocol.** When exploration is on, the review sends up to `review.explore.maxRounds` exploration calls before the review call. Each exploration call carries the review prompt and the results so far, and asks the model for `{"explore": [...]}`: at most `maxRequestsPerRound` requests, or an empty list when it needs nothing more. A request is one of (an invalid request is dropped, the rest of the answer still runs; `startLine`/`endLine` may be null):
+   - `{"read": {"path", "startLine"?, "endLine"?}}`: lines of a file at the PR head;
+   - `{"find": {"text", "path"?}}`: a literal search in the files this review already holds (patches, context files, files read in earlier rounds) and in the head's file paths;
+   - `{"list": {"dir"}}`: the files of one directory at the PR head.
+   The results go into an `EXPLORED` section appended to the user prompt of the review call; the review call, its retries, truncation recovery, verification and the Jev filter are otherwise unchanged. Every provider works the same way, because the protocol is plain text.
+2. **Limits** (`review.explore`, all defaulted): `maxRounds` 3, `maxRequestsPerRound` 8, `maxReadTokens` 30,000 per review across all rounds and the verifier, `maxLinesPerRead` 400. A round is skipped, and the bot answers with what it has, when the review deadline (ADR-0013) has passed or the spend tracker cannot afford the round plus a reserve: the prompt and output tokens of the call that follows (the review call and, when verification is on, the verify call; or the verify call), the results gathered so far (the call that follows carries them again) and the read budget still left. A request whose reader fails answers "read failed" and the round goes on; a failed exploration call ends the exploration. Exploration never makes a review incomplete. A read is charged once per path and line range: an exact repeat shows what was shown the first time, for free, and adds no second copy; any other range of the same file is charged again. A failed tree listing costs only the path matches and is not cached.
+3. **A reader port (ADR-0001).** The engine defines `RepositoryReader` (`readFile`, `listDirectory`, `listPaths`) in `packages/engine/src/review/explore.ts`; `RunReviewInput.explore` carries it. Without it exploration is off, whatever the config says. `packages/github` implements it at the PR head SHA of the PR's own repository with `readAtRef`, `listAtRef` and a new optional `listTreePaths` client method (the recursive git tree, one call per review). Paths go through `isContextPathAllowed` (sensitive paths, `review.exclude`, generated files, lockfiles, binaries, vendored code are refused) in the reader and again in the engine; `..`, absolute paths and `.git/` are refused.
+4. **No execution.** Nothing from the PR runs, no dependency is installed, and no request leaves the GitHub contents and git-tree API of that repository at that SHA. Read content is untrusted: redacted with the review's known secrets as soon as it is read (before any line selection, cut or search), escaped with the existing delimiters, and never treated as instructions; result labels are redacted, put on one line and cut to 200 characters.
+5. **Verifier.** When the review explored, the verify prompt carries the review's explored results, and the verify pass gets one exploration round of its own when read budget is left, so a finding whose evidence sits in a file not shown is checked against that file.
+6. **Accounting and disclosure.** Exploration calls are review calls: their tokens go into the run's usage and spend; a subscription run stays $0 with its API-equivalent figure (ADR-0024). The run result carries `exploration` (rounds, requests, files read, refused requests, skipped reason); `renderExplorationNote` (`packages/github/src/review-notes.ts`) writes it as «Explored: N files in R rounds», and the following change shows that note in the review summary.
+7. **Scope of this change.** Single-call reviews explore; a batched review (ADR-0013) does not yet, and its `exploration` says so. The switch is per bot in the dashboard (a following change with its migration); this change adds the engine, the reader (`createRepositoryReader`, `packages/github/src/explore-reader.ts`) and the note renderer, and nothing turns it on.
+8. **Rollout.** First on waleed_Bot only, after the GPT-5.6 Sol model experiment ends (2026-10-26 10:35 Kuwait). After 48 hours it is measured with `window48.py` against the v4 baseline; it is turned off if false positives pass 10%, the Codex match does not rise, or review time doubles. If it helps, the other bots get it.
+
+## Consequences
+
+- Expected: fewer plain misses on "is this guarded elsewhere?" questions, fewer hedged false positives, fewer wrong verify rejections.
+- Cost: up to three extra calls per review for a bot that explores, each resending the review prompt, and a longer review. More GitHub reads: they are bounded by `maxRounds × maxRequestsPerRound` per bot (plus one tree listing), not by `review.contextReads`, and they share the GitHub rate limit.
+- Risk: prompt injection through read files, mitigated by escaping, redaction and the fixed request schema. A model that ignores the protocol is treated as asking for nothing.
+- Not in scope: running tests or builds, native tool calls, other repositories, exploration in batched reviews.
