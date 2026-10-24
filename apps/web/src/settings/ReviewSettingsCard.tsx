@@ -58,6 +58,7 @@ export function ReviewSettingsCard({
   // The main bot's identity (ADR-0017), saved with the settings.
   const [botName, setBotName] = useState(MAIN_BOT_DEFAULT_NAME);
   const [botLogo, setBotLogo] = useState<BotLogo>(MAIN_BOT_DEFAULT_LOGO);
+  const [exploreEnabled, setExploreEnabled] = useState(false);
   // The main bot's review skill (ADR-0034); null = Default.
   const [skillId, setSkillId] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -74,12 +75,13 @@ export function ReviewSettingsCard({
     const key = JSON.stringify([
       settings.botName, settings.botLogo, settings.provider, settings.model, settings.effort, settings.heavyProvider,
       settings.heavyModel, settings.heavyEffort, settings.heavyThresholdLines, settings.fallback, settings.minSeverity,
-      settings.maxFindings, settings.language, settings.monthlyBudgetUsd, settings.perReviewUsd,
+      settings.maxFindings, settings.language, settings.monthlyBudgetUsd, settings.perReviewUsd, settings.exploreEnabled,
     ]);
     if (key === shownKey.current) return;
     shownKey.current = key;
     setBotName(settings.botName ?? MAIN_BOT_DEFAULT_NAME);
     setBotLogo(settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO);
+    setExploreEnabled(settings.exploreEnabled ?? false);
     setProvider(settings.provider);
     setModel(settings.model);
     setEffort(settings.effort ?? null);
@@ -153,6 +155,7 @@ export function ReviewSettingsCard({
         maxFindings,
         botName: botName.trim(),
         botLogo,
+        exploreEnabled,
         // Always sent: saving the form confirms the skill choice and clears a deleted-skill note.
         skillId,
       });
@@ -189,6 +192,24 @@ export function ReviewSettingsCard({
             disabled={isMember}
             nameError={errors.botName}
           />
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={exploreEnabled}
+                aria-label={t('botExploreLabel')}
+                aria-describedby="settings-explore-hint"
+                disabled={isMember || isSaving}
+                onClick={() => setExploreEnabled(!exploreEnabled)}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${exploreEnabled ? 'bg-green-500' : 'bg-ink-300 dark:bg-ink-700'}`}
+              >
+                <span aria-hidden="true" className={`absolute top-0.5 start-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${exploreEnabled ? 'translate-x-4 rtl:-translate-x-4' : ''}`} />
+              </button>
+              <span className="text-xs font-semibold text-ink-800 dark:text-ink-200">{t('botExploreLabel')}</span>
+            </div>
+            <p id="settings-explore-hint" className="text-[11px] text-ink-500 dark:text-ink-400 ms-12">{t('botExploreHint')}</p>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ProviderSelect
               id="settings-provider"

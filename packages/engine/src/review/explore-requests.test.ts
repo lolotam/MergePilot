@@ -451,6 +451,26 @@ describe('the requests of an exploration round (ADR-0046)', () => {
     expect(result.entries[0]!.content).not.toContain('explore-secret-two');
   });
 
+  it('keeps the head line numbers of reads and finds after a multi-line secret', async () => {
+    const pem = [
+      `-----BEGIN RSA ${'PRIVATE'} KEY-----`,
+      'firstFakeBase64Line',
+      'secondFakeBase64Line',
+      'thirdFakeBase64Line',
+      '-----END RSA PRIVATE KEY-----',
+    ].join('\n');
+    const reader = fakeReader({ 'src/a.ts': `before\n${pem}\nafter secret\nfind target` });
+    const budget = new ExploreBudget(LIMITS);
+
+    const result = await executeRequests(
+      [{ read: { path: 'src/a.ts', startLine: 7, endLine: 7 } }, { find: { text: 'find target' } }],
+      ctx(reader, budget),
+    );
+
+    expect(result.entries[0]?.content).toBe('7| after secret');
+    expect(result.entries[1]?.content).toBe('src/a.ts:8: find target');
+  });
+
   it('redacts a secret before the find slice, so no part of it is shown', async () => {
     const secret = new Secret('explore-secret-value-42');
     // The secret starts at the two-hundredth character of the line: the slice of a match would cut

@@ -148,6 +148,7 @@ export async function publishConsensus(
     verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),
+    explorations: completed.flatMap(({ br, rr }) => (rr.exploration ? [{ ...rr.exploration, bot: br.bot.name }] : [])),
     outputLimits: completed.flatMap(({ br, rr }) => (rr.outputLimit ? [{ ...rr.outputLimit, bot: br.bot.name }] : [])),
     findingsFates,
   });

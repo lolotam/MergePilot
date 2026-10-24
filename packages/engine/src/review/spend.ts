@@ -54,6 +54,7 @@ export function hasRealUsage(usage: TokenUsage | undefined): usage is TokenUsage
 
 export class SpendTracker {
   #spentUsd = 0;
+  #mustCheckNext = false;
 
   constructor(
     private readonly pricing: ModelPricing | undefined | (() => ModelPricing | undefined),
@@ -76,6 +77,15 @@ export class SpendTracker {
 
   get priced(): boolean {
     return this.currentPricing() !== undefined;
+  }
+
+  get mustCheckNext(): boolean {
+    return this.#mustCheckNext;
+  }
+
+  /** Requires a final affordability check after exploration changed the active pricing. */
+  requireAffordableNext(): void {
+    this.#mustCheckNext = true;
   }
 
   /** Worst-case cost of one call; 0 without pricing. */

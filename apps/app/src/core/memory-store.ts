@@ -128,6 +128,7 @@ export class MemoryStore implements AppStore {
       minSeverity: s.minSeverity ?? 'medium',
       maxFindings: s.maxFindings ?? DEFAULT_WORKSPACE_MAX_FINDINGS,
       perReviewUsd: s.perReviewUsd ?? 0.5,
+      exploreEnabled: s.exploreEnabled ?? false,
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
       judge: s.judge ? { ...s.judge, uses: [...s.judge.uses], fallback: [...s.judge.fallback] } : null,
@@ -154,6 +155,7 @@ export class MemoryStore implements AppStore {
       ...settings,
       maxFindings: settings.maxFindings ?? stored?.maxFindings,
       perReviewUsd: settings.perReviewUsd ?? stored?.perReviewUsd,
+      exploreEnabled: settings.exploreEnabled ?? stored?.exploreEnabled ?? false,
       runRetentionDays:
         settings.runRetentionDays !== undefined
           ? settings.runRetentionDays
@@ -175,9 +177,19 @@ export class MemoryStore implements AppStore {
   async upsertReviewerBot(workspaceId: string, bot: ReviewerBot): Promise<ReviewerBot> {
     this.assertLive(workspaceId);
     assertMemorySkill(this.skills, workspaceId, bot.skillId);
-    // Like Postgres: a skill left out keeps the stored skill and its note.
-    const stored = bot.skillId === undefined ? listMemoryBots(this.bots, workspaceId).find((b) => b.slot === bot.slot) : undefined;
-    const next = stored ? { ...bot, skillId: stored.skillId ?? null, skillRemovedName: stored.skillRemovedName ?? null } : bot;
+    // Like Postgres: a skill or exploration flag left out keeps its stored value.
+    const stored = bot.skillId === undefined || bot.exploreEnabled === undefined
+      ? listMemoryBots(this.bots, workspaceId).find((b) => b.slot === bot.slot)
+      : undefined;
+    const next = stored
+      ? {
+          ...bot,
+          exploreEnabled: bot.exploreEnabled ?? stored.exploreEnabled,
+          ...(bot.skillId === undefined
+            ? { skillId: stored.skillId ?? null, skillRemovedName: stored.skillRemovedName ?? null }
+            : {}),
+        }
+      : { ...bot, exploreEnabled: bot.exploreEnabled ?? false };
     return upsertMemoryBot(this.bots, workspaceId, next, this.settings.get(workspaceId)?.botName);
   }
 

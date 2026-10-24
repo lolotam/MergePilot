@@ -84,6 +84,7 @@ export const workspaceSettings = pgTable('workspace_settings', {
   skillId: uuid('skill_id'),
   /** Migration 0014: the name of the bot's skill that was deleted, shown until a skill is chosen again. */
   skillRemovedName: text('skill_removed_name'),
+  exploreEnabled: boolean('explore_enabled').notNull().default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),
@@ -249,6 +250,7 @@ export const reviewerBots = pgTable(
     /** Migration 0014: the bot's review skill (ADR-0034); null = Default. */
     skillId: uuid('skill_id'),
     skillRemovedName: text('skill_removed_name'),
+    exploreEnabled: boolean('explore_enabled').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },

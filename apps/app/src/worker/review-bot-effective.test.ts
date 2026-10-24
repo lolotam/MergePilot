@@ -113,6 +113,7 @@ describe('runBot effective auth (ADR-0027)', () => {
         model: 'gpt-test',
         effort: null,
         fallback: [],
+        exploreEnabled: false,
       },
       run,
       stopHeartbeat: () => {},

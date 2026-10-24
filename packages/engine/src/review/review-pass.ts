@@ -116,6 +116,9 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
 
   let response: ReviewModelResponse;
   try {
+    if (spend.mustCheckNext && !spend.canAfford(promptTokens, reviewOutputTokens)) {
+      return { ok: false, reason: 'budget limit reached after exploration' };
+    }
     response = await model.generate(request);
     spend.record(promptTokens, reviewOutputTokens, response.usage);
   } catch (err) {

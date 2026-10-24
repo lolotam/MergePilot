@@ -33,3 +33,11 @@ The LLM layer has no tool calling: `ReviewModelRequest` is one system and one us
 - Cost: up to three extra calls per review for a bot that explores, each resending the review prompt, and a longer review. More GitHub reads: they are bounded by `maxRounds × maxRequestsPerRound` per bot (plus one tree listing), not by `review.contextReads`, and they share the GitHub rate limit.
 - Risk: prompt injection through read files, mitigated by escaping, redaction and the fixed request schema. A model that ignores the protocol is treated as asking for nothing.
 - Not in scope: running tests or builds, native tool calls, other repositories, exploration in batched reviews.
+
+## Amendment (2026-10-24): part B, the per-bot switch
+
+- **Switch.** Migration `0017_bot_exploration.sql` adds `explore_enabled boolean NOT NULL DEFAULT false` to `workspace_settings` (the main bot) and `reviewer_bots` (slots 2-5); every existing bot stays off. The bots and settings API carry `exploreEnabled` (left out keeps the stored value), the settings backup exports and restores it (a backup without it restores false), and the dashboard shows an «Explore the repository» switch on each bot.
+- **Worker.** `bot-review-run.ts` passes `explore: { reader: createRepositoryReader(...) }` to `runReview` only for a bot whose switch is on, at the PR head with the repository's `review.exclude`. The GitHub Action never explores.
+- **Summary.** A bot's review summary shows «Explored: N files in R rounds» after the context note; the panel summary shows one such line per bot that explored or disclosed why it did not.
+- **Issue #183, fixed before the switch exists.** (1) After the exploration rounds, the review call's prompt with the explored block must still pass `spend.canAfford`, which prices from the current pricing (so a paid switch during exploration is seen); otherwise the block is left out and the summary says «explored results left out: budget limit reached». (2) `redactSecrets(..., { keepLineBreaks: true })` keeps the line breaks of a redacted multi-line secret, and exploration reads use it, so read and find line numbers stay the head's.
+- **Owner decisions.** Turned on for waleed_Bot as soon as it is released (decisions log س59, part B), although that overlaps the GPT-5.6 Sol model experiment; the 48-hour measurement notes the switch time.

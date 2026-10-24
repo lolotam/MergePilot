@@ -162,6 +162,7 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
         heavyEffort: null,
         heavyThresholdLines: 800,
         fallback: [],
+        exploreEnabled: false,
         minSeverity: 'medium',
         maxFindings: 5,
         runRetentionDays: 30,

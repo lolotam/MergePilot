@@ -95,6 +95,31 @@ describe('settings backup: export and restore (ADR-0018)', { timeout: 60000 }, (
     expect((await h.store.getCredential('ws-2', 'anthropic'))?.createdBy).toBe('u-owner');
   });
 
+  it('exports and restores exploration, and an older backup restores it as false', async () => {
+    const settings = await h.store.getSettings('ws-1');
+    expect(settings).not.toBeNull();
+    if (!settings) return;
+    await h.store.saveSettings({ ...settings, exploreEnabled: true });
+    const owl = (await h.store.listReviewerBots('ws-1')).find((bot) => bot.slot === 2);
+    expect(owl).toBeDefined();
+    if (!owl) return;
+    await h.store.upsertReviewerBot('ws-1', { ...owl, exploreEnabled: true });
+
+    const file = await exported();
+    expect(file.settings.exploreEnabled).toBe(true);
+    expect(file.bots.find((bot: { slot: number }) => bot.slot === 2).exploreEnabled).toBe(true);
+    expect((await restoreBackup(h, { file, passphrase: PASSPHRASE })).statusCode).toBe(200);
+    expect((await get('settings', 'ws-2')).settings.exploreEnabled).toBe(true);
+    expect((await get('bots', 'ws-2')).bots.find((bot: { slot: number }) => bot.slot === 2).exploreEnabled).toBe(true);
+
+    const old = structuredClone(file);
+    delete old.settings.exploreEnabled;
+    for (const bot of old.bots) delete bot.exploreEnabled;
+    expect((await restoreBackup(h, { file: old, passphrase: PASSPHRASE })).statusCode).toBe(200);
+    expect((await get('settings', 'ws-2')).settings.exploreEnabled).toBe(false);
+    expect((await get('bots', 'ws-2')).bots.every((bot: { exploreEnabled: boolean }) => !bot.exploreEnabled)).toBe(true);
+  });
+
   it('full backup of the same workspace undoes a mistake; keys are replaced', async () => {
     const file = await exported();
     await h.app.inject({

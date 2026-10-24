@@ -45,7 +45,7 @@ const cleanFallback = (list: readonly FallbackEntry[]): FallbackEntry[] =>
   list.map((f) => ({ provider: f.provider, model: f.model.trim(), effort: f.effort ?? null }));
 
 /** The saved bot as a PUT body, with `active` changed (the switch saves at once). */
-const savedInput = (bot: ReviewerBotDto, active: boolean): ReviewerBotInput => ({
+const savedInput = (bot: ReviewerBotDto, active: boolean, exploreEnabled = bot.exploreEnabled): ReviewerBotInput => ({
   name: bot.name,
   logo: bot.logo,
   active,
@@ -53,6 +53,7 @@ const savedInput = (bot: ReviewerBotDto, active: boolean): ReviewerBotInput => (
   model: bot.model,
   effort: bot.effort,
   fallback: bot.fallback,
+  exploreEnabled,
 });
 
 const secondaryButton =
@@ -119,6 +120,7 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
       fallback: cleanFallback(fallback),
       // Always sent: saving the bot confirms the skill choice and clears a deleted-skill note.
       skillId,
+      exploreEnabled: bot.exploreEnabled,
     };
     try {
       await save.mutateAsync({ slot: bot.slot, input });
@@ -132,6 +134,15 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
   const toggleActive = async (active: boolean) => {
     try {
       await save.mutateAsync({ slot: bot.slot, input: savedInput(bot, active) });
+      showToast(t('botSaved'), 'success');
+    } catch (err) {
+      showToast(err instanceof Error && err.message ? err.message : t('error'), 'error');
+    }
+  };
+
+  const toggleExplore = async (exploreEnabled: boolean) => {
+    try {
+      await save.mutateAsync({ slot: bot.slot, input: savedInput(bot, bot.active, exploreEnabled) });
       showToast(t('botSaved'), 'success');
     } catch (err) {
       showToast(err instanceof Error && err.message ? err.message : t('error'), 'error');
@@ -179,6 +190,25 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
           disabled={isMember}
           nameError={errors.name}
         />
+
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={bot.exploreEnabled}
+              aria-label={t('botExploreLabel')}
+              aria-describedby={`${prefix}-explore-hint`}
+              disabled={isMember || save.isPending}
+              onClick={() => void toggleExplore(!bot.exploreEnabled)}
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${bot.exploreEnabled ? 'bg-green-500' : 'bg-ink-300 dark:bg-ink-700'}`}
+            >
+              <span aria-hidden="true" className={`absolute top-0.5 start-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${bot.exploreEnabled ? 'translate-x-4 rtl:-translate-x-4' : ''}`} />
+            </button>
+            <span className="text-xs font-semibold text-ink-800 dark:text-ink-200">{t('botExploreLabel')}</span>
+          </div>
+          <p id={`${prefix}-explore-hint`} className="text-[11px] text-ink-500 dark:text-ink-400 ms-12">{t('botExploreHint')}</p>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <ProviderSelect

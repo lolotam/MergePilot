@@ -3,9 +3,10 @@ import { foundByLabel, type ConsensusCluster, type MergePanelResult } from './co
 import type { FallbackReason } from './fallback-reason.js';
 import type { BotFindingsFate } from './panel-findings-fate.js';
 import { renderFallbackNotice, renderScopeLine, type ReviewScope } from './summary.js';
-import type { ContextDisclosure, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
+import type { ContextDisclosure, ExplorationDisclosure, OutputLimitDisclosure, WithheldItem } from '@mergepilot/engine';
 import {
   renderContextNote,
+  renderExplorationNote,
   renderOutputLimitNote,
   renderRulesLeftOut,
   renderVerifyRejected,
@@ -60,6 +61,8 @@ export interface PanelSummaryInput {
   rulesLeftOut?: readonly string[] | undefined;
   /** Repository context of the bots, merged (ADR-0029). */
   context?: ContextDisclosure | undefined;
+  /** Each bot that explored or disclosed why it did not (ADR-0046). */
+  explorations?: Array<ExplorationDisclosure & { bot: string }> | undefined;
   /** The bots whose model's output limit clamped their answer budget (ADR-0033). */
   outputLimits?: ReadonlyArray<OutputLimitDisclosure & { bot: string }> | undefined;
   /** Where each completed bot's findings went, to explain a table count above what it published. */
@@ -263,6 +266,11 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   if (rulesLeftOut) sections.push(rulesLeftOut);
   const contextNote = renderContextNote(input.context, isArabic);
   if (contextNote) sections.push(contextNote);
+  for (const exploration of input.explorations ?? []) {
+    const note = renderExplorationNote(exploration, isArabic);
+    const text = note?.slice('> ℹ️ '.length).replace(/\r?\n/g, ' ');
+    if (text) sections.push(`> ℹ️ **${escapeInline(exploration.bot)}**: ${text}`);
+  }
   for (const limit of input.outputLimits ?? []) {
     const note = renderOutputLimitNote(limit, isArabic, limit.bot);
     if (note) sections.push(note);

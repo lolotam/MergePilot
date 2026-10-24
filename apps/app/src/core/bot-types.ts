@@ -54,6 +54,8 @@ export interface ReviewerBot {
   model: string;
   effort: string | null;
   fallback: FallbackSetting[];
+  /** Read-only exploration (ADR-0046); undefined in an upsert keeps it, while reads always set it. */
+  exploreEnabled?: boolean | undefined;
   /** The bot's review skill (ADR-0034); null or undefined = Default. Stores leave it out while unset. */
   skillId?: string | null | undefined;
   /**

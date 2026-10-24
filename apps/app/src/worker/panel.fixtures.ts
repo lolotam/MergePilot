@@ -52,7 +52,7 @@ export async function panelSetup(options: PanelSetupOptions = {}) {
   }
   for (const bot of options.bots ?? []) {
     await store.upsertReviewerBot(WS, {
-      name: `Bot ${bot.slot}`, logo: 'owl', active: true, provider: 'openai', model: `bot${bot.slot}-model`, effort: null, fallback: [], ...bot,
+      name: `Bot ${bot.slot}`, logo: 'owl', active: true, provider: 'openai', model: `bot${bot.slot}-model`, effort: null, fallback: [], exploreEnabled: false, ...bot,
     });
   }
   if (options.monthlyCost !== undefined) {

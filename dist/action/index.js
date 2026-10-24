@@ -137790,7 +137790,7 @@ var TOKEN_PATTERNS = [
   { regex: /(?<![A-Za-z0-9_])(?:gh[posu]|github_pat)_[A-Za-z0-9_]{8,}(?![A-Za-z0-9_])/g, kind: "github", priority: 50 },
   { regex: /(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])/g, kind: "aws", priority: 50 }
 ];
-function redactSecrets(text, knownSecrets = []) {
+function redactSecrets(text, knownSecrets = [], options) {
   const lineOffsets = computeLineOffsets(text);
   const candidates = [];
   for (const value of knownSecrets.flatMap((secret) => credentialSecretValues(secret.reveal()))) {
@@ -137870,6 +137870,9 @@ function redactSecrets(text, knownSecrets = []) {
   for (const match3 of accepted) {
     redactedText += text.slice(lastIndex, match3.start);
     redactedText += match3.replacement;
+    if (options?.keepLineBreaks) {
+      redactedText += "\n".repeat((text.slice(match3.start, match3.end).match(/\n/g) ?? []).length);
+    }
     lastIndex = match3.end;
     found.push({ kind: match3.kind, line: match3.line });
   }
@@ -140485,6 +140488,7 @@ var SpendTracker = class {
   pricing;
   limitUsd;
   #spentUsd = 0;
+  #mustCheckNext = false;
   constructor(pricing, limitUsd) {
     this.pricing = pricing;
     this.limitUsd = limitUsd;
@@ -140502,6 +140506,13 @@ var SpendTracker = class {
   }
   get priced() {
     return this.currentPricing() !== void 0;
+  }
+  get mustCheckNext() {
+    return this.#mustCheckNext;
+  }
+  /** Requires a final affordability check after exploration changed the active pricing. */
+  requireAffordableNext() {
+    this.#mustCheckNext = true;
   }
   /** Worst-case cost of one call; 0 without pricing. */
   estimate(promptTokens, outputTokens) {
@@ -141994,7 +142005,7 @@ async function executeRead(request2, ctx) {
   let content;
   if (cached2 === void 0) {
     const raw = await ctx.reader.readFile(path12);
-    content = raw === null ? null : redactSecrets(raw, [...ctx.knownSecrets]).text;
+    content = raw === null ? null : redactSecrets(raw, [...ctx.knownSecrets], { keepLineBreaks: true }).text;
     ctx.budget.readFiles.set(path12, content);
   } else {
     content = cached2;
@@ -142334,6 +142345,7 @@ async function exploreBeforeSinglePass(opts) {
   let priorBlock = "";
   let priorEntries = [];
   if (budget && opts.explore && !opts.batched) {
+    opts.spend.requireAffordableNext();
     const explored = await runExploration({
       model: opts.model,
       spend: opts.spend,
@@ -142366,12 +142378,14 @@ async function exploreBeforeSinglePass(opts) {
 
 ${explored.block}`;
       const tokens = estimateTokens(opts.prompt.system + user);
-      if (tokens <= opts.promptLimit) {
+      if (tokens <= opts.promptLimit && opts.spend.canAfford(tokens, opts.reviewOutputTokens)) {
         prompt = { system: opts.prompt.system, user };
         promptTokens = tokens;
         priorBlock = explored.block;
-      } else {
+      } else if (tokens > opts.promptLimit) {
         budget.noteSkipped("explored results did not fit the input-token limit");
+      } else {
+        budget.noteSkipped("explored results left out: budget limit reached");
       }
     }
   }
@@ -142599,6 +142613,9 @@ async function runSinglePass(ctx) {
   };
   let response;
   try {
+    if (spend.mustCheckNext && !spend.canAfford(promptTokens, reviewOutputTokens)) {
+      return { ok: false, reason: "budget limit reached after exploration" };
+    }
     response = await model.generate(request2);
     spend.record(promptTokens, reviewOutputTokens, response.usage);
   } catch (err) {
@@ -197550,6 +197567,24 @@ function renderContextNote(context, isArabic) {
   ].filter((line) => line !== void 0);
   return lines.length > 0 ? lines.join("\n>\n") : void 0;
 }
+function renderExplorationNote(exploration, isArabic) {
+  if (!exploration)
+    return void 0;
+  if (exploration.rounds === 0 && !exploration.skipped)
+    return void 0;
+  const files = exploration.filesRead.length;
+  const rounds = exploration.rounds;
+  const refused = exploration.refused;
+  const skipped = exploration.skipped ? neutralize2(exploration.skipped) : void 0;
+  if (isArabic) {
+    const refusedPart2 = refused > 0 ? `\u060C ${refused} \u0637\u0644\u0628 \u0645\u0631\u0641\u0648\u0636` : "";
+    const skippedPart2 = skipped ? ` (\u0627\u062A\u062E\u0637\u0649: ${skipped})` : "";
+    return `> \u2139\uFE0F \u0627\u0644\u0627\u0633\u062A\u0643\u0634\u0627\u0641: ${files} \u0645\u0644\u0641 \u0641\u064A ${rounds} \u062C\u0648\u0644\u0629${refusedPart2}${skippedPart2}`;
+  }
+  const refusedPart = refused > 0 ? `, ${refused} requests refused` : "";
+  const skippedPart = skipped ? ` (skipped: ${skipped})` : "";
+  return `> \u2139\uFE0F Explored: ${files} files in ${rounds} rounds${refusedPart}${skippedPart}`;
+}
 function citedOf(context, isArabic) {
   const unique = [...new Set(context.cited ?? [])];
   if (unique.length === 0)
@@ -197799,6 +197834,9 @@ function renderReviewSummary(input2) {
   const contextNote = renderContextNote(input2.context, isArabic);
   if (contextNote)
     sections.push(contextNote);
+  const explorationNote = renderExplorationNote(input2.exploration, isArabic);
+  if (explorationNote)
+    sections.push(explorationNote);
   const outputLimitNote = renderOutputLimitNote(input2.outputLimit, isArabic);
   if (outputLimitNote)
     sections.push(outputLimitNote);

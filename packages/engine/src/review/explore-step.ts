@@ -97,6 +97,7 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
   let priorEntries: readonly ExploreEntry[] = [];
 
   if (budget && opts.explore && !opts.batched) {
+    opts.spend.requireAffordableNext();
     const explored = await runExploration({
       model: opts.model,
       spend: opts.spend,
@@ -129,12 +130,14 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
     if (explored.block) {
       const user = `${opts.prompt.user}\n\n${explored.block}`;
       const tokens = estimateTokens(opts.prompt.system + user);
-      if (tokens <= opts.promptLimit) {
+      if (tokens <= opts.promptLimit && opts.spend.canAfford(tokens, opts.reviewOutputTokens)) {
         prompt = { system: opts.prompt.system, user };
         promptTokens = tokens;
         priorBlock = explored.block;
-      } else {
+      } else if (tokens > opts.promptLimit) {
         budget.noteSkipped('explored results did not fit the input-token limit');
+      } else {
+        budget.noteSkipped('explored results left out: budget limit reached');
       }
     }
   }

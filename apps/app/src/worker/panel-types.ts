@@ -25,6 +25,8 @@ export interface PanelBot {
   model: string;
   effort: string | null;
   fallback: FallbackSetting[];
+  /** Whether this bot explores the head before answering (ADR-0046). */
+  exploreEnabled: boolean;
   /** The bot's review skill (ADR-0034), read when the job started; undefined = Default. */
   skill?: BotSkill | undefined;
 }
