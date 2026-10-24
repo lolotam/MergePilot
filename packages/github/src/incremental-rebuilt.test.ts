@@ -71,6 +71,58 @@ describe('selectIncrementalFiles with rebuilt patches (ADR-0045)', () => {
     });
   });
 
+  it('stays incremental for a changed binary file, which has no patch and no line changes', async () => {
+    const marker = buildMarker({ headSha: 'last-sha-binary', configHash: 'conf-1' });
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [{ id: 1, user: { login: publisherLogin }, body: marker }];
+      },
+      async compareCommits() {
+        return {
+          status: 'ahead',
+          files: [{ filename: 'assets/logo.png', status: 'modified', additions: 0, deletions: 0, changes: 0 }],
+        };
+      },
+    };
+    const prFiles: PullRequestFile[] = [
+      { path: 'assets/logo.png', status: 'modified', additions: 0, deletions: 0, changes: 0 },
+    ];
+
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha: 'head-sha-binary',
+      publisherLogin, prFiles,
+    });
+
+    expect(result.mode).toBe('incremental');
+  });
+
+  it('never takes the compare patch of a snapshot whose rebuilt diff was dropped', async () => {
+    const marker = buildMarker({ headSha: 'last-sha-dropped', configHash: 'conf-1' });
+    const snapshotPath = 'packages/db/migrations/meta/0176_snapshot.json';
+    const client: Partial<GitHubClient> = {
+      async listReviewsPage() {
+        return [{ id: 1, user: { login: publisherLogin }, body: marker }];
+      },
+      async compareCommits() {
+        return {
+          status: 'ahead',
+          files: [{ filename: snapshotPath, status: 'added', additions: 3, deletions: 0, changes: 3, patch: '@@ -0,0 +1,3 @@\n+{\n+  "a": 1\n+}' }],
+        };
+      },
+    };
+    const prFiles: PullRequestFile[] = [
+      { path: snapshotPath, status: 'added', additions: 3, deletions: 0, changes: 3 },
+    ];
+
+    const result = await selectIncrementalFiles(client as GitHubClient, {
+      owner: 'acme', repo: 'repo', pull_number: 10, headSha: 'head-sha-dropped',
+      publisherLogin, prFiles,
+    });
+
+    expect(result.mode).toBe('incremental');
+    expect(result.files[0]!.patch).toBeUndefined();
+  });
+
   it('uses the rebuilt patch of an added snapshot, not the whole new file', async () => {
     const lastSha = 'last-sha-snapshot';
     const headSha = 'head-sha-snapshot';

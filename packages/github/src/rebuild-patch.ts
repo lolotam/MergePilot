@@ -193,7 +193,8 @@ async function rebuildOne(
         return { path: file.path, patch: snapshot.patch, previous: snapshot.previous };
       }
       if (snapshot.kind === 'same') {
-        return { path: file.path, reason: `no content change from ${snapshot.previous}` };
+        // Nothing differs from the previous snapshot: the whole file is never sent instead.
+        return { path: file.path, reason: `no content change from ${snapshot.previous}`, dropPatch: true };
       }
       if (snapshot.kind === 'failed') {
         // The diff against the previous snapshot failed: the snapshot is never reviewed as a

@@ -210,19 +210,21 @@ export async function selectIncrementalFiles(
     };
 
     const isSnapshot = status === 'added' && SNAPSHOT_PATH_RE.test(compareFile.filename);
-    if (isSnapshot && prFile.patch !== undefined) {
+    if (isSnapshot) {
       // A snapshot's patch is the diff against its previous snapshot (ADR-0045, rule 5): the
-      // compare API's patch is the whole new file, so the rebuilt one is reviewed instead.
-      mapped.patch = prFile.patch;
+      // compare API's patch is the whole new file, so it is never used. Without a rebuilt patch
+      // (its diff failed and was dropped) the snapshot stays without one.
+      if (prFile.patch !== undefined) mapped.patch = prFile.patch;
     } else if (compareFile.patch !== undefined) {
       // A base-branch merge brings in changes the PR did not make: those hunks are left out.
       const own = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own === undefined) continue;
       mapped.patch = own;
-    } else if (!isSnapshot) {
-      // The compare API left the patch out (its diff was too big for it). The pull request's own
-      // patch covers the changes from before the last reviewed commit too, so it is not shown as
-      // new: the whole pull request is reviewed instead.
+    } else if ((compareFile.changes ?? 0) > 0) {
+      // The compare API left the patch of a changed text file out (its diff was too big for it).
+      // The pull request's own patch covers the changes from before the last reviewed commit too,
+      // so it is not shown as new: the whole pull request is reviewed instead. A binary file, a
+      // pure rename or a mode change has no patch and no line changes, and stays incremental.
       return {
         mode: 'full',
         files: prFiles,

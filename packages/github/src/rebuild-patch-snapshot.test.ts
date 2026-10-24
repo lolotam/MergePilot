@@ -232,6 +232,26 @@ describe('rebuildMissingPatches on a migration snapshot (ADR-0045, rule 5)', () 
     expect(result.files[0]!.patch).not.toContain('@@ -0,0 +1,9 @@');
   });
 
+  it('drops the whole-file patch GitHub sent for a snapshot that did not change', async () => {
+    const { client } = fakeClient(
+      {
+        [`base-sha:${PREVIOUS_SNAPSHOT}`]: SNAPSHOT_TEXT,
+        [`head-sha:${NEW_SNAPSHOT}`]: SNAPSHOT_TEXT,
+      },
+      { [`base-sha:${SNAPSHOT_DIR}`]: ['0175_snapshot.json'] },
+    );
+    const files: PullRequestFile[] = [
+      { path: NEW_SNAPSHOT, status: 'added', patch: '@@ -0,0 +1,1 @@\n+{}', additions: 9, deletions: 0, changes: 9 },
+    ];
+
+    const result = await rebuildMissingPatches(client, files, OPTS);
+
+    expect(result.files[0]!.patch).toBeUndefined();
+    expect(result.failed).toEqual([
+      { path: NEW_SNAPSHOT, reason: 'no content change from 0175_snapshot.json' },
+    ]);
+  });
+
   it('leaves a snapshot that did not change alone, and says why', async () => {
     const { client } = fakeClient(
       {

@@ -195748,7 +195748,7 @@ async function rebuildOne(client, file2, opts, baseRef) {
         return { path: file2.path, patch: snapshot.patch, previous: snapshot.previous };
       }
       if (snapshot.kind === "same") {
-        return { path: file2.path, reason: `no content change from ${snapshot.previous}` };
+        return { path: file2.path, reason: `no content change from ${snapshot.previous}`, dropPatch: true };
       }
       if (snapshot.kind === "failed") {
         return { path: file2.path, reason: `snapshot diff failed (${snapshot.reason})`, dropPatch: true };
@@ -196446,14 +196446,15 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       changes: compareFile.changes ?? prFile.changes
     };
     const isSnapshot = status === "added" && SNAPSHOT_PATH_RE2.test(compareFile.filename);
-    if (isSnapshot && prFile.patch !== void 0) {
-      mapped.patch = prFile.patch;
+    if (isSnapshot) {
+      if (prFile.patch !== void 0)
+        mapped.patch = prFile.patch;
     } else if (compareFile.patch !== void 0) {
       const own2 = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own2 === void 0)
         continue;
       mapped.patch = own2;
-    } else if (!isSnapshot) {
+    } else if ((compareFile.changes ?? 0) > 0) {
       return {
         mode: "full",
         files: prFiles,
