@@ -120,6 +120,22 @@ describe('ReviewSettingsCard exploration switch', () => {
     expect(exploreSwitch().disabled).toBe(false);
   });
 
+  it('a second click that fails before the refetch keeps the value the first click saved', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async (_next: SettingsUpdate) => undefined);
+    onSave.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new ApiClientError('Server error', 'internal', 500));
+    // The settings never refetch here: the card only knows what its own saves did.
+    renderSettings(card(SAVED, onSave), 'en');
+
+    await user.click(exploreSwitch());
+    await waitFor(() => expect(exploreSwitch().getAttribute('aria-checked')).toBe('true'));
+    await user.click(exploreSwitch());
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent ?? '').toContain('Server error'));
+    expect(onSave.mock.calls[1]?.[0].base?.exploreEnabled).toBe(true);
+    expect(exploreSwitch().getAttribute('aria-checked')).toBe('true');
+  });
+
   it('leaves exploreEnabled out of the form save', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn(async (_next: SettingsUpdate) => undefined);

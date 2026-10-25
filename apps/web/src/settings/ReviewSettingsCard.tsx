@@ -148,6 +148,8 @@ export function ReviewSettingsCard({
         },
       };
       await onSave(body);
+      // The server has the new value now, before the refetch lands; a later failed click goes back here.
+      savedExploreRef.current = next;
       setExploreEnabled(next);
     } catch (err) {
       // The settings mutation shows the error; the switch goes back to the value the server has.

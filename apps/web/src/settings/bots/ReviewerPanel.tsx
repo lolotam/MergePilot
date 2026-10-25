@@ -142,6 +142,8 @@ export function ReviewerPanel({ workspaceId, settings, isLoading, isMember, onSa
             />
           ) : (
             <ReviewSettingsCard
+              // A new card per workspace: a save still running for the last workspace cannot set this one's switch.
+              key={workspaceId}
               workspaceId={workspaceId}
               settings={settings}
               isLoading={isLoading}

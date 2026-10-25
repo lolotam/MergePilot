@@ -37,6 +37,8 @@ export function useUpdateSettingsMutation(workspaceId: string) {
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
+      // A 409 means another admin changed the settings: refetch, so the next save builds on them.
+      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
     },
   });
 }
