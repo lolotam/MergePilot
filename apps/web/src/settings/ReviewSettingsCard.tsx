@@ -20,7 +20,8 @@ export interface ReviewSettingsCardProps {
   settings: Settings | null | undefined;
   isLoading: boolean;
   isMember: boolean;
-  onSave: (settings: Settings) => Promise<void>;
+  /** The settings to save: the switch sends a patch, the form sends the whole form. */
+  onSave: (settings: SettingsUpdate) => Promise<void>;
   isSaving: boolean;
   /** Providers with a saved key; heavy and fallback models may only use these. Undefined = unknown. */
   keyedProviders?: readonly ApiProvider[] | undefined;
@@ -59,8 +60,8 @@ export function ReviewSettingsCard({
   const [botName, setBotName] = useState(MAIN_BOT_DEFAULT_NAME);
   const [botLogo, setBotLogo] = useState<BotLogo>(MAIN_BOT_DEFAULT_LOGO);
   const [exploreEnabled, setExploreEnabled] = useState(false);
-  // The value the switch just saved, until the settings carry it again (null = nothing pending).
-  const [pendingExplore, setPendingExplore] = useState<boolean | null>(null);
+  // A save of the switch is in flight: the switch waits for the save, not for the refetch.
+  const [savingExplore, setSavingExplore] = useState(false);
   // The main bot's review skill (ADR-0034); null = Default.
   const [skillId, setSkillId] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -107,11 +108,14 @@ export function ReviewSettingsCard({
   }, [settings]);
 
   // The switch follows the server on its own: it is out of the refill key, so the settings a save
-  // brings back do not reset the form. It waits for them before it can be used again.
+  // brings back do not reset the form.
   const savedExplore = settings?.exploreEnabled ?? false;
+  // The latest saved value, so a failed save puts the switch back where the server is and not
+  // where it was when the save started.
+  const savedExploreRef = useRef(savedExplore);
   useEffect(() => {
+    savedExploreRef.current = savedExplore;
     setExploreEnabled(savedExplore);
-    setPendingExplore((pending) => (pending !== null && savedExplore === pending ? null : pending));
   }, [savedExplore]);
 
   // The skill follows the server on its own (ADR-0034): deleting a skill sets this bot to Default,
@@ -122,30 +126,37 @@ export function ReviewSettingsCard({
   }, [savedSkillId]);
 
   const handleExploreToggle = async () => {
-    if (!settings || isMember || isSaving || pendingExplore !== null) return;
+    if (!settings || isMember || isSaving || savingExplore) return;
     const shown = exploreEnabled;
     const next = !shown;
-    setPendingExplore(next);
+    setSavingExplore(true);
     if (errors.explore) setErrors(withoutError(errors, 'explore'));
     try {
       // The required fields, the change and the base it was built from: the server keeps every
-      // field left out, so a stale tab cannot overwrite the other settings, and a switch changed
-      // meanwhile answers 409. The parent's save forwards this body as it is.
+      // field the client did not change, so a stale tab cannot overwrite the other settings, and
+      // a switch changed meanwhile answers 409. The parent's save forwards this body as it is.
       const body: SettingsUpdate = {
         provider: settings.provider,
         model: settings.model,
         language: settings.language,
         exploreEnabled: next,
-        base: { exploreEnabled: shown },
+        base: {
+          provider: settings.provider,
+          model: settings.model,
+          language: settings.language,
+          exploreEnabled: shown,
+        },
       };
-      await onSave(body as Settings);
+      await onSave(body);
       setExploreEnabled(next);
     } catch (err) {
-      // The settings mutation shows the error; the switch goes back to the value it had.
-      setExploreEnabled(shown);
-      setPendingExplore(null);
+      // The settings mutation shows the error; the switch goes back to the value the server has.
+      setExploreEnabled(savedExploreRef.current);
       const message = err instanceof Error && err.message ? err.message : t('error');
       setErrors((current) => ({ ...current, explore: message }));
+    } finally {
+      // The switch is usable again as soon as the save is done; it does not wait for the refetch.
+      setSavingExplore(false);
     }
   };
 
@@ -236,7 +247,7 @@ export function ReviewSettingsCard({
                 aria-checked={exploreEnabled}
                 aria-label={t('botExploreLabel')}
                 aria-describedby="settings-explore-hint"
-                disabled={isMember || isSaving || pendingExplore !== null}
+                disabled={isMember || isSaving || savingExplore}
                 onClick={() => void handleExploreToggle()}
                 className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${exploreEnabled ? 'bg-green-500' : 'bg-ink-300 dark:bg-ink-700'}`}
               >

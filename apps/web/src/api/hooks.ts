@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MeResponse, Settings } from '@mergepilot/app/contract';
+import type { MeResponse, SettingsUpdate } from '@mergepilot/app/contract';
 import { api, type GetRunsParams, type KeyProvider } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
@@ -26,7 +26,7 @@ export function useUpdateSettingsMutation(workspaceId: string) {
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: (settings: Settings) => api.updateSettings(workspaceId, settings),
+    mutationFn: (settings: SettingsUpdate) => api.updateSettings(workspaceId, settings),
     onSuccess: () => {
       showToast(t('settingsSavedSuccess'), 'success');
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });

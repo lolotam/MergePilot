@@ -108,15 +108,14 @@ export function renderExplorationNote(
   // The reason comes from the engine, but it may hold a provider's message: it is neutralized.
   const skipped = exploration.skipped ? neutralize(exploration.skipped) : undefined;
   if (isArabic) {
-    const verifierPart = verifierRounds > 0
-      ? (verifierRounds === 1 ? '، والتحقق قرا مرة' : `، والتحقق: ${verifierRounds} جولة`)
-      : '';
+    // The verifier's rounds are rounds, not files it read: the note counts them as they are.
+    const verifierPart = verifierRounds > 0 ? `، والتحقق: ${verifierRounds} جولة` : '';
     const refusedPart = refused > 0 ? `، ${refused} طلب مرفوض` : '';
     const skippedPart = skipped ? ` (اتخطى: ${skipped})` : '';
     return `> ℹ️ الاستكشاف: ${files} ملف في ${rounds} جولة${verifierPart}${refusedPart}${skippedPart}`;
   }
   const verifierPart = verifierRounds > 0
-    ? (verifierRounds === 1 ? ', verifier read once' : `, verifier: ${verifierRounds} rounds`)
+    ? `, verifier: ${verifierRounds} ${verifierRounds === 1 ? 'round' : 'rounds'}`
     : '';
   const refusedPart = refused > 0 ? `, ${refused} ${refused === 1 ? 'request' : 'requests'} refused` : '';
   const skippedPart = skipped ? ` (skipped: ${skipped})` : '';

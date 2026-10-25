@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Settings } from '@mergepilot/app/contract';
+import type { Settings, SettingsUpdate } from '@mergepilot/app/contract';
 import { ApiClientError, api } from '../api/client.js';
 import { ToastProvider } from '../components/Toast.js';
 import { ReviewSettingsCard } from './ReviewSettingsCard.js';
@@ -16,7 +16,7 @@ vi.mock('../api/client.js', async (importOriginal) => {
 const SAVED: Settings = { ...MAIN_SETTINGS, exploreEnabled: false, monthlyBudgetUsd: 50 };
 
 /** The main bot's card with the given settings and save. */
-const card = (settings: Settings, onSave: (next: Settings) => Promise<void>) => (
+const card = (settings: Settings, onSave: (next: SettingsUpdate) => Promise<void>) => (
   <ToastProvider>
     <ReviewSettingsCard
       workspaceId="ws-1"
@@ -41,7 +41,7 @@ describe('ReviewSettingsCard exploration switch', () => {
 
   it('sends only the switch change and keeps the unsaved form edits', async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async (_next: Settings) => undefined);
+    const onSave = vi.fn(async (_next: SettingsUpdate) => undefined);
     const { rerender } = renderSettings(card(SAVED, onSave), 'en');
     await user.clear(botNameField());
     await user.type(botNameField(), 'Draft name');
@@ -54,7 +54,14 @@ describe('ReviewSettingsCard exploration switch', () => {
       model: SAVED.model,
       language: SAVED.language,
       exploreEnabled: true,
-      base: { exploreEnabled: false },
+      // The base every sent field was read from: the server keeps the stored provider, model and
+      // language, and answers 409 when the switch changed meanwhile.
+      base: {
+        provider: SAVED.provider,
+        model: SAVED.model,
+        language: SAVED.language,
+        exploreEnabled: false,
+      },
     });
 
     // The settings the save brings back must not refill the form: the unsaved name edit stays.
@@ -63,23 +70,21 @@ describe('ReviewSettingsCard exploration switch', () => {
     expect(botNameField().value).toBe('Draft name');
   });
 
-  it('waits for the settings that carry the saved value before the switch can be used again', async () => {
+  it('the switch is usable again as soon as the save resolves, without waiting for the refetch', async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async (_next: Settings) => undefined);
-    const { rerender } = renderSettings(card(SAVED, onSave), 'en');
+    const onSave = vi.fn(async (_next: SettingsUpdate) => undefined);
+    renderSettings(card(SAVED, onSave), 'en');
 
     await user.click(exploreSwitch());
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(exploreSwitch().disabled).toBe(true);
-
-    rerender(card({ ...SAVED, exploreEnabled: true }, onSave));
     await waitFor(() => expect(exploreSwitch().disabled).toBe(false));
+    expect(exploreSwitch().getAttribute('aria-checked')).toBe('true');
   });
 
   it('puts the switch back and shows the error when the save fails', async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async (_next: Settings) => {
+    const onSave = vi.fn(async (_next: SettingsUpdate) => {
       throw new ApiClientError('Settings changed while saving; reload and try again', 'settings_conflict', 409);
     });
     renderSettings(card(SAVED, onSave), 'en');
@@ -92,9 +97,32 @@ describe('ReviewSettingsCard exploration switch', () => {
     expect(exploreSwitch().disabled).toBe(false);
   });
 
+  it('a failed save puts the switch back to the value the server has now', async () => {
+    const user = userEvent.setup();
+    let failSave: (err: unknown) => void = () => {};
+    const onSave = vi.fn((_next: SettingsUpdate) => new Promise<void>((_resolve, reject) => {
+      failSave = reject;
+    }));
+    const { rerender } = renderSettings(card(SAVED, onSave), 'en');
+
+    await user.click(exploreSwitch());
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+
+    // Another admin turned the switch on: the settings that come back carry it.
+    rerender(card({ ...SAVED, exploreEnabled: true }, onSave));
+    await waitFor(() => expect(exploreSwitch().getAttribute('aria-checked')).toBe('true'));
+
+    failSave(new ApiClientError('Settings changed while saving; reload and try again', 'settings_conflict', 409));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent ?? '').toContain('Settings changed while saving'));
+    // The switch shows the value the server has, not the one it had when the save started.
+    expect(exploreSwitch().getAttribute('aria-checked')).toBe('true');
+    expect(exploreSwitch().disabled).toBe(false);
+  });
+
   it('leaves exploreEnabled out of the form save', async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async (_next: Settings) => undefined);
+    const onSave = vi.fn(async (_next: SettingsUpdate) => undefined);
     renderSettings(card(SAVED, onSave), 'en');
 
     await user.click(screen.getByRole('button', { name: 'Save settings' }));

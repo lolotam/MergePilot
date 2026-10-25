@@ -81,7 +81,7 @@ describe('the exploration note (ADR-0046)', () => {
       { rounds: 2, verifierRounds: 1, requests: 3, filesRead: ['src/a.ts'], refused: 0 },
       false,
     );
-    expect(note).toBe('> ℹ️ Explored: 1 file in 2 rounds, verifier read once');
+    expect(note).toBe('> ℹ️ Explored: 1 file in 2 rounds, verifier: 1 round');
   });
 
   it('discloses several verifier rounds separately', () => {
@@ -113,7 +113,7 @@ describe('the exploration note (ADR-0046)', () => {
         { rounds: 2, verifierRounds: 1, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 1 },
         true,
       ),
-    ).toBe('> ℹ️ الاستكشاف: 2 ملف في 2 جولة، والتحقق قرا مرة، 1 طلب مرفوض');
+    ).toBe('> ℹ️ الاستكشاف: 2 ملف في 2 جولة، والتحقق: 1 جولة، 1 طلب مرفوض');
     expect(
       renderExplorationNote(
         { rounds: 0, verifierRounds: 2, requests: 0, filesRead: [], refused: 0 },

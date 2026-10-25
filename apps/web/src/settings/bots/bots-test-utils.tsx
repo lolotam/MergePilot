@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import { vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { Settings } from '@mergepilot/app/contract';
+import type { Settings, SettingsUpdate } from '@mergepilot/app/contract';
 import type { BotsResponse, ReviewerBotDto } from '../../api/bots.js';
 import type { SkillSummary } from '../../api/skills.js';
 import { ApiClientError, fetchApi, type ApiProvider } from '../../api/client.js';
@@ -120,7 +120,7 @@ export function fakeBotsServer(
 
 export function renderPanel(options: {
   isMember?: boolean;
-  onSave?: (settings: Settings) => Promise<void>;
+  onSave?: (settings: SettingsUpdate) => Promise<void>;
   keyedProviders?: readonly ApiProvider[] | undefined;
   settings?: Settings;
 } = {}) {
