@@ -142128,6 +142128,7 @@ async function executeRequests(requests, ctx) {
 var EXPLORE_OUTPUT_TOKENS = 2e3;
 var BATCHED_EXPLORATION = {
   rounds: 0,
+  verifierRounds: 0,
   requests: 0,
   filesRead: [],
   refused: 0,
@@ -142136,6 +142137,7 @@ var BATCHED_EXPLORATION = {
 var ExploreBudget = class {
   #remainingTokens;
   #rounds = 0;
+  #verifierRounds = 0;
   #requests = 0;
   #refused = 0;
   #skipped;
@@ -142184,8 +142186,11 @@ var ExploreBudget = class {
   markServed(key, content) {
     this.#served.set(key, content);
   }
-  countRound() {
-    this.#rounds += 1;
+  countRound(verifier = false) {
+    if (verifier)
+      this.#verifierRounds += 1;
+    else
+      this.#rounds += 1;
   }
   countRequests(count2) {
     this.#requests += count2;
@@ -142218,6 +142223,7 @@ var ExploreBudget = class {
   disclosure() {
     return {
       rounds: this.#rounds,
+      verifierRounds: this.#verifierRounds,
       requests: this.#requests,
       filesRead: [...this.#filesRead],
       refused: this.#refused,
@@ -142306,7 +142312,7 @@ ${block}` : opts.user;
     }
     spend.record(promptTokens, requested, response.usage);
     usage = combineUsage(usage, response.usage);
-    budget.countRound();
+    budget.countRound(opts.purpose === "verify");
     const requests = parseExploreRequests(response.text);
     if (!requests)
       break;
@@ -197570,20 +197576,23 @@ function renderContextNote(context, isArabic) {
 function renderExplorationNote(exploration, isArabic) {
   if (!exploration)
     return void 0;
-  if (exploration.rounds === 0 && !exploration.skipped)
+  if (exploration.rounds === 0 && exploration.verifierRounds === 0 && !exploration.skipped)
     return void 0;
   const files = exploration.filesRead.length;
   const rounds = exploration.rounds;
+  const verifierRounds = exploration.verifierRounds;
   const refused = exploration.refused;
   const skipped = exploration.skipped ? neutralize2(exploration.skipped) : void 0;
   if (isArabic) {
+    const verifierPart2 = verifierRounds > 0 ? verifierRounds === 1 ? "\u060C \u0648\u0627\u0644\u062A\u062D\u0642\u0642 \u0642\u0631\u0627 \u0645\u0631\u0629" : `\u060C \u0648\u0627\u0644\u062A\u062D\u0642\u0642: ${verifierRounds} \u062C\u0648\u0644\u0629` : "";
     const refusedPart2 = refused > 0 ? `\u060C ${refused} \u0637\u0644\u0628 \u0645\u0631\u0641\u0648\u0636` : "";
     const skippedPart2 = skipped ? ` (\u0627\u062A\u062E\u0637\u0649: ${skipped})` : "";
-    return `> \u2139\uFE0F \u0627\u0644\u0627\u0633\u062A\u0643\u0634\u0627\u0641: ${files} \u0645\u0644\u0641 \u0641\u064A ${rounds} \u062C\u0648\u0644\u0629${refusedPart2}${skippedPart2}`;
+    return `> \u2139\uFE0F \u0627\u0644\u0627\u0633\u062A\u0643\u0634\u0627\u0641: ${files} \u0645\u0644\u0641 \u0641\u064A ${rounds} \u062C\u0648\u0644\u0629${verifierPart2}${refusedPart2}${skippedPart2}`;
   }
-  const refusedPart = refused > 0 ? `, ${refused} requests refused` : "";
+  const verifierPart = verifierRounds > 0 ? verifierRounds === 1 ? ", verifier read once" : `, verifier: ${verifierRounds} rounds` : "";
+  const refusedPart = refused > 0 ? `, ${refused} ${refused === 1 ? "request" : "requests"} refused` : "";
   const skippedPart = skipped ? ` (skipped: ${skipped})` : "";
-  return `> \u2139\uFE0F Explored: ${files} files in ${rounds} rounds${refusedPart}${skippedPart}`;
+  return `> \u2139\uFE0F Explored: ${files} ${files === 1 ? "file" : "files"} in ${rounds} ${rounds === 1 ? "round" : "rounds"}${verifierPart}${refusedPart}${skippedPart}`;
 }
 function citedOf(context, isArabic) {
   const unique = [...new Set(context.cited ?? [])];

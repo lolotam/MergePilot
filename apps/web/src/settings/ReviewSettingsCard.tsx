@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sliders } from 'lucide-react';
-import type { FallbackEntry, Settings, Severity } from '@mergepilot/app/contract';
+import type { FallbackEntry, Settings, SettingsUpdate, Severity } from '@mergepilot/app/contract';
 import type { BotLogo } from '../api/bots.js';
 import { ApiClientError, type ApiProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
@@ -26,7 +26,7 @@ export interface ReviewSettingsCardProps {
   keyedProviders?: readonly ApiProvider[] | undefined;
 }
 
-type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'perReview' | 'heavy' | 'fallback' | 'skill', string>>;
+type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'perReview' | 'heavy' | 'fallback' | 'skill' | 'explore', string>>;
 
 const NO_HEAVY: HeavyModelValue = { heavyProvider: null, heavyModel: null, heavyEffort: null, heavyThresholdLines: null };
 
@@ -59,6 +59,8 @@ export function ReviewSettingsCard({
   const [botName, setBotName] = useState(MAIN_BOT_DEFAULT_NAME);
   const [botLogo, setBotLogo] = useState<BotLogo>(MAIN_BOT_DEFAULT_LOGO);
   const [exploreEnabled, setExploreEnabled] = useState(false);
+  // The value the switch just saved, until the settings carry it again (null = nothing pending).
+  const [pendingExplore, setPendingExplore] = useState<boolean | null>(null);
   // The main bot's review skill (ADR-0034); null = Default.
   const [skillId, setSkillId] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -75,13 +77,12 @@ export function ReviewSettingsCard({
     const key = JSON.stringify([
       settings.botName, settings.botLogo, settings.provider, settings.model, settings.effort, settings.heavyProvider,
       settings.heavyModel, settings.heavyEffort, settings.heavyThresholdLines, settings.fallback, settings.minSeverity,
-      settings.maxFindings, settings.language, settings.monthlyBudgetUsd, settings.perReviewUsd, settings.exploreEnabled,
+      settings.maxFindings, settings.language, settings.monthlyBudgetUsd, settings.perReviewUsd,
     ]);
     if (key === shownKey.current) return;
     shownKey.current = key;
     setBotName(settings.botName ?? MAIN_BOT_DEFAULT_NAME);
     setBotLogo(settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO);
-    setExploreEnabled(settings.exploreEnabled ?? false);
     setProvider(settings.provider);
     setModel(settings.model);
     setEffort(settings.effort ?? null);
@@ -105,12 +106,48 @@ export function ReviewSettingsCard({
     );
   }, [settings]);
 
+  // The switch follows the server on its own: it is out of the refill key, so the settings a save
+  // brings back do not reset the form. It waits for them before it can be used again.
+  const savedExplore = settings?.exploreEnabled ?? false;
+  useEffect(() => {
+    setExploreEnabled(savedExplore);
+    setPendingExplore((pending) => (pending !== null && savedExplore === pending ? null : pending));
+  }, [savedExplore]);
+
   // The skill follows the server on its own (ADR-0034): deleting a skill sets this bot to Default,
   // and that refetch must not discard unsaved edits to the model or the other fields.
   const savedSkillId = settings?.skillId ?? null;
   useEffect(() => {
     setSkillId(savedSkillId);
   }, [savedSkillId]);
+
+  const handleExploreToggle = async () => {
+    if (!settings || isMember || isSaving || pendingExplore !== null) return;
+    const shown = exploreEnabled;
+    const next = !shown;
+    setPendingExplore(next);
+    if (errors.explore) setErrors(withoutError(errors, 'explore'));
+    try {
+      // The required fields, the change and the base it was built from: the server keeps every
+      // field left out, so a stale tab cannot overwrite the other settings, and a switch changed
+      // meanwhile answers 409. The parent's save forwards this body as it is.
+      const body: SettingsUpdate = {
+        provider: settings.provider,
+        model: settings.model,
+        language: settings.language,
+        exploreEnabled: next,
+        base: { exploreEnabled: shown },
+      };
+      await onSave(body as Settings);
+      setExploreEnabled(next);
+    } catch (err) {
+      // The settings mutation shows the error; the switch goes back to the value it had.
+      setExploreEnabled(shown);
+      setPendingExplore(null);
+      const message = err instanceof Error && err.message ? err.message : t('error');
+      setErrors((current) => ({ ...current, explore: message }));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,7 +192,6 @@ export function ReviewSettingsCard({
         maxFindings,
         botName: botName.trim(),
         botLogo,
-        exploreEnabled,
         // Always sent: saving the form confirms the skill choice and clears a deleted-skill note.
         skillId,
       });
@@ -200,8 +236,8 @@ export function ReviewSettingsCard({
                 aria-checked={exploreEnabled}
                 aria-label={t('botExploreLabel')}
                 aria-describedby="settings-explore-hint"
-                disabled={isMember || isSaving}
-                onClick={() => setExploreEnabled(!exploreEnabled)}
+                disabled={isMember || isSaving || pendingExplore !== null}
+                onClick={() => void handleExploreToggle()}
                 className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${exploreEnabled ? 'bg-green-500' : 'bg-ink-300 dark:bg-ink-700'}`}
               >
                 <span aria-hidden="true" className={`absolute top-0.5 start-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${exploreEnabled ? 'translate-x-4 rtl:-translate-x-4' : ''}`} />
@@ -209,6 +245,7 @@ export function ReviewSettingsCard({
               <span className="text-xs font-semibold text-ink-800 dark:text-ink-200">{t('botExploreLabel')}</span>
             </div>
             <p id="settings-explore-hint" className="text-[11px] text-ink-500 dark:text-ink-400 ms-12">{t('botExploreHint')}</p>
+            {errors.explore && <p role="alert" className="text-xs text-red-500 mt-1 ms-12">{errors.explore}</p>}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ProviderSelect

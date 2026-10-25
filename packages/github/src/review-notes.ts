@@ -100,20 +100,27 @@ export function renderExplorationNote(
   isArabic: boolean,
 ): string | undefined {
   if (!exploration) return undefined;
-  if (exploration.rounds === 0 && !exploration.skipped) return undefined;
+  if (exploration.rounds === 0 && exploration.verifierRounds === 0 && !exploration.skipped) return undefined;
   const files = exploration.filesRead.length;
   const rounds = exploration.rounds;
+  const verifierRounds = exploration.verifierRounds;
   const refused = exploration.refused;
   // The reason comes from the engine, but it may hold a provider's message: it is neutralized.
   const skipped = exploration.skipped ? neutralize(exploration.skipped) : undefined;
   if (isArabic) {
+    const verifierPart = verifierRounds > 0
+      ? (verifierRounds === 1 ? '، والتحقق قرا مرة' : `، والتحقق: ${verifierRounds} جولة`)
+      : '';
     const refusedPart = refused > 0 ? `، ${refused} طلب مرفوض` : '';
     const skippedPart = skipped ? ` (اتخطى: ${skipped})` : '';
-    return `> ℹ️ الاستكشاف: ${files} ملف في ${rounds} جولة${refusedPart}${skippedPart}`;
+    return `> ℹ️ الاستكشاف: ${files} ملف في ${rounds} جولة${verifierPart}${refusedPart}${skippedPart}`;
   }
-  const refusedPart = refused > 0 ? `, ${refused} requests refused` : '';
+  const verifierPart = verifierRounds > 0
+    ? (verifierRounds === 1 ? ', verifier read once' : `, verifier: ${verifierRounds} rounds`)
+    : '';
+  const refusedPart = refused > 0 ? `, ${refused} ${refused === 1 ? 'request' : 'requests'} refused` : '';
   const skippedPart = skipped ? ` (skipped: ${skipped})` : '';
-  return `> ℹ️ Explored: ${files} files in ${rounds} rounds${refusedPart}${skippedPart}`;
+  return `> ℹ️ Explored: ${files} ${files === 1 ? 'file' : 'files'} in ${rounds} ${rounds === 1 ? 'round' : 'rounds'}${verifierPart}${refusedPart}${skippedPart}`;
 }
 
 /** The cited files of a disclosure: at most five names, the rest counted (ADR-0041). */
