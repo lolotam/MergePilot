@@ -269,6 +269,7 @@ export interface ApiEquivalentRunUsage {
 /** The stored fields needed to compute the API-equivalent card without a backfill. */
 export interface ApiEquivalentRunRow {
   createdAt: Date;
+  status: ReviewRunStatus;
   provider: string | null;
   model: string | null;
   pricing: unknown;

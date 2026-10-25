@@ -17,6 +17,7 @@ export function memoryApiEquivalentRows(
       || run.result?.pricing?.subscriptionPart !== undefined)
     .map((run) => ({
       createdAt: run.createdAt,
+      status: run.status,
       provider: run.provider ?? null,
       model: run.model ?? null,
       pricing: run.result?.pricing ?? null,

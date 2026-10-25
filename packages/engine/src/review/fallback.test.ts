@@ -238,6 +238,18 @@ describe('FallbackChain', () => {
       ]);
     });
 
+    it('discloses a subscription call that answered without reporting usage', async () => {
+      const chain = new FallbackChain({
+        label: 'openai:gpt-5', includedInSubscription: true,
+        generate: async (): Promise<ReviewModelResponse> => ({ text: 'ok', finishReason: 'stop' }),
+      });
+      await chain.generate(req);
+
+      const disclosure = chain.disclosure([]);
+      expect(disclosure.subscriptionUsageUnreported).toBe(true);
+      expect(disclosure.subscriptionUsage).toBeUndefined();
+    });
+
     it('omits subscription usage when no subscription call answered', async () => {
       const chain = new FallbackChain(mockModel('openai:gpt-5'));
       await chain.generate(req);

@@ -65,6 +65,8 @@ export interface FallbackDisclosure {
   modelUsedMethod?: ReviewAuthMethod;
   /** Successful subscription calls, summed by model label; never includes the judge. */
   subscriptionUsage?: Array<{ label: string; usage: TokenUsage }>;
+  /** A subscription call answered without reporting its usage, so `subscriptionUsage` is not all of it. */
+  subscriptionUsageUnreported?: true;
 }
 
 /** One possible switch: the model that just failed, the entry that would take over, and the call. */
@@ -86,6 +88,7 @@ export class FallbackChain implements ReviewModel {
   #from: { label: string; code: FailureKind; detail: string | undefined } | undefined;
   #onlySubscriptionCalls = true;
   readonly #subscriptionUsage = new Map<string, TokenUsage>();
+  #subscriptionUsageUnreported = false;
   readonly #mayEnter: MayEnter | undefined;
 
   constructor(primary: ReviewModel, fallbacks: readonly ReviewModel[] = [], mayEnter?: MayEnter) {
@@ -131,9 +134,10 @@ export class FallbackChain implements ReviewModel {
       this.#onlySubscriptionCalls &&= model.includedInSubscription === true;
       try {
         const response = await model.generate(request);
-        if (model.includedInSubscription === true && response.usage) {
+        if (model.includedInSubscription === true) {
           const combined = combineUsage(this.#subscriptionUsage.get(model.label), response.usage);
           if (combined) this.#subscriptionUsage.set(model.label, combined);
+          if (!response.usage) this.#subscriptionUsageUnreported = true;
         }
         return response;
       } catch (error) {
@@ -173,6 +177,7 @@ export class FallbackChain implements ReviewModel {
       ...(this.#subscriptionUsage.size > 0
         ? { subscriptionUsage: [...this.#subscriptionUsage].map(([label, usage]) => ({ label, usage })) }
         : {}),
+      ...(this.#subscriptionUsageUnreported ? { subscriptionUsageUnreported: true as const } : {}),
       ...this.#methodSwitch(),
     };
   }

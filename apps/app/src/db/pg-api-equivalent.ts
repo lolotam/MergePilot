@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
-import type { ApiEquivalentRunRow, ApiEquivalentRunUsage } from '../core/types.js';
+import type { ApiEquivalentRunRow, ApiEquivalentRunUsage, ReviewRunStatus } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { reviewRuns } from './schema.js';
 
@@ -16,6 +16,7 @@ export async function listPgApiEquivalentRuns(
   const rows = await db
     .select({
       createdAt: reviewRuns.createdAt,
+      status: reviewRuns.status,
       provider: reviewRuns.provider,
       model: reviewRuns.model,
       pricing: sql<unknown>`${pricing}`,
@@ -36,6 +37,7 @@ export async function listPgApiEquivalentRuns(
     ));
   return rows.map((row) => ({
     createdAt: new Date(row.createdAt),
+    status: row.status as ReviewRunStatus,
     provider: row.provider,
     model: row.model,
     pricing: row.pricing,

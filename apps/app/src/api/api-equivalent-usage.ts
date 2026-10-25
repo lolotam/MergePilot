@@ -164,12 +164,16 @@ async function shareOf(
   const storedUsd = numberOf(pricing?.apiEquivalentUsd);
   if (storedUsd !== undefined) return { usd: storedUsd, entries: storedEntries(row, tokenPlan, storedUsd) };
   // An older run that switched methods either way (ADR-0027) cannot be split.
-  const switched = row.fallbackFromMethod === 'subscription' || row.fallbackFromMethod === 'api-key';
-  if (switched && row.provider !== null && SUBSCRIPTION_PROVIDERS.includes(row.provider)) return 'leftOut';
+  const switched = (row.fallbackFromMethod === 'subscription' || row.fallbackFromMethod === 'api-key')
+    && row.provider !== null && SUBSCRIPTION_PROVIDERS.includes(row.provider);
   // A token plan counts only when the catalog prices it at $0 and the run's own price is $0.
-  const shouldHaveEquivalent = subscriptionPriced(row, pricing) || (tokenPlan && await pricesPlanAtZero(prices, row, pricing));
-  // A run that failed before any call consumed nothing: there is nothing to price.
-  if (!shouldHaveEquivalent || !row.usage) return undefined;
+  const shouldHaveEquivalent = switched || subscriptionPriced(row, pricing)
+    || (tokenPlan && await pricesPlanAtZero(prices, row, pricing));
+  if (!shouldHaveEquivalent) return undefined;
+  // No usage: a failed run made no call that answered, so there is nothing to price; a completed
+  // one ran on a backend that reported none, so its tokens are unknown.
+  if (!row.usage) return row.status === 'failed' ? undefined : 'leftOut';
+  if (switched) return 'leftOut';
   const entry = await priceOldRun(prices, settings, row, pricing, tokenPlan);
   return entry ? { usd: entry.usd, entries: [entry] } : 'leftOut';
 }

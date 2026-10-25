@@ -20,8 +20,10 @@ export interface EquivalentInput {
   onlySubscriptionCalls: boolean;
   /** True when another model took over (ADR-0008). */
   fellBack: boolean;
-  /** True when the run switched from the subscription to API keys (ADR-0027). */
-  leftSubscription: boolean;
+  /** True when the run switched auth methods, in either direction (ADR-0027). */
+  switchedMethod: boolean;
+  /** True when a subscription call answered without reporting usage: the part is not all known. */
+  subscriptionUsageUnreported: boolean;
   /** The prices: the workspace's manual price first, then the catalog. */
   store: Pick<ModelPriceStore, 'getModelPrice'>;
   settings: Pick<WorkspaceSettings, 'priceOverrides'>;
@@ -42,9 +44,13 @@ export async function equivalentFields(
 ): Promise<EquivalentFields> {
   const usage = input.subscriptionUsage;
   const oneSubscriptionModel = input.onlySubscriptionCalls && !input.fellBack;
-  if (usage === undefined && input.leftSubscription) {
-    // The subscription answered no call before the switch to API keys: its part is a known
-    // nothing, which tells this run apart from an older mixed run the card cannot split.
+  if (!oneSubscriptionModel && input.subscriptionUsageUnreported) {
+    // A subscription call answered with no usage: its tokens are unknown, so the card leaves it out.
+    return { subscriptionPart: null };
+  }
+  if (usage === undefined && input.switchedMethod && !oneSubscriptionModel) {
+    // No subscription call answered in a run that switched methods: its part is a known nothing,
+    // which tells this run apart from an older switched run the card cannot split.
     return { subscriptionPart: { usd: 0, byModel: [], source: 'subscription' } };
   }
   if (usage === undefined || oneSubscriptionModel) {

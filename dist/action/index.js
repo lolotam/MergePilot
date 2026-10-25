@@ -140580,6 +140580,7 @@ var FallbackChain = class {
   #from;
   #onlySubscriptionCalls = true;
   #subscriptionUsage = /* @__PURE__ */ new Map();
+  #subscriptionUsageUnreported = false;
   #mayEnter;
   constructor(primary, fallbacks = [], mayEnter) {
     this.#models = [primary, ...fallbacks];
@@ -140618,10 +140619,12 @@ var FallbackChain = class {
       this.#onlySubscriptionCalls &&= model.includedInSubscription === true;
       try {
         const response = await model.generate(request2);
-        if (model.includedInSubscription === true && response.usage) {
+        if (model.includedInSubscription === true) {
           const combined = combineUsage(this.#subscriptionUsage.get(model.label), response.usage);
           if (combined)
             this.#subscriptionUsage.set(model.label, combined);
+          if (!response.usage)
+            this.#subscriptionUsageUnreported = true;
         }
         return response;
       } catch (error62) {
@@ -140660,6 +140663,7 @@ var FallbackChain = class {
       ...this.#from?.detail ? { fallbackDetail: disclosedDetail(this.#from.detail, secrets) } : {},
       ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {},
       ...this.#subscriptionUsage.size > 0 ? { subscriptionUsage: [...this.#subscriptionUsage].map(([label, usage]) => ({ label, usage })) } : {},
+      ...this.#subscriptionUsageUnreported ? { subscriptionUsageUnreported: true } : {},
       ...this.#methodSwitch()
     };
   }

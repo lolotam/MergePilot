@@ -236,6 +236,36 @@ describe('API-equivalent usage', () => {
     expect(result).toMatchObject({ leftOut: 0, reviews: 0 });
   });
 
+  it('neither counts nor leaves out a switched run that failed before any call answered', async () => {
+    const store = setup();
+    const now = new Date('2026-10-15T00:00:00.000Z');
+    store.runs.set('run-switched', {
+      id: 'run-switched', workspaceId: 'ws-1', installationId: 1, repoFullName: 'acme/repo', pullNumber: 98,
+      headSha: 'sha-switched', status: 'failed', costUsd: 0, detail: null, createdAt: now, finishedAt: now, updatedAt: now,
+      provider: 'openai', model: 'gpt-x',
+      result: {
+        v: 1, summary: '', highlights: [], findings: [], language: 'en', pricing: subscription,
+        fallbackFromMethod: 'subscription', modelUsedMethod: 'api-key',
+      },
+    });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result).toMatchObject({ leftOut: 0, reviews: 0 });
+  });
+
+  it('leaves out a completed subscription run whose backend reported no usage', async () => {
+    const store = setup();
+    await price(store, 'openai', 'gpt-x');
+    const now = new Date('2026-10-15T00:00:00.000Z');
+    store.runs.set('run-no-usage', {
+      id: 'run-no-usage', workspaceId: 'ws-1', installationId: 1, repoFullName: 'acme/repo', pullNumber: 97,
+      headSha: 'sha-no-usage', status: 'completed', costUsd: 0, detail: null, createdAt: now, finishedAt: now, updatedAt: now,
+      provider: 'openai', model: 'gpt-x',
+      result: { v: 1, summary: '', highlights: [], findings: [], language: 'en', pricing: subscription },
+    });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result).toMatchObject({ leftOut: 1, reviews: 0 });
+  });
+
   it('prices a subscription run recorded as static at $0 before ADR-0024', async () => {
     const store = setup();
     await price(store, 'anthropic', 'claude-x');
