@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse, SettingsUpdate } from '@mergepilot/app/contract';
-import { api, type GetRunsParams, type KeyProvider } from './client.js';
+import { api, ApiClientError, type GetRunsParams, type KeyProvider } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -27,8 +27,11 @@ export function useUpdateSettingsMutation(workspaceId: string) {
 
   return useMutation({
     mutationFn: (settings: SettingsUpdate) => api.updateSettings(workspaceId, settings),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       showToast(t('settingsSavedSuccess'), 'success');
+      // The PUT answers the stored settings: the card follows them at once, so a later refetch that
+      // brings another admin's change is a real change and moves the card again.
+      queryClient.setQueryData(['workspaces', workspaceId, 'settings'], saved);
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
       // The main bot's name and logo are saved with the settings (ADR-0017).
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'bots'] });
@@ -37,8 +40,12 @@ export function useUpdateSettingsMutation(workspaceId: string) {
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
-      // A 409 means another admin changed the settings: refetch, so the next save builds on them.
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
+      // A 409 means another admin changed the settings: the save rejects only once they are
+      // refetched, so the next save builds on them. Other errors leave the cached settings alone.
+      if (err instanceof ApiClientError && err.status === 409) {
+        return queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
+      }
+      return undefined;
     },
   });
 }
