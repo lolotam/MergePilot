@@ -39,6 +39,12 @@ describe('ApiEquivalentCard', () => {
     expect(screen.getByText('≈ $0.00')).toBeTruthy();
   });
 
+  it('keeps the last totals when a background refetch fails', () => {
+    answer({ monthUsd: 12.34, totalUsd: 30, reviews: 4, averagePerReviewUsd: 7.5, leftOut: 0, byModel: [], monthStart: '2026-10-01' }, true);
+    expect(screen.getByText('≈ $12.34')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('shows an error, not the empty state, when the request fails', () => {
     answer(undefined, true);
     expect(screen.getByRole('alert')).toBeTruthy();

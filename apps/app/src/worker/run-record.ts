@@ -58,6 +58,7 @@ export async function recordOf(
       subscriptionUsage,
       onlySubscriptionCalls: allOnSubscription,
       fellBack: review.fallbackFrom !== undefined,
+      leftSubscription: review.fallbackFromMethod === 'subscription',
       store: ctx.deps.store,
       settings: ctx.settings,
     },

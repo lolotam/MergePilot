@@ -20,6 +20,8 @@ export interface EquivalentInput {
   onlySubscriptionCalls: boolean;
   /** True when another model took over (ADR-0008). */
   fellBack: boolean;
+  /** True when the run switched from the subscription to API keys (ADR-0027). */
+  leftSubscription: boolean;
   /** The prices: the workspace's manual price first, then the catalog. */
   store: Pick<ModelPriceStore, 'getModelPrice'>;
   settings: Pick<WorkspaceSettings, 'priceOverrides'>;
@@ -40,6 +42,11 @@ export async function equivalentFields(
 ): Promise<EquivalentFields> {
   const usage = input.subscriptionUsage;
   const oneSubscriptionModel = input.onlySubscriptionCalls && !input.fellBack;
+  if (usage === undefined && input.leftSubscription) {
+    // The subscription answered no call before the switch to API keys: its part is a known
+    // nothing, which tells this run apart from an older mixed run the card cannot split.
+    return { subscriptionPart: { usd: 0, byModel: [], source: 'subscription' } };
+  }
   if (usage === undefined || oneSubscriptionModel) {
     // A run that stayed on its own model: its own tokens at that model's API price.
     return apiEquivalentFields(input.usage, input.fellBack ? undefined : input.apiPrice);

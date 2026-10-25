@@ -205,6 +205,37 @@ describe('API-equivalent usage', () => {
     expect(result).toMatchObject({ leftOut: 1, reviews: 0, totalUsd: 0 });
   });
 
+  it('leaves out an older run that switched from API keys to the subscription', async () => {
+    const store = setup();
+    await price(store, 'openai', 'gpt-x');
+    seed(store, 'openai', 'gpt-x', { source: 'catalog:models.dev', inputPerMTok: 2, outputPerMTok: 4, fallbackFromMethod: 'api-key' }, { inputTokens: 100, outputTokens: 50 });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result).toMatchObject({ leftOut: 1, reviews: 0 });
+  });
+
+  it('neither counts nor leaves out a switch whose subscription answered nothing', async () => {
+    const store = setup();
+    seed(store, 'openai', 'gpt-x', {
+      source: 'catalog:models.dev', inputPerMTok: 2, outputPerMTok: 4, fallbackFromMethod: 'subscription',
+      subscriptionPart: { usd: 0, byModel: [], source: 'subscription' },
+    }, { inputTokens: 100, outputTokens: 50 });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result).toMatchObject({ leftOut: 0, reviews: 0, totalUsd: 0 });
+  });
+
+  it('neither counts nor leaves out a subscription run that failed before any call', async () => {
+    const store = setup();
+    const now = new Date('2026-10-15T00:00:00.000Z');
+    store.runs.set('run-failed', {
+      id: 'run-failed', workspaceId: 'ws-1', installationId: 1, repoFullName: 'acme/repo', pullNumber: 99,
+      headSha: 'sha-failed', status: 'failed', costUsd: 0, detail: null, createdAt: now, finishedAt: now, updatedAt: now,
+      provider: 'openai', model: 'gpt-x',
+      result: { v: 1, summary: '', highlights: [], findings: [], language: 'en', pricing: subscription },
+    });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result).toMatchObject({ leftOut: 0, reviews: 0 });
+  });
+
   it('prices a subscription run recorded as static at $0 before ADR-0024', async () => {
     const store = setup();
     await price(store, 'anthropic', 'claude-x');

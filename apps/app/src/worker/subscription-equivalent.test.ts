@@ -17,6 +17,7 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
         subscriptionUsage: [{ label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50 } }],
         onlySubscriptionCalls: false,
         fellBack: false,
+        leftSubscription: false,
         store: new MemoryStore(),
         settings,
       },
@@ -31,6 +32,24 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
     ]);
   });
 
+  it('records a known empty part when the subscription answered nothing before the switch to API keys', async () => {
+    const fields = await equivalentFields(
+      {
+        usage: { inputTokens: 300, outputTokens: 150 },
+        apiPrice: undefined,
+        subscriptionUsage: undefined,
+        onlySubscriptionCalls: false,
+        fellBack: true,
+        leftSubscription: true,
+        store: new MemoryStore(),
+        settings,
+      },
+      noFailure,
+    );
+
+    expect(fields).toEqual({ subscriptionPart: { usd: 0, byModel: [], source: 'subscription' } });
+  });
+
   it('marks the subscription part unpriced when any of its models has no API price', async () => {
     const fields = await equivalentFields(
       {
@@ -42,6 +61,7 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
         ],
         onlySubscriptionCalls: false,
         fellBack: false,
+        leftSubscription: false,
         store: new MemoryStore(),
         settings,
       },
@@ -59,6 +79,7 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
         subscriptionUsage: [{ label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50 } }],
         onlySubscriptionCalls: true,
         fellBack: false,
+        leftSubscription: false,
         store: new MemoryStore(),
         settings,
       },

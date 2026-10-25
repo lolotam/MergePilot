@@ -145,7 +145,7 @@ type RunShare = { usd: number; entries: ApiEquivalentModel[] } | 'leftOut' | und
 /**
  * Sorts a run into the card (ADR-0047). A stored subscription part (mixed or fallback run) or a
  * stored ADR-0024 equivalent is used as recorded. An older run that fell back from the subscription
- * to API keys cannot be split, so it is left out. An older subscription or $0 token-plan run is
+ * to API keys, or from API keys to it, cannot be split, so it is left out. An older subscription or $0 token-plan run is
  * priced now from its tokens. A run priced for real is neither counted nor left out.
  */
 async function shareOf(
@@ -156,17 +156,20 @@ async function shareOf(
   const pricing = objectOf(row.pricing);
   if (pricing && 'subscriptionPart' in pricing) {
     const part = storedPart(pricing.subscriptionPart);
-    return part ? { usd: part.usd, entries: part.byModel } : 'leftOut';
+    if (!part) return 'leftOut';
+    // A run whose subscription answered nothing used no subscription: neither counted nor left out.
+    return part.byModel.length > 0 ? { usd: part.usd, entries: part.byModel } : undefined;
   }
   const tokenPlan = row.provider !== null && row.provider in TOKEN_PLAN_API_PROVIDER;
   const storedUsd = numberOf(pricing?.apiEquivalentUsd);
   if (storedUsd !== undefined) return { usd: storedUsd, entries: storedEntries(row, tokenPlan, storedUsd) };
-  if (row.fallbackFromMethod === 'subscription' && row.provider !== null && SUBSCRIPTION_PROVIDERS.includes(row.provider)) {
-    return 'leftOut';
-  }
+  // An older run that switched methods either way (ADR-0027) cannot be split.
+  const switched = row.fallbackFromMethod === 'subscription' || row.fallbackFromMethod === 'api-key';
+  if (switched && row.provider !== null && SUBSCRIPTION_PROVIDERS.includes(row.provider)) return 'leftOut';
   // A token plan counts only when the catalog prices it at $0 and the run's own price is $0.
   const shouldHaveEquivalent = subscriptionPriced(row, pricing) || (tokenPlan && await pricesPlanAtZero(prices, row, pricing));
-  if (!shouldHaveEquivalent) return undefined;
+  // A run that failed before any call consumed nothing: there is nothing to price.
+  if (!shouldHaveEquivalent || !row.usage) return undefined;
   const entry = await priceOldRun(prices, settings, row, pricing, tokenPlan);
   return entry ? { usd: entry.usd, entries: [entry] } : 'leftOut';
 }
