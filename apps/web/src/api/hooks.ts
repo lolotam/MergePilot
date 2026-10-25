@@ -45,6 +45,9 @@ export function useUpdateSettingsMutation(workspaceId: string) {
       // them. Any other 4xx was refused before writing and leaves the cached settings alone.
       const refused = err instanceof ApiClientError && err.status >= 400 && err.status < 500 && err.status !== 409;
       if (!refused) {
+        // The same write may have changed the main bot's name, logo and skill too (ADR-0017, ADR-0034).
+        queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'bots'] });
+        queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'skills'] });
         return queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
       }
       return undefined;
