@@ -1,6 +1,7 @@
 import type {
   MeResponse,
   Settings,
+  SettingsUpdate,
   ErrorBody,
   ReviewRun,
   RunsResponse,
@@ -252,7 +253,7 @@ export const api = {
   getMe: () => fetchApi<MeResponseWithAdmin>('/api/me'),
   getSettings: (workspaceId: string) =>
     fetchApi<SettingsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
-  updateSettings: (workspaceId: string, settings: Settings) =>
+  updateSettings: (workspaceId: string, settings: SettingsUpdate) =>
     fetchApi<SettingsResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`, {
       method: 'PUT',
       body: JSON.stringify(settings),

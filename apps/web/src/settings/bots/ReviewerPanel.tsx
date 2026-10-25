@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Settings } from '@mergepilot/app/contract';
+import type { Settings, SettingsUpdate } from '@mergepilot/app/contract';
 import { useBotsQuery, useSaveBotMutation, type BotsResponse, type ReviewerBotInput } from '../../api/bots.js';
 import type { ApiProvider } from '../../api/client.js';
 import { useToast } from '../../components/Toast.js';
@@ -22,7 +22,8 @@ export interface ReviewerPanelProps {
   settings: Settings | null | undefined;
   isLoading: boolean;
   isMember: boolean;
-  onSave: (settings: Settings) => Promise<void>;
+  /** The settings to save: the switch sends a patch, the form sends the whole form. */
+  onSave: (settings: SettingsUpdate) => Promise<void>;
   isSaving: boolean;
   /** Providers with a saved key; undefined = unknown (members). */
   keyedProviders?: readonly ApiProvider[] | undefined;
@@ -141,6 +142,8 @@ export function ReviewerPanel({ workspaceId, settings, isLoading, isMember, onSa
             />
           ) : (
             <ReviewSettingsCard
+              // A new card per workspace: a save still running for the last workspace cannot set this one's switch.
+              key={workspaceId}
               workspaceId={workspaceId}
               settings={settings}
               isLoading={isLoading}

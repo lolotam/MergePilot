@@ -41,3 +41,9 @@ The LLM layer has no tool calling: `ReviewModelRequest` is one system and one us
 - **Summary.** A bot's review summary shows «Explored: N files in R rounds» after the context note; the panel summary shows one such line per bot that explored or disclosed why it did not.
 - **Issue #183, fixed before the switch exists.** (1) After the exploration rounds, the review call's prompt with the explored block must still pass `spend.canAfford`, which prices from the current pricing (so a paid switch during exploration is seen); otherwise the block is left out and the summary says «explored results left out: budget limit reached». (2) `redactSecrets(..., { keepLineBreaks: true })` keeps the line breaks of a redacted multi-line secret, and exploration reads use it, so read and find line numbers stay the head's.
 - **Owner decisions.** Turned on for waleed_Bot as soon as it is released (decisions log س59, part B), although that overlaps the GPT-5.6 Sol model experiment; the 48-hour measurement notes the switch time.
+
+## Amendment (2026-10-25): the verifier's round and the note wording
+
+- `ExplorationDisclosure.rounds` counts the review's own rounds only (at most `review.explore.maxRounds`); the verifier's round is counted apart in `verifierRounds` (0 or 1). A verifier round means its model call answered, not that it read a file.
+- The note uses singular and plural: «Explored: 1 file in 2 rounds», and adds «, verifier: 1 round» when the verifier's round ran (Arabic: «، والتحقق: 1 جولة»).
+- The main bot's exploration switch saves at once, like the extra bots' switches: it sends provider, model, language and `exploreEnabled` with their shown values as `base`, so a stale tab cannot overwrite them and a concurrent change answers 409; the settings form's Save no longer sends `exploreEnabled`.

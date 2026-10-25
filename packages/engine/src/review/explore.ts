@@ -55,6 +55,7 @@ export interface ExploreInput {
 /** What the run discloses about its exploration (ADR-0046). */
 export interface ExplorationDisclosure {
   rounds: number;
+  verifierRounds: number;
   requests: number;
   filesRead: string[];
   refused: number;
@@ -64,6 +65,7 @@ export interface ExplorationDisclosure {
 /** What a batched review discloses about its exploration: it does not explore (ADR-0046). */
 export const BATCHED_EXPLORATION: ExplorationDisclosure = {
   rounds: 0,
+  verifierRounds: 0,
   requests: 0,
   filesRead: [],
   refused: 0,
@@ -78,6 +80,7 @@ export const BATCHED_EXPLORATION: ExplorationDisclosure = {
 export class ExploreBudget {
   #remainingTokens: number;
   #rounds = 0;
+  #verifierRounds = 0;
   #requests = 0;
   #refused = 0;
   #skipped: string | undefined;
@@ -137,8 +140,9 @@ export class ExploreBudget {
     this.#served.set(key, content);
   }
 
-  countRound(): void {
-    this.#rounds += 1;
+  countRound(verifier = false): void {
+    if (verifier) this.#verifierRounds += 1;
+    else this.#rounds += 1;
   }
 
   countRequests(count: number): void {
@@ -177,6 +181,7 @@ export class ExploreBudget {
   disclosure(): ExplorationDisclosure {
     return {
       rounds: this.#rounds,
+      verifierRounds: this.#verifierRounds,
       requests: this.#requests,
       filesRead: [...this.#filesRead],
       refused: this.#refused,
@@ -366,7 +371,7 @@ export async function runExploration(opts: ExploreRunOptions): Promise<ExploreRu
     }
     spend.record(promptTokens, requested, response.usage);
     usage = combineUsage(usage, response.usage);
-    budget.countRound();
+    budget.countRound(opts.purpose === 'verify');
     const requests = parseExploreRequests(response.text);
     // An answer that is not the protocol asks for nothing: the exploration ends here.
     if (!requests) break;

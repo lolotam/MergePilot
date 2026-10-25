@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { MeResponse, Settings } from '@mergepilot/app/contract';
-import { api, type GetRunsParams, type KeyProvider } from './client.js';
+import type { MeResponse, SettingsUpdate } from '@mergepilot/app/contract';
+import { api, ApiClientError, type GetRunsParams, type KeyProvider } from './client.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -26,9 +26,12 @@ export function useUpdateSettingsMutation(workspaceId: string) {
   const { t } = useI18n();
 
   return useMutation({
-    mutationFn: (settings: Settings) => api.updateSettings(workspaceId, settings),
-    onSuccess: () => {
+    mutationFn: (settings: SettingsUpdate) => api.updateSettings(workspaceId, settings),
+    onSuccess: (saved) => {
       showToast(t('settingsSavedSuccess'), 'success');
+      // The PUT answers the stored settings: the card follows them at once, so a later refetch that
+      // brings another admin's change is a real change and moves the card again.
+      queryClient.setQueryData(['workspaces', workspaceId, 'settings'], saved);
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
       // The main bot's name and logo are saved with the settings (ADR-0017).
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'bots'] });
@@ -37,6 +40,17 @@ export function useUpdateSettingsMutation(workspaceId: string) {
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
+      // A 409 means another admin changed the settings, and a 5xx or a lost answer may have saved
+      // them anyway: the save rejects only once they are refetched, so the next save builds on
+      // them. Any other 4xx was refused before writing and leaves the cached settings alone.
+      const refused = err instanceof ApiClientError && err.status >= 400 && err.status < 500 && err.status !== 409;
+      if (!refused) {
+        // The same write may have changed the main bot's name, logo and skill too (ADR-0017, ADR-0034).
+        queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'bots'] });
+        queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'skills'] });
+        return queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
+      }
+      return undefined;
     },
   });
 }

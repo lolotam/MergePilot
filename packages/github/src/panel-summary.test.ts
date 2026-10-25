@@ -90,10 +90,10 @@ describe('renderPanelSummary (consensus, ADR-0017)', () => {
 
   it('names only the bots that explored, with escaped names', async () => {
     const merge = await merged();
-    const explorations = [{ rounds: 2, requests: 1, filesRead: ['src/a.ts'], refused: 0, bot: 'Owl | one' }];
+    const explorations = [{ rounds: 2, verifierRounds: 0, requests: 1, filesRead: ['src/a.ts'], refused: 0, bot: 'Owl | one' }];
     const body = renderPanelSummary({ language: 'en', bots, merge, minAgreement: 2, inlineCount: 1, explorations });
 
-    expect(body).toContain('> ℹ️ **Owl \\| one**: Explored: 1 files in 2 rounds');
+    expect(body).toContain('> ℹ️ **Owl \\| one**: Explored: 1 file in 2 rounds');
     expect(body).not.toContain('**MergePilot**: Explored:');
     expect(renderPanelSummary({ language: 'en', bots, merge, minAgreement: 2, inlineCount: 1 })).not.toContain('Explored:');
   });

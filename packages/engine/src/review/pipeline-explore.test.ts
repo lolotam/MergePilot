@@ -164,7 +164,7 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
     expect(requests[4]!.user).toContain('<<<UNTRUSTED:EXPLORED:src/other.ts>>>');
     expect(result).toMatchObject({
       status: 'completed',
-      exploration: { rounds: 3, requests: 2, filesRead: ['src/guard.ts', 'src/other.ts'] },
+      exploration: { rounds: 2, verifierRounds: 1, requests: 2, filesRead: ['src/guard.ts', 'src/other.ts'] },
     });
   });
 

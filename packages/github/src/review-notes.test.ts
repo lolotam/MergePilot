@@ -60,25 +60,41 @@ describe('review summary — verification rejections and rules left out', () => 
 });
 
 describe('the exploration note (ADR-0046)', () => {
-  it('says how many files the review explored and in how many rounds', () => {
+  it('uses plural English count words', () => {
     const note = renderExplorationNote(
-      { rounds: 2, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 0 },
+      { rounds: 2, verifierRounds: 0, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 2 },
       false,
     );
-    expect(note).toBe('> ℹ️ Explored: 2 files in 2 rounds');
+    expect(note).toBe('> ℹ️ Explored: 2 files in 2 rounds, 2 requests refused');
   });
 
-  it('counts the requests the rules refused', () => {
+  it('uses singular English count words', () => {
     const note = renderExplorationNote(
-      { rounds: 1, requests: 2, filesRead: ['src/a.ts'], refused: 1 },
+      { rounds: 1, verifierRounds: 0, requests: 2, filesRead: ['src/a.ts'], refused: 1 },
       false,
     );
-    expect(note).toBe('> ℹ️ Explored: 1 files in 1 rounds, 1 requests refused');
+    expect(note).toBe('> ℹ️ Explored: 1 file in 1 round, 1 request refused');
+  });
+
+  it('discloses one verifier round separately', () => {
+    const note = renderExplorationNote(
+      { rounds: 2, verifierRounds: 1, requests: 3, filesRead: ['src/a.ts'], refused: 0 },
+      false,
+    );
+    expect(note).toBe('> ℹ️ Explored: 1 file in 2 rounds, verifier: 1 round');
+  });
+
+  it('discloses several verifier rounds separately', () => {
+    const note = renderExplorationNote(
+      { rounds: 0, verifierRounds: 2, requests: 0, filesRead: [], refused: 0 },
+      false,
+    );
+    expect(note).toBe('> ℹ️ Explored: 0 files in 0 rounds, verifier: 2 rounds');
   });
 
   it('says why the exploration was skipped', () => {
     const note = renderExplorationNote(
-      { rounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'batched review' },
+      { rounds: 0, verifierRounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'batched review' },
       false,
     );
     expect(note).toBe('> ℹ️ Explored: 0 files in 0 rounds (skipped: batched review)');
@@ -86,19 +102,27 @@ describe('the exploration note (ADR-0046)', () => {
 
   it('says nothing when there was no exploration', () => {
     expect(renderExplorationNote(undefined, false)).toBeUndefined();
-    expect(renderExplorationNote({ rounds: 0, requests: 0, filesRead: [], refused: 0 }, false)).toBeUndefined();
+    expect(
+      renderExplorationNote({ rounds: 0, verifierRounds: 0, requests: 0, filesRead: [], refused: 0 }, false),
+    ).toBeUndefined();
   });
 
   it('speaks Arabic too', () => {
     expect(
       renderExplorationNote(
-        { rounds: 2, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 1 },
+        { rounds: 2, verifierRounds: 1, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 1 },
         true,
       ),
-    ).toBe('> ℹ️ الاستكشاف: 2 ملف في 2 جولة، 1 طلب مرفوض');
+    ).toBe('> ℹ️ الاستكشاف: 2 ملف في 2 جولة، والتحقق: 1 جولة، 1 طلب مرفوض');
     expect(
       renderExplorationNote(
-        { rounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'batched review' },
+        { rounds: 0, verifierRounds: 2, requests: 0, filesRead: [], refused: 0 },
+        true,
+      ),
+    ).toBe('> ℹ️ الاستكشاف: 0 ملف في 0 جولة، والتحقق: 2 جولة');
+    expect(
+      renderExplorationNote(
+        { rounds: 0, verifierRounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'batched review' },
         true,
       ),
     ).toBe('> ℹ️ الاستكشاف: 0 ملف في 0 جولة (اتخطى: batched review)');

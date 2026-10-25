@@ -91,8 +91,19 @@ describe('the exploration rounds (ADR-0046)', () => {
     expect(result.block).toContain('src/a.ts');
     expect(result.block).toContain('src/b.ts');
     expect(budget.rounds).toBe(3);
+    expect(budget.disclosure().verifierRounds).toBe(0);
     expect(budget.requests).toBe(2);
     expect(budget.filesRead).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('counts verifier rounds separately from review rounds', async () => {
+    const budget = new ExploreBudget(LIMITS);
+    const reader = fakeReader({ 'src/a.ts': 'const a = 1;' });
+
+    await runExploration(options({ model: makeModel([READ_A, NOTHING]).model, budget, reader }));
+    await runExploration(options({ model: makeModel([NOTHING]).model, budget, reader, purpose: 'verify', rounds: 1 }));
+
+    expect(budget.disclosure()).toMatchObject({ rounds: 2, verifierRounds: 1, requests: 1 });
   });
 
   it('caps the rounds at the configured limit', async () => {

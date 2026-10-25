@@ -3,8 +3,10 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { type ReactNode } from 'react';
 import type { MeResponse } from '@mergepilot/app/contract';
-import { api } from './client.js';
-import { ACTIVE_RUN_POLL_MS, useDeleteWorkspaceMutation, useMeQuery, useRunGroupsQuery } from './hooks.js';
+import { api, ApiClientError, type SettingsResponse } from './client.js';
+import {
+  ACTIVE_RUN_POLL_MS, useDeleteWorkspaceMutation, useMeQuery, useRunGroupsQuery, useSettingsQuery, useUpdateSettingsMutation,
+} from './hooks.js';
 import { I18nProvider } from '../i18n/context.js';
 import { ToastProvider } from '../components/Toast.js';
 
@@ -107,5 +109,99 @@ describe('useRunGroupsQuery polling', () => {
       await vi.advanceTimersByTimeAsync(ACTIVE_RUN_POLL_MS * 3);
     });
     expect(getRunGroups).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useUpdateSettingsMutation', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const settingsKey = ['workspaces', 'ws-1', 'settings'];
+  const stored = (exploreEnabled: boolean) => ({ settings: { exploreEnabled } }) as unknown as SettingsResponse;
+  const body = { provider: 'openrouter', model: 'm', language: 'en', exploreEnabled: true } as const;
+
+  function wrapperFor(queryClient: QueryClient) {
+    return ({ children }: { children: ReactNode }) =>
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(I18nProvider, { initialLanguage: 'en' }, React.createElement(ToastProvider, null, children)),
+      );
+  }
+
+  it('puts the settings the save answers into the cache before any refetch', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(settingsKey, stored(false));
+    vi.spyOn(api, 'updateSettings').mockResolvedValue(stored(true));
+
+    const { result } = renderHook(() => useUpdateSettingsMutation('ws-1'), { wrapper: wrapperFor(queryClient) });
+    await act(() => result.current.mutateAsync(body));
+
+    expect(queryClient.getQueryData(settingsKey)).toEqual(stored(true));
+  });
+
+  it.each([
+    ['a 409', new ApiClientError('changed', 'settings_conflict', 409)],
+    ['a 5xx', new ApiClientError('bad gateway', 'internal', 502)],
+    ['a lost answer', new TypeError('Failed to fetch')],
+  ])('refetches the settings after %s, whose write may have happened', async (_name, error) => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const getSettings = vi.spyOn(api, 'getSettings').mockResolvedValue(stored(true));
+    vi.spyOn(api, 'updateSettings').mockRejectedValue(error);
+    const { result } = renderHook(
+      () => ({ query: useSettingsQuery('ws-1'), save: useUpdateSettingsMutation('ws-1') }),
+      { wrapper: wrapperFor(queryClient) },
+    );
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+
+    await act(() => result.current.save.mutateAsync(body).catch(() => undefined));
+
+    expect(getSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves the settings alone after a 4xx refused before writing', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const getSettings = vi.spyOn(api, 'getSettings').mockResolvedValue(stored(false));
+    vi.spyOn(api, 'updateSettings').mockRejectedValue(new ApiClientError('bad', 'invalid', 400));
+    const { result } = renderHook(
+      () => ({ query: useSettingsQuery('ws-1'), save: useUpdateSettingsMutation('ws-1') }),
+      { wrapper: wrapperFor(queryClient) },
+    );
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+
+    await act(() => result.current.save.mutateAsync(body).catch(() => undefined));
+
+    expect(getSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a conflicting save only after the settings are refetched', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let resolveRefetch: (value: SettingsResponse) => void = () => {};
+    vi.spyOn(api, 'getSettings')
+      .mockResolvedValueOnce(stored(false))
+      .mockImplementationOnce(() => new Promise<SettingsResponse>((resolve) => { resolveRefetch = resolve; }));
+    vi.spyOn(api, 'updateSettings').mockRejectedValue(new ApiClientError('changed', 'settings_conflict', 409));
+
+    const { result } = renderHook(
+      () => ({ query: useSettingsQuery('ws-1'), save: useUpdateSettingsMutation('ws-1') }),
+      { wrapper: wrapperFor(queryClient) },
+    );
+    await waitFor(() => expect(result.current.query.data).toEqual(stored(false)));
+
+    let rejected = false;
+    let pending: Promise<unknown> = Promise.resolve();
+    act(() => {
+      pending = result.current.save.mutateAsync(body).catch(() => { rejected = true; });
+    });
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalledTimes(2));
+    expect(rejected).toBe(false);
+
+    await act(async () => {
+      resolveRefetch(stored(true));
+      await pending;
+    });
+    expect(rejected).toBe(true);
+    expect(queryClient.getQueryData(settingsKey)).toEqual(stored(true));
   });
 });
