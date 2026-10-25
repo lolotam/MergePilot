@@ -40,9 +40,11 @@ export function useUpdateSettingsMutation(workspaceId: string) {
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
-      // A 409 means another admin changed the settings: the save rejects only once they are
-      // refetched, so the next save builds on them. Other errors leave the cached settings alone.
-      if (err instanceof ApiClientError && err.status === 409) {
+      // A 409 means another admin changed the settings, and a 5xx or a lost answer may have saved
+      // them anyway: the save rejects only once they are refetched, so the next save builds on
+      // them. Any other 4xx was refused before writing and leaves the cached settings alone.
+      const refused = err instanceof ApiClientError && err.status >= 400 && err.status < 500 && err.status !== 409;
+      if (!refused) {
         return queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'settings'] });
       }
       return undefined;

@@ -141,6 +141,40 @@ describe('useUpdateSettingsMutation', () => {
     expect(queryClient.getQueryData(settingsKey)).toEqual(stored(true));
   });
 
+  it.each([
+    ['a 409', new ApiClientError('changed', 'settings_conflict', 409)],
+    ['a 5xx', new ApiClientError('bad gateway', 'internal', 502)],
+    ['a lost answer', new TypeError('Failed to fetch')],
+  ])('refetches the settings after %s, whose write may have happened', async (_name, error) => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const getSettings = vi.spyOn(api, 'getSettings').mockResolvedValue(stored(true));
+    vi.spyOn(api, 'updateSettings').mockRejectedValue(error);
+    const { result } = renderHook(
+      () => ({ query: useSettingsQuery('ws-1'), save: useUpdateSettingsMutation('ws-1') }),
+      { wrapper: wrapperFor(queryClient) },
+    );
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+
+    await act(() => result.current.save.mutateAsync(body).catch(() => undefined));
+
+    expect(getSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves the settings alone after a 4xx refused before writing', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const getSettings = vi.spyOn(api, 'getSettings').mockResolvedValue(stored(false));
+    vi.spyOn(api, 'updateSettings').mockRejectedValue(new ApiClientError('bad', 'invalid', 400));
+    const { result } = renderHook(
+      () => ({ query: useSettingsQuery('ws-1'), save: useUpdateSettingsMutation('ws-1') }),
+      { wrapper: wrapperFor(queryClient) },
+    );
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+
+    await act(() => result.current.save.mutateAsync(body).catch(() => undefined));
+
+    expect(getSettings).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a conflicting save only after the settings are refetched', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     let resolveRefetch: (value: SettingsResponse) => void = () => {};

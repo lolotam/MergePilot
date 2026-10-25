@@ -249,7 +249,7 @@ export function ReviewSettingsCard({
                 aria-checked={exploreEnabled}
                 aria-label={t('botExploreLabel')}
                 aria-describedby="settings-explore-hint"
-                disabled={isMember || isSaving || savingExplore}
+                disabled={!settings || isMember || isSaving || savingExplore}
                 onClick={() => void handleExploreToggle()}
                 className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${exploreEnabled ? 'bg-green-500' : 'bg-ink-300 dark:bg-ink-700'}`}
               >
