@@ -61,6 +61,15 @@ export function findOverride(overrides: readonly PriceOverride[] | undefined, pr
  */
 export type PricingSource = 'override' | 'repo' | `catalog:${PriceSource}` | 'subscription' | 'static' | 'unknown';
 
+/** One model's display-only API-equivalent, including the tokens priced. */
+export interface ApiEquivalentModel {
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  usd: number;
+}
+
 /** `result.pricing` of a run: what priced its primary model; null prices when unknown. */
 export interface RunPricing {
   source: PricingSource;
@@ -74,6 +83,8 @@ export interface RunPricing {
    * of `cost_usd`, the monthly budget or the GitHub summary. Absent when that price is unknown.
    */
   apiEquivalentUsd?: number | undefined;
+  /** Subscription calls only on a mixed or subscription-fallback run (ADR-0047). */
+  apiEquivalentByModel?: ApiEquivalentModel[] | undefined;
   /** Where that API price came from (`override`, `catalog:…`), when `apiEquivalentUsd` is set. */
   apiEquivalentSource?: PricingSource | undefined;
 }

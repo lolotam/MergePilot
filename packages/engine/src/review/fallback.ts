@@ -12,8 +12,10 @@
  */
 import type { Secret } from '../credentials/secret.js';
 import { failureKind, type FailureKind, type LlmFailureCode } from '../llm/failure.js';
+import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
 import type { ReviewAuthMethod, ReviewModel, ReviewModelRequest, ReviewModelResponse, SkippedFallback } from './model.js';
+import { combineUsage } from './split.js';
 
 export const FALLBACK_TRIGGERS: readonly FailureKind[] = ['quota', 'rate-limit', 'server', 'network', 'auth'];
 
@@ -61,6 +63,8 @@ export interface FallbackDisclosure {
    */
   fallbackFromMethod?: ReviewAuthMethod;
   modelUsedMethod?: ReviewAuthMethod;
+  /** Successful subscription calls, summed by model label; never includes the judge. */
+  subscriptionUsage?: Array<{ label: string; usage: TokenUsage }>;
 }
 
 /** One possible switch: the model that just failed, the entry that would take over, and the call. */
@@ -81,6 +85,7 @@ export class FallbackChain implements ReviewModel {
   #index = 0;
   #from: { label: string; code: FailureKind; detail: string | undefined } | undefined;
   #onlySubscriptionCalls = true;
+  readonly #subscriptionUsage = new Map<string, TokenUsage>();
   readonly #mayEnter: MayEnter | undefined;
 
   constructor(primary: ReviewModel, fallbacks: readonly ReviewModel[] = [], mayEnter?: MayEnter) {
@@ -125,7 +130,12 @@ export class FallbackChain implements ReviewModel {
       const model = this.#current();
       this.#onlySubscriptionCalls &&= model.includedInSubscription === true;
       try {
-        return await model.generate(request);
+        const response = await model.generate(request);
+        if (model.includedInSubscription === true && response.usage) {
+          const combined = combineUsage(this.#subscriptionUsage.get(model.label), response.usage);
+          if (combined) this.#subscriptionUsage.set(model.label, combined);
+        }
+        return response;
       } catch (error) {
         const kind = failureKindOf(error);
         if (request.signal?.aborted || !kind || !FALLBACK_TRIGGERS.includes(kind)) throw error;
@@ -160,6 +170,9 @@ export class FallbackChain implements ReviewModel {
       ...(this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {}),
       ...(this.#from?.detail ? { fallbackDetail: disclosedDetail(this.#from.detail, secrets) } : {}),
       ...(skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {}),
+      ...(this.#subscriptionUsage.size > 0
+        ? { subscriptionUsage: [...this.#subscriptionUsage].map(([label, usage]) => ({ label, usage })) }
+        : {}),
       ...this.#methodSwitch(),
     };
   }

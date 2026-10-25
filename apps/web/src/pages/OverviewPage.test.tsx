@@ -44,6 +44,11 @@ describe('OverviewPage - onboarding checklist states and usage', () => {
       data: usage,
       isLoading: false,
     } as unknown as ReturnType<typeof hooks.useUsageQuery>);
+
+    vi.mocked(hooks.useApiEquivalentUsageQuery).mockReturnValue({
+      data: { monthUsd: 0, totalUsd: 0, reviews: 0, averagePerReviewUsd: 0, leftOut: 0, byModel: [], monthStart: '2026-10-01' },
+      isLoading: false,
+    } as unknown as ReturnType<typeof hooks.useApiEquivalentUsageQuery>);
   };
 
   const renderComponent = () =>

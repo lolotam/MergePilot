@@ -438,6 +438,25 @@ export const UsageResponseSchema = z.object({
   monthlyBudgetUsd: z.number().nullable(),
   monthStart: z.string(),
 });
+export type UsageResponse = z.infer<typeof UsageResponseSchema>;
+
+/** GET (member) /api/workspaces/:workspaceId/usage/api-equivalent */
+export const ApiEquivalentUsageResponseSchema = z.object({
+  monthUsd: z.number(),
+  totalUsd: z.number(),
+  reviews: z.number().int(),
+  averagePerReviewUsd: z.number(),
+  leftOut: z.number().int(),
+  byModel: z.array(z.object({
+    provider: z.string(),
+    model: z.string(),
+    inputTokens: z.number(),
+    outputTokens: z.number(),
+    usd: z.number(),
+  })),
+  monthStart: z.string(),
+});
+export type ApiEquivalentUsageResponse = z.infer<typeof ApiEquivalentUsageResponseSchema>;
 
 /**
  * GET /app/installed?installation_id=&setup_action= — GitHub's post-install redirect.

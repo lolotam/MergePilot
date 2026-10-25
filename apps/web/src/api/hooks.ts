@@ -219,6 +219,14 @@ export function useUsageQuery(workspaceId: string) {
   });
 }
 
+export function useApiEquivalentUsageQuery(workspaceId: string) {
+  return useQuery({
+    queryKey: ['workspaces', workspaceId, 'usage', 'api-equivalent'],
+    queryFn: () => api.getApiEquivalentUsage(workspaceId),
+    enabled: Boolean(workspaceId),
+  });
+}
+
 export function useRenameWorkspaceMutation(workspaceId: string) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();

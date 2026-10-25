@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { DEFAULT_WORKSPACE_MAX_FINDINGS, InstallationAlreadyLinkedError, type SaveSettingsOptions, SettingsChangedError, WorkspaceDeletedError } from './types.js';
-import { findActiveRun } from './memory-runs.js';
+import { memoryActiveRun, memoryApiEquivalentRows, memoryRunRepos } from './memory-run-queries.js';
 import {
   memoryCreateReviewRun,
   memoryFailStaleRuns,
@@ -40,7 +40,7 @@ import type {
   KeyProvider, AppStore, DeleteRunsTarget, FinishReviewRunOptions, Installation, LatestFailedRunsOptions,
   ListReviewRunGroupsResult, ListReviewRunsOptions, ListReviewRunsResult, MaintenanceKind, MaintenanceRun,
   MonthlyUsage, NewReviewRun, RetentionPolicy, ReviewRun, StaleRunRef, StoredCredential, StoredProviderKey,
-  ProviderKeyChange, KeyQuotaStatus, ProviderAuthMethod, WorkspaceRestore, WorkspaceSettings,
+  ProviderKeyChange, KeyQuotaStatus, ProviderAuthMethod, WorkspaceRestore, WorkspaceSettings, ApiEquivalentRunRow,
 } from './types.js';
 /** In-memory AppStore for tests and local development. Same contract as the Postgres store. */
 export class MemoryStore implements AppStore {
@@ -361,14 +361,12 @@ export class MemoryStore implements AppStore {
     return { ...run };
   }
 
+  async listApiEquivalentRuns(workspaceId: string): Promise<ApiEquivalentRunRow[]> {
+    return memoryApiEquivalentRows(this.runs, workspaceId);
+  }
+
   async listReviewRunRepos(workspaceId: string): Promise<string[]> {
-    const repos = new Set<string>();
-    for (const r of this.runs.values()) {
-      if (r.workspaceId === workspaceId && r.repoFullName) {
-        repos.add(r.repoFullName);
-      }
-    }
-    return [...repos].sort();
+    return memoryRunRepos(this.runs, workspaceId);
   }
 
   async findActiveReviewRun(
@@ -378,8 +376,7 @@ export class MemoryStore implements AppStore {
     headSha: string,
     botSlot?: number,
   ): Promise<ReviewRun | null> {
-    const run = findActiveRun(this.runs.values(), { workspaceId, repoFullName, pullNumber, headSha, botSlot });
-    return run ? { ...run } : null;
+    return memoryActiveRun(this.runs, workspaceId, repoFullName, pullNumber, headSha, botSlot);
   }
 
   async listLatestFailedRuns(

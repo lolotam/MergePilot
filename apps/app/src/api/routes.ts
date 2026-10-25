@@ -38,6 +38,7 @@ import { registerSkillRoutes } from './skill-routes.js';
 import { registerWorkspaceLifecycleRoutes } from './workspace-lifecycle.js';
 import { registerSubscriptionRoutes, subscriptionAvailability } from './subscription-routes.js';
 import type { SubscriptionLoginFn } from '../credentials/subscription-login.js';
+import { registerApiEquivalentUsageRoute } from './api-equivalent-usage.js';
 
 export interface DashboardApiDeps {
   auth: Auth;
@@ -391,6 +392,7 @@ export function registerDashboardApi(
     },
   );
 
+  registerApiEquivalentUsageRoute(app, deps);
   registerProviderKeyRoutes(app, deps, validateKeyFn);
   registerProviderAuthRoutes(app, deps);
   registerInstallationRoutes(app, deps);
