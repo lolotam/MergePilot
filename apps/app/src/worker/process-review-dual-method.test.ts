@@ -119,7 +119,8 @@ describe('processReviewJob — method fallback from a subscription to API keys (
     const { run } = await dualReview(model);
 
     expect(run?.costUsd).toBe(0);
-    expect(run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 });
+    // The fallback's model has no API price here, so its subscription part is marked unpriced (ADR-0047).
+    expect(run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0, subscriptionPart: null });
   });
 
   it('keeps an all-subscription run at $0 with its API-equivalent', async () => {

@@ -247,7 +247,8 @@ describe('processReviewJob — an unavailable subscription enters the configured
     const h = await review({ provider, freeFallback: true, monthlyBudgetUsd: 10 });
     expect(h.admit.mock.calls[0]?.[1]).toBe(0);
     expect(h.run).toMatchObject({ status: 'completed', fallbackFrom: h.primaryLabel, costUsd: 0 });
-    expect(h.run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 });
+    // No API price for the fallback's model here: its subscription part is marked unpriced (ADR-0047).
+    expect(h.run?.result?.pricing).toEqual({ source: 'subscription', inputPerMTok: 0, outputPerMTok: 0, subscriptionPart: null });
     expect(refreshSubscription).toHaveBeenCalledTimes(1);
     warning(h, 'sign-in');
   });

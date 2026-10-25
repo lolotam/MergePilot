@@ -56,6 +56,18 @@ export const RunPricingSchema = z.object({
   /** Display-only API-equivalent of a subscription or token-plan run (ADR-0024); absent when unknown. */
   apiEquivalentUsd: z.number().optional(),
   apiEquivalentSource: PricingSourceSchema.optional(),
+  /** The subscription calls of a mixed or fallback run at their API price (ADR-0047); null when unpriced. */
+  subscriptionPart: z.object({
+    usd: z.number(),
+    byModel: z.array(z.object({
+      provider: z.string(),
+      model: z.string(),
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+      usd: z.number(),
+    })),
+    source: PricingSourceSchema,
+  }).nullable().optional(),
 });
 
 export const PRICED_MODEL_ROLES = ['primary', 'heavy', 'fallback', 'judge', 'judge-fallback'] as const;

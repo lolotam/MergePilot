@@ -1,29 +1,25 @@
-import { createReviewModel, LlmFailure, redactSecrets, type ApiProviderId, type ReviewModel, type Secret, type TokenUsage } from '@mergepilot/engine';
-import type { SemanticDedupeResult } from '@mergepilot/github';
+import { createReviewModel, LlmFailure, redactSecrets, type ApiProviderId, type ReviewModel, type Secret } from '@mergepilot/engine';
 import {
   MAIN_BOT_SLOT,
   WorkspaceDeletedError,
   type ApiProvider,
   type FinishReviewRunOptions,
-  type ReviewRunResultPayload,
-  type ReviewRunStatus,
 } from '../core/types.js';
-import type { RunPricing } from '../core/price-types.js';
 import { terminalSubscriptionFailure } from '../credentials/subscription-resolution.js';
 import { createSafeFetch, REVIEW_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { buildBotConfig } from './bot-config.js';
 import { skillKeyOf } from './effective-config.js';
 import { reviewOnlyOutcome, runBotReview, type BotFiles, type ReviewOnlyOutcome } from './bot-review-run.js';
 import { executeReview } from './execute-review.js';
-import { judgeRunParts, workspaceJudge, type WorkspaceJudge } from './judge-setup.js';
-import { customBaseUrlFor, fallbackChain, skippedFallbacksNote, usedModel, type ModelChoice } from './model-choice.js';
+import { workspaceJudge } from './judge-setup.js';
+import { customBaseUrlFor, fallbackChain, skippedFallbacksNote, type ModelChoice } from './model-choice.js';
 import type { BotOutcome, BotRun, PanelContext } from './panel-types.js';
 import { CursorWrites, loadRosters, rosterSecrets, rotationHandler, type KeyRotationDisclosure } from './key-roster.js';
-import { prepareRunResult } from './prepare-run-result.js';
 import { addRedactionCredentials } from './redaction-credentials.js';
+import { recordOf, type RecordPricing } from './run-record.js';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
 import type { ProcessReviewResult } from './types.js';
-import { apiEquivalentFields, apiEquivalentPrice, type ApiEquivalentPrice } from './api-equivalent.js';
+import { apiEquivalentPrice } from './api-equivalent.js';
 import { admittedSubscription, apiPricedConfig, dualMethodsForProviders, withinAdmission } from './dual-method-review.js';
 
 export const WORKSPACE_DELETED = 'workspace_deleted';
@@ -205,7 +201,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         { knownSecrets, judge: judgeSetup.judge },
       );
       await cursorWrites.flush();
-      const record = recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, recordPricing);
+      const record = await recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, recordPricing);
       if (outcome.fallback) {
         const { from, code, detail: why } = outcome.fallback;
         deps.log?.(`Fallback used: ${from} failed (${code})${why ? `: ${why}` : ''}`);
@@ -229,7 +225,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
         : {}),
     });
     await cursorWrites.flush();
-    const record = recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, recordPricing);
+    const record = await recordOf(ctx, br, choice, reviewResult, judgeSetup, credStore.getKnownSecrets(), skippedNote, recordPricing);
     record.finish.reviewUrl = reviewResult.reviewUrl ?? null;
     await finishBotRun(ctx, br, record.finish, reviewResult.runResult);
     return { slot, result: record.result, findings: record.finish.findingsCount ?? 0 };
@@ -237,123 +233,6 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     await cursorWrites.flush();
     return { slot, result: await failBotRun(ctx, br, error, credStore?.getKnownSecrets() ?? [], choice) };
   }
-}
-
-interface RecordPricing {
-  /** What priced the bot's own model (ADR-0016). */
-  pricing: RunPricing;
-  /** The display-only API price of a subscription or token-plan model (ADR-0024). */
-  apiPrice: ApiEquivalentPrice | undefined;
-  rotation: readonly KeyRotationDisclosure[];
-  /** The primary model runs on a consumer subscription. */
-  onSubscription: boolean;
-}
-
-interface BotRecord {
-  finish: FinishReviewRunOptions;
-  result: ProcessReviewResult;
-  modelLabel: string;
-}
-
-/** The run record of a reviewed bot: status, cost, detail, the model that answered, findings. */
-function recordOf(
-  ctx: PanelContext,
-  br: BotRun,
-  choice: ModelChoice,
-  review: ReviewOnlyOutcome & { judgeSemantic?: SemanticDedupeResult | undefined },
-  judgeSetup: WorkspaceJudge,
-  knownSecrets: Secret[],
-  skippedNote: string | undefined,
-  { pricing, apiPrice, rotation, onSubscription }: RecordPricing,
-): BotRecord {
-  // `subscription` ($0) only while every call stayed on a subscription; a run that switched to
-  // paid API keys is priced at the API price (ADR-0027). A run that made no model call has no
-  // tally, and without a fallback all its calls were on the primary.
-  const rr = review.runResult;
-  const allOnSubscription =
-    rr && rr.status !== 'skipped-budget' ? rr.onlySubscriptionCalls : onSubscription && !review.fallbackFrom;
-  const runPricing: RunPricing = allOnSubscription ? { source: 'subscription', inputPerMTok: 0, outputPerMTok: 0 } : pricing;
-  // What priced this bot's own model (ADR-0016), plus the display-only API-equivalent of a
-  // subscription or token-plan run (ADR-0024), from its own usage before the judge's tokens; the
-  // method switch (ADR-0027) and the key rotation (ADR-0026). Never a secret or provider text.
-  const disclosed = (usage: TokenUsage | undefined): Pick<ReviewRunResultPayload, 'pricing' | 'fallbackFromMethod' | 'modelUsedMethod' | 'keyRotation'> => ({
-    pricing: { ...runPricing, ...apiEquivalentFields(usage, review.fallbackFrom ? undefined : apiPrice) },
-    ...(review.fallbackFromMethod && review.modelUsedMethod
-      ? { fallbackFromMethod: review.fallbackFromMethod, modelUsedMethod: review.modelUsedMethod }
-      : {}),
-    ...(rotation.length > 0 ? { keyRotation: rotation.slice(0, 20).map((event) => ({ ...event })) } : {}),
-  });
-  const status: ReviewRunStatus =
-    review.outcome === 'completed'
-      ? 'completed'
-      : review.outcome === 'skipped-budget' || review.outcome === 'skipped'
-        ? 'skipped'
-        : 'failed';
-
-  const costUsd = review.costUsd ?? null;
-  let payload: ReviewRunResultPayload | null = null;
-  let findingsCount: number | null = null;
-  let judgeNote: string | undefined;
-
-  if (rr?.status === 'completed') {
-    const judged = judgeRunParts(judgeSetup, rr.usage, rr.judge, review.judgeSemantic);
-    judgeNote = judged.note;
-    payload = {
-      ...prepareRunResult({
-        summary: rr.summary,
-        inlineFindings: rr.inline,
-        summaryOnlyFindings: rr.summaryOnly,
-        language: ctx.settings.language,
-        usage: judged.usage,
-        verification: rr.verification,
-        judge: judged.judge,
-        knownSecrets,
-      }),
-      ...disclosed(rr.usage),
-    };
-    findingsCount = rr.inline.length + rr.summaryOnly.length;
-  } else if (rr?.status === 'failed') {
-    // A failed run keeps what it spent and how (ADR-0027 amendment): no summary, no findings, and
-    // none of the provider's text, which stays in the redacted `detail` and the logs.
-    payload = {
-      v: 1,
-      summary: '',
-      highlights: [],
-      findings: [],
-      language: ctx.settings.language,
-      ...(rr.usage ? { usage: { inputTokens: rr.usage.inputTokens, outputTokens: rr.usage.outputTokens } } : {}),
-      ...disclosed(rr.usage),
-    };
-  } else if (status === 'skipped') {
-    findingsCount = 0;
-  }
-  const detail = br.skipPaidFallbacks?.length
-    ? [review.detail, skippedNote].filter(Boolean).join('; ') || judgeNote || null
-    : review.detail ?? skippedNote ?? judgeNote ?? null;
-  const used = usedModel(
-    choice,
-    { ...ctx.settings, fallback: br.bot.fallback },
-    review.modelUsed,
-    review.fallbackFrom,
-    review.fallbackFromMethod,
-    review.modelUsedMethod,
-  );
-  return {
-    finish: {
-      status,
-      costUsd,
-      detail,
-      provider: used.provider,
-      model: used.model,
-      effort: used.effort,
-      fallbackFrom: used.fallbackFrom,
-      findingsCount,
-      result: payload,
-      reviewUrl: null,
-    },
-    result: { status, costUsd, detail, ...(review.outcome === 'skipped-budget' ? { skippedForBudget: true as const } : {}) },
-    modelLabel: `${used.provider}:${used.model}`,
-  };
 }
 
 /** Records a reviewed bot's run and logs `job.end` (with the bot slot when the panel is active). */

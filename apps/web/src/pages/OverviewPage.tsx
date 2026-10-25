@@ -20,6 +20,7 @@ import {
 } from '../api/hooks.js';
 import { useI18n } from '../i18n/context.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { ApiEquivalentCard } from './ApiEquivalentCard.js';
 
 export function OverviewPage() {
   const { workspaceId = '' } = useParams();
@@ -182,7 +183,7 @@ export function OverviewPage() {
       )}
 
       {/* Usage & Quick Links Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Usage this month card */}
         <div className="lg:col-span-2 p-6 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs">
           <div className="flex items-center justify-between mb-4">
@@ -244,6 +245,8 @@ export function OverviewPage() {
             </div>
           )}
         </div>
+
+        <ApiEquivalentCard workspaceId={workspaceId} />
 
         {/* Quick Links Card */}
         <div className="p-6 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs flex flex-col justify-between">

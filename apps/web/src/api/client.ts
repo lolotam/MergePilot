@@ -21,9 +21,10 @@ import type {
   SubscriptionLogin,
   SubscriptionProvider,
   SubscriptionAvailability,
+  ApiEquivalentUsageResponse,
 } from '@mergepilot/app/contract';
 
-export type { PricesResponse } from '@mergepilot/app/contract';
+export type { PricesResponse, ApiEquivalentUsageResponse } from '@mergepilot/app/contract';
 export type { SubscriptionAvailability, SubscriptionLogin, SubscriptionLoginErrorCode, SubscriptionProvider } from '@mergepilot/app/contract';
 export type {
   BackupPreview,
@@ -346,6 +347,8 @@ export const api = {
     ),
   getUsage: (workspaceId: string) =>
     fetchApi<UsageResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/usage`),
+  getApiEquivalentUsage: (workspaceId: string) =>
+    fetchApi<ApiEquivalentUsageResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/usage/api-equivalent`),
   renameWorkspace: (workspaceId: string, name: string) =>
     fetchApi<{ id: string; name: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
       method: 'PATCH',

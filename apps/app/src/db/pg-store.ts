@@ -11,6 +11,7 @@ import type {
   WorkspaceSettings, ModelKey,
   StaleRunRef,
   StoredModelPrice, DeletedReviewSkill, NewReviewSkill, ReviewSkillChange, ReviewSkillRecord, ReviewSkillSummary,
+  ApiEquivalentRunRow,
 } from '../core/types.js';
 import type { PriceEntry, PriceSource } from '@mergepilot/engine';
 import { getPgModelPrice, listPgModelPrices, pgPricesFetchedAt, replacePgModelPrices } from './pg-prices.js';
@@ -35,6 +36,7 @@ import {
   touchPgReviewRun,
 } from './pg-runs.js';
 import { getPgSettings, savePgSettings } from './pg-settings.js';
+import { listPgApiEquivalentRuns } from './pg-api-equivalent.js';
 import { failPgStaleRuns, finishPgReviewRun, listPgMonthlyUsage, monthPgCostUsd } from './pg-usage.js';
 import { installations, providerCredentials, reviewRuns, webhookDeliveries } from './schema.js';
 import type * as schema from './schema.js';
@@ -346,6 +348,10 @@ export class PgStore implements AppStore {
       .where(and(eq(reviewRuns.id, id), eq(reviewRuns.workspaceId, workspaceId)));
     const row = rows[0];
     return row ? mapReviewRunRow(row) : null;
+  }
+
+  async listApiEquivalentRuns(workspaceId: string, providers: readonly string[]): Promise<ApiEquivalentRunRow[]> {
+    return listPgApiEquivalentRuns(this.db, workspaceId, providers);
   }
 
   async listReviewRunRepos(workspaceId: string): Promise<string[]> {

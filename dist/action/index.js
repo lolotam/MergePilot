@@ -140173,6 +140173,386 @@ function parseReviewAnswer(text, options) {
   };
 }
 
+var FileTier = { Source: 0, Test: 1, Config: 2, Docs: 3 };
+var DOC_EXTENSIONS = /* @__PURE__ */ new Set(["md", "mdx", "markdown", "rst", "adoc", "txt"]);
+var DOC_NAMES = /^(license|licence|changelog|changes|authors|notice|copying|codeowners)$/i;
+var GENERATED_SEGMENTS = /* @__PURE__ */ new Set(["__snapshots__", "generated", "vendor"]);
+var CI_SEGMENTS = /* @__PURE__ */ new Set([".github", ".circleci", ".gitlab", ".husky", ".devcontainer", ".vscode"]);
+var CONFIG_EXTENSIONS = /* @__PURE__ */ new Set(["json", "jsonc", "json5", "yml", "yaml", "toml", "ini", "cfg", "conf", "properties"]);
+var CONFIG_NAMES = /^(dockerfile|makefile|procfile|jenkinsfile|cmakelists\.txt|requirements[^/]*\.txt|docker-compose[^/]*|.*\.dockerfile)$/i;
+var TOOL_CONFIG_NAMES = /^(vite|vitest|eslint|jest|webpack|rollup|babel|postcss|tailwind|prettier|next|nuxt|svelte|astro|playwright|cypress|tsup|esbuild|karma|commitlint|stylelint|metro|drizzle|turbo|lint-staged)\.config\.[cm]?[jt]s$/i;
+var TEST_SEGMENTS = /* @__PURE__ */ new Set(["__tests__", "__mocks__", "__fixtures__", "test", "tests", "spec", "specs", "testdata"]);
+var TEST_NAME = /(\.(test|spec|fixtures?)\.[^.]+$)|(^test_.+\.py$)|(_test\.(py|go)$)|(^conftest\.py$)/;
+function splitPath(path12) {
+  const segments = path12.replace(/\\/g, "/").split("/");
+  const base = segments.pop() ?? "";
+  const extension2 = base.includes(".") ? (base.split(".").pop() ?? "").toLowerCase() : "";
+  return { dirs: segments, base, extension: extension2 };
+}
+function fileTierOf(path12) {
+  const { dirs, base, extension: extension2 } = splitPath(path12);
+  const lower2 = base.toLowerCase();
+  if (CONFIG_NAMES.test(lower2) || TOOL_CONFIG_NAMES.test(lower2))
+    return FileTier.Config;
+  if (DOC_EXTENSIONS.has(extension2) || DOC_NAMES.test(lower2) || isLockfile(lower2) || lower2.endsWith(".snap")) {
+    return FileTier.Docs;
+  }
+  if (dirs.some((d) => GENERATED_SEGMENTS.has(d.toLowerCase())))
+    return FileTier.Docs;
+  if (dirs.some((d) => CI_SEGMENTS.has(d.toLowerCase())))
+    return FileTier.Config;
+  if (TEST_NAME.test(lower2) || dirs.some((d) => TEST_SEGMENTS.has(d.toLowerCase())))
+    return FileTier.Test;
+  if (CONFIG_EXTENSIONS.has(extension2) || base.startsWith("."))
+    return FileTier.Config;
+  return FileTier.Source;
+}
+function implementationKeyOf(path12) {
+  const { dirs, base } = splitPath(path12);
+  let stem = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
+  let parent = dirs;
+  const jsTest = /^(.+)\.(test|spec)\.[^.]+$/.exec(base);
+  if (jsTest) {
+    stem = jsTest[1];
+    if (parent[parent.length - 1] === "__tests__")
+      parent = parent.slice(0, -1);
+  } else if (/^test_.+\.py$/.test(base)) {
+    stem = stem.slice("test_".length);
+    if (parent[parent.length - 1] === "tests")
+      parent = parent.slice(0, -1);
+  } else if (/_test\.(py|go)$/.test(base)) {
+    stem = stem.slice(0, -"_test".length);
+  }
+  return [...parent, stem].join("/");
+}
+var dirOf = (key) => key.slice(0, Math.max(0, key.lastIndexOf("/")));
+function nodeOf(members2, children) {
+  return {
+    files: members2.map((m2) => m2.file),
+    tokens: members2.reduce((sum, m2) => sum + m2.tokens, 0),
+    tier: Math.min(...members2.map((m2) => m2.tier)),
+    ...children ? { children } : {}
+  };
+}
+function push(map2, key, value) {
+  const list = map2.get(key);
+  if (list)
+    list.push(value);
+  else
+    map2.set(key, [value]);
+}
+function groupFilesForBatches(files, tokensOf) {
+  const groups = /* @__PURE__ */ new Map();
+  files.forEach((file2, index) => {
+    const tier = fileTierOf(file2.path);
+    const unit = implementationKeyOf(file2.path);
+    const key = tier <= FileTier.Test ? `code:${dirOf(unit)}` : `${tier}:${dirOf(file2.path)}`;
+    if (!groups.has(key))
+      groups.set(key, /* @__PURE__ */ new Map());
+    push(groups.get(key), unit, { file: file2, index, tier, tokens: tokensOf(file2) });
+  });
+  const ordered = [...groups.values()].map((units) => {
+    const nodes = [...units.values()].map((unit) => {
+      const members3 = [...unit].sort((a, b) => a.tier - b.tier || a.index - b.index);
+      return { members: members3, node: nodeOf(members3, members3.map((m2) => nodeOf([m2]))) };
+    }).sort((a, b) => a.members[0].tier - b.members[0].tier || a.members[0].index - b.members[0].index);
+    const members2 = nodes.flatMap((n) => n.members);
+    return {
+      tier: Math.min(...members2.map((m2) => m2.tier)),
+      first: Math.min(...members2.map((m2) => m2.index)),
+      node: nodeOf(members2, nodes.map((n) => n.node))
+    };
+  });
+  return ordered.sort((a, b) => a.tier - b.tier || a.first - b.first).map((group) => group.node);
+}
+
+var HUNK_HEADER_RE2 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+var LINE_CUT_MARKER = " [line cut to fit review.batchTokens]";
+function splitPatchIntoParts(patch, capTokens) {
+  if (estimateTokens(patch) <= capTokens)
+    return { parts: [patch], cutLines: 0 };
+  const hunks = parseHunks(patch);
+  if (hunks.length === 0)
+    return { parts: [patch], cutLines: 0 };
+  const pieces = [];
+  let cutLines = 0;
+  for (const hunk of hunks) {
+    const rendered = renderHunk(hunk);
+    if (estimateTokens(rendered) <= capTokens) {
+      pieces.push(rendered);
+    } else {
+      const split = splitHunk(hunk, capTokens);
+      pieces.push(...split.pieces);
+      cutLines += split.cutLines;
+    }
+  }
+  const parts = [];
+  let current = [];
+  let currentChars = 0;
+  for (const piece of pieces) {
+    const joined = currentChars + piece.length + current.length;
+    if (current.length > 0 && estimateChars(joined) > capTokens) {
+      parts.push(current.join("\n"));
+      current = [];
+      currentChars = 0;
+    }
+    current.push(piece);
+    currentChars += piece.length;
+  }
+  if (current.length > 0)
+    parts.push(current.join("\n"));
+  return { parts, cutLines };
+}
+function estimateChars(chars) {
+  return Math.ceil(chars / 3.5);
+}
+function parseHunks(patch) {
+  const hunks = [];
+  let current;
+  for (const line of patch.split("\n")) {
+    const match3 = HUNK_HEADER_RE2.exec(line);
+    if (match3) {
+      current = {
+        header: line,
+        heading: (match3[5] ?? "").replace(/\r$/, ""),
+        oldStart: Number(match3[1]),
+        oldLines: match3[2] === void 0 ? 1 : Number(match3[2]),
+        newStart: Number(match3[3]),
+        newLines: match3[4] === void 0 ? 1 : Number(match3[4]),
+        lines: []
+      };
+      hunks.push(current);
+      continue;
+    }
+    if (current)
+      current.lines.push(line);
+  }
+  return hunks;
+}
+function renderHunk(hunk) {
+  return [hunk.header, ...hunk.lines].join("\n");
+}
+function splitHunk(hunk, capTokens) {
+  let oldLine = hunk.oldLines > 0 ? hunk.oldStart : hunk.oldStart + 1;
+  let newLine = hunk.newLines > 0 ? hunk.newStart : hunk.newStart + 1;
+  const pieces = [];
+  let lines = [];
+  let oldStart = oldLine;
+  let newStart = newLine;
+  let oldCount = 0;
+  let newCount = 0;
+  let heading = hunk.heading;
+  let bodyChars = 0;
+  let cutLines = 0;
+  const flush = () => {
+    if (lines.length === 0)
+      return;
+    pieces.push(renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines));
+    lines = [];
+    oldCount = 0;
+    newCount = 0;
+    bodyChars = 0;
+    heading = "";
+  };
+  for (const unit of groupUnits(hunk.lines)) {
+    const line = unit[0] ?? "";
+    const unitOld = line.startsWith(" ") || line.startsWith("-") ? 1 : 0;
+    const unitNew = line.startsWith(" ") || line.startsWith("+") ? 1 : 0;
+    const unitChars = charsOf(unit);
+    if (isOverLong(unit, capTokens)) {
+      flush();
+      const cut3 = cutUnit(unit, capTokens);
+      cutLines += 1;
+      lines = cut3;
+      oldCount = unitOld;
+      newCount = unitNew;
+      bodyChars = charsOf(cut3);
+      oldStart = oldLine;
+      newStart = newLine;
+      flush();
+      oldLine += unitOld;
+      newLine += unitNew;
+      oldStart = oldLine;
+      newStart = newLine;
+      continue;
+    }
+    const candidate = headerChars(oldStart, oldCount + unitOld, newStart, newCount + unitNew, heading) + lines.length + unit.length + bodyChars + unitChars;
+    if (lines.length > 0 && estimateChars(candidate) > capTokens) {
+      flush();
+      oldStart = oldLine;
+      newStart = newLine;
+    }
+    lines.push(...unit);
+    oldCount += unitOld;
+    newCount += unitNew;
+    bodyChars += unitChars;
+    oldLine += unitOld;
+    newLine += unitNew;
+  }
+  flush();
+  return { pieces, cutLines };
+}
+function isOverLong(unit, capTokens) {
+  if (estimateChars(charsOf(unit)) <= capTokens)
+    return false;
+  const cutChars = 1 + Math.floor(capTokens * 3) + LINE_CUT_MARKER.length;
+  return estimateChars(cutChars) <= capTokens;
+}
+function renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines) {
+  return [subHunkHeader(oldStart, oldCount, newStart, newCount, heading), ...lines].join("\n");
+}
+function subHunkHeader(oldStart, oldCount, newStart, newCount, heading) {
+  const old = oldCount > 0 ? oldStart : Math.max(0, oldStart - 1);
+  const current = newCount > 0 ? newStart : Math.max(0, newStart - 1);
+  return `@@ -${old},${oldCount} +${current},${newCount} @@${heading}`;
+}
+function headerChars(oldStart, oldCount, newStart, newCount, heading) {
+  return subHunkHeader(oldStart, oldCount, newStart, newCount, heading).length;
+}
+function charsOf(lines) {
+  let chars = 0;
+  for (const line of lines)
+    chars += line.length;
+  return chars;
+}
+function cutUnit(unit, capTokens) {
+  const line = unit[0] ?? "";
+  const prefix = line.slice(0, 1);
+  const text = line.slice(1);
+  const maxChars = Math.max(0, Math.floor(capTokens * 3));
+  return [`${prefix}${text.slice(0, maxChars)}${LINE_CUT_MARKER}`, ...unit.slice(1)];
+}
+function groupUnits(lines) {
+  const units = [];
+  for (const line of lines) {
+    if (line.startsWith("\\") && units.length > 0) {
+      units[units.length - 1].push(line);
+    } else {
+      units.push([line]);
+    }
+  }
+  return units;
+}
+
+function combineUsage(u1, u2) {
+  if (!u1 && !u2)
+    return void 0;
+  if (!u1)
+    return u2;
+  if (!u2)
+    return u1;
+  return {
+    inputTokens: u1.inputTokens + u2.inputTokens,
+    outputTokens: u1.outputTokens + u2.outputTokens,
+    cacheReadTokens: (u1.cacheReadTokens ?? 0) + (u2.cacheReadTokens ?? 0),
+    cacheWriteTokens: (u1.cacheWriteTokens ?? 0) + (u2.cacheWriteTokens ?? 0)
+  };
+}
+function batchFilesBySize(files, maxBatchTokens) {
+  if (files.length <= 1)
+    return [files.map((f3) => ({ ...f3 }))];
+  const fileTokens = files.map((f3) => ({ file: f3, tokens: estimateTokens(f3.patch) }));
+  const totalTokens = fileTokens.reduce((sum, item) => sum + item.tokens, 0);
+  const targetBatchTokens = maxBatchTokens ?? Math.max(100, Math.floor(totalTokens / 2));
+  const batches = [];
+  let currentBatch = [];
+  let currentTokens = 0;
+  for (const item of fileTokens) {
+    if (currentBatch.length > 0 && currentTokens + item.tokens > targetBatchTokens) {
+      batches.push(currentBatch);
+      currentBatch = [{ ...item.file }];
+      currentTokens = item.tokens;
+    } else {
+      currentBatch.push({ ...item.file });
+      currentTokens += item.tokens;
+    }
+  }
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+  if (batches.length === 1 && files.length >= 2) {
+    const mid = Math.ceil(files.length / 2);
+    return [
+      files.slice(0, mid).map((f3) => ({ ...f3 })),
+      files.slice(mid).map((f3) => ({ ...f3 }))
+    ];
+  }
+  return batches;
+}
+function dedupeFindings(findings) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  let idCounter = 1;
+  for (const f3 of findings) {
+    const key = `${f3.path}:${f3.line}:${f3.title.toLowerCase().trim()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push({
+        ...f3,
+        id: `f${idCounter++}`
+      });
+    }
+  }
+  return result;
+}
+var reviewJsonSchema = () => external_exports.toJSONSchema(ReviewAnswerSchema);
+function needsTruncationRetry(parsed, finishReason) {
+  return !parsed.ok && (parsed.code === "truncated" || finishReason === "max-tokens");
+}
+function batchFilesByTokenCap(files, capTokens, maxFileParts = 8) {
+  const batches = [];
+  const skippedParts = [];
+  const cutLines = [];
+  let current = [];
+  let currentTokens = 0;
+  const flush = () => {
+    if (current.length > 0)
+      batches.push(current);
+    current = [];
+    currentTokens = 0;
+  };
+  const deferredTests = [];
+  const placeDeferred = () => {
+    deferredTests.splice(0).forEach(place);
+  };
+  const place = (node2) => {
+    if (node2.tokens <= capTokens) {
+      if (currentTokens + node2.tokens > capTokens)
+        flush();
+      current.push(...node2.files.map((f3) => ({ ...f3 })));
+      currentTokens += node2.tokens;
+    } else if (node2.children) {
+      for (const child of node2.children) {
+        if (node2.tier === FileTier.Source && child.tier !== FileTier.Source)
+          deferredTests.push(child);
+        else
+          place(child);
+      }
+    } else {
+      const file2 = node2.files[0];
+      flush();
+      const split = splitPatchIntoParts(file2.patch, capTokens);
+      split.parts.slice(0, maxFileParts).forEach((part, index) => {
+        batches.push([{ path: file2.path, patch: part, part: { index: index + 1, total: split.parts.length } }]);
+      });
+      if (split.parts.length > maxFileParts) {
+        skippedParts.push({ path: file2.path, from: maxFileParts + 1, total: split.parts.length });
+      }
+      if (split.cutLines > 0) {
+        cutLines.push({ path: file2.path, count: split.cutLines });
+      }
+    }
+  };
+  for (const group of groupFilesForBatches(files, (f3) => estimateTokens(f3.patch))) {
+    if (group.tier !== FileTier.Source)
+      placeDeferred();
+    place(group);
+  }
+  placeDeferred();
+  flush();
+  return { batches, skippedParts, cutLines };
+}
+
 var FALLBACK_TRIGGERS = ["quota", "rate-limit", "server", "network", "auth"];
 var KNOWN_CODES = /* @__PURE__ */ new Set([
   "INVALID_CREDENTIAL",
@@ -140199,6 +140579,8 @@ var FallbackChain = class {
   #index = 0;
   #from;
   #onlySubscriptionCalls = true;
+  #subscriptionUsage = /* @__PURE__ */ new Map();
+  #subscriptionUsageUnreported = false;
   #mayEnter;
   constructor(primary, fallbacks = [], mayEnter) {
     this.#models = [primary, ...fallbacks];
@@ -140236,7 +140618,15 @@ var FallbackChain = class {
       const model = this.#current();
       this.#onlySubscriptionCalls &&= model.includedInSubscription === true;
       try {
-        return await model.generate(request2);
+        const response = await model.generate(request2);
+        if (model.includedInSubscription === true) {
+          const combined = combineUsage(this.#subscriptionUsage.get(model.label), response.usage);
+          if (combined)
+            this.#subscriptionUsage.set(model.label, combined);
+          if (!response.usage)
+            this.#subscriptionUsageUnreported = true;
+        }
+        return response;
       } catch (error62) {
         const kind = failureKindOf(error62);
         if (request2.signal?.aborted || !kind || !FALLBACK_TRIGGERS.includes(kind))
@@ -140272,6 +140662,8 @@ var FallbackChain = class {
       ...this.#from ? { fallbackFrom: this.#from.label, fallbackCode: this.#from.code } : {},
       ...this.#from?.detail ? { fallbackDetail: disclosedDetail(this.#from.detail, secrets) } : {},
       ...skipped.length > 0 ? { skippedFallbacks: [...skipped] } : {},
+      ...this.#subscriptionUsage.size > 0 ? { subscriptionUsage: [...this.#subscriptionUsage].map(([label, usage]) => ({ label, usage })) } : {},
+      ...this.#subscriptionUsageUnreported ? { subscriptionUsageUnreported: true } : {},
       ...this.#methodSwitch()
     };
   }
@@ -141071,386 +141463,6 @@ function buildReviewPrompt(input2) {
     system: buildSystemPrompt(input2.language, input2.maxFindings, input2.batch !== void 0, input2.pr.followUp, input2.pr.skill, hasCriteria, isDesignReview(input2.files)),
     user: buildUserPrompt(input2)
   };
-}
-
-var FileTier = { Source: 0, Test: 1, Config: 2, Docs: 3 };
-var DOC_EXTENSIONS = /* @__PURE__ */ new Set(["md", "mdx", "markdown", "rst", "adoc", "txt"]);
-var DOC_NAMES = /^(license|licence|changelog|changes|authors|notice|copying|codeowners)$/i;
-var GENERATED_SEGMENTS = /* @__PURE__ */ new Set(["__snapshots__", "generated", "vendor"]);
-var CI_SEGMENTS = /* @__PURE__ */ new Set([".github", ".circleci", ".gitlab", ".husky", ".devcontainer", ".vscode"]);
-var CONFIG_EXTENSIONS = /* @__PURE__ */ new Set(["json", "jsonc", "json5", "yml", "yaml", "toml", "ini", "cfg", "conf", "properties"]);
-var CONFIG_NAMES = /^(dockerfile|makefile|procfile|jenkinsfile|cmakelists\.txt|requirements[^/]*\.txt|docker-compose[^/]*|.*\.dockerfile)$/i;
-var TOOL_CONFIG_NAMES = /^(vite|vitest|eslint|jest|webpack|rollup|babel|postcss|tailwind|prettier|next|nuxt|svelte|astro|playwright|cypress|tsup|esbuild|karma|commitlint|stylelint|metro|drizzle|turbo|lint-staged)\.config\.[cm]?[jt]s$/i;
-var TEST_SEGMENTS = /* @__PURE__ */ new Set(["__tests__", "__mocks__", "__fixtures__", "test", "tests", "spec", "specs", "testdata"]);
-var TEST_NAME = /(\.(test|spec|fixtures?)\.[^.]+$)|(^test_.+\.py$)|(_test\.(py|go)$)|(^conftest\.py$)/;
-function splitPath(path12) {
-  const segments = path12.replace(/\\/g, "/").split("/");
-  const base = segments.pop() ?? "";
-  const extension2 = base.includes(".") ? (base.split(".").pop() ?? "").toLowerCase() : "";
-  return { dirs: segments, base, extension: extension2 };
-}
-function fileTierOf(path12) {
-  const { dirs, base, extension: extension2 } = splitPath(path12);
-  const lower2 = base.toLowerCase();
-  if (CONFIG_NAMES.test(lower2) || TOOL_CONFIG_NAMES.test(lower2))
-    return FileTier.Config;
-  if (DOC_EXTENSIONS.has(extension2) || DOC_NAMES.test(lower2) || isLockfile(lower2) || lower2.endsWith(".snap")) {
-    return FileTier.Docs;
-  }
-  if (dirs.some((d) => GENERATED_SEGMENTS.has(d.toLowerCase())))
-    return FileTier.Docs;
-  if (dirs.some((d) => CI_SEGMENTS.has(d.toLowerCase())))
-    return FileTier.Config;
-  if (TEST_NAME.test(lower2) || dirs.some((d) => TEST_SEGMENTS.has(d.toLowerCase())))
-    return FileTier.Test;
-  if (CONFIG_EXTENSIONS.has(extension2) || base.startsWith("."))
-    return FileTier.Config;
-  return FileTier.Source;
-}
-function implementationKeyOf(path12) {
-  const { dirs, base } = splitPath(path12);
-  let stem = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
-  let parent = dirs;
-  const jsTest = /^(.+)\.(test|spec)\.[^.]+$/.exec(base);
-  if (jsTest) {
-    stem = jsTest[1];
-    if (parent[parent.length - 1] === "__tests__")
-      parent = parent.slice(0, -1);
-  } else if (/^test_.+\.py$/.test(base)) {
-    stem = stem.slice("test_".length);
-    if (parent[parent.length - 1] === "tests")
-      parent = parent.slice(0, -1);
-  } else if (/_test\.(py|go)$/.test(base)) {
-    stem = stem.slice(0, -"_test".length);
-  }
-  return [...parent, stem].join("/");
-}
-var dirOf = (key) => key.slice(0, Math.max(0, key.lastIndexOf("/")));
-function nodeOf(members2, children) {
-  return {
-    files: members2.map((m2) => m2.file),
-    tokens: members2.reduce((sum, m2) => sum + m2.tokens, 0),
-    tier: Math.min(...members2.map((m2) => m2.tier)),
-    ...children ? { children } : {}
-  };
-}
-function push(map2, key, value) {
-  const list = map2.get(key);
-  if (list)
-    list.push(value);
-  else
-    map2.set(key, [value]);
-}
-function groupFilesForBatches(files, tokensOf) {
-  const groups = /* @__PURE__ */ new Map();
-  files.forEach((file2, index) => {
-    const tier = fileTierOf(file2.path);
-    const unit = implementationKeyOf(file2.path);
-    const key = tier <= FileTier.Test ? `code:${dirOf(unit)}` : `${tier}:${dirOf(file2.path)}`;
-    if (!groups.has(key))
-      groups.set(key, /* @__PURE__ */ new Map());
-    push(groups.get(key), unit, { file: file2, index, tier, tokens: tokensOf(file2) });
-  });
-  const ordered = [...groups.values()].map((units) => {
-    const nodes = [...units.values()].map((unit) => {
-      const members3 = [...unit].sort((a, b) => a.tier - b.tier || a.index - b.index);
-      return { members: members3, node: nodeOf(members3, members3.map((m2) => nodeOf([m2]))) };
-    }).sort((a, b) => a.members[0].tier - b.members[0].tier || a.members[0].index - b.members[0].index);
-    const members2 = nodes.flatMap((n) => n.members);
-    return {
-      tier: Math.min(...members2.map((m2) => m2.tier)),
-      first: Math.min(...members2.map((m2) => m2.index)),
-      node: nodeOf(members2, nodes.map((n) => n.node))
-    };
-  });
-  return ordered.sort((a, b) => a.tier - b.tier || a.first - b.first).map((group) => group.node);
-}
-
-var HUNK_HEADER_RE2 = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
-var LINE_CUT_MARKER = " [line cut to fit review.batchTokens]";
-function splitPatchIntoParts(patch, capTokens) {
-  if (estimateTokens(patch) <= capTokens)
-    return { parts: [patch], cutLines: 0 };
-  const hunks = parseHunks(patch);
-  if (hunks.length === 0)
-    return { parts: [patch], cutLines: 0 };
-  const pieces = [];
-  let cutLines = 0;
-  for (const hunk of hunks) {
-    const rendered = renderHunk(hunk);
-    if (estimateTokens(rendered) <= capTokens) {
-      pieces.push(rendered);
-    } else {
-      const split = splitHunk(hunk, capTokens);
-      pieces.push(...split.pieces);
-      cutLines += split.cutLines;
-    }
-  }
-  const parts = [];
-  let current = [];
-  let currentChars = 0;
-  for (const piece of pieces) {
-    const joined = currentChars + piece.length + current.length;
-    if (current.length > 0 && estimateChars(joined) > capTokens) {
-      parts.push(current.join("\n"));
-      current = [];
-      currentChars = 0;
-    }
-    current.push(piece);
-    currentChars += piece.length;
-  }
-  if (current.length > 0)
-    parts.push(current.join("\n"));
-  return { parts, cutLines };
-}
-function estimateChars(chars) {
-  return Math.ceil(chars / 3.5);
-}
-function parseHunks(patch) {
-  const hunks = [];
-  let current;
-  for (const line of patch.split("\n")) {
-    const match3 = HUNK_HEADER_RE2.exec(line);
-    if (match3) {
-      current = {
-        header: line,
-        heading: (match3[5] ?? "").replace(/\r$/, ""),
-        oldStart: Number(match3[1]),
-        oldLines: match3[2] === void 0 ? 1 : Number(match3[2]),
-        newStart: Number(match3[3]),
-        newLines: match3[4] === void 0 ? 1 : Number(match3[4]),
-        lines: []
-      };
-      hunks.push(current);
-      continue;
-    }
-    if (current)
-      current.lines.push(line);
-  }
-  return hunks;
-}
-function renderHunk(hunk) {
-  return [hunk.header, ...hunk.lines].join("\n");
-}
-function splitHunk(hunk, capTokens) {
-  let oldLine = hunk.oldLines > 0 ? hunk.oldStart : hunk.oldStart + 1;
-  let newLine = hunk.newLines > 0 ? hunk.newStart : hunk.newStart + 1;
-  const pieces = [];
-  let lines = [];
-  let oldStart = oldLine;
-  let newStart = newLine;
-  let oldCount = 0;
-  let newCount = 0;
-  let heading = hunk.heading;
-  let bodyChars = 0;
-  let cutLines = 0;
-  const flush = () => {
-    if (lines.length === 0)
-      return;
-    pieces.push(renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines));
-    lines = [];
-    oldCount = 0;
-    newCount = 0;
-    bodyChars = 0;
-    heading = "";
-  };
-  for (const unit of groupUnits(hunk.lines)) {
-    const line = unit[0] ?? "";
-    const unitOld = line.startsWith(" ") || line.startsWith("-") ? 1 : 0;
-    const unitNew = line.startsWith(" ") || line.startsWith("+") ? 1 : 0;
-    const unitChars = charsOf(unit);
-    if (isOverLong(unit, capTokens)) {
-      flush();
-      const cut3 = cutUnit(unit, capTokens);
-      cutLines += 1;
-      lines = cut3;
-      oldCount = unitOld;
-      newCount = unitNew;
-      bodyChars = charsOf(cut3);
-      oldStart = oldLine;
-      newStart = newLine;
-      flush();
-      oldLine += unitOld;
-      newLine += unitNew;
-      oldStart = oldLine;
-      newStart = newLine;
-      continue;
-    }
-    const candidate = headerChars(oldStart, oldCount + unitOld, newStart, newCount + unitNew, heading) + lines.length + unit.length + bodyChars + unitChars;
-    if (lines.length > 0 && estimateChars(candidate) > capTokens) {
-      flush();
-      oldStart = oldLine;
-      newStart = newLine;
-    }
-    lines.push(...unit);
-    oldCount += unitOld;
-    newCount += unitNew;
-    bodyChars += unitChars;
-    oldLine += unitOld;
-    newLine += unitNew;
-  }
-  flush();
-  return { pieces, cutLines };
-}
-function isOverLong(unit, capTokens) {
-  if (estimateChars(charsOf(unit)) <= capTokens)
-    return false;
-  const cutChars = 1 + Math.floor(capTokens * 3) + LINE_CUT_MARKER.length;
-  return estimateChars(cutChars) <= capTokens;
-}
-function renderSubHunk(oldStart, oldCount, newStart, newCount, heading, lines) {
-  return [subHunkHeader(oldStart, oldCount, newStart, newCount, heading), ...lines].join("\n");
-}
-function subHunkHeader(oldStart, oldCount, newStart, newCount, heading) {
-  const old = oldCount > 0 ? oldStart : Math.max(0, oldStart - 1);
-  const current = newCount > 0 ? newStart : Math.max(0, newStart - 1);
-  return `@@ -${old},${oldCount} +${current},${newCount} @@${heading}`;
-}
-function headerChars(oldStart, oldCount, newStart, newCount, heading) {
-  return subHunkHeader(oldStart, oldCount, newStart, newCount, heading).length;
-}
-function charsOf(lines) {
-  let chars = 0;
-  for (const line of lines)
-    chars += line.length;
-  return chars;
-}
-function cutUnit(unit, capTokens) {
-  const line = unit[0] ?? "";
-  const prefix = line.slice(0, 1);
-  const text = line.slice(1);
-  const maxChars = Math.max(0, Math.floor(capTokens * 3));
-  return [`${prefix}${text.slice(0, maxChars)}${LINE_CUT_MARKER}`, ...unit.slice(1)];
-}
-function groupUnits(lines) {
-  const units = [];
-  for (const line of lines) {
-    if (line.startsWith("\\") && units.length > 0) {
-      units[units.length - 1].push(line);
-    } else {
-      units.push([line]);
-    }
-  }
-  return units;
-}
-
-function combineUsage(u1, u2) {
-  if (!u1 && !u2)
-    return void 0;
-  if (!u1)
-    return u2;
-  if (!u2)
-    return u1;
-  return {
-    inputTokens: u1.inputTokens + u2.inputTokens,
-    outputTokens: u1.outputTokens + u2.outputTokens,
-    cacheReadTokens: (u1.cacheReadTokens ?? 0) + (u2.cacheReadTokens ?? 0),
-    cacheWriteTokens: (u1.cacheWriteTokens ?? 0) + (u2.cacheWriteTokens ?? 0)
-  };
-}
-function batchFilesBySize(files, maxBatchTokens) {
-  if (files.length <= 1)
-    return [files.map((f3) => ({ ...f3 }))];
-  const fileTokens = files.map((f3) => ({ file: f3, tokens: estimateTokens(f3.patch) }));
-  const totalTokens = fileTokens.reduce((sum, item) => sum + item.tokens, 0);
-  const targetBatchTokens = maxBatchTokens ?? Math.max(100, Math.floor(totalTokens / 2));
-  const batches = [];
-  let currentBatch = [];
-  let currentTokens = 0;
-  for (const item of fileTokens) {
-    if (currentBatch.length > 0 && currentTokens + item.tokens > targetBatchTokens) {
-      batches.push(currentBatch);
-      currentBatch = [{ ...item.file }];
-      currentTokens = item.tokens;
-    } else {
-      currentBatch.push({ ...item.file });
-      currentTokens += item.tokens;
-    }
-  }
-  if (currentBatch.length > 0) {
-    batches.push(currentBatch);
-  }
-  if (batches.length === 1 && files.length >= 2) {
-    const mid = Math.ceil(files.length / 2);
-    return [
-      files.slice(0, mid).map((f3) => ({ ...f3 })),
-      files.slice(mid).map((f3) => ({ ...f3 }))
-    ];
-  }
-  return batches;
-}
-function dedupeFindings(findings) {
-  const seen = /* @__PURE__ */ new Set();
-  const result = [];
-  let idCounter = 1;
-  for (const f3 of findings) {
-    const key = `${f3.path}:${f3.line}:${f3.title.toLowerCase().trim()}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push({
-        ...f3,
-        id: `f${idCounter++}`
-      });
-    }
-  }
-  return result;
-}
-var reviewJsonSchema = () => external_exports.toJSONSchema(ReviewAnswerSchema);
-function needsTruncationRetry(parsed, finishReason) {
-  return !parsed.ok && (parsed.code === "truncated" || finishReason === "max-tokens");
-}
-function batchFilesByTokenCap(files, capTokens, maxFileParts = 8) {
-  const batches = [];
-  const skippedParts = [];
-  const cutLines = [];
-  let current = [];
-  let currentTokens = 0;
-  const flush = () => {
-    if (current.length > 0)
-      batches.push(current);
-    current = [];
-    currentTokens = 0;
-  };
-  const deferredTests = [];
-  const placeDeferred = () => {
-    deferredTests.splice(0).forEach(place);
-  };
-  const place = (node2) => {
-    if (node2.tokens <= capTokens) {
-      if (currentTokens + node2.tokens > capTokens)
-        flush();
-      current.push(...node2.files.map((f3) => ({ ...f3 })));
-      currentTokens += node2.tokens;
-    } else if (node2.children) {
-      for (const child of node2.children) {
-        if (node2.tier === FileTier.Source && child.tier !== FileTier.Source)
-          deferredTests.push(child);
-        else
-          place(child);
-      }
-    } else {
-      const file2 = node2.files[0];
-      flush();
-      const split = splitPatchIntoParts(file2.patch, capTokens);
-      split.parts.slice(0, maxFileParts).forEach((part, index) => {
-        batches.push([{ path: file2.path, patch: part, part: { index: index + 1, total: split.parts.length } }]);
-      });
-      if (split.parts.length > maxFileParts) {
-        skippedParts.push({ path: file2.path, from: maxFileParts + 1, total: split.parts.length });
-      }
-      if (split.cutLines > 0) {
-        cutLines.push({ path: file2.path, count: split.cutLines });
-      }
-    }
-  };
-  for (const group of groupFilesForBatches(files, (f3) => estimateTokens(f3.patch))) {
-    if (group.tier !== FileTier.Source)
-      placeDeferred();
-    place(group);
-  }
-  placeDeferred();
-  flush();
-  return { batches, skippedParts, cutLines };
 }
 
 function parseReviewResponse(response) {

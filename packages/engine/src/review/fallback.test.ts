@@ -20,6 +20,14 @@ function mockModel(label: string, reply: string = 'ok'): ReviewModel & { calls: 
   };
 }
 
+function subscriptionModel(label: string, usage: { inputTokens: number; outputTokens: number }): ReviewModel {
+  return {
+    label,
+    includedInSubscription: true,
+    generate: async (): Promise<ReviewModelResponse> => ({ text: 'ok', finishReason: 'stop', usage }),
+  };
+}
+
 function failingModel(label: string, failure: unknown): ReviewModel & { calls: number } {
   let calls = 0;
   return {
@@ -197,6 +205,55 @@ describe('FallbackChain', () => {
       await expect(chain.generate(req)).rejects.toMatchObject({ code: 'SERVER' });
       expect(primary.calls).toBe(1);
       expect(fallback1.calls).toBe(1);
+    });
+
+    it('sums successful subscription calls under their model label', async () => {
+      const chain = new FallbackChain(subscriptionModel('openai:gpt-5', { inputTokens: 10, outputTokens: 2 }));
+      await chain.generate(req);
+      await chain.generate(req);
+
+      expect(chain.disclosure([]).subscriptionUsage).toEqual([
+        { label: 'openai:gpt-5', usage: { inputTokens: 20, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+      ]);
+    });
+
+    it('does not count a successful API-key fallback call', async () => {
+      const primary = failingModel('openai:gpt-5', new LlmFailure({ code: 'QUOTA', provider: 'openai', message: 'quota' }));
+      const fallback = { ...mockModel('openai:gpt-5'), generate: async (): Promise<ReviewModelResponse> => ({
+        text: 'ok', finishReason: 'stop', usage: { inputTokens: 100, outputTokens: 50 },
+      }) };
+      const chain = new FallbackChain(primary, [fallback]);
+      await chain.generate(req);
+
+      expect(chain.disclosure([]).subscriptionUsage).toBeUndefined();
+    });
+
+    it('counts a subscription fallback model under its own label', async () => {
+      const primary = failingModel('openai:gpt-5', new LlmFailure({ code: 'QUOTA', provider: 'openai', message: 'quota' }));
+      const chain = new FallbackChain(primary, [subscriptionModel('anthropic:claude-x', { inputTokens: 8, outputTokens: 3 })]);
+      await chain.generate(req);
+
+      expect(chain.disclosure([]).subscriptionUsage).toEqual([
+        { label: 'anthropic:claude-x', usage: { inputTokens: 8, outputTokens: 3 } },
+      ]);
+    });
+
+    it('discloses a subscription call that answered without reporting usage', async () => {
+      const chain = new FallbackChain({
+        label: 'openai:gpt-5', includedInSubscription: true,
+        generate: async (): Promise<ReviewModelResponse> => ({ text: 'ok', finishReason: 'stop' }),
+      });
+      await chain.generate(req);
+
+      const disclosure = chain.disclosure([]);
+      expect(disclosure.subscriptionUsageUnreported).toBe(true);
+      expect(disclosure.subscriptionUsage).toBeUndefined();
+    });
+
+    it('omits subscription usage when no subscription call answered', async () => {
+      const chain = new FallbackChain(mockModel('openai:gpt-5'));
+      await chain.generate(req);
+      expect(chain.disclosure([]).subscriptionUsage).toBeUndefined();
     });
 
     it('never triggers fallback on aborted signal', async () => {

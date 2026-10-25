@@ -259,6 +259,26 @@ export interface ReviewRunJudge {
   attempts: Array<{ provider: string; model: string; ok: boolean; code?: string | undefined; ms: number; skipped?: boolean | undefined }>;
 }
 
+export interface ApiEquivalentRunUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
+
+/** The stored fields needed to compute the API-equivalent card without a backfill. */
+export interface ApiEquivalentRunRow {
+  createdAt: Date;
+  status: ReviewRunStatus;
+  provider: string | null;
+  model: string | null;
+  pricing: unknown;
+  usage: ApiEquivalentRunUsage | null;
+  judgeUsage: ApiEquivalentRunUsage | null;
+  /** The method the run started on when it switched (ADR-0027), from `result.fallbackFromMethod`. */
+  fallbackFromMethod: string | null;
+}
+
 export interface ReviewRun {
   id: string;
   workspaceId: string;
@@ -432,6 +452,11 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
     limitOrOptions?: number | ListReviewRunsOptions,
   ): Promise<ReviewRun[] | ListReviewRunsResult>;
   listReviewRunRepos(workspaceId: string): Promise<string[]>;
+  /**
+   * The runs the API-equivalent card can count (ADR-0047): on one of `providers`, or carrying a
+   * stored equivalent or subscription part.
+   */
+  listApiEquivalentRuns(workspaceId: string, providers: readonly string[]): Promise<ApiEquivalentRunRow[]>;
   /**
    * Finds an active review run ('queued' or 'running') matching repo, PR and headSha, of the given
    * bot slot; with no slot, of any bot.
