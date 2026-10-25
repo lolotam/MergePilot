@@ -7,7 +7,7 @@ import { apiEquivalentFields, subscriptionEquivalent, type ApiEquivalentPrice } 
 export type SubscriptionUsage = ReadonlyArray<{ label: string; usage: TokenUsage }>;
 
 /** What the run's pricing record shows about the API price of its tokens. */
-export type EquivalentFields = Pick<RunPricing, 'apiEquivalentUsd' | 'apiEquivalentByModel' | 'apiEquivalentSource'>;
+export type EquivalentFields = Pick<RunPricing, 'apiEquivalentUsd' | 'apiEquivalentSource' | 'subscriptionPart'>;
 
 export interface EquivalentInput {
   /** The run's own usage; the judge's tokens are not part of it. */
@@ -30,8 +30,9 @@ export interface EquivalentInput {
  *
  * A run that stayed on one subscription model keeps the ADR-0024 equivalent: the API price of
  * its own tokens, with one price lookup. A mixed run (some calls paid with API keys) or a run
- * another subscription answered is priced per model: every subscription call at the API price of
- * the model that answered it, with the breakdown by model.
+ * another subscription answered gets `subscriptionPart` instead: every subscription call at the API
+ * price of the model that answered it. It never sets `apiEquivalentUsd`, which the runs table shows
+ * only for a run whose every call stayed on its own subscription model (ADR-0024 §5, ADR-0027 §7).
  */
 export async function equivalentFields(
   input: EquivalentInput,
@@ -43,11 +44,11 @@ export async function equivalentFields(
     // A run that stayed on its own model: its own tokens at that model's API price.
     return apiEquivalentFields(input.usage, input.fellBack ? undefined : input.apiPrice);
   }
+  if (usage.length === 0) return {};
   const priced = await subscriptionEquivalent(input.store, input.settings, usage).catch((error: unknown) => {
     onPriceFailure(error);
     return undefined;
   });
-  return priced
-    ? { apiEquivalentUsd: priced.usd, apiEquivalentByModel: priced.byModel, apiEquivalentSource: priced.source }
-    : {};
+  // Null, not absent: the run had a subscription part the card cannot price, so it is left out.
+  return { subscriptionPart: priced ?? null };
 }

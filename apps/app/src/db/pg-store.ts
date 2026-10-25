@@ -350,8 +350,8 @@ export class PgStore implements AppStore {
     return row ? mapReviewRunRow(row) : null;
   }
 
-  async listApiEquivalentRuns(workspaceId: string): Promise<ApiEquivalentRunRow[]> {
-    return listPgApiEquivalentRuns(this.db, workspaceId);
+  async listApiEquivalentRuns(workspaceId: string, providers: readonly string[]): Promise<ApiEquivalentRunRow[]> {
+    return listPgApiEquivalentRuns(this.db, workspaceId, providers);
   }
 
   async listReviewRunRepos(workspaceId: string): Promise<string[]> {

@@ -16,7 +16,7 @@ vi.mock('../auth/guard.js', () => ({
 const MONTH = new Date('2026-10-01T00:00:00.000Z');
 let sequence = 0;
 
-/** The stored pricing record of a run, with the method switch the worker discloses (ADR-0027). */
+/** The stored pricing record of a run, with the method switch the worker discloses beside it (ADR-0027). */
 type StoredPricing = RunPricing & { fallbackFromMethod?: 'subscription' | 'api-key' | undefined };
 
 function seed(
@@ -30,8 +30,11 @@ function seed(
 ): void {
   sequence++;
   const now = new Date(createdAt);
+  const { fallbackFromMethod, ...runPricing } = pricing;
+  // The worker stores the method switch next to `pricing`, not inside it.
   const result: ReviewRunResultPayload = {
-    v: 1, summary: '', highlights: [], findings: [], language: 'en', usage, pricing,
+    v: 1, summary: '', highlights: [], findings: [], language: 'en', usage, pricing: runPricing,
+    ...(fallbackFromMethod ? { fallbackFromMethod, modelUsedMethod: 'api-key' as const } : {}),
     ...(judge ? { judge } : {}),
   };
   const run: ReviewRun = {
@@ -74,7 +77,7 @@ function spyStore(store: MemoryStore) {
   return {
     getModelPrice,
     store: {
-      listApiEquivalentRuns: (workspaceId: string) => store.listApiEquivalentRuns(workspaceId),
+      listApiEquivalentRuns: (workspaceId: string, providers: readonly string[]) => store.listApiEquivalentRuns(workspaceId, providers),
       getSettings: (workspaceId: string) => store.getSettings(workspaceId),
       getModelPrice,
     },
@@ -86,11 +89,14 @@ const subscription: RunPricing = { source: 'subscription', inputPerMTok: 0, outp
 describe('API-equivalent usage', () => {
   beforeEach(() => { sequence = 0; });
 
-  it('uses a stored equivalent and its model split as recorded', async () => {
+  it('uses a stored subscription part and its model split as recorded', async () => {
     const store = setup();
     seed(store, 'openai', 'gpt-x', {
-      ...subscription, apiEquivalentUsd: 1.25,
-      apiEquivalentByModel: [{ provider: 'openai', model: 'gpt-x', inputTokens: 10, outputTokens: 5, usd: 1.25 }],
+      source: 'catalog:models.dev', inputPerMTok: 2, outputPerMTok: 4, fallbackFromMethod: 'subscription',
+      subscriptionPart: {
+        usd: 1.25, source: 'catalog:models.dev',
+        byModel: [{ provider: 'openai', model: 'gpt-x', inputTokens: 10, outputTokens: 5, usd: 1.25 }],
+      },
     }, { inputTokens: 999, outputTokens: 999 });
     const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
     expect(result).toMatchObject({ totalUsd: 1.25, monthUsd: 1.25, reviews: 1, averagePerReviewUsd: 1.25 });
@@ -182,6 +188,37 @@ describe('API-equivalent usage', () => {
     const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
     expect(result).toMatchObject({ leftOut: 1, reviews: 0, totalUsd: 0 });
     expect(result.byModel).toEqual([]);
+  });
+
+  it('leaves out a run whose subscription part had no API price', async () => {
+    const store = setup();
+    seed(store, 'openai', 'gpt-x', { ...subscription, subscriptionPart: null }, { inputTokens: 100, outputTokens: 50 });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result).toMatchObject({ leftOut: 1, reviews: 0, totalUsd: 0 });
+  });
+
+  it('leaves out an older mixed run even when its own model has a price', async () => {
+    const store = setup();
+    await price(store, 'openai', 'gpt-x');
+    seed(store, 'openai', 'gpt-x', { ...subscription, fallbackFromMethod: 'subscription' }, { inputTokens: 100, outputTokens: 50 });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result).toMatchObject({ leftOut: 1, reviews: 0, totalUsd: 0 });
+  });
+
+  it('prices a subscription run recorded as static at $0 before ADR-0024', async () => {
+    const store = setup();
+    await price(store, 'anthropic', 'claude-x');
+    seed(store, 'anthropic', 'claude-x', { source: 'static', inputPerMTok: 0, outputPerMTok: 0 }, { inputTokens: 1_000_000, outputTokens: 0 });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result).toMatchObject({ reviews: 1, leftOut: 0 });
+    expect(result.totalUsd).toBeCloseTo(2);
+  });
+
+  it('shows a stored token-plan equivalent under its API provider, as a run priced now shows it', async () => {
+    const store = setup();
+    seed(store, 'zai-coding', 'glm-x', { source: 'catalog:models.dev', inputPerMTok: 0, outputPerMTok: 0, apiEquivalentUsd: 0.5 }, { inputTokens: 10, outputTokens: 5 });
+    const result = await apiEquivalentUsage({ store, auth: {} as Auth }, 'ws-1', MONTH);
+    expect(result.byModel).toEqual([{ provider: 'zai', model: 'glm-x', inputTokens: 10, outputTokens: 5, usd: 0.5 }]);
   });
 
   it('separates the current month from all retained runs', async () => {

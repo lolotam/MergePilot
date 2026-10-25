@@ -4,7 +4,7 @@ import { useI18n } from '../i18n/context.js';
 
 export function ApiEquivalentCard({ workspaceId }: { workspaceId: string }) {
   const { t } = useI18n();
-  const { data, isLoading } = useApiEquivalentUsageQuery(workspaceId);
+  const { data, isLoading, isError } = useApiEquivalentUsageQuery(workspaceId);
 
   return (
     <div className="p-6 bg-white dark:bg-ink-900 rounded-[10px] border border-ink-200 dark:border-ink-700 shadow-xs">
@@ -22,7 +22,9 @@ export function ApiEquivalentCard({ workspaceId }: { workspaceId: string }) {
 
       {isLoading ? (
         <div className="text-sm text-ink-400 py-4">{t('loading')}</div>
-      ) : !data || data.reviews === 0 ? (
+      ) : isError || !data ? (
+        <div role="alert" className="py-4 text-center text-sm text-red-600 dark:text-red-400">{t('error')}</div>
+      ) : data.reviews === 0 && data.leftOut === 0 ? (
         <div className="py-4 text-center text-sm text-ink-500 dark:text-ink-400">{t('apiEquivalentEmpty')}</div>
       ) : (
         <div>

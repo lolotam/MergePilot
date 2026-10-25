@@ -1,6 +1,6 @@
 import { costUsd, type ModelPricing, type ReviewModel, type TokenUsage } from '@mergepilot/engine';
 import { resolvePricing } from '../core/model-pricing.js';
-import type { ApiEquivalentModel, ModelPriceStore, PricingSource, RunPricing } from '../core/price-types.js';
+import type { ApiEquivalentModel, ModelPriceStore, PricingSource, RunPricing, SubscriptionPart } from '../core/price-types.js';
 export type { ApiEquivalentModel } from '../core/price-types.js';
 import type { WorkspaceSettings } from '../core/types.js';
 
@@ -9,6 +9,9 @@ export const TOKEN_PLAN_API_PROVIDER: Record<string, string> = {
   'zai-coding': 'zai',
   'minimax-coding-plan': 'minimax',
 };
+
+/** The consumer subscriptions whose runs can carry an API-equivalent (ADR-0024). */
+export const SUBSCRIPTION_PROVIDERS: readonly string[] = ['openai', 'anthropic', 'xai', 'google-antigravity'];
 
 /**
  * Google Antigravity serves other vendors' models (decisions log س47-ز): the API price is the same
@@ -85,23 +88,26 @@ export async function apiEquivalentPrice(
   return resolved.pricing ? { pricing: resolved.pricing, source: resolved.record.source } : undefined;
 }
 
-/** Prices the subscription calls of a mixed run at each answering model's API price. */
+/**
+ * Prices the subscription calls of a mixed run at each answering model's API price. Undefined when
+ * any call has no known API price: a part of the run priced is not the run's subscription part.
+ */
 export async function subscriptionEquivalent(
   store: Pick<ModelPriceStore, 'getModelPrice'>,
   settings: Pick<WorkspaceSettings, 'priceOverrides'>,
   entries: ReadonlyArray<{ label: string; usage: UsageCounts }>,
-): Promise<{ usd: number; byModel: ApiEquivalentModel[]; source: PricingSource } | undefined> {
+): Promise<SubscriptionPart | undefined> {
   const byModel: ApiEquivalentModel[] = [];
   const sources: PricingSource[] = [];
   for (const entry of entries) {
     const separator = entry.label.indexOf(':');
-    if (separator < 1) continue;
+    if (separator < 1) return undefined;
     const provider = entry.label.slice(0, separator);
     const model = entry.label.slice(separator + 1);
     const choice = provider === 'google-antigravity' ? antigravityApiModel(model) : { provider, model };
-    if (!choice) continue;
+    if (!choice) return undefined;
     const resolved = await resolvePricing({ store, settings }, choice.provider, choice.model);
-    if (!resolved.pricing) continue;
+    if (!resolved.pricing) return undefined;
     const usage = fullUsage(entry.usage);
     sources.push(resolved.record.source);
     byModel.push({

@@ -2,15 +2,19 @@ import { findActiveRun } from './memory-runs.js';
 import type { ApiEquivalentRunRow, ReviewRun } from './types.js';
 
 /**
- * The rows the API-equivalent card prices (ADR-0047): every retained run of the workspace that
- * has a result, with the tokens and the pricing record the card reads.
+ * The rows the API-equivalent card prices (ADR-0047): the workspace's retained runs with a result
+ * that ran on one of `providers` or carry a stored equivalent, as the Postgres query selects them.
  */
 export function memoryApiEquivalentRows(
   runs: ReadonlyMap<string, ReviewRun>,
   workspaceId: string,
+  providers: readonly string[],
 ): ApiEquivalentRunRow[] {
   return [...runs.values()]
     .filter((run) => run.workspaceId === workspaceId && run.result != null)
+    .filter((run) => (run.provider != null && providers.includes(run.provider))
+      || run.result?.pricing?.apiEquivalentUsd !== undefined
+      || run.result?.pricing?.subscriptionPart !== undefined)
     .map((run) => ({
       createdAt: run.createdAt,
       provider: run.provider ?? null,
@@ -20,6 +24,7 @@ export function memoryApiEquivalentRows(
       judgeUsage: run.result?.judge
         ? { inputTokens: run.result.judge.inputTokens, outputTokens: run.result.judge.outputTokens }
         : null,
+      fallbackFromMethod: run.result?.fallbackFromMethod ?? null,
     }));
 }
 

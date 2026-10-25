@@ -23,10 +23,32 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
       noFailure,
     );
 
-    expect(fields.apiEquivalentUsd).toBeCloseTo(0.0004);
-    expect(fields.apiEquivalentByModel).toEqual([
+    // The runs table keeps showing no equivalent for a mixed run (ADR-0024 §5): only the card's part.
+    expect(fields.apiEquivalentUsd).toBeUndefined();
+    expect(fields.subscriptionPart?.usd).toBeCloseTo(0.0004);
+    expect(fields.subscriptionPart?.byModel).toEqual([
       { provider: 'openai', model: 'gpt-x', inputTokens: 100, outputTokens: 50, usd: 0.0004 },
     ]);
+  });
+
+  it('marks the subscription part unpriced when any of its models has no API price', async () => {
+    const fields = await equivalentFields(
+      {
+        usage: { inputTokens: 300, outputTokens: 150 },
+        apiPrice: undefined,
+        subscriptionUsage: [
+          { label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50 } },
+          { label: 'anthropic:unpriced', usage: { inputTokens: 100, outputTokens: 50 } },
+        ],
+        onlySubscriptionCalls: false,
+        fellBack: false,
+        store: new MemoryStore(),
+        settings,
+      },
+      noFailure,
+    );
+
+    expect(fields).toEqual({ subscriptionPart: null });
   });
 
   it('keeps a run that stayed on its own subscription model on the ADR-0024 price', async () => {

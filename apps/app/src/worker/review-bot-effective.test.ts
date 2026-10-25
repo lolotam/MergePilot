@@ -193,8 +193,10 @@ describe('runBot API-equivalent subscription usage (ADR-0047)', () => {
       { provider: 'anthropic', model: 'claude-x', inputPerMTok: 2, outputPerMTok: 4 },
     ]);
     expect(run?.result?.pricing?.source).toBe('subscription');
-    expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo(0.0004);
-    expect(run?.result?.pricing?.apiEquivalentByModel?.[0]).toMatchObject({ provider: 'anthropic', model: 'claude-x' });
+    // A model fallback hides the runs-table equivalent (ADR-0024 §5); the card gets the part.
+    expect(run?.result?.pricing?.apiEquivalentUsd).toBeUndefined();
+    expect(run?.result?.pricing?.subscriptionPart?.usd).toBeCloseTo(0.0004);
+    expect(run?.result?.pricing?.subscriptionPart?.byModel[0]).toMatchObject({ provider: 'anthropic', model: 'claude-x' });
   });
 
   it('keeps the token-plan equivalent path unchanged', async () => {
@@ -204,7 +206,7 @@ describe('runBot API-equivalent subscription usage (ADR-0047)', () => {
       { provider: 'zai', model: 'glm-x', inputPerMTok: 2, outputPerMTok: 4 },
     ]);
     expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo(0.0004);
-    expect(run?.result?.pricing?.apiEquivalentByModel).toBeUndefined();
+    expect(run?.result?.pricing?.subscriptionPart).toBeUndefined();
   });
 
   it('keeps a plain subscription run at the ADR-0024 equivalent, with no model breakdown', async () => {
@@ -214,6 +216,6 @@ describe('runBot API-equivalent subscription usage (ADR-0047)', () => {
     ]);
     expect(run?.result?.pricing?.source).toBe('subscription');
     expect(run?.result?.pricing?.apiEquivalentUsd).toBeCloseTo(0.0004);
-    expect(run?.result?.pricing?.apiEquivalentByModel).toBeUndefined();
+    expect(run?.result?.pricing?.subscriptionPart).toBeUndefined();
   });
 });

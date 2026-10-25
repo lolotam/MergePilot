@@ -274,6 +274,8 @@ export interface ApiEquivalentRunRow {
   pricing: unknown;
   usage: ApiEquivalentRunUsage | null;
   judgeUsage: ApiEquivalentRunUsage | null;
+  /** The method the run started on when it switched (ADR-0027), from `result.fallbackFromMethod`. */
+  fallbackFromMethod: string | null;
 }
 
 export interface ReviewRun {
@@ -449,7 +451,11 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
     limitOrOptions?: number | ListReviewRunsOptions,
   ): Promise<ReviewRun[] | ListReviewRunsResult>;
   listReviewRunRepos(workspaceId: string): Promise<string[]>;
-  listApiEquivalentRuns(workspaceId: string): Promise<ApiEquivalentRunRow[]>;
+  /**
+   * The runs the API-equivalent card can count (ADR-0047): on one of `providers`, or carrying a
+   * stored equivalent or subscription part.
+   */
+  listApiEquivalentRuns(workspaceId: string, providers: readonly string[]): Promise<ApiEquivalentRunRow[]>;
   /**
    * Finds an active review run ('queued' or 'running') matching repo, PR and headSha, of the given
    * bot slot; with no slot, of any bot.

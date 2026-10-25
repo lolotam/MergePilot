@@ -4,7 +4,9 @@ import { requireRole } from '../auth/guard.js';
 import type { Auth } from '../auth/auth.js';
 import type { ApiEquivalentModel, ModelPriceStore, StoredModelPrice } from '../core/price-types.js';
 import type { ApiEquivalentRunRow, ApiEquivalentRunUsage, AppStore, WorkspaceSettings } from '../core/types.js';
-import { antigravityApiModel, apiEquivalentPrice, TOKEN_PLAN_API_PROVIDER } from '../worker/api-equivalent.js';
+import {
+  antigravityApiModel, apiEquivalentPrice, SUBSCRIPTION_PROVIDERS, TOKEN_PLAN_API_PROVIDER,
+} from '../worker/api-equivalent.js';
 
 export interface ApiEquivalentUsage {
   monthUsd: number;
@@ -22,7 +24,8 @@ export interface ApiEquivalentUsageDeps {
   now?: () => Date;
 }
 
-const SUBSCRIPTION_PROVIDERS = new Set(['openai', 'anthropic', 'xai', 'google-antigravity']);
+/** The providers whose runs can carry an equivalent: the subscriptions and the token plans. */
+const CARD_PROVIDERS: readonly string[] = [...SUBSCRIPTION_PROVIDERS, ...Object.keys(TOKEN_PLAN_API_PROVIDER)];
 
 /**
  * The catalog price of a model, looked up once per request: the card prices every retained run,
@@ -55,22 +58,28 @@ function numberOf(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function storedModels(value: unknown): ApiEquivalentModel[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const models = value.flatMap((item): ApiEquivalentModel[] => {
+/** A stored `subscriptionPart` (ADR-0047); undefined when it is null or not one. */
+function storedPart(value: unknown): { usd: number; byModel: ApiEquivalentModel[] } | undefined {
+  const part = objectOf(value);
+  const usd = numberOf(part?.usd);
+  if (usd === undefined || !Array.isArray(part?.byModel)) return undefined;
+  const byModel = part.byModel.flatMap((item): ApiEquivalentModel[] => {
     const row = objectOf(item);
     if (!row || typeof row.provider !== 'string' || typeof row.model !== 'string') return [];
     const inputTokens = numberOf(row.inputTokens);
     const outputTokens = numberOf(row.outputTokens);
-    const usd = numberOf(row.usd);
-    return inputTokens === undefined || outputTokens === undefined || usd === undefined
+    const entryUsd = numberOf(row.usd);
+    return inputTokens === undefined || outputTokens === undefined || entryUsd === undefined
       ? []
-      : [{ provider: row.provider, model: row.model, inputTokens, outputTokens, usd }];
+      : [{ provider: row.provider, model: row.model, inputTokens, outputTokens, usd: entryUsd }];
   });
-  return models;
+  return { usd, byModel };
 }
 
-/** The run's own tokens, without the judge's: an absent cache count is zero, never missing. */
+/**
+ * The run's own tokens, without the judge's. Runs store only input and output tokens, so an older
+ * run priced now leaves its cache tokens out: its figure is a lower bound (ADR-0047 §4).
+ */
 function withoutJudge(usage: ApiEquivalentRunUsage, judge: ApiEquivalentRunUsage | null): TokenUsage {
   return {
     inputTokens: Math.max(0, usage.inputTokens - (judge?.inputTokens ?? 0)),
@@ -118,13 +127,59 @@ async function pricesPlanAtZero(
 }
 
 /**
- * The method switch the worker disclosed (ADR-0027): `fallbackFromMethod === 'subscription'` means
- * the run fell back from the subscription to API keys, so its subscription part cannot be told
- * apart from the paid one. Read from the stored run record.
+ * A subscription run priced when it ran: `subscription` since ADR-0024, `static` at $0 before it.
+ * An API-key run is never priced at $0, so the $0 tells an old subscription run apart.
  */
-function fellBackFromSubscription(row: ApiEquivalentRunRow, pricing: Record<string, unknown> | undefined): boolean {
-  const stored = objectOf(row);
-  return stored?.fallbackFromMethod === 'subscription' || pricing?.fallbackFromMethod === 'subscription';
+function subscriptionPriced(row: ApiEquivalentRunRow, pricing: Record<string, unknown> | undefined): boolean {
+  if (pricing?.source === 'subscription') return true;
+  return pricing?.source === 'static'
+    && row.provider !== null
+    && SUBSCRIPTION_PROVIDERS.includes(row.provider)
+    && numberOf(pricing.inputPerMTok) === 0
+    && numberOf(pricing.outputPerMTok) === 0;
+}
+
+/** What a run adds to the card: an amount and its models, `leftOut`, or nothing. */
+type RunShare = { usd: number; entries: ApiEquivalentModel[] } | 'leftOut' | undefined;
+
+/**
+ * Sorts a run into the card (ADR-0047). A stored subscription part (mixed or fallback run) or a
+ * stored ADR-0024 equivalent is used as recorded. An older run that fell back from the subscription
+ * to API keys cannot be split, so it is left out. An older subscription or $0 token-plan run is
+ * priced now from its tokens. A run priced for real is neither counted nor left out.
+ */
+async function shareOf(
+  prices: PriceLookup,
+  settings: Pick<WorkspaceSettings, 'priceOverrides'>,
+  row: ApiEquivalentRunRow,
+): Promise<RunShare> {
+  const pricing = objectOf(row.pricing);
+  if (pricing && 'subscriptionPart' in pricing) {
+    const part = storedPart(pricing.subscriptionPart);
+    return part ? { usd: part.usd, entries: part.byModel } : 'leftOut';
+  }
+  const tokenPlan = row.provider !== null && row.provider in TOKEN_PLAN_API_PROVIDER;
+  const storedUsd = numberOf(pricing?.apiEquivalentUsd);
+  if (storedUsd !== undefined) return { usd: storedUsd, entries: storedEntries(row, tokenPlan, storedUsd) };
+  if (row.fallbackFromMethod === 'subscription' && row.provider !== null && SUBSCRIPTION_PROVIDERS.includes(row.provider)) {
+    return 'leftOut';
+  }
+  // A token plan counts only when the catalog prices it at $0 and the run's own price is $0.
+  const shouldHaveEquivalent = subscriptionPriced(row, pricing) || (tokenPlan && await pricesPlanAtZero(prices, row, pricing));
+  if (!shouldHaveEquivalent) return undefined;
+  const entry = await priceOldRun(prices, settings, row, pricing, tokenPlan);
+  return entry ? { usd: entry.usd, entries: [entry] } : 'leftOut';
+}
+
+/**
+ * The model split of a stored ADR-0024 equivalent: the run's own tokens, without the judge's, under
+ * the API model that priced them, as a run priced now shows them.
+ */
+function storedEntries(row: ApiEquivalentRunRow, tokenPlan: boolean, usd: number): ApiEquivalentModel[] {
+  if (!row.provider || !row.model || !row.usage) return [];
+  const choice = apiChoice(row.provider, row.model, tokenPlan) ?? { provider: row.provider, model: row.model };
+  const tokens = withoutJudge(row.usage, row.judgeUsage);
+  return [{ ...choice, inputTokens: tokens.inputTokens, outputTokens: tokens.outputTokens, usd }];
 }
 
 async function priceOldRun(
@@ -156,21 +211,14 @@ async function priceOldRun(
   };
 }
 
-/**
- * Computes the display-only card from retained runs and current prices for older records (ADR-0047).
- *
- * A run counts when it has an equivalent: one it stored, or one priced now because it ran on a
- * subscription, on a token plan the catalog prices at $0, or on a subscription that fell back to
- * API keys. A run priced for real is neither counted nor left out; a run that should have had an
- * equivalent but has no price for it is left out.
- */
+/** Computes the display-only card from retained runs and current prices for older records (ADR-0047). */
 export async function apiEquivalentUsage(
   deps: ApiEquivalentUsageDeps,
   workspaceId: string,
   monthStart: Date,
 ): Promise<ApiEquivalentUsage> {
   const [rows, settings] = await Promise.all([
-    deps.store.listApiEquivalentRuns(workspaceId),
+    deps.store.listApiEquivalentRuns(workspaceId, CARD_PROVIDERS),
     deps.store.getSettings(workspaceId),
   ]);
   const priceSettings = { priceOverrides: settings?.priceOverrides ?? [] };
@@ -182,54 +230,13 @@ export async function apiEquivalentUsage(
   let leftOut = 0;
 
   for (const row of rows) {
-    const pricing = objectOf(row.pricing);
-    const storedUsd = numberOf(pricing?.apiEquivalentUsd);
-    const tokenPlan = row.provider !== null && row.provider in TOKEN_PLAN_API_PROVIDER;
-    const oldSubscription = pricing?.source === 'subscription';
-    // A token plan counts only when the catalog prices it at $0 and the run's own price is $0.
-    const planRun = tokenPlan && await pricesPlanAtZero(prices, row, pricing);
-    // An older mixed run: it fell back from the subscription to API keys, so it should have had
-    // an equivalent even though its own pricing is the real one. It is priced at the API price
-    // of its own tokens when that price is known, and left out when it is not.
-    const mixed = !oldSubscription
-      && row.provider !== null
-      && SUBSCRIPTION_PROVIDERS.has(row.provider)
-      && fellBackFromSubscription(row, pricing);
-    const shouldHaveEquivalent = oldSubscription || planRun || mixed;
-
-    let entries: ApiEquivalentModel[] | undefined;
-    let usd: number | undefined;
-    if (storedUsd !== undefined) {
-      usd = storedUsd;
-      entries = storedModels(pricing?.apiEquivalentByModel);
-      if (!entries && row.provider && row.model && row.usage) {
-        // The stored amount stays as it is; its tokens are the run's own, without the judge's.
-        const tokens = withoutJudge(row.usage, row.judgeUsage);
-        entries = [{
-          provider: row.provider,
-          model: row.model,
-          inputTokens: tokens.inputTokens,
-          outputTokens: tokens.outputTokens,
-          usd: storedUsd,
-        }];
-      }
-    } else if (shouldHaveEquivalent) {
-      const entry = await priceOldRun(prices, priceSettings, row, pricing, tokenPlan);
-      if (entry) {
-        usd = entry.usd;
-        entries = [entry];
-      }
-    }
-
-    if (usd === undefined) {
-      // No price for a run that should have had one: it is left out of the card.
-      if (shouldHaveEquivalent) leftOut++;
-      continue;
-    }
+    const share = await shareOf(prices, priceSettings, row);
+    if (share === 'leftOut') leftOut++;
+    if (share === undefined || share === 'leftOut') continue;
     reviews++;
-    totalUsd += usd;
-    if (row.createdAt >= monthStart) monthUsd += usd;
-    for (const entry of entries ?? []) addModel(models, entry);
+    totalUsd += share.usd;
+    if (row.createdAt >= monthStart) monthUsd += share.usd;
+    for (const entry of share.entries) addModel(models, entry);
   }
 
   return {

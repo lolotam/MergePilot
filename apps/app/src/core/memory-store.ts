@@ -361,8 +361,8 @@ export class MemoryStore implements AppStore {
     return { ...run };
   }
 
-  async listApiEquivalentRuns(workspaceId: string): Promise<ApiEquivalentRunRow[]> {
-    return memoryApiEquivalentRows(this.runs, workspaceId);
+  async listApiEquivalentRuns(workspaceId: string, providers: readonly string[]): Promise<ApiEquivalentRunRow[]> {
+    return memoryApiEquivalentRows(this.runs, workspaceId, providers);
   }
 
   async listReviewRunRepos(workspaceId: string): Promise<string[]> {

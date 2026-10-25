@@ -6,9 +6,9 @@ import * as hooks from '../api/hooks.js';
 
 vi.mock('../api/hooks.js');
 
-function answer(data: object) {
+function answer(data: object | undefined, isError = false) {
   vi.mocked(hooks.useApiEquivalentUsageQuery).mockReturnValue({
-    data, isLoading: false,
+    data, isLoading: false, isError,
   } as unknown as ReturnType<typeof hooks.useApiEquivalentUsageQuery>);
   render(<I18nProvider initialLanguage="en"><ApiEquivalentCard workspaceId="ws-1" /></I18nProvider>);
 }
@@ -31,5 +31,17 @@ describe('ApiEquivalentCard', () => {
   it('renders the empty state', () => {
     answer({ monthUsd: 0, totalUsd: 0, reviews: 0, averagePerReviewUsd: 0, leftOut: 0, byModel: [], monthStart: '2026-10-01' });
     expect(screen.getByText('No subscription or coding-plan usage yet.')).toBeTruthy();
+  });
+
+  it('shows runs left out instead of the empty state when none could be priced', () => {
+    answer({ monthUsd: 0, totalUsd: 0, reviews: 0, averagePerReviewUsd: 0, leftOut: 3, byModel: [], monthStart: '2026-10-01' });
+    expect(screen.queryByText('No subscription or coding-plan usage yet.')).toBeNull();
+    expect(screen.getByText('≈ $0.00')).toBeTruthy();
+  });
+
+  it('shows an error, not the empty state, when the request fails', () => {
+    answer(undefined, true);
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByText('No subscription or coding-plan usage yet.')).toBeNull();
   });
 });
