@@ -131,31 +131,80 @@ it('shares exhausted read evidence across batches and accounts for every call', 
   expect(result).toMatchObject({ status: 'completed', usage: { inputTokens: requests.length * 7, outputTokens: requests.length * 3 } });
 });
 
- it('reserves remaining batch answers and stops slow exploration with a reason', async () => {
+it.each(['call', 'read'] as const)('bounds slow exploration %s to one window and answers every batch', async (slow) => {
   vi.useFakeTimers();
   try {
     vi.setSystemTime(0);
     const requests: ReviewModelRequest[] = [];
+    let attempts = 0;
     const model: ReviewModel = { label: 'fake:clock', generate: async (request) => {
       requests.push(request);
-      const exploring = request.system.includes('EXPLORATION (round');
-      vi.setSystemTime(Date.now() + (exploring ? 9000 : 1000));
-      return { text: exploring ? READ_GUARD : makeAnswerJson([]), finishReason: 'stop' };
+      if (request.system.includes('EXPLORATION (round')) {
+        attempts++;
+        // One completed round, then an operation that ignores abort and never resolves.
+        if (slow === 'call' && attempts > 1) return new Promise(() => {});
+        return { text: READ_GUARD, finishReason: 'stop' };
+      }
+      return { text: makeAnswerJson([]), finishReason: 'stop' };
+    } };
+    const pending = runReview(input(model, {
+      files: Array.from({ length: 6 }, (_, i) => ({ path: `src/file${i}.ts`, status: 'modified', patch: bigPatch(200), changes: 201 })),
+      explore: { reader: { ...fakeReader(), readFile: () => slow === 'read' ? new Promise(() => {}) : Promise.resolve('evidence') } },
+    }, { maxPromptTokens: 6000, batchTokens: 2000, callTimeoutMs: 600000, totalTimeoutMs: 1200000, explore: { maxRounds: 3 } }));
+    await vi.advanceTimersByTimeAsync(300000);
+    const result = await pending;
+    const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
+    expect(answers).toHaveLength(6);
+    expect(result).toMatchObject({ status: 'completed', exploration: { stopped: 'exploration time share used up' } });
+    expect(result.exploration?.rounds).toBeGreaterThan(0);
+    expect(result.exploration?.skipped).toBeUndefined();
+    expect(attempts).toBeLessThanOrEqual(3);
+    expect(Date.now()).toBe(300000);
+    // The existing per-call wrapper can retain its timer when a backend ignores abort.
+    // The outer exploration timeout still returns every answer at the window boundary.
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+it.each([600000, 300000])('explores a single pass with callTimeoutMs=%s and still sends its answer', async (callTimeoutMs) => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(0);
+    const { model, requests } = recordingModel([READ_GUARD, makeAnswerJson([])]);
+    const result = await runReview(input(model, { explore: { reader: fakeReader({ 'src/guard.ts': 'evidence' }) } }, {
+      callTimeoutMs, totalTimeoutMs: 1200000, explore: { maxRounds: 1 },
+    }));
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.system).toContain('EXPLORATION (round');
+    expect(requests[1]!.system).not.toContain('EXPLORATION (round');
+    expect(result).toMatchObject({ status: 'completed', exploration: { rounds: 1 } });
+    expect(result.exploration?.skipped).toBeUndefined();
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+it('explores six default-timeout batches within the shared maxRounds', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(0);
+    const requests: ReviewModelRequest[] = [];
+    const model: ReviewModel = { label: 'fake:six', generate: async (request) => {
+      requests.push(request);
+      return { text: request.system.includes('EXPLORATION (round') ? READ_GUARD : makeAnswerJson([]), finishReason: 'stop' };
     } };
     const result = await runReview(input(model, {
-      files: [{ path: 'src/a.ts', status: 'modified', patch: bigPatch(900), changes: 901 }],
+      files: Array.from({ length: 6 }, (_, i) => ({ path: `src/file${i}.ts`, status: 'modified', patch: bigPatch(200), changes: 201 })),
       explore: { reader: fakeReader({ 'src/guard.ts': 'evidence' }) },
-    }, { maxPromptTokens: 6000, batchTokens: 5000, callTimeoutMs: 10000, totalTimeoutMs: 55000, explore: { maxRounds: 10 } }));
-    const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
-    expect(answers.length).toBeGreaterThan(1);
-    expect(result).toMatchObject({ status: 'completed', exploration: { skipped: 'time reserved for remaining batch answers' } });
-    const advertisedBatches = /changed files in (\d+) batches/.exec(answers[0]!.user);
-    expect(advertisedBatches).not.toBeNull();
-    expect(answers).toHaveLength(Number(advertisedBatches![1]));
-    expect(Date.now()).toBeLessThan(55000);
-    expect(requests.filter((r) => r.system.includes('EXPLORATION (round')).length).toBeGreaterThan(0);
-    expect(requests.filter((r) => r.system.includes('EXPLORATION (round')).length).toBeLessThan(10);
+    }, { maxPromptTokens: 6000, batchTokens: 2000, callTimeoutMs: 300000, totalTimeoutMs: 1200000, explore: { maxRounds: 2 } }));
+    expect(requests.filter((r) => !r.system.includes('EXPLORATION (round'))).toHaveLength(6);
+    expect(requests.filter((r) => r.system.includes('EXPLORATION (round'))).toHaveLength(2);
+    expect(result).toMatchObject({ status: 'completed', exploration: { rounds: 2 } });
   } finally {
+    vi.clearAllTimers();
     vi.useRealTimers();
   }
 });

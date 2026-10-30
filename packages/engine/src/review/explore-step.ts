@@ -113,7 +113,6 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       system: opts.prompt.system,
       user: opts.prompt.user,
       rounds: limits.maxRounds,
-      answerReserveMs: opts.remainingAnswers === undefined ? undefined : opts.remainingAnswers * reviewLimits(opts.review).callTimeoutMs,
       roundTimeoutMs: reviewLimits(opts.review).callTimeoutMs,
       limits,
       budget,

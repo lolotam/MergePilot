@@ -169,3 +169,11 @@ describe('panel summary — verification rejections and rules left out', () => {
     expect(renderExplorationNote({ ...data, skipped: 'time reserved' }, arabic)).toContain(arabic ? 'اتخطى: time reserved' : 'skipped: time reserved');
   }
 });
+
+ it.each([false, true])('discloses an exploration time stop without calling it skipped (Arabic=%s)', (arabic) => {
+  const note = renderExplorationNote({ rounds: 1, verifierRounds: 0, requests: 1, filesRead: [], refused: 0, stopped: 'exploration time share used up' }, arabic);
+  expect(note).toContain('exploration time share used up');
+  expect(note).not.toContain('skipped:');
+  expect(note).not.toContain('اتخطى:');
+  expect(note).toContain(arabic ? 'وقف:' : 'stopped:');
+});

@@ -50,4 +50,4 @@ The LLM layer has no tool calling: `ReviewModelRequest` is one system and one us
 
 ## Amendment: input space and batched reviews
 
-[ADR-0049](0049-exploration-input-budget.md) implements B23: reserve space before fitting diff/context, explore each planned batch with a shared review-wide read budget, retain fitted result prefixes, and list capped read paths in the note. It supersedes the single-call-only scope and the counts-only note described above. Total review rounds may exceed `maxRounds` across batches.
+[ADR-0049](0049-exploration-input-budget.md) implements B23: reserve space before fitting diff/context, explore each planned batch with a shared review-wide read budget, retain fitted result prefixes, and list capped read paths in the note. It supersedes the single-call-only scope and the counts-only note described above. Total review exploration attempts remain bounded by `maxRounds` across batches; the review-only time window is shared too.
