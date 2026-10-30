@@ -101,7 +101,11 @@ export function renderExplorationNote(
 ): string | undefined {
   if (!exploration) return undefined;
   if (exploration.rounds === 0 && exploration.verifierRounds === 0 && !exploration.skipped) return undefined;
-  const files = exploration.filesRead.length;
+  const paths = [...new Set(exploration.filesRead)];
+  const shown = paths.slice(0, 10).map((path) => `\`${neutralize(path.replace(/`/g, '').replace(/\s+/g, ' ').slice(0, 200))}\``);
+  const rest = paths.length - shown.length;
+  const names = shown.length ? ` (${shown.join(', ')}${rest ? (isArabic ? ` و ${rest} غيرها` : ` and ${rest} more`) : ''})` : '';
+  const files = paths.length;
   const rounds = exploration.rounds;
   const verifierRounds = exploration.verifierRounds;
   const refused = exploration.refused;
@@ -112,14 +116,14 @@ export function renderExplorationNote(
     const verifierPart = verifierRounds > 0 ? `، والتحقق: ${verifierRounds} جولة` : '';
     const refusedPart = refused > 0 ? `، ${refused} طلب مرفوض` : '';
     const skippedPart = skipped ? ` (اتخطى: ${skipped})` : '';
-    return `> ℹ️ الاستكشاف: ${files} ملف في ${rounds} جولة${verifierPart}${refusedPart}${skippedPart}`;
+    return `> ℹ️ الاستكشاف: ${files} ملف في ${rounds} جولة${verifierPart}${refusedPart}${skippedPart}${names}`;
   }
   const verifierPart = verifierRounds > 0
     ? `, verifier: ${verifierRounds} ${verifierRounds === 1 ? 'round' : 'rounds'}`
     : '';
   const refusedPart = refused > 0 ? `, ${refused} ${refused === 1 ? 'request' : 'requests'} refused` : '';
   const skippedPart = skipped ? ` (skipped: ${skipped})` : '';
-  return `> ℹ️ Explored: ${files} ${files === 1 ? 'file' : 'files'} in ${rounds} ${rounds === 1 ? 'round' : 'rounds'}${verifierPart}${refusedPart}${skippedPart}`;
+  return `> ℹ️ Explored: ${files} ${files === 1 ? 'file' : 'files'} in ${rounds} ${rounds === 1 ? 'round' : 'rounds'}${verifierPart}${refusedPart}${skippedPart}${names}`;
 }
 
 /** The cited files of a disclosure: at most five names, the rest counted (ADR-0041). */

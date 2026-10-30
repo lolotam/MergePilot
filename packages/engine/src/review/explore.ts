@@ -15,7 +15,7 @@ import type { TokenUsage } from '../llm/types.js';
 import { isSensitivePath } from '../security/sensitive-path.js';
 import { estimateTokens } from './budget.js';
 import type { ReviewDeadline } from './call.js';
-import { renderExploredBlock } from './explore-block.js';
+import { fitExploredEntries, renderExploredBlock } from './explore-block.js';
 import {
   executeRequests,
   exploreInstructions,
@@ -334,7 +334,8 @@ export async function runExploration(opts: ExploreRunOptions): Promise<ExploreRu
       break;
     }
     const system = `${opts.system}\n\n${exploreInstructions(opts.purpose, opts.limits, round, opts.rounds)}`;
-    const block = renderExploredBlock(entries, opts.knownSecrets);
+    const room = opts.promptLimit === undefined ? Infinity : opts.promptLimit - estimateTokens(system + opts.user) - 2;
+    const block = renderExploredBlock(fitExploredEntries(entries, opts.knownSecrets, room), opts.knownSecrets);
     const user = block ? `${opts.user}\n\n${block}` : opts.user;
     const promptTokens = estimateTokens(system + user);
     // A round whose prompt is over the input-token limit is not sent at all (ADR-0046).

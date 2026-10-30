@@ -24,6 +24,7 @@ import {
   type ExplorePassInput,
   type ExplorationDisclosure,
 } from './explore.js';
+import { fitExploredEntries, renderExploredBlock } from './explore-block.js';
 import type { ExploreEntry } from './explore-requests.js';
 import type { ReviewModel } from './model.js';
 import type { SpendTracker } from './spend.js';
@@ -34,6 +35,10 @@ export type { ExploreInput, ExplorationDisclosure } from './explore.js';
 export interface ExploreStepOptions {
   /** The reader the exploration rounds use; without it the exploration stays off. */
   explore: ExploreInput | undefined;
+  budget?: ExploreBudget | undefined;
+  priorEntries?: readonly ExploreEntry[] | undefined;
+  additionalReserveTokens?: number | undefined;
+  additionalReserveOutputTokens?: number | undefined;
   /** The review config: the explore limits and the skip rules of the paths. */
   review: { explore?: Partial<ExploreLimits> | undefined; exclude: readonly string[] };
   /** Whether the review is batched: a batched review does not explore. */
@@ -84,7 +89,7 @@ export interface ExploreStepResult {
  */
 export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise<ExploreStepResult> {
   const limits = exploreLimits(opts.review);
-  const budget = opts.explore ? new ExploreBudget(limits) : undefined;
+  const budget = opts.explore ? (opts.budget ?? new ExploreBudget(limits)) : undefined;
   const heldTexts = heldTextsOf(opts.files, opts.contextFiles);
   const allowPath = allowPathOf(opts.review.exclude);
   let prompt = opts.prompt;
@@ -120,20 +125,23 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       // reserved for it too.
       reserve: {
         promptTokens:
-          opts.promptTokens +
+          opts.promptTokens + (opts.additionalReserveTokens ?? 0) +
           (opts.verifyReserve ? opts.verifyReserve.promptTokens + limits.maxReadTokens : 0),
-        outputTokens: opts.reviewOutputTokens + (opts.verifyReserve?.outputTokens ?? 0),
+        outputTokens: opts.reviewOutputTokens + (opts.additionalReserveOutputTokens ?? 0) + (opts.verifyReserve?.outputTokens ?? 0),
       },
     });
     usage = explored.usage;
-    priorEntries = explored.entries;
-    if (explored.block) {
-      const user = `${opts.prompt.user}\n\n${explored.block}`;
+    const entries = [...new Map([...explored.entries, ...(opts.priorEntries ?? [])].map((entry) => [JSON.stringify(entry), entry])).values()];
+    priorEntries = fitExploredEntries(entries, opts.knownSecrets, opts.promptLimit - opts.promptTokens - 2);
+    const block = renderExploredBlock(priorEntries, opts.knownSecrets);
+    if (block !== renderExploredBlock(entries, opts.knownSecrets)) budget.noteSkipped('explored results trimmed to fit the input-token limit');
+    if (block) {
+      const user = `${opts.prompt.user}\n\n${block}`;
       const tokens = estimateTokens(opts.prompt.system + user);
       if (tokens <= opts.promptLimit && opts.spend.canAfford(tokens, opts.reviewOutputTokens)) {
         prompt = { system: opts.prompt.system, user };
         promptTokens = tokens;
-        priorBlock = explored.block;
+        priorBlock = block;
       } else if (tokens > opts.promptLimit) {
         budget.noteSkipped('explored results did not fit the input-token limit');
       } else {

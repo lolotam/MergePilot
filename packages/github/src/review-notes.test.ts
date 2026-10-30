@@ -65,7 +65,7 @@ describe('the exploration note (ADR-0046)', () => {
       { rounds: 2, verifierRounds: 0, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 2 },
       false,
     );
-    expect(note).toBe('> ℹ️ Explored: 2 files in 2 rounds, 2 requests refused');
+    expect(note).toBe('> ℹ️ Explored: 2 files in 2 rounds, 2 requests refused (`src/a.ts`, `src/b.ts`)');
   });
 
   it('uses singular English count words', () => {
@@ -73,7 +73,7 @@ describe('the exploration note (ADR-0046)', () => {
       { rounds: 1, verifierRounds: 0, requests: 2, filesRead: ['src/a.ts'], refused: 1 },
       false,
     );
-    expect(note).toBe('> ℹ️ Explored: 1 file in 1 round, 1 request refused');
+    expect(note).toBe('> ℹ️ Explored: 1 file in 1 round, 1 request refused (`src/a.ts`)');
   });
 
   it('discloses one verifier round separately', () => {
@@ -81,7 +81,7 @@ describe('the exploration note (ADR-0046)', () => {
       { rounds: 2, verifierRounds: 1, requests: 3, filesRead: ['src/a.ts'], refused: 0 },
       false,
     );
-    expect(note).toBe('> ℹ️ Explored: 1 file in 2 rounds, verifier: 1 round');
+    expect(note).toBe('> ℹ️ Explored: 1 file in 2 rounds, verifier: 1 round (`src/a.ts`)');
   });
 
   it('discloses several verifier rounds separately', () => {
@@ -113,7 +113,7 @@ describe('the exploration note (ADR-0046)', () => {
         { rounds: 2, verifierRounds: 1, requests: 3, filesRead: ['src/a.ts', 'src/b.ts'], refused: 1 },
         true,
       ),
-    ).toBe('> ℹ️ الاستكشاف: 2 ملف في 2 جولة، والتحقق: 1 جولة، 1 طلب مرفوض');
+    ).toBe('> ℹ️ الاستكشاف: 2 ملف في 2 جولة، والتحقق: 1 جولة، 1 طلب مرفوض (`src/a.ts`, `src/b.ts`)');
     expect(
       renderExplorationNote(
         { rounds: 0, verifierRounds: 2, requests: 0, filesRead: [], refused: 0 },
@@ -147,4 +147,15 @@ describe('panel summary — verification rejections and rules left out', () => {
     const ar = renderPanelSummary({ ...input, language: 'ar' });
     expect(ar).toContain('<summary>رفضها التحقق (1)</summary>');
   });
+});
+
+ it('names explored paths with a capped remainder in both languages (B23)', () => {
+  const filesRead = Array.from({ length: 12 }, (_, i) => `src/file${i}.ts`);
+  for (const arabic of [false, true]) {
+    const note = renderExplorationNote({ rounds: 1, verifierRounds: 0, requests: 12, refused: 0, filesRead }, arabic);
+    expect(note).toContain('`src/file0.ts`');
+    expect(note).toContain('`src/file9.ts`');
+    expect(note).not.toContain('src/file10.ts');
+    expect(note).toContain(arabic ? '2 غيرها' : 'and 2 more');
+  }
 });

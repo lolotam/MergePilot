@@ -42,6 +42,8 @@ export function parseReviewResponse(response: ReviewModelResponse): ParseReviewA
 
 export interface ExecuteBatchedReviewInput {
   batches: ReviewableFileWithPatch[][];
+  promptLimit?: number | undefined;
+  beforeBatch?: ((prompt: { system: string; user: string }, files: ReviewableFileWithPatch[], index: number) => Promise<{ system: string; user: string }>) | undefined;
   config: MergePilotConfig;
   /** Passed through unchanged: a follow-up review's `followUp` must reach every batch (ADR-0030). */
   pr: PromptPr;
@@ -56,7 +58,7 @@ export interface ExecuteBatchedReviewInput {
   knownSecrets?: readonly Secret[] | undefined;
   libraryDocs?: LibraryDoc[] | undefined;
   /** The repository context of a batch: only its own files' context (ADR-0029). */
-  contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
+  contextFor?: ((files: ReviewableFileWithPatch[], maxTokens?: number) => ContextFile[]) | undefined;
   /** Every changed file of the PR for the manifest each batch gets (ADR-0031); none without it. */
   manifestFiles?: readonly ManifestFile[] | undefined;
   signal?: AbortSignal | undefined;
@@ -74,13 +76,13 @@ export interface ExecuteBatchedReviewResult {
 
 /** The prompt for batch `index` of `input.batches`, with the PR manifest when there is one. */
 export function buildBatchPrompt(
-  input: Pick<ExecuteBatchedReviewInput, 'batches' | 'config' | 'pr' | 'rulesFiles' | 'libraryDocs' | 'contextFor' | 'manifestFiles'>,
+  input: Pick<ExecuteBatchedReviewInput, 'batches' | 'config' | 'pr' | 'rulesFiles' | 'libraryDocs' | 'contextFor' | 'manifestFiles' | 'promptLimit'>,
   index: number,
 ): { system: string; user: string } {
   const files = input.batches[index] ?? [];
-  const contextFiles = input.contextFor?.(files) ?? [];
+  let contextFiles: ContextFile[] = [];
   const manifest = input.manifestFiles ? renderManifest(input.manifestFiles, input.batches) : undefined;
-  return buildReviewPrompt({
+  const build = () => buildReviewPrompt({
     language: input.config.language,
     maxFindings: input.config.review.maxFindings,
     pr: input.pr,
@@ -91,6 +93,15 @@ export function buildBatchPrompt(
     ...(contextFiles.length > 0 ? { contextFiles } : {}),
     ...(manifest !== undefined ? { batch: { number: index + 1, count: input.batches.length, manifest } } : {}),
   });
+  let prompt = build();
+  const room = input.promptLimit === undefined ? Infinity : Math.max(0, input.promptLimit - estimateTokens(prompt.system + prompt.user) - 64);
+  contextFiles = input.contextFor?.(files, room) ?? [];
+  prompt = build();
+  while (input.promptLimit !== undefined && estimateTokens(prompt.system + prompt.user) > input.promptLimit && contextFiles.length > 0) {
+    contextFiles.pop();
+    prompt = build();
+  }
+  return prompt;
 }
 
 interface BatchOutcome {
@@ -196,7 +207,12 @@ export async function executeBatchedReview(
       break;
     }
     const label = labelOf(bIdx);
-    const batchPrompt = buildBatchPrompt(input, bIdx);
+    let batchPrompt = buildBatchPrompt(input, bIdx);
+    if (input.beforeBatch) batchPrompt = await input.beforeBatch(batchPrompt, batches[bIdx]!, bIdx);
+    if (input.deadline?.expired) {
+      skipFrom(bIdx, 'skipped: time limit reached during exploration');
+      break;
+    }
     const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
 
     const tokenBudget = checkBudget({ promptTokens: bPromptTokens, maxInputTokens: input.config.budget.maxInputTokens });
