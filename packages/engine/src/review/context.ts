@@ -303,7 +303,7 @@ export class ContextPlan {
   }
 
   /** The context of one batch, from its own files' context, recorded as sent. */
-  readonly forBatch = (batch: ReadonlyArray<{ path: string }>): ContextFile[] => {
+  readonly forBatch = (batch: ReadonlyArray<{ path: string }>, maxTokens = Infinity): ContextFile[] => {
     const cap = Math.min(this.opts.contextTokens, this.opts.batchContextTokens ?? this.opts.batchTokens);
     if (!this.batchContext) {
       const batchOpts = { ...this.opts, contextTokens: cap };
@@ -312,7 +312,7 @@ export class ContextPlan {
         prFiles: cap > 0 ? preparePullRequest(this.offered, batchOpts) : [],
       };
     }
-    const files = this.selectPrepared(batch.map((f) => f.path), cap, this.batchContext.files, this.batchContext.prFiles);
+    const files = this.selectPrepared(batch.map((f) => f.path), Math.min(cap, maxTokens), this.batchContext.files, this.batchContext.prFiles);
     this.markSent(files);
     return files;
   };

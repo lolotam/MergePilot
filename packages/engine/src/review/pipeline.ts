@@ -11,10 +11,8 @@
 import {
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_PR_CONTEXT_TOKENS,
-  REVIEW_LIMIT_DEFAULTS,
   type MergePilotConfig,
   type ModelPricing,
-  type ReviewLimits,
 } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
 import { classifyFile } from '../diff/classify-file.js';
@@ -25,16 +23,19 @@ import { anchorFindings } from '../validate/anchor.js';
 import { selectFindings } from '../validate/select.js';
 import { buildBatchPrompt } from './batch-run.js';
 import { checkBudget, costOverBudgetReason, estimateTokens } from './budget.js';
+import { reviewLimits } from './input-limits.js';
 import { ReviewDeadline, withCallTimeout } from './call.js';
 import { ContextPlan, type ContextDisclosure, type RepositoryContextFile } from './context.js';
-import { exploreBeforeSinglePass, type ExploreInput, type ExplorationDisclosure } from './explore-step.js';
+import { exploreLimits } from './explore.js';
+import { explorationBaseLimit, explorationBatchCap, exploreReview, fitExplorationBatches } from './explore-plan.js';
+import type { ExploreInput, ExplorationDisclosure } from './explore-step.js';
 import { runFalsePositiveFilter, type FalsePositiveOutcome } from '../judge/false-positive.js';
 import { hasJudgeUse, type JudgeUses } from '../judge/uses.js';
 import type { Judge } from '../judge/judge.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { prepareFollowUp, promptPrOf, type FollowUp } from './follow-up.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
-import { manifestFileOf, type ManifestFile } from './manifest.js';
+import { renderManifest, manifestFileOf, type ManifestFile } from './manifest.js';
 import { reviewOutputTokensFor, verifyOutputTokensFor, type OutputLimitDisclosure } from './output-budget.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
@@ -264,13 +265,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const withoutContext = buildReviewPrompt(promptInput);
   const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
   const wholePromptLimit = Math.min(limits.maxPromptTokens, budgetCfg.maxInputTokens);
-  const contextRoom = Math.max(0, wholePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS);
-  const wholeContext = context.whole(contextRoom);
+  const basePromptLimit = explorationBaseLimit(wholePromptLimit, exploreLimits(reviewCfg), input.explore !== undefined);
+  const wholeContext = context.whole(Math.max(0, basePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS));
   let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;
   let promptTokens = estimateTokens(prompt.system + prompt.user);
   // Long path labels can outgrow the estimated block overhead. Drop the lowest-priority files,
   // never split a review just to accommodate context, and disclose exactly what remains.
-  while (promptTokens > wholePromptLimit && wholeContext.length > 0) {
+  while (promptTokens > basePromptLimit && wholeContext.length > 0) {
     wholeContext.pop();
     prompt = buildReviewPrompt({ ...promptInput, contextFiles: wholeContext });
     promptTokens = estimateTokens(prompt.system + prompt.user);
@@ -280,7 +281,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // A review that will be batched sends no whole-PR prompt: only its batches are checked, each
   // against maxInputTokens below, and their total below too. Counting the whole PR here would
   // skip a review whose batches fit, so the check is only for the unbatched review.
-  const batched = withoutContextTokens > limits.maxPromptTokens && redactedReviewableFiles.length > 0;
+  const batched = withoutContextTokens > (input.explore ? basePromptLimit : limits.maxPromptTokens) && redactedReviewableFiles.length > 0;
   if (!batched) {
     const budgetResult = checkBudget({
       promptTokens,
@@ -295,7 +296,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // Size guard (ADR-0013): a prompt too big for one reliable call goes straight to capped batches.
   let plan: CappedBatches | undefined;
   if (batched) {
-    plan = batchFilesByTokenCap(redactedReviewableFiles, limits.batchTokens, reviewCfg.maxFileParts);
+    const cap = input.explore ? explorationBatchCap(limits.batchTokens, basePromptLimit, buildReviewPrompt({ ...promptInput, files: [] }), renderManifest(manifestFiles, [])) : limits.batchTokens;
+    plan = input.explore ? fitExplorationBatches(redactedReviewableFiles, cap, reviewCfg.maxFileParts, basePromptLimit,
+      (batches, index) => buildBatchPrompt({ batches, config: promptConfig, pr: promptPr, rulesFiles: redactedRulesFiles, libraryDocs: input.libraryDocs, manifestFiles }, index))
+      : batchFilesByTokenCap(redactedReviewableFiles, cap, reviewCfg.maxFileParts);
     // A file too big for one batch is reviewed in parts (ADR-0045); the parts beyond
     // review.maxFileParts are not sent, and the file is reported as not fully reviewed.
     for (const skipped of plan.skippedParts) {
@@ -312,6 +316,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
   const promptArgs = {
     config: promptConfig,
+    promptLimit: input.explore ? basePromptLimit : undefined,
     pr: promptPr,
     rulesFiles: redactedRulesFiles,
     libraryDocs: input.libraryDocs,
@@ -373,9 +378,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const spend = new SpendTracker(currentPricing, budgetCfg.perReviewUsd);
 
   // ── Steps d + e: model call(s), parse, recovery ────────────────────────
-  // Read-only exploration before the answer (ADR-0046): only when the caller passes a reader,
-  // and only in a single-call review; a batched one discloses that it did not explore.
-  const explored = await exploreBeforeSinglePass({
+  // Explore the whole PR or each planned batch, sharing one read budget (ADR-0049).
+  const explored = await exploreReview({
+    callPromptTokens,
     explore: input.explore, review: reviewCfg, batched: plan !== undefined, model, spend, deadline, signal,
     prompt, promptTokens, promptLimit: wholePromptLimit, files: redactedReviewableFiles, contextFiles: context.sentFiles(),
     knownSecrets, reviewOutputTokens, verifyReserve: reviewCfg.verify ? { promptTokens, outputTokens: verifyOutputTokens } : undefined,
@@ -383,6 +388,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   const passContext: ReviewPassContext = {
     config: promptConfig,
+    promptLimit: input.explore ? basePromptLimit : undefined,
+    beforeBatch: explored.beforeBatch,
     model,
     spend,
     knownSecrets,
@@ -547,14 +554,4 @@ function knownCostUsd(
   const methodOnlyFallback =
     disclosure.fallbackFromMethod !== undefined && disclosure.modelUsed === disclosure.fallbackFrom;
   return pricing && (!disclosure.fallbackFrom || methodOnlyFallback) ? spend.spentUsd : undefined;
-}
-
-/** The ADR-0013 limits, defaulted for a config built in code without the schema. */
-function reviewLimits(review: Partial<ReviewLimits>): ReviewLimits {
-  return {
-    maxPromptTokens: review.maxPromptTokens ?? REVIEW_LIMIT_DEFAULTS.maxPromptTokens,
-    batchTokens: review.batchTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens,
-    callTimeoutMs: review.callTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.callTimeoutMs,
-    totalTimeoutMs: review.totalTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.totalTimeoutMs,
-  };
 }

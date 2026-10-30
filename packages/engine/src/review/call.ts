@@ -92,6 +92,10 @@ export class ReviewDeadline {
     this.#endsAt = now() + totalMs;
   }
 
+  get remainingMs(): number {
+    return Math.max(0, this.#endsAt - this.now());
+  }
+
   get expired(): boolean {
     return this.now() >= this.#endsAt;
   }

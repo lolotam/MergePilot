@@ -14,9 +14,11 @@ import { isContextPathAllowed } from '../diff/classify-file.js';
 import type { TokenUsage } from '../llm/types.js';
 import { isSensitivePath } from '../security/sensitive-path.js';
 import { estimateTokens } from './budget.js';
-import type { ReviewDeadline } from './call.js';
-import { renderExploredBlock } from './explore-block.js';
+import { generateWithTimeout, type ReviewDeadline } from './call.js';
+import { EXPLORATION_TIME_SHARE, EXPLORATION_TIME_EXHAUSTED, boundExplorationReads } from './explore-time.js';
+import { fitExploredEntries, renderExploredBlock } from './explore-block.js';
 import {
+  EXPLORED_SEPARATOR_TOKENS,
   executeRequests,
   exploreInstructions,
   exploreJsonSchema,
@@ -59,7 +61,11 @@ export interface ExplorationDisclosure {
   requests: number;
   filesRead: string[];
   refused: number;
+  /** New evidence was shortened or omitted to meet an input-token limit. */
+  trimmed?: boolean;
   skipped?: string;
+  /** Exploration ran, then stopped early; this is not a skipped review. */
+  stopped?: string;
 }
 
 /** What a batched review discloses about its exploration: it does not explore (ADR-0046). */
@@ -80,10 +86,14 @@ export const BATCHED_EXPLORATION: ExplorationDisclosure = {
 export class ExploreBudget {
   #remainingTokens: number;
   #rounds = 0;
+  #reviewAttempts = 0;
+  #timeReserveMs: number | undefined;
   #verifierRounds = 0;
   #requests = 0;
   #refused = 0;
+  #trimmed = false;
   #skipped: string | undefined;
+  #stopped: string | undefined;
   readonly #filesRead = new Set<string>();
   /** The files read so far, by path: the content is fetched once and kept. */
   readonly readFiles = new Map<string, string | null>();
@@ -108,6 +118,22 @@ export class ExploreBudget {
   /** The rounds that ran. */
   get rounds(): number {
     return this.#rounds;
+  }
+
+  /** One wall-clock window from the first review exploration, shared across batches.
+   * Time between batches counts too, so the window can never be renewed. */
+  remainingExplorationMs(deadline: ReviewDeadline): number {
+    this.#timeReserveMs ??= deadline.remainingMs * (1 - EXPLORATION_TIME_SHARE);
+    return Math.max(0, deadline.remainingMs - this.#timeReserveMs);
+  }
+
+  /** Attempts include failed calls, so a failing provider cannot multiply work per batch. */
+  get reviewAttempts(): number {
+    return this.#reviewAttempts;
+  }
+
+  countReviewAttempt(): void {
+    this.#reviewAttempts++;
   }
 
   /** The requests the model asked for. */
@@ -162,6 +188,15 @@ export class ExploreBudget {
     this.#skipped ??= reason;
   }
 
+  noteTimeStopped(): void {
+    if (this.#rounds === 0) this.noteSkipped(EXPLORATION_TIME_EXHAUSTED);
+    else this.#stopped ??= EXPLORATION_TIME_EXHAUSTED;
+  }
+
+  noteTrimmed(): void {
+    this.#trimmed = true;
+  }
+
   /** The file paths of the head, read once per review; a failed listing is tried again later. */
   listPaths(reader: RepositoryReader): Promise<{ paths: string[]; truncated: boolean } | null> {
     let pending = this.#listPaths;
@@ -185,7 +220,9 @@ export class ExploreBudget {
       requests: this.#requests,
       filesRead: [...this.#filesRead],
       refused: this.#refused,
+      ...(this.#trimmed ? { trimmed: true } : {}),
       ...(this.#skipped ? { skipped: this.#skipped } : {}),
+      ...(this.#stopped ? { stopped: this.#stopped } : {}),
     };
   }
 }
@@ -273,6 +310,7 @@ export interface ExploreRunOptions {
   user: string;
   /** How many rounds may run (the review's own limit; the verifier runs one). */
   rounds: number;
+  roundTimeoutMs?: number | undefined;
   limits: ExploreLimits;
   budget: ExploreBudget;
   reader: RepositoryReader;
@@ -323,8 +361,14 @@ export async function runExploration(opts: ExploreRunOptions): Promise<ExploreRu
   const shown = new Set<string>();
   for (const entry of opts.shownEntries ?? []) shown.add(entryKey(entry));
   let usage: TokenUsage | undefined;
+  const remainingTime = opts.purpose === 'review' ? () => budget.remainingExplorationMs(opts.deadline) : undefined;
 
   for (let round = 1; round <= opts.rounds; round++) {
+    if (opts.purpose === 'review' && budget.reviewAttempts >= opts.limits.maxRounds) break;
+    if (remainingTime && remainingTime() <= 0) {
+      budget.noteTimeStopped();
+      break;
+    }
     if (opts.deadline.expired) {
       if (budget.rounds === 0) budget.noteSkipped('time limit reached');
       break;
@@ -334,7 +378,10 @@ export async function runExploration(opts: ExploreRunOptions): Promise<ExploreRu
       break;
     }
     const system = `${opts.system}\n\n${exploreInstructions(opts.purpose, opts.limits, round, opts.rounds)}`;
-    const block = renderExploredBlock(entries, opts.knownSecrets);
+    const room = opts.promptLimit === undefined ? Infinity : opts.promptLimit - estimateTokens(system + opts.user) - EXPLORED_SEPARATOR_TOKENS;
+    const fitted = fitExploredEntries(entries, opts.knownSecrets, room);
+    const block = renderExploredBlock(fitted, opts.knownSecrets);
+    if (block !== renderExploredBlock(entries, opts.knownSecrets)) budget.noteTrimmed();
     const user = block ? `${opts.user}\n\n${block}` : opts.user;
     const promptTokens = estimateTokens(system + user);
     // A round whose prompt is over the input-token limit is not sent at all (ADR-0046).
@@ -363,10 +410,13 @@ export async function runExploration(opts: ExploreRunOptions): Promise<ExploreRu
     };
     let response: ReviewModelResponse;
     try {
-      response = await model.generate(request);
+      if (opts.purpose === 'review') budget.countReviewAttempt();
+      const timeoutMs = remainingTime ? Math.min(opts.roundTimeoutMs ?? Infinity, remainingTime()) : opts.roundTimeoutMs;
+      response = await (timeoutMs === undefined ? model.generate(request) : generateWithTimeout(model, request, timeoutMs));
     } catch (err) {
       spend.record(promptTokens, requested, undefined);
-      if (budget.rounds === 0) budget.noteSkipped(describeCallError(err, opts.knownSecrets));
+      if (remainingTime && remainingTime() <= 0) budget.noteTimeStopped();
+      else if (budget.rounds === 0) budget.noteSkipped(describeCallError(err, opts.knownSecrets));
       break;
     }
     spend.record(promptTokens, requested, response.usage);
@@ -378,7 +428,7 @@ export async function runExploration(opts: ExploreRunOptions): Promise<ExploreRu
     if (requests.length === 0) break;
     const asked = requests.slice(0, opts.limits.maxRequestsPerRound);
     const run = await executeRequests(asked, {
-      reader: opts.reader,
+      reader: remainingTime ? boundExplorationReads(opts.reader, remainingTime, () => budget.noteTimeStopped()) : opts.reader,
       budget,
       limits: opts.limits,
       allowPath: opts.allowPath,

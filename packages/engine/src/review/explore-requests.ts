@@ -86,6 +86,14 @@ export interface ExploreEntry {
   content: string;
 }
 
+/** Leave room for the two newlines between the base prompt and evidence. */
+export const EXPLORED_SEPARATOR_TOKENS = 2;
+
+/** Keep one copy of each identical result, preserving first occurrence order. */
+export function uniqueExploreEntries(entries: readonly ExploreEntry[]): ExploreEntry[] {
+  return [...new Map(entries.map((entry) => [JSON.stringify(entry), entry])).values()];
+}
+
 export interface ExecuteRequestsContext {
   reader: RepositoryReader;
   budget: ExploreBudget;
@@ -248,7 +256,7 @@ async function executeRead(
   const { text, start } = numberedLines(content, request.startLine, request.endLine, ctx.limits.maxLinesPerRead);
   if (text.length === 0) return { entry: { label: path, content: 'no such lines' }, refused: false };
   const label = start === 1 ? path : `${path}:${start}`;
-  ctx.budget.addFileRead(path);
+  ctx.budget.addFileRead(redactSecrets(path, [...ctx.knownSecrets]).text);
   // The same range of a file that was served before shows what it showed then, and it is free: a
   // read that was cut to the budget stays cut, so a repeat never gets more than the first one.
   const key = servedKey(path, request);

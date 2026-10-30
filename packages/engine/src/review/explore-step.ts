@@ -24,7 +24,9 @@ import {
   type ExplorePassInput,
   type ExplorationDisclosure,
 } from './explore.js';
-import type { ExploreEntry } from './explore-requests.js';
+import { fitExploredEntries, renderExploredBlock } from './explore-block.js';
+import { EXPLORED_SEPARATOR_TOKENS, uniqueExploreEntries, type ExploreEntry } from './explore-requests.js';
+import { reviewLimits } from './input-limits.js';
 import type { ReviewModel } from './model.js';
 import type { SpendTracker } from './spend.js';
 
@@ -34,8 +36,12 @@ export type { ExploreInput, ExplorationDisclosure } from './explore.js';
 export interface ExploreStepOptions {
   /** The reader the exploration rounds use; without it the exploration stays off. */
   explore: ExploreInput | undefined;
+  budget?: ExploreBudget | undefined;
+  priorEntries?: readonly ExploreEntry[] | undefined;
+  additionalReserveTokens?: number | undefined;
+  additionalReserveOutputTokens?: number | undefined;
   /** The review config: the explore limits and the skip rules of the paths. */
-  review: { explore?: Partial<ExploreLimits> | undefined; exclude: readonly string[] };
+  review: { explore?: Partial<ExploreLimits> | undefined; exclude: readonly string[]; callTimeoutMs?: number };
   /** Whether the review is batched: a batched review does not explore. */
   batched: boolean;
   model: ReviewModel;
@@ -84,7 +90,7 @@ export interface ExploreStepResult {
  */
 export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise<ExploreStepResult> {
   const limits = exploreLimits(opts.review);
-  const budget = opts.explore ? new ExploreBudget(limits) : undefined;
+  const budget = opts.explore ? (opts.budget ?? new ExploreBudget(limits)) : undefined;
   const heldTexts = heldTextsOf(opts.files, opts.contextFiles);
   const allowPath = allowPathOf(opts.review.exclude);
   let prompt = opts.prompt;
@@ -106,6 +112,7 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       system: opts.prompt.system,
       user: opts.prompt.user,
       rounds: limits.maxRounds,
+      roundTimeoutMs: reviewLimits(opts.review).callTimeoutMs,
       limits,
       budget,
       reader: opts.explore.reader,
@@ -120,22 +127,26 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       // reserved for it too.
       reserve: {
         promptTokens:
-          opts.promptTokens +
+          opts.promptTokens + (opts.additionalReserveTokens ?? 0) +
           (opts.verifyReserve ? opts.verifyReserve.promptTokens + limits.maxReadTokens : 0),
-        outputTokens: opts.reviewOutputTokens + (opts.verifyReserve?.outputTokens ?? 0),
+        outputTokens: opts.reviewOutputTokens + (opts.additionalReserveOutputTokens ?? 0) + (opts.verifyReserve?.outputTokens ?? 0),
       },
     });
     usage = explored.usage;
-    priorEntries = explored.entries;
-    if (explored.block) {
-      const user = `${opts.prompt.user}\n\n${explored.block}`;
+    const entries = uniqueExploreEntries([...explored.entries, ...(opts.priorEntries ?? [])]);
+    priorEntries = fitExploredEntries(entries, opts.knownSecrets, opts.promptLimit - opts.promptTokens - EXPLORED_SEPARATOR_TOKENS);
+    const block = renderExploredBlock(priorEntries, opts.knownSecrets);
+    // Only newly gathered evidence counts here; carried evidence may fit differently per batch.
+    if (explored.entries.some((entry) => !priorEntries.some((kept) => kept.label === entry.label && kept.content === entry.content))) budget.noteTrimmed();
+    if (block) {
+      const user = `${opts.prompt.user}\n\n${block}`;
       const tokens = estimateTokens(opts.prompt.system + user);
       if (tokens <= opts.promptLimit && opts.spend.canAfford(tokens, opts.reviewOutputTokens)) {
         prompt = { system: opts.prompt.system, user };
         promptTokens = tokens;
-        priorBlock = explored.block;
+        priorBlock = block;
       } else if (tokens > opts.promptLimit) {
-        budget.noteSkipped('explored results did not fit the input-token limit');
+        budget.noteTrimmed();
       } else {
         budget.noteSkipped('explored results left out: budget limit reached');
       }

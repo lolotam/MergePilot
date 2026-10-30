@@ -47,3 +47,7 @@ The LLM layer has no tool calling: `ReviewModelRequest` is one system and one us
 - `ExplorationDisclosure.rounds` counts the review's own rounds only (at most `review.explore.maxRounds`); the verifier's round is counted apart in `verifierRounds` (0 or 1). A verifier round means its model call answered, not that it read a file.
 - The note uses singular and plural: «Explored: 1 file in 2 rounds», and adds «, verifier: 1 round» when the verifier's round ran (Arabic: «، والتحقق: 1 جولة»).
 - The main bot's exploration switch saves at once, like the extra bots' switches: it sends provider, model, language and `exploreEnabled` with their shown values as `base`, so a stale tab cannot overwrite them and a concurrent change answers 409; the settings form's Save no longer sends `exploreEnabled`.
+
+## Amendment: input space and batched reviews
+
+[ADR-0049](0049-exploration-input-budget.md) implements B23: reserve space before fitting diff/context, explore each planned batch with a shared review-wide read budget, retain fitted result prefixes, and list capped read paths in the note. It supersedes the single-call-only scope and the counts-only note described above. Total review exploration attempts remain bounded by `maxRounds` across batches; the review-only time window is shared too.
