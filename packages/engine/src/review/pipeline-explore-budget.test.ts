@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { estimateTokens } from './budget.js';
 import type { RepositoryReader } from './explore.js';
 import type { ReviewModel, ReviewModelRequest } from './model.js';
@@ -45,7 +45,7 @@ function input(
 ): RunReviewInput {
   const base = makeConfig();
   return {
-    config: makeConfig({ review: { ...base.review, verify: false, ...review } }),
+    config: makeConfig({ review: { ...base.review, verify: false, callTimeoutMs: 1000, ...review } }),
     pr: { title: 'PR', body: '' },
     files: [{ path: 'src/a.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }],
     rulesFiles: [],
@@ -57,7 +57,7 @@ function input(
 
 const READ_GUARD = JSON.stringify({ explore: [{ read: { path: 'src/guard.ts' } }] });
 describe('large PR exploration budgets (B23)', () => {
-  it('explores every batch of a large patch without exceeding the input cap (B23)', async () => {
+  it('reuses exploration evidence in every batch without exceeding the input cap (B23)', async () => {
     const requests: ReviewModelRequest[] = [];
     const model: ReviewModel = { label: 'fake:large', generate: async (request) => {
       requests.push(request);
@@ -66,11 +66,12 @@ describe('large PR exploration budgets (B23)', () => {
     const base = makeConfig();
     const result = await runReview(input(model, {
       files: [{ path: 'src/a.ts', status: 'modified', patch: bigPatch(900), changes: 901 }],
-      config: makeConfig({ review: { ...base.review, verify: false, maxPromptTokens: 6000, batchTokens: 5000, explore: { maxRounds: 1 } }, budget: { ...base.budget, maxInputTokens: 30000 } }),
+      config: makeConfig({ review: { ...base.review, verify: false, callTimeoutMs: 1000, maxPromptTokens: 6000, batchTokens: 5000, explore: { maxRounds: 1 } }, budget: { ...base.budget, maxInputTokens: 30000 } }),
       explore: { reader: fakeReader({ 'src/guard.ts': 'export function guard() {}' }) },
     }));
     const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
     expect(answers.length).toBeGreaterThan(1);
+    expect(requests.filter((r) => r.system.includes('EXPLORATION (round'))).toHaveLength(1);
     expect(answers.every((r) => r.user.includes('EXPLORED:src/guard.ts'))).toBe(true);
     expect(requests.every((r) => estimateTokens(r.system + r.user) <= 6000)).toBe(true);
     expect(result).toMatchObject({ status: 'completed', exploration: { filesRead: ['src/guard.ts'] } });
@@ -128,4 +129,54 @@ it('shares exhausted read evidence across batches and accounts for every call', 
   expect(answers.every((r) => r.user.includes('guard evidence'))).toBe(true);
   expect(reads).toBe(1);
   expect(result).toMatchObject({ status: 'completed', usage: { inputTokens: requests.length * 7, outputTokens: requests.length * 3 } });
+});
+
+ it('reserves remaining batch answers and stops slow exploration with a reason', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(0);
+    const requests: ReviewModelRequest[] = [];
+    const model: ReviewModel = { label: 'fake:clock', generate: async (request) => {
+      requests.push(request);
+      const exploring = request.system.includes('EXPLORATION (round');
+      vi.setSystemTime(Date.now() + (exploring ? 9000 : 1000));
+      return { text: exploring ? READ_GUARD : makeAnswerJson([]), finishReason: 'stop' };
+    } };
+    const result = await runReview(input(model, {
+      files: [{ path: 'src/a.ts', status: 'modified', patch: bigPatch(900), changes: 901 }],
+      explore: { reader: fakeReader({ 'src/guard.ts': 'evidence' }) },
+    }, { maxPromptTokens: 6000, batchTokens: 5000, callTimeoutMs: 10000, totalTimeoutMs: 55000, explore: { maxRounds: 10 } }));
+    const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
+    expect(answers.length).toBeGreaterThan(1);
+    expect(result).toMatchObject({ status: 'completed', exploration: { skipped: 'time reserved for remaining batch answers' } });
+    const advertisedBatches = /changed files in (\d+) batches/.exec(answers[0]!.user);
+    expect(advertisedBatches).not.toBeNull();
+    expect(answers).toHaveLength(Number(advertisedBatches![1]));
+    expect(Date.now()).toBeLessThan(55000);
+    expect(requests.filter((r) => r.system.includes('EXPLORATION (round')).length).toBeGreaterThan(0);
+    expect(requests.filter((r) => r.system.includes('EXPLORATION (round')).length).toBeLessThan(10);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+ it.each([false, true])('bounds total exploration attempts across batches, including failures=%s', async (fail) => {
+  let attempts = 0;
+  let answers = 0;
+  const model: ReviewModel = { label: 'fake:bound', generate: async (request) => {
+    if (request.system.includes('EXPLORATION (round')) {
+      attempts++;
+      if (fail) throw new Error('fake provider unavailable');
+      return { text: READ_GUARD, finishReason: 'stop' };
+    }
+    answers++;
+    return { text: makeAnswerJson([]), finishReason: 'stop' };
+  } };
+  const result = await runReview(input(model, {
+    files: [{ path: 'src/a.ts', status: 'modified', patch: bigPatch(900), changes: 901 }],
+    explore: { reader: fakeReader({ 'src/guard.ts': 'evidence' }) },
+  }, { maxPromptTokens: 6000, batchTokens: 3000, explore: { maxRounds: 2 } }));
+  expect(answers).toBeGreaterThan(2);
+  expect(attempts).toBe(2);
+  expect(result.status).toBe('completed');
 });

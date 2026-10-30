@@ -159,3 +159,13 @@ describe('panel summary — verification rejections and rules left out', () => {
     expect(note).toContain(arabic ? '2 غيرها' : 'and 2 more');
   }
 });
+
+ it('discloses shortening separately from real skips in both languages', () => {
+  for (const arabic of [false, true]) {
+    const data = { rounds: 1, verifierRounds: 0, requests: 1, refused: 0, filesRead: ['src/a.ts'], trimmed: true };
+    const note = renderExplorationNote(data, arabic)!;
+    expect(note).toContain(arabic ? 'النتائج اتقصرت عشان تناسب حد الإدخال' : 'results shortened to fit');
+    expect(note).not.toContain(arabic ? 'اتخطى:' : 'skipped:');
+    expect(renderExplorationNote({ ...data, skipped: 'time reserved' }, arabic)).toContain(arabic ? 'اتخطى: time reserved' : 'skipped: time reserved');
+  }
+});

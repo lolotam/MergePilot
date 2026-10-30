@@ -86,6 +86,14 @@ export interface ExploreEntry {
   content: string;
 }
 
+/** Leave room for the two newlines between the base prompt and evidence. */
+export const EXPLORED_SEPARATOR_TOKENS = 2;
+
+/** Keep one copy of each identical result, preserving first occurrence order. */
+export function uniqueExploreEntries(entries: readonly ExploreEntry[]): ExploreEntry[] {
+  return [...new Map(entries.map((entry) => [JSON.stringify(entry), entry])).values()];
+}
+
 export interface ExecuteRequestsContext {
   reader: RepositoryReader;
   budget: ExploreBudget;
