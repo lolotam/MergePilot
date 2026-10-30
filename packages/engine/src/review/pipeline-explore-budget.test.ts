@@ -90,8 +90,8 @@ describe('large PR exploration budgets (B23)', () => {
     await runReview(input(model, { files, explore: { reader: fakeReader({ 'src/guard.ts': 'guard evidence' }) } }, { maxPromptTokens: cap, explore: { maxRounds: 1 } }));
     expect(requests.some((r) => r.system.includes('EXPLORATION (round'))).toBe(true);
     const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
-  expect(answers.length).toBeGreaterThan(1);
-  expect(answers.every((r) => r.user.includes('guard evidence'))).toBe(true);
+    expect(answers.length).toBeGreaterThan(1);
+    expect(answers.every((r) => r.user.includes('guard evidence'))).toBe(true);
     expect(requests.every((r) => estimateTokens(r.system + r.user) <= cap)).toBe(true);
   });
 
@@ -209,7 +209,7 @@ it('explores six default-timeout batches within the shared maxRounds', async () 
   }
 });
 
- it.each([false, true])('bounds total exploration attempts across batches, including failures=%s', async (fail) => {
+it.each([false, true])('bounds total exploration attempts across batches, including failures=%s', async (fail) => {
   let attempts = 0;
   let answers = 0;
   const model: ReviewModel = { label: 'fake:bound', generate: async (request) => {

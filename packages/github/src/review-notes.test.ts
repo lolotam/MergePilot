@@ -149,7 +149,7 @@ describe('panel summary — verification rejections and rules left out', () => {
   });
 });
 
- it('names explored paths with a capped remainder in both languages (B23)', () => {
+it('names explored paths with a capped remainder in both languages (B23)', () => {
   const filesRead = Array.from({ length: 12 }, (_, i) => `src/file${i}.ts`);
   for (const arabic of [false, true]) {
     const note = renderExplorationNote({ rounds: 1, verifierRounds: 0, requests: 12, refused: 0, filesRead }, arabic);
@@ -160,7 +160,7 @@ describe('panel summary — verification rejections and rules left out', () => {
   }
 });
 
- it('discloses shortening separately from real skips in both languages', () => {
+it('discloses shortening separately from real skips in both languages', () => {
   for (const arabic of [false, true]) {
     const data = { rounds: 1, verifierRounds: 0, requests: 1, refused: 0, filesRead: ['src/a.ts'], trimmed: true };
     const note = renderExplorationNote(data, arabic)!;
@@ -170,7 +170,7 @@ describe('panel summary — verification rejections and rules left out', () => {
   }
 });
 
- it.each([false, true])('discloses an exploration time stop without calling it skipped (Arabic=%s)', (arabic) => {
+it.each([false, true])('discloses an exploration time stop without calling it skipped (Arabic=%s)', (arabic) => {
   const note = renderExplorationNote({ rounds: 1, verifierRounds: 0, requests: 1, filesRead: [], refused: 0, stopped: 'exploration time share used up' }, arabic);
   expect(note).toContain('exploration time share used up');
   expect(note).not.toContain('skipped:');

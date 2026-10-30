@@ -46,7 +46,7 @@ const BATCH_CONTEXT_SAFETY_TOKENS = 64;
 export interface ExecuteBatchedReviewInput {
   batches: ReviewableFileWithPatch[][];
   promptLimit?: number | undefined;
-  beforeBatch?: ((prompt: { system: string; user: string }, files: ReviewableFileWithPatch[], index: number, remainingAnswers: number) => Promise<{ system: string; user: string }>) | undefined;
+  beforeBatch?: ((prompt: { system: string; user: string }, files: ReviewableFileWithPatch[], index: number) => Promise<{ system: string; user: string }>) | undefined;
   config: MergePilotConfig;
   /** Passed through unchanged: a follow-up review's `followUp` must reach every batch (ADR-0030). */
   pr: PromptPr;
@@ -211,7 +211,7 @@ export async function executeBatchedReview(
     }
     const label = labelOf(bIdx);
     let batchPrompt = buildBatchPrompt(input, bIdx);
-    if (input.beforeBatch) batchPrompt = await input.beforeBatch(batchPrompt, batches[bIdx]!, bIdx, batches.length - bIdx);
+    if (input.beforeBatch) batchPrompt = await input.beforeBatch(batchPrompt, batches[bIdx]!, bIdx);
     const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
 
     const tokenBudget = checkBudget({ promptTokens: bPromptTokens, maxInputTokens: input.config.budget.maxInputTokens });

@@ -34,12 +34,12 @@ export function explorationBatchCap(cap: number, limit: number, emptyPrompt: { s
 
 export async function exploreReview(opts: ExploreStepOptions & { callPromptTokens: number[] }): Promise<ExploreStepResult & { beforeBatch: ExecuteBatchedReviewInput['beforeBatch'] }> {
   const budget = opts.explore ? new ExploreBudget(exploreLimits(opts.review)) : undefined;
-  const result = await exploreBeforeSinglePass({ ...opts, budget, remainingAnswers: 1 });
+  const result = await exploreBeforeSinglePass({ ...opts, budget });
   result.disclosure = () => budget ? { exploration: budget.disclosure() } : {};
-  const beforeBatch: ExecuteBatchedReviewInput['beforeBatch'] = opts.explore ? async (prompt, files, index, remainingAnswers) => {
+  const beforeBatch: ExecuteBatchedReviewInput['beforeBatch'] = opts.explore ? async (prompt, files, index) => {
     const remaining = opts.callPromptTokens.slice(index + 1);
     const step = await exploreBeforeSinglePass({
-      ...opts, budget, prompt, files, batched: false, remainingAnswers, priorEntries: result.explorePass?.priorEntries,
+      ...opts, budget, prompt, files, batched: false, priorEntries: result.explorePass?.priorEntries,
       promptTokens: estimateTokens(prompt.system + prompt.user),
       additionalReserveTokens: remaining.reduce((sum, tokens) => sum + tokens, 0),
       additionalReserveOutputTokens: opts.reviewOutputTokens * remaining.length,

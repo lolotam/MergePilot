@@ -38,7 +38,6 @@ export interface ExploreStepOptions {
   explore: ExploreInput | undefined;
   budget?: ExploreBudget | undefined;
   priorEntries?: readonly ExploreEntry[] | undefined;
-  remainingAnswers?: number | undefined;
   additionalReserveTokens?: number | undefined;
   additionalReserveOutputTokens?: number | undefined;
   /** The review config: the explore limits and the skip rules of the paths. */

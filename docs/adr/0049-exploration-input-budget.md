@@ -6,7 +6,7 @@
 
 The B23 evaluation counted exploration skipped or cut in 30 of 265 reviews (11%) across 24 PRs. Three separate paths lose evidence: the first exploration call adds protocol instructions to an already full review prompt; a successful read produces a block that is accepted or discarded as a whole; and the GitHub note displays only counts despite the engine already disclosing paths. Batched reviews explicitly bypass exploration, including large patches split under ADR-0045.
 
-The round-2 worst-case answer reserve regressed the main exploration user: Waleed_Bot's effective `callTimeoutMs = 600_000` (ADR-0048) plus one answer reserve already equals the default `totalTimeoutMs = 1_200_000`, so no exploration could start. With default 300s calls, three or more batch answers also block exploration entirely. A maximum call timeout is not a latency estimate.
+Exploring before every batch needs a time bound, but reserving the worst-case call timeout for each remaining answer does not work: Waleed_Bot's effective `callTimeoutMs = 600_000` (ADR-0048) plus one answer reserve already equals the default `totalTimeoutMs = 1_200_000`, so no exploration could start. With default 300s calls, three or more batch answers would also block exploration entirely. A maximum call timeout is not a latency estimate.
 
 ## Options
 

@@ -131,7 +131,7 @@ it('redacts known secrets in disclosed read paths before notes can display them'
   expect(result.disclosure().exploration?.filesRead).toEqual(['src/[REDACTED:known].ts']);
 });
 
- it('does not report a new trim for carried evidence that no longer fits', async () => {
+it('does not report a new trim for carried evidence that no longer fits', async () => {
   const result = await exploreBeforeSinglePass({
     explore: { reader }, priorEntries: [{ label: 'src/old.ts', content: 'old evidence '.repeat(1000) }],
     review: { exclude: [], explore: { maxRounds: 1 } }, batched: false,
@@ -144,7 +144,7 @@ it('redacts known secrets in disclosed read paths before notes can display them'
   expect(result.disclosure().exploration?.skipped).toBeUndefined();
 });
 
- it('deduplicates identical exploration entries in first occurrence order', () => {
+it('deduplicates identical exploration entries in first occurrence order', () => {
   const first = { label: 'src/a.ts', content: 'first range' };
   const second = { label: 'src/a.ts', content: 'another range' };
   expect(uniqueExploreEntries([first, second, { ...first }])).toEqual([first, second]);
