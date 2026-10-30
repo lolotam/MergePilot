@@ -15,6 +15,7 @@ import {
   ModelIdSchema,
 } from './contract-models.js';
 import { SkillIdSchema } from './contract-skills.js';
+import { CallTimeoutMsSchema } from './contract-call-timeout.js';
 
 // The reviewer panel (ADR-0017): up to five bots per workspace. Re-exported by contract.ts.
 
@@ -39,6 +40,8 @@ export const ReviewerBotInputSchema = z.object({
   exploreEnabled: z.boolean().optional(),
   /** The bot's review skill (ADR-0034); null = Default. Left out keeps the stored skill. */
   skillId: SkillIdSchema.nullable().optional(),
+  /** Migration 0018: the bot's optional call timeout override in ms (1000-1200000); omitted keeps the stored one, null resets to inherit. */
+  callTimeoutMs: CallTimeoutMsSchema.optional(),
 });
 export type ReviewerBotInput = z.infer<typeof ReviewerBotInputSchema>;
 
@@ -56,6 +59,8 @@ export const ReviewerBotSchema = z.object({
   skillId: z.string().nullable().optional(),
   /** The name of the bot's skill that was deleted; left out unless the bot fell back to Default. */
   skillRemovedName: z.string().nullable().optional(),
+  /** Migration 0018: the bot's optional call timeout override in ms (1000-1200000); omitted keeps the stored one, null = inherit. */
+  callTimeoutMs: CallTimeoutMsSchema.optional(),
 });
 export type ReviewerBotDto = z.infer<typeof ReviewerBotSchema>;
 

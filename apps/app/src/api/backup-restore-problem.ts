@@ -1,5 +1,13 @@
 import type { z } from 'zod';
 
+/** Which settings field a validateSettings problem is about. */
+export const SETTINGS_PROBLEM_FIELDS: Record<string, string> = {
+  validation_error: 'settings.heavyModel',
+  heavy_key_missing: 'settings.heavyProvider',
+  fallback_duplicate: 'settings.fallback',
+  fallback_key_missing: 'settings.fallback',
+};
+
 /** A refused restore: `field` names the part of the file that failed (e.g. `settings.provider`). */
 export class RestoreProblem extends Error {
   constructor(

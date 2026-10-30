@@ -129,6 +129,7 @@ export class MemoryStore implements AppStore {
       maxFindings: s.maxFindings ?? DEFAULT_WORKSPACE_MAX_FINDINGS,
       perReviewUsd: s.perReviewUsd ?? 0.5,
       exploreEnabled: s.exploreEnabled ?? false,
+      callTimeoutMs: s.callTimeoutMs ?? null,
       runRetentionDays: s.runRetentionDays === undefined ? DEFAULT_RUN_RETENTION_DAYS : s.runRetentionDays,
       repoColors: { ...(s.repoColors ?? {}) },
       judge: s.judge ? { ...s.judge, uses: [...s.judge.uses], fallback: [...s.judge.fallback] } : null,
@@ -167,6 +168,8 @@ export class MemoryStore implements AppStore {
       // A skill choice (null included) clears the deleted-skill note; undefined keeps both (ADR-0034).
       skillId: settings.skillId !== undefined ? settings.skillId : (stored?.skillId ?? null),
       skillRemovedName: settings.skillId !== undefined ? null : (stored?.skillRemovedName ?? null),
+      // An omitted timeout keeps the stored one; an explicit null resets to inherit; a number overrides.
+      callTimeoutMs: settings.callTimeoutMs !== undefined ? settings.callTimeoutMs : (stored?.callTimeoutMs ?? null),
     });
   }
 
@@ -178,18 +181,19 @@ export class MemoryStore implements AppStore {
     this.assertLive(workspaceId);
     assertMemorySkill(this.skills, workspaceId, bot.skillId);
     // Like Postgres: a skill or exploration flag left out keeps its stored value.
-    const stored = bot.skillId === undefined || bot.exploreEnabled === undefined
+    const stored = bot.skillId === undefined || bot.exploreEnabled === undefined || bot.callTimeoutMs === undefined
       ? listMemoryBots(this.bots, workspaceId).find((b) => b.slot === bot.slot)
       : undefined;
     const next = stored
       ? {
           ...bot,
           exploreEnabled: bot.exploreEnabled ?? stored.exploreEnabled,
+          callTimeoutMs: bot.callTimeoutMs !== undefined ? bot.callTimeoutMs : (stored?.callTimeoutMs ?? null),
           ...(bot.skillId === undefined
             ? { skillId: stored.skillId ?? null, skillRemovedName: stored.skillRemovedName ?? null }
             : {}),
         }
-      : { ...bot, exploreEnabled: bot.exploreEnabled ?? false };
+      : { ...bot, exploreEnabled: bot.exploreEnabled ?? false, callTimeoutMs: bot.callTimeoutMs !== undefined ? bot.callTimeoutMs : null };
     return upsertMemoryBot(this.bots, workspaceId, next, this.settings.get(workspaceId)?.botName);
   }
 

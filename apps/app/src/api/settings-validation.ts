@@ -50,6 +50,9 @@ export function mergeSettings(
     panelMode: update.panelMode ?? current?.panelMode,
     panelMinAgreement: update.panelMinAgreement ?? current?.panelMinAgreement,
     ...(update.exploreEnabled !== undefined ? { exploreEnabled: update.exploreEnabled } : {}),
+    // The main bot's call timeout override: left out keeps the stored value inside the store's
+    // write; null resets it to inheritance (the repository's value or the engine default).
+    ...(update.callTimeoutMs !== undefined ? { callTimeoutMs: update.callTimeoutMs } : {}),
     // ADR-0034: undefined keeps the stored skill (and its deleted-skill note); null is Default.
     ...(update.skillId !== undefined
       ? { skillId: update.skillId }

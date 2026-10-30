@@ -52,11 +52,12 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       allowedFallbacks.map((f) => f.provider),
       deps.ssrfLookup,
     );
-    // Slot 1's config (and its price) was built once by the shared steps; an extra bot prices its own model.
+    // Slot 1's config (and its price) was built once by the shared steps; an extra bot prices its
+    // own model and runs with its own call timeout override, never the main bot's.
     const builtConfig =
       slot === MAIN_BOT_SLOT
         ? ctx.mainConfig
-        : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store, skillKeyOf([br.bot]));
+        : await buildBotConfig(ctx.repoConfigResult, choice, fallbackList, settings, deps.store, skillKeyOf([br.bot]), br.bot.callTimeoutMs);
     const providerIds = [choice.provider, ...allowedFallbacks.map((fallback) => fallback.provider)];
     // Admitted free, every allowed provider stays on its subscription for the whole run
     // (ADR-0033, ADR-0035), whatever the default method or API keys become.

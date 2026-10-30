@@ -20,8 +20,8 @@ export const NO_KEY_DETAIL = 'no key';
 
 /**
  * The main bot (slot 1, the workspace settings) followed by the active extra bots, by slot, each
- * with its review skill from `skills` (by id; ADR-0034). A skill id missing from `skills` (deleted
- * since) reviews on Default.
+ * with its review skill from `skills` (by id; ADR-0034) and its own call timeout override
+ * (migration 0018). A skill id missing from `skills` (deleted since) reviews on Default.
  */
 export function panelBots(
   settings: WorkspaceSettings,
@@ -42,6 +42,7 @@ export function panelBots(
     fallback: settings.fallback ?? [],
     exploreEnabled: settings.exploreEnabled ?? false,
     ...skillOf(settings.skillId),
+    callTimeoutMs: settings.callTimeoutMs ?? null,
   };
   const active = extras
     .filter((b) => b.active && b.slot > MAIN_BOT_SLOT)
@@ -50,6 +51,7 @@ export function panelBots(
       slot: b.slot, name: b.name, logo: b.logo, provider: b.provider, model: b.model, effort: b.effort, fallback: b.fallback,
       exploreEnabled: b.exploreEnabled ?? false,
       ...skillOf(b.skillId),
+      callTimeoutMs: b.callTimeoutMs ?? null,
     }));
   return [main, ...active];
 }

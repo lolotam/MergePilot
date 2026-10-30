@@ -71,6 +71,13 @@ export const enSettings = {
   maxFindingsHint:
     'The most findings one review writes on a pull request. A repository whose .mergepilot.yml sets review.maxFindings uses its own value.',
 
+  // Call timeout (ADR-0048)
+  callTimeoutLabel: 'Call timeout (seconds)',
+  callTimeoutHint:
+    'How long one model call may take. Leave it empty to inherit the repository timeout (5 minutes by default).',
+  callTimeoutInvalid: 'Enter a number of seconds, like 90 or 1.5.',
+  callTimeoutOutOfRange: 'Enter a timeout between 1 and 1200 seconds.',
+
   // Key testing & Base URL
   testKeyAction: 'Test connection',
   testingKey: 'Testing...',

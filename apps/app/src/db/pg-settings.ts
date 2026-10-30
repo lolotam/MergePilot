@@ -54,6 +54,7 @@ export async function getPgSettings(db: AppDb | AppTx, workspaceId: string): Pro
     panelMode: row.panelMode as PanelMode,
     panelMinAgreement: Number(row.panelMinAgreement),
     exploreEnabled: row.exploreEnabled,
+    callTimeoutMs: row.callTimeoutMs ?? null,
     ...skillFields(row),
   };
 }
@@ -89,6 +90,7 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
  * prices, the "MergePilot" bot, separate reviews).
  * `skillId` left undefined keeps the stored skill; any value (null = Default) clears the
  * deleted-skill note (ADR-0034).
+ * `callTimeoutMs` left undefined keeps the stored override; an explicit value (null = inherit) writes it.
  * Throws BotNameTakenError when `botName` matches an extra bot's name, and UnknownSkillError when
  * `skillId` is not a skill of this workspace.
  */
@@ -136,6 +138,7 @@ export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings, op
   if (settings.panelMode !== undefined) values.panelMode = settings.panelMode;
   if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
   if (settings.exploreEnabled !== undefined) values.exploreEnabled = settings.exploreEnabled;
+  if (settings.callTimeoutMs !== undefined) values.callTimeoutMs = settings.callTimeoutMs;
   if (settings.skillId !== undefined) {
     // The bot-name lock before the row, like deleting a skill (pg-skills.ts), so the two cannot deadlock.
     await lockBotNames(tx, settings.workspaceId);

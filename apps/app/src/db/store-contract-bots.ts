@@ -22,6 +22,7 @@ const bot = (overrides: Partial<ReviewerBot> = {}): ReviewerBot => ({
   effort: 'high',
   fallback: [{ provider: 'anthropic', model: 'claude-sonnet-5-5', effort: null }],
   exploreEnabled: false,
+  callTimeoutMs: null,
   ...overrides,
 });
 

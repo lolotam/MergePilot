@@ -20,6 +20,8 @@ export interface BotConfig {
  * One bot's review config (`effectiveConfigFor`), priced for that bot's chosen provider and model
  * (ADR-0016): workspace override, the repo's `budget.pricing` for the same model, the catalog,
  * otherwise unknown (the run's cost then stays null). Throws on an invalid repository file.
+ * `callTimeoutMs` is the bot's own call timeout override (null / undefined = inherit); the
+ * consensus `panelTimeoutKey` extends the hash only (`panelTimeoutKeyOf`).
  */
 export async function buildBotConfig(
   repoConfigResult: LoadRepoConfigResult,
@@ -29,8 +31,12 @@ export async function buildBotConfig(
   store: Pick<ModelPriceStore, 'getModelPrice'>,
   /** The skill part of the configHash (`skillKeyOf`, ADR-0034); undefined on Default. */
   skillKey?: string | undefined,
+  /** The bot's own call timeout override in ms; null / undefined keeps the repo effective value. */
+  callTimeoutMs?: number | null | undefined,
+  /** Consensus mode only: the panel's explicit call timeouts by slot (`panelTimeoutKeyOf`). */
+  panelTimeoutKey?: string | undefined,
 ): Promise<BotConfig> {
-  const built = effectiveConfigFor(repoConfigResult, choice, fallbackList, settings, skillKey);
+  const built = effectiveConfigFor(repoConfigResult, choice, fallbackList, settings, skillKey, callTimeoutMs, panelTimeoutKey);
   const pricing = await resolvePricing({ store, settings, repoPricing: built.repoPricing }, choice.provider, choice.model);
   return {
     effectiveConfig: { ...built.config, budget: { ...built.config.budget, pricing: pricing.pricing } },

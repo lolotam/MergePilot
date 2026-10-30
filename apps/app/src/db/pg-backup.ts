@@ -77,6 +77,7 @@ async function replacePgBots(tx: AppTx, workspaceId: string, bots: NonNullable<W
       effort: bot.effort,
       fallback: bot.fallback,
       exploreEnabled: bot.exploreEnabled ?? false,
+      callTimeoutMs: bot.callTimeoutMs ?? null,
       skillId: bot.skillId ?? null,
     })),
   );
