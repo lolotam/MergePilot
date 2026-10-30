@@ -85,6 +85,11 @@ export const workspaceSettings = pgTable('workspace_settings', {
   /** Migration 0014: the name of the bot's skill that was deleted, shown until a skill is chosen again. */
   skillRemovedName: text('skill_removed_name'),
   exploreEnabled: boolean('explore_enabled').notNull().default(false),
+  /**
+   * Migration 0018: the main bot's optional call timeout override in ms (1000-1200000); null =
+   * inherit the effective timeout (the repository's or the engine default), a number overrides it.
+   */
+  callTimeoutMs: integer('call_timeout_ms'),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),
@@ -251,6 +256,11 @@ export const reviewerBots = pgTable(
     skillId: uuid('skill_id'),
     skillRemovedName: text('skill_removed_name'),
     exploreEnabled: boolean('explore_enabled').notNull().default(false),
+    /**
+     * Migration 0018: the bot's optional call timeout override in ms (1000-1200000); null = inherit
+     * the repository's effective timeout (or the engine default), a number overrides it.
+     */
+    callTimeoutMs: integer('call_timeout_ms'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },

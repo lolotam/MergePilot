@@ -4,6 +4,8 @@ import type { FallbackEntry, Settings, SettingsUpdate, Severity } from '@mergepi
 import type { BotLogo } from '../api/bots.js';
 import { ApiClientError, type ApiProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
+import { CallTimeoutField } from './CallTimeoutField.js';
+import { parseCallTimeoutSeconds, useCallTimeoutField } from './call-timeout.js';
 import { EffortSelect, effortFor } from './EffortSelect.js';
 import { FallbackModelsCard } from './FallbackModelsCard.js';
 import { HeavyModelCard, type HeavyModelValue } from './HeavyModelCard.js';
@@ -27,7 +29,7 @@ export interface ReviewSettingsCardProps {
   keyedProviders?: readonly ApiProvider[] | undefined;
 }
 
-type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'perReview' | 'heavy' | 'fallback' | 'skill' | 'explore', string>>;
+type FormErrors = Partial<Record<'botName' | 'model' | 'budget' | 'perReview' | 'heavy' | 'fallback' | 'skill' | 'explore' | 'callTimeout', string>>;
 
 const NO_HEAVY: HeavyModelValue = { heavyProvider: null, heavyModel: null, heavyEffort: null, heavyThresholdLines: null };
 
@@ -125,6 +127,10 @@ export function ReviewSettingsCard({
     setSkillId(savedSkillId);
   }, [savedSkillId]);
 
+  // The call timeout follows the server on its own (ADR-0048): a refetch that does not change it
+  // must not discard an unsaved edit, so it is out of the refill key above.
+  const callTimeout = useCallTimeoutField(settings?.callTimeoutMs ?? null);
+
   const handleExploreToggle = async () => {
     if (!settings || isMember || isSaving || savingExplore) return;
     const shown = exploreEnabled;
@@ -184,9 +190,16 @@ export function ReviewSettingsCard({
     }
     if (heavy.heavyProvider && !heavy.heavyModel?.trim()) next.heavy = t('heavyModelRequired');
     if (fallback.some((f) => !f.model.trim())) next.fallback = t('fallbackModelRequired');
+    const timeout = parseCallTimeoutSeconds(callTimeout.value);
+    if (timeout.kind === 'invalid') next.callTimeout = t('callTimeoutInvalid');
+    else if (timeout.kind === 'outOfRange') next.callTimeout = t('callTimeoutOutOfRange');
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
+    // The timeout is sent only when it changed (ADR-0048): an unrelated save leaves it out, so a
+    // stale value never overwrites another admin's change; the server keeps the stored one.
+    const timeoutMs = timeout.kind === 'ok' ? timeout.ms : null;
+    const timeoutChanged = timeoutMs !== callTimeout.shownMs;
     const heavyOn = Boolean(heavy.heavyProvider && heavy.heavyModel);
     try {
       await onSave({
@@ -207,6 +220,9 @@ export function ReviewSettingsCard({
         botLogo,
         // Always sent: saving the form confirms the skill choice and clears a deleted-skill note.
         skillId,
+        ...(timeoutChanged ? { callTimeoutMs: timeoutMs } : {}),
+        // The base the timeout was read from: the server refuses a stale edit (409).
+        ...(timeoutChanged ? { base: { callTimeoutMs: callTimeout.shownMs } } : {}),
       });
     } catch (err) {
       // A taken bot name and an unknown skill are shown on their field; other errors were already shown as a toast.
@@ -365,6 +381,16 @@ export function ReviewSettingsCard({
               <p id="settings-per-review-hint" className="text-[11px] text-ink-500 dark:text-ink-400 ms-1">{t('perReviewHint')}</p>
               {errors.perReview && <p className="text-xs text-red-500 mt-1 ms-2">{errors.perReview}</p>}
             </div>
+            <CallTimeoutField
+              id="settings-call-timeout"
+              value={callTimeout.value}
+              onChange={(next) => {
+                callTimeout.setValue(next);
+                if (errors.callTimeout) setErrors(withoutError(errors, 'callTimeout'));
+              }}
+              disabled={isMember || isSaving}
+              error={errors.callTimeout}
+            />
           </div>
 
           <HeavyModelCard

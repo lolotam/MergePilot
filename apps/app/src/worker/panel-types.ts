@@ -29,6 +29,11 @@ export interface PanelBot {
   exploreEnabled: boolean;
   /** The bot's review skill (ADR-0034), read when the job started; undefined = Default. */
   skill?: BotSkill | undefined;
+  /**
+   * The bot's own call timeout override in ms (migration 0018); null = inherit the repository's
+   * effective timeout (or the engine default). Extras never inherit the main bot's override.
+   */
+  callTimeoutMs?: number | null | undefined;
 }
 
 /** A review skill as a bot runs with it. */

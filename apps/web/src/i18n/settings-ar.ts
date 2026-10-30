@@ -71,6 +71,12 @@ export const arSettings = {
   maxFindingsHint:
     'أكبر عدد من الملاحظات تكتبه مراجعة واحدة على الـ Pull Request. إذا حدّد ملف .mergepilot.yml في المستودع review.maxFindings، فسيُستخدم الرقم الموجود فيه.',
 
+  // Call timeout (ADR-0048)
+  callTimeoutLabel: 'مهلة استدعاء الموديل (بالثواني)',
+  callTimeoutHint: 'أقصى مدة مسموحة لنداء واحد للموديل. لو سبتها فاضية، البوت ياخد مهلة المستودع (الافتراضي ٥ دقائق).',
+  callTimeoutInvalid: 'اكتب عدد بالثواني، زي 90 أو 1.5.',
+  callTimeoutOutOfRange: 'اكتب مهلة من 1 لحد 1200 ثانية.',
+
   // Key testing & Base URL
   testKeyAction: 'اختبار الاتصال',
   testingKey: 'جاري الاختبار...',

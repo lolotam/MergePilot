@@ -42,7 +42,7 @@ describe('reviewer panel bots API (ADR-0017)', { timeout: 25000 }, () => {
     const res = await get();
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      main: { slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: null, model: null, effort: null, fallback: [], exploreEnabled: false },
+      main: { slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: null, model: null, effort: null, fallback: [], exploreEnabled: false, callTimeoutMs: null },
       bots: [],
       panel: { mode: 'separate', minAgreement: 1 },
       logos: [...BOT_LOGOS],
@@ -56,14 +56,14 @@ describe('reviewer panel bots API (ADR-0017)', { timeout: 25000 }, () => {
     const fox = { name: '  Fox  ', logo: 'fox', provider: 'anthropic', model: 'claude-haiku-5' };
     const saved = await put(4, fox);
     expect(saved.statusCode).toBe(200);
-    expect(saved.json().bot).toEqual({ slot: 4, name: 'Fox', logo: 'fox', active: true, provider: 'anthropic', model: 'claude-haiku-5', effort: null, fallback: [], exploreEnabled: false });
+    expect(saved.json().bot).toEqual({ slot: 4, name: 'Fox', logo: 'fox', active: true, provider: 'anthropic', model: 'claude-haiku-5', effort: null, fallback: [], exploreEnabled: false, callTimeoutMs: null });
     expect((await put(2, { ...owl, exploreEnabled: true })).statusCode).toBe(200);
     expect((await put(2, { ...owl, active: false, fallback: [] })).json().bot).toMatchObject({ slot: 2, active: false, fallback: [], exploreEnabled: true });
 
     const listed = (await get()).json();
     expect(listed.main).toEqual({
       slot: 1, name: 'MergePilot', logo: 'pilot', active: true, provider: 'anthropic', model: 'claude-sonnet-5-5', effort: 'high',
-      fallback: [{ provider: 'anthropic', model: 'claude-opus-5' }], exploreEnabled: false,
+      fallback: [{ provider: 'anthropic', model: 'claude-opus-5' }], exploreEnabled: false, callTimeoutMs: null,
     });
     expect(listed.bots.map((b: { slot: number; name: string; active: boolean }) => [b.slot, b.name, b.active])).toEqual([
       [2, 'Owl', false],

@@ -21,6 +21,7 @@ import { pausedWithNotice, PAUSED_DETAIL } from './pause-check.js';
 import { changedLinesOf, chooseModel, fallbackChain } from './model-choice.js';
 import { noteBudgetSkipped } from './budget-skip-note.js';
 import { noteNothingNew } from './nothing-new-note.js';
+import { panelTimeoutKeyOf } from './panel-timeout-key.js';
 import { closeRuns, loadBotSkills, panelBots, runPanel, startBotRuns, type StartedRuns } from './panel.js';
 import { skillKeyOf } from './effective-config.js';
 import type { BotRun, PanelContext } from './panel-types.js';
@@ -96,9 +97,12 @@ export async function processReviewJob(
   const bots = panelBots(settings, extras, skills);
   const panelActive = bots.length > 1;
   const mode = settings.panelMode ?? DEFAULT_PANEL_MODE;
+  const consensusMode = panelActive && mode === 'consensus';
   // Slot 1's marker hash holds its own skill; in consensus, where the panel selects files once with
-  // that marker, the skills of every bot (ADR-0034).
-  const mainSkillKey = skillKeyOf(panelActive && mode === 'consensus' ? bots : bots.filter((b) => b.slot === MAIN_BOT_SLOT));
+  // that marker, the skills of every bot (ADR-0034) and every active bot's explicit call timeout
+  // (`panelTimeoutKeyOf`) are part of it. Each bot's own override then extends only its own hash.
+  const mainSkillKey = skillKeyOf(consensusMode ? bots : bots.filter((b) => b.slot === MAIN_BOT_SLOT));
+  const mainTimeoutKey = consensusMode ? panelTimeoutKeyOf(bots) : undefined;
   if (panelActive) {
     logger.info(
       { event: 'panel.start', jobId: job.deliveryId, bots: bots.map((b) => b.slot), mode },
@@ -144,7 +148,7 @@ export async function processReviewJob(
 
     let ctx: PanelContext;
     try {
-      const shared = await sharedSteps({ ...base, settings }, runs, main, lead, logSkip, startTime, panelActive, mainSkillKey);
+      const shared = await sharedSteps({ ...base, settings }, runs, main, lead, logSkip, startTime, panelActive, mainSkillKey, mainTimeoutKey);
       if ('result' in shared) return shared.result;
       releaseBudget = shared.releaseBudget;
       ctx = { ...shared.ctx, mode };
@@ -174,7 +178,9 @@ type SharedOutcome =
 /**
  * The steps every bot shares, run once: PR, pause, repository config, the main bot's model and
  * config, and the monthly budget (it covers all bots: when reached, every bot's run is skipped
- * and only the main bot publishes the notice, as before the panel).
+ * and only the main bot publishes the notice, as before the panel). The main bot's config hash
+ * takes its own call timeout override and, in consensus mode, the panel's timeouts
+ * (`mainTimeoutKey`) alongside its skill key.
  */
 async function sharedSteps(
   shared: Pick<PanelContext, 'job' | 'deps' | 'logger' | 'workspaceId' | 'settings'>,
@@ -185,6 +191,7 @@ async function sharedSteps(
   startTime: number,
   panelActive: boolean,
   mainSkillKey: string | undefined,
+  mainTimeoutKey: string | undefined,
 ): Promise<SharedOutcome> {
   const { settings, ...base } = shared;
   const { job, deps, logger, workspaceId } = base;
@@ -222,7 +229,8 @@ async function sharedSteps(
     baseSha: job.baseSha,
     defaults: { provider: mainChoice.provider, model: mainChoice.model, maxFindings: settings.maxFindings, perReviewUsd: settings.perReviewUsd },
   });
-  // Slot 1's config, priced for its model (the heavy-duty one when chosen; ADR-0016).
+  // Slot 1's config, priced for its model (the heavy-duty one when chosen; ADR-0016), with its own
+  // call timeout override and — in consensus mode — the panel's timeouts in the marker identity.
   const mainConfig = await buildBotConfig(
     repoConfigResult,
     mainChoice,
@@ -230,6 +238,8 @@ async function sharedSteps(
     settings,
     deps.store,
     mainSkillKey,
+    settings.callTimeoutMs,
+    mainTimeoutKey,
   );
 
   if (settings.monthlyBudgetUsd !== null && settings.monthlyBudgetUsd !== undefined) {

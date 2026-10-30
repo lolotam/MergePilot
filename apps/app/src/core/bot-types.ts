@@ -64,6 +64,12 @@ export interface ReviewerBot {
    * `skillId` it writes this value (null clears it).
    */
   skillRemovedName?: string | null | undefined;
+  /**
+   * Migration 0018: this bot's call timeout override in ms. An omitted write keeps the stored
+   * value; null resets to the repository's effective timeout (or the engine default).
+   * Extra bots do not inherit the main bot's override.
+   */
+  callTimeoutMs?: number | null | undefined;
 }
 
 /** Thrown by AppStore.upsertReviewerBot when another bot of the workspace already has this name. */

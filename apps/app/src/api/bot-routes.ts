@@ -56,6 +56,8 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
           effort: settings?.effort ?? null,
           fallback: settings?.fallback ?? [],
           exploreEnabled: settings?.exploreEnabled ?? false,
+          // Migration 0018: the main bot's own override, null when it inherits.
+          callTimeoutMs: settings?.callTimeoutMs ?? null,
           ...(settings?.skillId ? { skillId: settings.skillId } : {}),
           ...(settings?.skillRemovedName ? { skillRemovedName: settings.skillRemovedName } : {}),
         },
@@ -99,6 +101,8 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
         effort: input.effort ?? null,
         fallback: input.fallback,
         exploreEnabled: input.exploreEnabled,
+        // Left out, the store keeps the stored timeout inside the write; null resets it to inherit.
+        ...(input.callTimeoutMs !== undefined ? { callTimeoutMs: input.callTimeoutMs } : {}),
         ...skillChoice,
       };
       const problem = unavailableProviderProblem(bot, previous, subscriptionAvailability(deps))

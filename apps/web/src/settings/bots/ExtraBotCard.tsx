@@ -12,6 +12,8 @@ import { ApiClientError, type ApiProvider } from '../../api/client.js';
 import { Modal } from '../../components/Modal.js';
 import { useToast } from '../../components/Toast.js';
 import { useI18n } from '../../i18n/context.js';
+import { CallTimeoutField } from '../CallTimeoutField.js';
+import { parseCallTimeoutSeconds, useCallTimeoutField } from '../call-timeout.js';
 import { EffortSelect, effortFor } from '../EffortSelect.js';
 import { FallbackModelsCard } from '../FallbackModelsCard.js';
 import { ModelSelect } from '../ModelSelect.js';
@@ -39,14 +41,15 @@ export interface ExtraBotCardProps {
   onDeleted: () => void;
 }
 
-type Errors = Partial<Record<'name' | 'model' | 'fallback' | 'skill' | 'form', string>>;
+type Errors = Partial<Record<'name' | 'model' | 'fallback' | 'skill' | 'form' | 'callTimeout', string>>;
 
 const cleanFallback = (list: readonly FallbackEntry[]): FallbackEntry[] =>
   list.map((f) => ({ provider: f.provider, model: f.model.trim(), effort: f.effort ?? null }));
 
 /**
  * The saved bot as a PUT body, with `active` changed (the switch saves at once). `exploreEnabled`
- * goes only from its own switch: left out, the server keeps the stored value (ADR-0046).
+ * goes only from its own switch: left out, the server keeps the stored value (ADR-0046). The call
+ * timeout is left out too: the server keeps the stored override (ADR-0048).
  */
 const savedInput = (bot: ReviewerBotDto, active: boolean, exploreEnabled?: boolean): ReviewerBotInput => ({
   name: bot.name,
@@ -83,6 +86,9 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
     setShownSkillId(savedSkillId);
     setSkillId(savedSkillId);
   }
+  // The call timeout follows the server on its own (ADR-0048): a refetch that does not change it
+  // keeps an unsaved edit.
+  const callTimeout = useCallTimeoutField(bot.callTimeoutMs ?? null);
   const [errors, setErrors] = useState<Errors>({});
   const [copied, setCopied] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -111,8 +117,15 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
     else if (otherNames.some((other) => sameBotName(other, name))) next.name = t('botNameTaken');
     if (!model.trim()) next.model = t('modelRequired');
     if (fallback.some((f) => !f.model.trim())) next.fallback = t('fallbackModelRequired');
+    const timeout = parseCallTimeoutSeconds(callTimeout.value);
+    if (timeout.kind === 'invalid') next.callTimeout = t('callTimeoutInvalid');
+    else if (timeout.kind === 'outOfRange') next.callTimeout = t('callTimeoutOutOfRange');
     setErrors(next);
     if (Object.keys(next).length > 0) return;
+    // The timeout is sent only when it changed (ADR-0048): an unrelated save leaves it out, so a
+    // stale value never overwrites another admin's change; the server keeps the stored one.
+    const timeoutMs = timeout.kind === 'ok' ? timeout.ms : null;
+    const timeoutChanged = timeoutMs !== callTimeout.shownMs;
     const input: ReviewerBotInput = {
       name: name.trim(),
       logo,
@@ -123,6 +136,7 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
       fallback: cleanFallback(fallback),
       // Always sent: saving the bot confirms the skill choice and clears a deleted-skill note.
       skillId,
+      ...(timeoutChanged ? { callTimeoutMs: timeoutMs } : {}),
     };
     try {
       await save.mutateAsync({ slot: bot.slot, input });
@@ -256,6 +270,16 @@ export function ExtraBotCard({ workspaceId, bot, main, otherNames, keyedProvider
             />
             {errors.skill && <p className="text-xs text-red-500 mt-1 ms-2">{errors.skill}</p>}
           </div>
+          <CallTimeoutField
+            id={`${prefix}-call-timeout`}
+            value={callTimeout.value}
+            onChange={(next) => {
+              callTimeout.setValue(next);
+              clear('callTimeout');
+            }}
+            disabled={isMember || save.isPending}
+            error={errors.callTimeout}
+          />
         </div>
         <p className="text-[11px] text-ink-500 dark:text-ink-400 -mt-3 ms-1">{t('botNoHeavyHint')}</p>
 

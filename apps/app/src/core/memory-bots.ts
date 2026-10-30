@@ -22,6 +22,7 @@ const copy = (bot: ReviewerBot): ReviewerBot => withSetSkillFields({
   ...bot,
   exploreEnabled: bot.exploreEnabled ?? false,
   fallback: bot.fallback.map((f) => ({ ...f })),
+  callTimeoutMs: bot.callTimeoutMs ?? null,
 });
 
 export function listMemoryBots(bots: MemoryBots, workspaceId: string): ReviewerBot[] {

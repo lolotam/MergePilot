@@ -139,6 +139,12 @@ export interface WorkspaceSettings {
   skillId?: string | null | undefined;
   /** The name of the main bot's skill that was deleted (read only: set by deleteReviewSkill). */
   skillRemovedName?: string | null | undefined;
+  /**
+   * Migration 0018: the main bot's call timeout override in ms. An omitted write keeps the stored
+   * value; null resets to the repository's effective timeout (or the engine default). Normalized
+   * reads return null when unset.
+   */
+  callTimeoutMs?: number | null | undefined;
 }
 
 /** The Jev judge of a workspace: the configured provider plus up to three explicit fallbacks. */

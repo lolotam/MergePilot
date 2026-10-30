@@ -90,6 +90,10 @@ export function fakeBotsServer(
         exploreEnabled: body && 'exploreEnabled' in body
           ? (body['exploreEnabled'] as boolean)
           : (state.bots.find((b) => b.slot === slot)?.exploreEnabled ?? false),
+        // Left out, the call timeout keeps the stored value (the server keeps it too, ADR-0048).
+        callTimeoutMs: body && 'callTimeoutMs' in body
+          ? (body['callTimeoutMs'] as number | null)
+          : (state.bots.find((b) => b.slot === slot)?.callTimeoutMs ?? null),
       };
       state.bots = [...state.bots.filter((b) => b.slot !== slot), bot].sort((a, b) => a.slot - b.slot);
       return { bot };

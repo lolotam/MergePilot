@@ -47,6 +47,7 @@ const bot = (overrides: Partial<ReviewerBot> = {}): ReviewerBot => ({
   effort: null,
   fallback: [],
   exploreEnabled: false,
+  callTimeoutMs: null,
   ...overrides,
 });
 

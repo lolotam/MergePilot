@@ -30,7 +30,7 @@ import {
   type BackupSection,
 } from './contract-backup.js';
 import { botNameTakenByExtraBot, mergeSettings, validateFallback, validateSettings, withoutSkillFields } from './settings-validation.js';
-import { RestoreProblem, zodProblem } from './backup-restore-problem.js';
+import { RestoreProblem, SETTINGS_PROBLEM_FIELDS, zodProblem } from './backup-restore-problem.js';
 import { planSkills, resolveSkillName, takeSkillRef, type SkillRestorePlan } from './backup-skills.js';
 
 // Settings restore (ADR-0018): every part of a (possibly hand-edited) file goes through the same
@@ -56,14 +56,6 @@ export interface RestorePlan {
   restore: WorkspaceRestore;
   preview: Omit<BackupPreview, 'dryRun'>;
 }
-
-/** Which settings field a validateSettings problem is about. */
-const SETTINGS_PROBLEM_FIELDS: Record<string, string> = {
-  validation_error: 'settings.heavyModel',
-  heavy_key_missing: 'settings.heavyProvider',
-  fallback_duplicate: 'settings.fallback',
-  fallback_key_missing: 'settings.fallback',
-};
 
 function parseFile(raw: unknown): BackupFile {
   const head = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
@@ -308,10 +300,15 @@ async function planSettings(
     const field = problem.code.startsWith('judge_') ? 'settings.judge' : (SETTINGS_PROBLEM_FIELDS[problem.code] ?? 'settings');
     throw new RestoreProblem(400, problem.code, problem.message, field);
   }
-  // A backup from before exploration restores the main bot with exploration off.
-  const withExploration = { ...merged, exploreEnabled: update.exploreEnabled ?? false };
+  // A backup from before exploration restores the main bot with exploration off, and one from
+  // before the call timeout restores it to inheritance: a restore replaces the stored value.
+  const withDefaults = {
+    ...merged,
+    exploreEnabled: update.exploreEnabled ?? false,
+    callTimeoutMs: update.callTimeoutMs ?? null,
+  };
   // A file without skillName keeps the stored skill: the store keeps it inside the write.
-  return ref.present ? withExploration : withoutSkillFields(withExploration);
+  return ref.present ? withDefaults : withoutSkillFields(withDefaults);
 }
 
 /** Each bot through PUT /bots/:slot's slot rule, schema and fallback check; names must not clash. */
@@ -345,6 +342,8 @@ async function planBots(
       effort: input.effort ?? null,
       fallback: input.fallback,
       exploreEnabled: input.exploreEnabled ?? false,
+      // A restore replaces the bots: a file without the timeout restores it to inheritance.
+      callTimeoutMs: input.callTimeoutMs ?? null,
       // Always set: a restore replaces the bots, and a bot the file leaves on Default (or whose skill
       // is missing) must come back on Default, never keep a stored skill.
       skillId,

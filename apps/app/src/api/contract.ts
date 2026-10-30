@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { SeveritySchema } from '@mergepilot/engine';
 import { MAX_FINDINGS_CHOICES } from '../core/findings-limit.js';
 import { BotLogoSchema, BotNameSchema, PanelMinAgreementSchema, PanelModeSchema } from './contract-bots.js';
+import { CallTimeoutMsSchema } from './contract-call-timeout.js';
 import { JudgeRunSchema, JudgeSettingsSchema, KeyProviderSchema } from './contract-judge.js';
 import {
   ApiProviderSchema,
@@ -27,6 +28,7 @@ import { SkillIdSchema } from './contract-skills.js';
 
 export * from './contract-backup.js';
 export * from './contract-bots.js';
+export * from './contract-call-timeout.js';
 export * from './contract-models.js';
 export * from './contract-runs.js';
 export * from './contract-judge.js';
@@ -109,6 +111,11 @@ export const SettingsSchema = z.object({
   skillId: SkillIdSchema.nullable().optional(),
   /** Read only: the name of the main bot's skill that was deleted, until a skill is chosen again. */
   skillRemovedName: z.string().nullable().optional(),
+  /**
+   * Main bot's call timeout override in ms. Omitted on PUT keeps the stored value;
+   * null resets to the repository's effective timeout (or the engine default).
+   */
+  callTimeoutMs: CallTimeoutMsSchema.optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 export const SettingsBaseSchema = z.record(z.string(), z.unknown());
