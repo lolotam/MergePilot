@@ -118,9 +118,14 @@ judge:
   - `annotate` adds `Jev confidence: 0.82` to every posted finding the judge scored.
   - `filter` drops findings below `threshold` and lists them under "Filtered by Jev (n)" in the summary. Critical and high findings are never dropped; a low-confidence one that is kept gets the confidence line.
   - `dedupe` skips a finding that repeats, in meaning, an existing MergePilot comment near it.
-  - `consensus` is reserved for the coming reviewer panel; it is accepted now and does nothing yet.
+  - `consensus` controls same-issue clustering in the GitHub App reviewer panel; it does nothing in the single-bot Action.
 - `annotate` and `filter` together still cost **one** Jev request per review: findings are filtered and every remaining one is annotated. Without either of them, no such request is sent; without `dedupe`, no duplicate-check request is sent. The summary names the active uses (`Jev uses: ...`).
 - The old `mode:` still works and maps to uses: `off` → `[dedupe]`, `annotate` → `[annotate, dedupe]`, `filter` → `[filter, dedupe]`. When both are set, `uses` wins; with neither, the judge runs the duplicate check only (the old default).
 - A fallback is used only after auth, rate limit / overload (after one retry), 5xx, network, timeout (20 s), or a wrong model id (422 / 404); a valid low-confidence answer is final. An entry without its key is skipped. All attempts share 60 s. The summary names the judge that answered, e.g. `Jev: opencode-zen:jev-1.13-free (fallback 1; openrouter failed: rate-limited)`.
 - If every entry fails, the review is published unfiltered and the summary says `Jev judge unavailable: <code>`.
 - Pass the keys as secrets, e.g. `OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}`. The log gets one `judge.call` line per attempt (provider, model, question count, time, result, tokens), never the code under review.
+
+
+Review and verification prompts include a bounded `CHANGED_BUT_NOT_SHOWN` list of skipped changed files (such as lockfiles), with status, line counts and skip reasons. Contents are not shown and must not be inferred. Uncertain defects in changed lines should be findings at confidence 0.5-0.69, naming the code that would confirm them, rather than withheld on speculation.
+
+In the GitHub App's consensus panel, verifier-rejected copies contribute agreement to a kept claim. A claim rejected by every verifier can be published when at least two distinct bots raised it, subject to agreement, severity exemptions, the normal findings cap and earlier-comment deduplication. It carries confidence at most 0.69 and an explicit unverified marker (including that Jev did not check it). Single-bot rejections stay rejected. See [ADR-0050](../../docs/adr/0050-panel-verify-agreement.md) and [ADR-0051](../../docs/adr/0051-changed-but-not-shown-files.md).

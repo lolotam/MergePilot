@@ -34,7 +34,7 @@ import type { Judge } from '../judge/judge.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { prepareFollowUp, promptPrOf, type FollowUp } from './follow-up.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
-import { renderManifest, manifestFileOf, type ManifestFile } from './manifest.js';
+import { renderManifest, renderNotShown, manifestFileOf, type ManifestFile } from './manifest.js';
 import { reviewOutputTokensFor, verifyOutputTokensFor, type OutputLimitDisclosure } from './output-budget.js';
 import { buildReviewPrompt, type ContextFile, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
@@ -45,13 +45,12 @@ import { batchFilesByTokenCap, combineUsage, type CappedBatches } from './split.
 import { estimateReviewCostUsd, paidSwitchFits, SpendTracker } from './spend.js';
 import type { ReviewSkill } from './skill.js';
 import { runVerifyPass } from './verify-pass.js';
-import type { VerifyRejectedFinding } from './verify.js';
+import type { RejectedFinding, VerifyRejectedFinding } from './verify.js';
 
 /** Room for context fences and token-estimate rounding at the whole-PR prompt boundary. */
 const WHOLE_CONTEXT_SAFETY_TOKENS = 128;
 
 // ── Input types ──
-
 export interface PrFile {
   path: string;
   status: string;
@@ -132,6 +131,8 @@ export type ReviewRunResult =
       verification?: { checked: number; rejected: number } | undefined;
       /** Findings the verification pass rejected, listed in the summary (ADR-0028). */
       verifyRejected?: VerifyRejectedFinding[] | undefined;
+      /** Transient panel input; never persisted in ReviewResult. */
+      verifyRejectedFindings?: RejectedFinding[] | undefined;
       judge?: JudgeFilterSummary | undefined;
       /** Repository context sent and left out (ADR-0029); a disclosure, not an incomplete reason. */
       context?: ContextDisclosure | undefined;
@@ -199,7 +200,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     });
     // On the path itself, not the classification: a removed or excluded `.env` is classified
     // before sensitivity, and its name must still never reach the model.
-    if (!isSensitivePath(file.path)) manifestFiles.push(manifestFileOf(file, knownSecrets));
+    if (!isSensitivePath(file.path)) manifestFiles.push({ ...manifestFileOf(file, knownSecrets), ...(classification !== 'review' ? { skipReason: classification } : {}) });
 
     if (classification === 'incomplete-truncated') {
       incompleteReasons.push(`${file.path}: patch truncated`);
@@ -259,6 +260,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     rulesFiles: redactedRulesFiles,
     pathInstructions: redactedPathInstructions,
     files: redactedReviewableFiles,
+    notShown: renderNotShown(manifestFiles),
     ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
   };
   const withoutContext = buildReviewPrompt(promptInput);
@@ -440,15 +442,16 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       : undefined;
 
   // ── Step e2: verification pass ─────────────────────────────────────────
-  let modelFindings = pass.findings;
+  let modelFindings = pass.findings.map((finding) => Object.fromEntries(Object.entries(finding).map(([key, value]) => [key, typeof value === 'string' ? redactSecrets(value, knownSecrets).text : value])) as Finding);
   let verification: { checked: number; rejected: number } | undefined;
-  let verifyRejected: VerifyRejectedFinding[] = [];
+  let verifyRejected: VerifyRejectedFinding[] = [], verifyRejectedFindings: RejectedFinding[] = [];
 
   if (reviewCfg.verify && modelFindings.length > 0) {
     const verified = await runVerifyPass({
       language: config.language,
       findings: modelFindings,
       files: redactedReviewableFiles,
+      notShown: renderNotShown(manifestFiles),
       contextFiles: context.sentFiles(),
       maxCodeTokens: limits.batchTokens,
       rulesFiles: redactedRulesFiles,
@@ -467,6 +470,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     totalUsage = verified.totalUsage;
     verification = verified.verification;
     verifyRejected = verified.rejected;
+    verifyRejectedFindings = verified.rejectedFindings ?? [];
     incompleteReasons.push(...verified.incompleteReasons);
   }
 
@@ -529,7 +533,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     droppedInvalid: pass.droppedInvalid,
     complete,
     ...(verification !== undefined ? { verification } : {}),
-    ...(verifyRejected.length > 0 ? { verifyRejected } : {}),
+    ...(verifyRejected.length > 0 ? { verifyRejected, verifyRejectedFindings } : {}),
     ...(judge ? { judge } : {}),
     ...(contextDisclosure ? { context: contextDisclosure } : {}),
     ...explored.disclosure(),

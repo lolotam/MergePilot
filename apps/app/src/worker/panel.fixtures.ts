@@ -29,6 +29,7 @@ export interface PanelSetupOptions {
   findings?: Record<string, Array<Record<string, unknown>>>;
   /** Models whose call throws. */
   failing?: string[];
+  rejectedModels?: string[];
   reviews?: GitHubReview[];
   comments?: GitHubReviewComment[];
   monthlyCost?: number;
@@ -100,7 +101,7 @@ export async function panelSetup(options: PanelSetupOptions = {}) {
         if (options.failing?.includes(name)) throw new Error(`model ${name} exploded`);
         return {
           // `verdicts` answers the verification pass: no verdict keeps every finding.
-          text: JSON.stringify({ summary: `${name} summary`, findings: options.findings?.[name] ?? [], verdicts: [] }),
+          text: JSON.stringify({ summary: `${name} summary`, findings: options.findings?.[name] ?? [], verdicts: options.rejectedModels?.includes(name) ? (options.findings?.[name] ?? []).map((_, index) => ({ id: `f${index + 1}`, verdict: 'rejected', reason: 'Contradicted' })) : [] }),
           finishReason: 'stop' as const,
           usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
         };

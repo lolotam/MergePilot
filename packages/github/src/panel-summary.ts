@@ -189,6 +189,11 @@ function renderFindingsFates(input: PanelSummaryInput, labels: Labels): string |
     const parts = FATE_PARTS.filter((part) => fate[part] > 0).map((part) => labels.fateParts[part](fate[part]));
     return [`> - **${escapeInline(fate.name)}** (${labels.fateOf(notOwn, fate.reported)}): ${parts.join(' · ')}`];
   });
+  for (const fate of input.findingsFates ?? []) {
+    if (fate.rejectedInAgreement) lines.push(input.language === 'ar'
+      ? `> - **${escapeInline(fate.name)}**: ${fate.rejectedInAgreement} نسخ رفضها التحقق دخلت في الاتفاق أو النشر غير المتحقق؛ خارج عدد الجدول.`
+      : `> - **${escapeInline(fate.name)}**: ${fate.rejectedInAgreement} verifier-rejected copies contributed to agreement or unverified revival; excluded from the table count.`);
+  }
   if (lines.length === 0) return undefined;
   const verifyNote = (input.verifyRejected ?? []).length > 0 ? [labels.fatesVerifyNote] : [];
   return [labels.fatesHeader, ...lines, ...verifyNote].join('\n');
@@ -241,6 +246,8 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
     sections.push(`${labels.incomplete}\n\n${reasons.map((r) => `- ${neutralize(r.trim())}`).join('\n')}`);
   }
 
+  const revived = merge.kept.filter((cluster) => cluster.revived && cluster.kind === 'inline');
+  if (revived.length > 0) sections.push(revived.map((cluster) => `- ${clusterLine(cluster, merge.total, input.language)}`).join('\n'));
   const outside = merge.kept.filter((c) => c.kind === 'summaryOnly');
   if (outside.length > 0) {
     const items = outside.map(

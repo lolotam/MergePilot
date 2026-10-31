@@ -10,6 +10,8 @@
  */
 
 import { z } from 'zod';
+import { redactSecrets } from '../security/redact.js';
+import type { RejectedFinding } from './verify.js';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { checkBudget, estimateTokens } from './budget.js';
@@ -39,6 +41,7 @@ import {
 
 export interface VerifyPassInput {
   language: 'ar' | 'en';
+  notShown?: string | undefined;
   findings: Finding[];
   files: ReviewableFileWithPatch[];
   contextFiles?: readonly ContextFile[] | undefined;
@@ -77,6 +80,7 @@ export interface VerifyPassResult {
   verification?: { checked: number; rejected: number } | undefined;
   /** Every rejected finding, so the summary discloses what verification dropped. */
   rejected: VerifyRejectedFinding[];
+  rejectedFindings?: RejectedFinding[];
   incompleteReasons: string[];
 }
 
@@ -95,6 +99,7 @@ function buildFittingVerifyPrompt(
 } {
   const base = {
     language: input.language,
+    notShown: input.notShown,
     findings: input.findings,
     files: input.files,
     contextFiles: input.contextFiles,
@@ -379,7 +384,11 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     findings: kept,
     totalUsage,
     verification: { checked: input.findings.length, rejected: rejected.length },
-    rejected: rejected.map(({ finding }) => ({ title: finding.title, path: finding.path, line: finding.line })),
+    rejectedFindings: rejected.map((item) => ({
+      finding: Object.fromEntries(Object.entries(item.finding).map(([key, value]) => [key, typeof value === 'string' ? redactSecrets(value, [...input.knownSecrets]).text : value])) as Finding,
+      reason: redactSecrets(item.reason, [...input.knownSecrets]).text,
+    })),
+    rejected: rejected.map(({ finding }) => ({ title: redactSecrets(finding.title, [...input.knownSecrets]).text, path: redactSecrets(finding.path, [...input.knownSecrets]).text, line: finding.line })),
     incompleteReasons,
   };
 }
