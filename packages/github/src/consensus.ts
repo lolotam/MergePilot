@@ -90,11 +90,16 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
     ...(bot.rejected ?? []).map(({ finding, kind }) => ({ slot: bot.slot, name: bot.name, kind, finding, rejected: true })),
   ]);
   const clusters = new BotClusters(entries.map((e) => e.slot));
-  // Strongest evidence first, so a weaker match never takes a bot's place in a cluster that an
-  // exact title would have earned: the same title, then the wording rule by score, then the judge.
+  // Kept-to-kept deterministic matches reserve bot slots before rejected copies can consume them.
+  // Within each tier, exact titles precede wording matches; the judge follows both tiers.
   const { byTitle, byClaim, undecided } = candidatePairs(entries);
-  for (const [a, b] of byTitle) clusters.join(a, b);
-  for (const { a, b } of byClaim.sort((x, y) => y.score - x.score)) clusters.join(a, b);
+  const hasRejected = (a: number, b: number): boolean => Boolean(entries[a]!.rejected || entries[b]!.rejected);
+  const rankedClaims = byClaim.sort((x, y) => y.score - x.score);
+  for (const tier of ['kept', 'rejected'] as const) {
+    const inTier = (a: number, b: number): boolean => hasRejected(a, b) === (tier === 'rejected');
+    for (const [a, b] of byTitle) if (inTier(a, b)) clusters.join(a, b);
+    for (const { a, b } of rankedClaims) if (inTier(a, b)) clusters.join(a, b);
+  }
   const semantic = input.judge
     ? await joinByJudge(entries, clusters, undecided, { ...input, judge: input.judge })
     : undefined;
@@ -276,16 +281,24 @@ function byImportance(a: ConsensusCluster, b: ConsensusCluster): number {
 }
 
 /** "Found by: A, B (2/3)", localized; bot names are escaped. */
-export function foundByLabel(cluster: ConsensusCluster, total: number, language: 'ar' | 'en'): string {
+export function foundByLabel(
+  cluster: ConsensusCluster,
+  total: number,
+  language: 'ar' | 'en',
+  publication: 'published' | 'unpublished' = 'unpublished',
+): string {
   const names = cluster.foundBy.map((b) => escapeInline(b.name));
   const count = `(${cluster.foundBy.length}/${total})`;
+  const verdict = publication === 'published'
+    ? (language === 'ar' ? 'نُشرت رغم رفض التحقق' : 'published although the verifier rejected it')
+    : (language === 'ar' ? 'رفضها التحقق' : 'verifier-rejected');
   const marker = cluster.revived ? (language === 'ar'
-    ? ` — غير متحققة: نُشرت رغم رفض التحقق؛ رصدها ${cluster.foundBy.length} بوتات بشكل مستقل (لم تمر بفلتر Jev)`
-    : ` - Unverified: published although the verifier rejected it; raised independently by ${cluster.foundBy.length} bots (not checked by Jev)`) : '';
+    ? ` — غير متحققة: ${verdict}؛ رصدها ${cluster.foundBy.length} بوتات بشكل مستقل (لم تمر بفلتر Jev)`
+    : ` - Unverified: ${verdict}; raised independently by ${cluster.foundBy.length} bots (not checked by Jev)`) : '';
   return (language === 'ar' ? `وجدها: ${names.join('، ')} ${count}` : `Found by: ${names.join(', ')} ${count}`) + marker;
 }
 
 /** The cluster's finding with its "found by" label added to the body, for the inline comment. */
 export function withFoundBy(cluster: ConsensusCluster, total: number, language: 'ar' | 'en'): Finding {
-  return { ...cluster.finding, body: `${cluster.finding.body}\n\n_${foundByLabel(cluster, total, language)}_` };
+  return { ...cluster.finding, body: `${cluster.finding.body}\n\n_${foundByLabel(cluster, total, language, 'published')}_` };
 }

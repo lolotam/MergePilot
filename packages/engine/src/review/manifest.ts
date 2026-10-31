@@ -112,7 +112,7 @@ function whereOf(batches: number[] | undefined): string {
 }
 
 /** Small shared disclosure, included in the existing input-token accounting. */
-export const NOT_SHOWN_RULE = 'CHANGED_BUT_NOT_SHOWN lists files that ARE changed in this pull request. Never report them as not updated, missing or unchanged. Their contents are not shown; make no claims about their contents.';
+export const NOT_SHOWN_RULE = 'CHANGED_BUT_NOT_SHOWN lists files that ARE changed in this pull request, including removals. Never claim they were omitted from the changes or not updated. Findings about consequences of removal are allowed, such as a shown caller importing a deleted module. Their contents are not shown; make no claims about their unseen contents.';
 
 export function renderNotShown(files: readonly ManifestFile[]): string {
   const skipped = files.filter((file) => file.skipReason);

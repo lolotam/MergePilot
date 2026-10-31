@@ -10,7 +10,7 @@ This Action uses repository API-key secrets or the existing official `claude-cod
 - **No repeated comments**: every inline comment carries a hidden fingerprint (`<!-- mp:f=… -->`); a new finding on the same file and overlapping lines with the same fingerprint or a near-identical title is not posted again, including comments posted earlier by the MergePilot GitHub App.
 - **Pause / resume** from a PR comment, in English or Arabic.
 - **Periodic audits** on `schedule` or `workflow_dispatch`.
-- **Skipped files stay visible** (ADR-0051): review and verification prompts list changed files whose contents are not shown, such as lockfiles, with status, line counts and skip reason, so no finding claims they were not updated. A defect in changed lines is reported at confidence 0.5-0.69 when uncertain, not withheld.
+- **Skipped files stay visible** (ADR-0051): review and verification prompts list changed files whose contents are not shown, such as lockfiles, with status, line counts and skip reason, so no finding claims they were omitted from the changes. Consequences of deletion, such as a shown caller importing a deleted module, can still be reported without inferring unseen contents. A defect in changed lines is reported at confidence 0.5-0.69 when uncertain, not withheld.
 
 ## Workflow
 

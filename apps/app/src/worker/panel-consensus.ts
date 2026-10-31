@@ -1,10 +1,6 @@
 import {
-  anchorFindings,
   describeAnsweredBy,
   hasJudgeUse,
-  parsePatch,
-  type ParsedPatch,
-  type RejectedFinding,
   type VerifyRejectedFinding,
 } from '@mergepilot/engine';
 import {
@@ -77,13 +73,12 @@ export async function publishConsensus(
   const consensusJudge = judge && hasJudgeUse(judge.uses, 'consensus') ? judge.judge : undefined;
   const dedupeJudge = dedupeJudgeOf(judge);
 
-  const patches = new Map(files.prFiles.flatMap((file) => (file.patch ? [[file.path, parsePatch(file.patch)] as const] : [])));
   const botFindings: PanelBotFindings[] = completed.map(({ br, rr }) => ({
     slot: br.bot.slot,
     name: br.bot.name,
     inline: rr.inline,
     summaryOnly: rr.summaryOnly,
-    rejected: placeRejected(rr.verifyRejectedFindings ?? [], patches),
+    rejected: rr.verifyRejectedFindings ?? [],
   }));
   const merge = await mergePanelFindings({
     bots: botFindings,
@@ -198,12 +193,6 @@ export async function publishConsensus(
   const findings = inline.length + capped.kept.filter((c) => c.kind === 'summaryOnly').length;
   logger.info({ event: 'panel.publish', jobId: job.deliveryId, mode: 'consensus', findings }, `Reviewer panel published ${findings} findings`);
   return { reviewUrl: reviewUrlOf(publish, capture.url(), { owner: ctx.owner, repo: ctx.repo, pullNumber: job.pullNumber }) };
-}
-
-/** A bot's verifier-rejected findings, each placed inline or outside the diff like its kept ones. */
-function placeRejected(rejected: readonly RejectedFinding[], patches: Map<string, ParsedPatch>): PanelBotFindings['rejected'] {
-  const inline = new Set(anchorFindings(rejected.map((r) => r.finding), patches).inline);
-  return rejected.map((r) => ({ ...r, kind: inline.has(r.finding) ? 'inline' : 'summaryOnly' }));
 }
 
 /** Whether a bot's listed rejection is one of the copies a cluster took in. */

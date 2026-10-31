@@ -38,7 +38,7 @@ import { reviewOutputTokensFor, verifyOutputTokensFor, type OutputLimitDisclosur
 import { buildReviewPrompt, type ContextFile, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 import { redactWithheld, type WithheldItem } from './withheld.js';
-import { anchorIndexOf, redactPatches } from './patch-helpers.js';
+import { anchorIndexOf, placeRejectedFindings, redactPatches, type PlacedRejectedFinding } from './patch-helpers.js';
 import { runBatchedPass, runSinglePass, type AnswerAttempt, type ReviewPassContext } from './review-pass.js';
 import { batchFilesByTokenCap, combineUsage, type CappedBatches } from './split.js';
 import { estimateReviewCostUsd, paidSwitchFits, SpendTracker } from './spend.js';
@@ -131,8 +131,8 @@ export type ReviewRunResult =
       verification?: { checked: number; rejected: number } | undefined;
       /** Findings the verification pass rejected, listed in the summary (ADR-0028). */
       verifyRejected?: VerifyRejectedFinding[] | undefined;
-      /** Transient panel input; never persisted in ReviewResult. */
-      verifyRejectedFindings?: RejectedFinding[] | undefined;
+      /** Transient panel input, severity-filtered and anchored like kept findings; never persisted. */
+      verifyRejectedFindings?: PlacedRejectedFinding[] | undefined;
       judge?: JudgeFilterSummary | undefined;
       /** Repository context sent and left out (ADR-0029); a disclosure, not an incomplete reason. */
       context?: ContextDisclosure | undefined;
@@ -490,6 +490,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // Inline comments land only on lines of the reviewed files (PR patch lines when incremental).
   const patchIndex = anchorIndexOf(redactedReviewableFiles, input.anchorFiles);
   const { inline, summaryOnly } = anchorFindings(selected, patchIndex);
+  const placedRejected = placeRejectedFindings(verifyRejectedFindings, patchIndex, reviewCfg.minSeverity);
 
   // ── Step g: assemble result ────────────────────────────────────────────
   const complete = incompleteReasons.length === 0;
@@ -519,7 +520,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     droppedInvalid: pass.droppedInvalid,
     complete,
     ...(verification !== undefined ? { verification } : {}),
-    ...(verifyRejected.length > 0 ? { verifyRejected, verifyRejectedFindings } : {}),
+    ...(verifyRejected.length > 0 ? { verifyRejected, verifyRejectedFindings: placedRejected } : {}),
     ...(judge ? { judge } : {}),
     ...(contextDisclosure ? { context: contextDisclosure } : {}),
     ...explored.disclosure(),
