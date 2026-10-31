@@ -99,9 +99,12 @@ export async function panelSetup(options: PanelSetupOptions = {}) {
         await new Promise((r) => setTimeout(r, 15));
         active--;
         if (options.failing?.includes(name)) throw new Error(`model ${name} exploded`);
+        const findings = options.findings?.[name] ?? [];
+        // A model in `rejectedModels` rejects, as its own verifier, every finding it reported (ADR-0050).
+        const rejectsAll = options.rejectedModels?.includes(name) ?? false;
         return {
           // `verdicts` answers the verification pass: no verdict keeps every finding.
-          text: JSON.stringify({ summary: `${name} summary`, findings: options.findings?.[name] ?? [], verdicts: options.rejectedModels?.includes(name) ? (options.findings?.[name] ?? []).map((_, index) => ({ id: `f${index + 1}`, verdict: 'rejected', reason: 'Contradicted' })) : [] }),
+          text: JSON.stringify({ summary: `${name} summary`, findings, verdicts: rejectsAll ? findings.map((_, i) => ({ id: `f${i + 1}`, verdict: 'rejected', reason: 'Contradicted' })) : [] }),
           finishReason: 'stop' as const,
           usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
         };
