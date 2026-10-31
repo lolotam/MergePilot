@@ -9,17 +9,20 @@
  */
 
 import {
-  DEFAULT_CONTEXT_TOKENS, DEFAULT_PR_CONTEXT_TOKENS, REVIEW_LIMIT_DEFAULTS,
-  type MergePilotConfig, type ModelPricing, type ReviewLimits,
+  DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_PR_CONTEXT_TOKENS,
+  REVIEW_LIMIT_DEFAULTS,
+  type MergePilotConfig,
+  type ModelPricing,
+  type ReviewLimits,
 } from '../config/schema.js';
 import type { Secret } from '../credentials/secret.js';
-import { classifyFile } from '../diff/classify-file.js';
 import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
-import { isSensitivePath } from '../security/sensitive-path.js';
 import { anchorFindings } from '../validate/anchor.js';
 import { selectFindings } from '../validate/select.js';
 import { buildBatchPrompt } from './batch-run.js';
+import { classifyChangedFiles } from './changed-files.js';
 import { checkBudget, costOverBudgetReason, estimateTokens } from './budget.js';
 import { ReviewDeadline, withCallTimeout } from './call.js';
 import { ContextPlan, type ContextDisclosure, type RepositoryContextFile } from './context.js';
@@ -30,7 +33,7 @@ import type { Judge } from '../judge/judge.js';
 import { FallbackChain, type FallbackDisclosure } from './fallback.js';
 import { prepareFollowUp, promptPrOf, type FollowUp } from './follow-up.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
-import { manifestFileOf, renderNotShown, type ManifestFile } from './manifest.js';
+import { renderNotShown } from './manifest.js';
 import { reviewOutputTokensFor, verifyOutputTokensFor, type OutputLimitDisclosure } from './output-budget.js';
 import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
@@ -47,6 +50,7 @@ import type { RejectedFinding, VerifyRejectedFinding } from './verify.js';
 const WHOLE_CONTEXT_SAFETY_TOKENS = 128;
 
 // ── Input types ──
+
 export interface PrFile {
   path: string;
   status: string;
@@ -184,26 +188,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const followUp = prepareFollowUp(input.followUp, knownSecrets);
 
   // ── Step a: classify files ─────────────────────────────────────────────
-  const incompleteReasons: string[] = [];
-  const reviewableFiles: Array<{ path: string; patch: string }> = [];
-  // Every changed file but sensitive ones, for the manifest of each batch (ADR-0031).
-  const manifestFiles: ManifestFile[] = [];
-
-  for (const file of files) {
-    const classification = classifyFile(file, {
-      exclude: reviewCfg.exclude,
-      isSensitivePath,
-    });
-    // On the path itself, not the classification: a removed or excluded `.env` is classified
-    // before sensitivity, and its name must still never reach the model.
-    if (!isSensitivePath(file.path)) manifestFiles.push({ ...manifestFileOf(file, knownSecrets), ...(classification !== 'review' ? { skipReason: classification } : {}) });
-
-    if (classification === 'incomplete-truncated') {
-      incompleteReasons.push(`${file.path}: patch truncated`);
-    } else if (classification === 'review' && file.patch) {
-      reviewableFiles.push({ path: file.path, patch: file.patch });
-    }
-  }
+  const { reviewableFiles, incompleteReasons, manifestFiles } = classifyChangedFiles(files, {
+    exclude: reviewCfg.exclude,
+    knownSecrets,
+  });
 
   // ── Step b: redact secrets ─────────────────────────────────────────────
   // Redact PR text
@@ -249,6 +237,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   });
 
   // ── Step c: build prompt + budget check ───────────────────────────────
+  const notShown = renderNotShown(manifestFiles);
   const promptInput = {
     language: config.language,
     maxFindings: reviewCfg.maxFindings,
@@ -256,7 +245,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     rulesFiles: redactedRulesFiles,
     pathInstructions: redactedPathInstructions,
     files: redactedReviewableFiles,
-    notShown: renderNotShown(manifestFiles),
+    notShown,
     ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
   };
   const withoutContext = buildReviewPrompt(promptInput);
@@ -428,16 +417,17 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       : undefined;
 
   // ── Step e2: verification pass ─────────────────────────────────────────
-  let modelFindings = pass.findings.map((finding) => Object.fromEntries(Object.entries(finding).map(([key, value]) => [key, typeof value === 'string' ? redactSecrets(value, knownSecrets).text : value])) as Finding);
+  let modelFindings = pass.findings;
   let verification: { checked: number; rejected: number } | undefined;
-  let verifyRejected: VerifyRejectedFinding[] = [], verifyRejectedFindings: RejectedFinding[] = [];
+  let verifyRejected: VerifyRejectedFinding[] = [];
+  let verifyRejectedFindings: RejectedFinding[] = [];
 
   if (reviewCfg.verify && modelFindings.length > 0) {
     const verified = await runVerifyPass({
       language: config.language,
       findings: modelFindings,
       files: redactedReviewableFiles,
-      notShown: renderNotShown(manifestFiles),
+      notShown,
       contextFiles: context.sentFiles(),
       maxCodeTokens: limits.batchTokens,
       rulesFiles: redactedRulesFiles,

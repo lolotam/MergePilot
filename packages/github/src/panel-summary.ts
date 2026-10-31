@@ -81,6 +81,8 @@ interface Labels {
   dedupeUnavailable: (code: string) => string;
   incomplete: string;
   outside: string;
+  /** Inline claims published although every bot's verifier rejected them (ADR-0050). */
+  revived: string;
   below: (n: number) => string;
   overLimit: (n: number) => string;
   summaries: string;
@@ -90,6 +92,8 @@ interface Labels {
   fateOf: (notOwn: number, reported: number) => string;
   fateParts: Record<FatePart, (n: number) => string>;
   fatesVerifyNote: string;
+  /** Rejected copies that counted as agreement or revival, outside the table count (ADR-0050). */
+  rejectedInAgreement: (n: number) => string;
   counts: (inline: number, outside: number) => string;
   disclaimer: string;
 }
@@ -109,6 +113,7 @@ const EN: Labels = {
   dedupeUnavailable: (code) => `> ⚠️ Jev duplicate check unavailable: ${code}`,
   incomplete: '### ⚠️ Warning: Incomplete review',
   outside: '### Findings outside the diff',
+  revived: '### Published although the verifier rejected them',
   below: (n) => `Below agreement (${n})`,
   overLimit: (n) => `Over the findings limit (${n})`,
   summaries: 'Bot summaries',
@@ -122,6 +127,7 @@ const EN: Labels = {
     alreadyPosted: (n) => `${n} already posted by an earlier review`,
   },
   fatesVerifyNote: '> Findings rejected by verification are not counted in the table; they are listed under «Rejected by verification».',
+  rejectedInAgreement: (n) => `${n} verifier-rejected copies contributed to agreement or unverified revival; excluded from the table count`,
   counts: (inline, outside) => `Inline comments: ${inline} · Outside diff: ${outside}`,
   disclaimer: 'MergePilot only comments and never approves or blocks merging.',
 };
@@ -138,6 +144,7 @@ const AR: Labels = {
   dedupeUnavailable: (code) => `> ⚠️ فحص التكرار بالمعنى (Jev) غير متاح: ${code}`,
   incomplete: '### ⚠️ تحذير: مراجعة غير مكتملة',
   outside: '### ملاحظات خارج التغييرات',
+  revived: '### منشورة رغم رفض التحقق',
   below: (n) => `أقل من حد الاتفاق (${n})`,
   overLimit: (n) => `فوق الحد الأقصى للملاحظات (${n})`,
   summaries: 'ملخصات المراجعين',
@@ -151,6 +158,7 @@ const AR: Labels = {
     alreadyPosted: (n) => `${n} منشورة من مراجعة سابقة`,
   },
   fatesVerifyNote: '> الملاحظات التي رفضها التحقق لا تُحسب في الجدول؛ تجدها تحت «رفضها التحقق».',
+  rejectedInAgreement: (n) => `${n} نسخ رفضها التحقق دخلت في الاتفاق أو النشر غير المتحقق؛ خارج عدد الجدول`,
   counts: (inline, outside) => `تعليقات مضمنة: ${inline} · خارج التغييرات: ${outside}`,
   disclaimer: '`MergePilot` يكتفي بالتعليق فقط ولا يوافق على الدمج أو يمنعه.',
 };
@@ -183,16 +191,15 @@ function clusterLine(cluster: ConsensusCluster, total: number, language: 'ar' | 
  * the rest went (ADR-0034 amendment); undefined when every bot published all it reported.
  */
 function renderFindingsFates(input: PanelSummaryInput, labels: Labels): string | undefined {
-  const lines = (input.findingsFates ?? []).flatMap((fate) => {
+  const fates = input.findingsFates ?? [];
+  const lines = fates.flatMap((fate) => {
     const notOwn = fate.reported - fate.own;
     if (notOwn <= 0) return [];
     const parts = FATE_PARTS.filter((part) => fate[part] > 0).map((part) => labels.fateParts[part](fate[part]));
     return [`> - **${escapeInline(fate.name)}** (${labels.fateOf(notOwn, fate.reported)}): ${parts.join(' · ')}`];
   });
-  for (const fate of input.findingsFates ?? []) {
-    if (fate.rejectedInAgreement) lines.push(input.language === 'ar'
-      ? `> - **${escapeInline(fate.name)}**: ${fate.rejectedInAgreement} نسخ رفضها التحقق دخلت في الاتفاق أو النشر غير المتحقق؛ خارج عدد الجدول.`
-      : `> - **${escapeInline(fate.name)}**: ${fate.rejectedInAgreement} verifier-rejected copies contributed to agreement or unverified revival; excluded from the table count.`);
+  for (const fate of fates) {
+    if (fate.rejectedInAgreement) lines.push(`> - **${escapeInline(fate.name)}**: ${labels.rejectedInAgreement(fate.rejectedInAgreement)}`);
   }
   if (lines.length === 0) return undefined;
   const verifyNote = (input.verifyRejected ?? []).length > 0 ? [labels.fatesVerifyNote] : [];
@@ -247,7 +254,10 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   }
 
   const revived = merge.kept.filter((cluster) => cluster.revived && cluster.kind === 'inline');
-  if (revived.length > 0) sections.push(revived.map((cluster) => `- ${clusterLine(cluster, merge.total, input.language)}`).join('\n'));
+  if (revived.length > 0) {
+    const items = revived.map((cluster) => `- ${clusterLine(cluster, merge.total, input.language)}`);
+    sections.push(`${labels.revived}\n\n${items.join('\n')}`);
+  }
   const outside = merge.kept.filter((c) => c.kind === 'summaryOnly');
   if (outside.length > 0) {
     const items = outside.map(

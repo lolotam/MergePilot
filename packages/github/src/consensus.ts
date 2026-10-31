@@ -108,6 +108,7 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
   const agreed: ConsensusCluster[] = [];
   const below: ConsensusCluster[] = [];
   for (const group of groups.values()) {
+    // A cluster holds at most one finding per bot, so its length is the number of bots that raised it.
     if (group.every((entry) => entry.rejected) && group.length < 2) continue;
     const cluster = toCluster(group);
     const enough = cluster.foundBy.length >= input.minAgreement;
@@ -199,7 +200,9 @@ function candidatePairs(entries: readonly Entry[]): {
 
 /**
  * Asks the judge, in one request, about the undecided pairs that could still join: a pair already
- * in one cluster, or whose clusters share a bot, is not asked. `merged` counts the joins made.
+ * in one cluster, or whose clusters share a bot, is not asked. Pairs of kept findings come first,
+ * so rejected copies never take a place in the pair limit that kept findings had (ADR-0050).
+ * `merged` counts the joins made.
  */
 async function joinByJudge(
   entries: readonly Entry[],
@@ -207,7 +210,9 @@ async function joinByJudge(
   undecided: readonly EntryPair[],
   input: MergePanelInput & { judge: Judge },
 ): Promise<MergePanelResult['semantic']> {
-  const asked = undecided.filter(([a, b]) => clusters.canJoin(a, b)).slice(0, MAX_CONSENSUS_PAIRS);
+  const hasRejected = ([a, b]: EntryPair): boolean => Boolean(entries[a]!.rejected || entries[b]!.rejected);
+  const joinable = undecided.filter(([a, b]) => clusters.canJoin(a, b));
+  const asked = [...joinable.filter((p) => !hasRejected(p)), ...joinable.filter(hasRejected)].slice(0, MAX_CONSENSUS_PAIRS);
   if (asked.length === 0) return undefined;
   const pairs: SameIssuePair[] = asked.map(([a, b], i) => {
     const fa = entries[a]!.finding;
