@@ -1,7 +1,7 @@
 # ADR-0052: Website security scan for the platform admin (`packages/webscan`)
 
 - **Date:** 2026-10-31
-- **Status:** Proposed. Design approved by the owner on 2026-10-31 (docs/decisions.ar.md, batch 26, Q63). Nothing is implemented yet.
+- **Status:** Proposed. The original feature scope was approved by the owner on 2026-10-31 (docs/decisions.ar.md, batch 26, Q63). Subsequent review refinements in this PR are proposed implementation details, not additional quoted owner decisions. Nothing is implemented yet.
 - **Related to:** ADR-0001 (package boundaries), ADR-0014 (retention), ADR-0021 (live run updates)
 
 This ADR is the design spec for the feature. The [implementation plan](../superpowers/plans/2026-10-31-web-scan.md) maps it to four delivery PRs. All new scanner behavior described here remains proposed until implemented and verified.
@@ -28,6 +28,7 @@ Three facts shaped the design:
 - Only a platform admin can see or use the section. Every web-scan API route sits behind `requirePlatformAdmin`, so anyone else gets the regular 404.
 - Only hosts the admin adds to the site list are scanned. Matching is on the exact hostname. A subdomain is scanned only when it is listed itself. There is no wildcard and no "allow all" option.
 - A manual scan needs a fresh confirmation each time: "I own this site or have explicit permission to test it". Enabling or changing a schedule requires the same confirmation and creates a new authorization audit record containing the administrator, timestamp, site and effective scope. Each scheduled scan references that record; disabling the schedule invalidates it for queued jobs. Both forms of authorization are recorded in the audit log (section 10).
+- The authorizing user must still exist, have a verified email, and pass `isUserPlatformAdmin` against the worker's current deployed `MERGEPILOT_PLATFORM_ADMINS` configuration before a queued scan is claimed, before every request, and before each alert write. A revoked/deleted/unverified user invalidates that authorization. Configuration removal follows the application's existing deployment/restart semantics; a historical authorization record is not permanent privilege.
 - Out of scope:
   - Workspace users.
   - PR preview URLs.
@@ -39,7 +40,8 @@ Three facts shaped the design:
 - **Before every request and every redirect hop:**
   1. The canonical hostname must equal this scan site's hostname, which must still be in the site list. A redirect to another listed site is rejected too. Only default HTTP/HTTPS ports (80/443) are allowed; a scan cannot switch to another service on the same hostname. URLs with credentials are rejected.
   2. The resolved address is checked by the existing SSRF guard (public addresses only) and pinned for the connection.
-  3. Redirects are followed manually (`redirect: 'manual'`), so every hop goes through steps 1 and 2.
+  3. Apply this request's authorized path/prefix, query-parameter rules, decoded action denylist and blocked paths to the destination, including redirects and fixed check targets. An HTTPS redirect to HTTP is rejected. A redirect cannot inherit authorization merely because its source URL was allowed.
+  4. Redirects are followed manually (`redirect: 'manual'`), so every hop goes through steps 1–3.
 - One request at a time per scan, paced to the configured rate.
 - Backoff: after three consecutive `429` or `503` replies, double the pacing interval. Honor a valid `Retry-After`, capped at 60 seconds and the remaining scan deadline. Three more consecutive replies stop the scan with the reason "stopped: the site is rate limiting". Every attempt and redirect counts toward the request cap; redirects have a fixed maximum of five hops.
 - Every request sends `User-Agent: MergePilot-WebScan/1 (+<contact>)`. The contact is a global setting, so a site's WAF logs identify the scanner.
@@ -50,7 +52,7 @@ Three facts shaped the design:
   - parameterized links unless their exact path and parameter names have a separate per-site authorization. Active probes require an additional opt-in for those path/parameter pairs; that list is also empty by default. Arbitrary regexes, wildcard hosts and implicit query-value authorization are not supported.
 
   Links are canonicalized before queueing (WHATWG URL parsing, fragment removal and default-port normalization). Path matching preserves path-segment boundaries: `/docs` may authorize `/docs/a`, never `/docs-admin`. Raw query values live only in the bounded in-memory request plan; they never enter queue payloads, progress events, errors or stored evidence. The worker discovers and probes authorized query links within the scan process.
-- **Implementation note:** the SSRF guard is HTTPS-only today (`parseSafeUrl` in `ssrf.ts` rejects other protocols). The HTTP-to-HTTPS redirect check needs plain HTTP on listed hosts, so the guarded fetch gains an `http:` path with the same address checks and pinning. Only the web-scan caller may use plain HTTP; provider calls stay HTTPS-only.
+- **Implementation note:** the SSRF guard is HTTPS-only today (`parseSafeUrl` in `ssrf.ts` rejects other protocols). A scanner-specific transport-check entry point may send a query-free, fragment-free HTTP request on port 80 to this site's authorized base path, with the same address checks and pinning, solely to inspect its redirect toward HTTPS. It does not crawl over HTTP or run parameterized/active/file probes there. All ordinary checks and crawling require HTTPS; provider calls stay HTTPS-only. A refused/no-listener HTTP probe is check-scoped Not checked, not a reason to abort otherwise valid HTTPS scanning.
 
 ### 3. Checks
 
@@ -69,7 +71,7 @@ Body content from exposed files is never stored. Only the status, the content ty
 
 ### 4. Findings model
 
-- **Grouping:** occurrences have a stable `occurrence_key` containing check id, issue id, canonical host, normalized path and sorted parameter names (never values). The dashboard groups occurrences with the same check and issue per site and keeps up to 5 redacted evidence samples. Grouping is a view, not a change of identity.
+- **Grouping:** occurrences have a versioned `occurrence_key` computed as HMAC-SHA-256 over an unambiguous canonical tuple of check id, issue id, stable check subject (for example cookie name), canonical host, normalized path and canonical query name/value pairs. Sort parameter names; preserve the order of repeated values within each name. This identity uses the **original baseline** URL, never the mutated probe/marker. Only the digest is persisted, not the raw tuple. A site-specific random identity key is encrypted at rest using a purpose-scoped vault envelope; the package receives an app-supplied fingerprint function, never the key or vault. The dashboard groups occurrences with the same check and issue per site and keeps up to 5 redacted evidence samples. Grouping is a view, not a change of identity.
 - **`issue_key`:** check id + issue id + canonical host. It is the group identity for reports and alert aggregation, independent of crawl order. Exceptions, evidence hashes, coverage and remediation transitions use `occurrence_key`; this prevents an unchecked URL from disappearing behind a site-wide group.
 - **Validation state:** one of Confirmed, Likely, Indicator or Informational. Section 3 sets the ceiling for each check. A finding is never promoted beyond its evidence.
 - **Severity:** Critical, High, Medium, Low or Info, fixed per issue in the check catalogue.
@@ -84,7 +86,7 @@ Body content from exposed files is never stored. Only the status, the content ty
   | validation | Confirmed 1, Likely 0.85, Indicator 0.6, Informational 0.4 |
   | surface | `1 + min(0.5, 0.1 × (affected URLs − 1))` |
 
-- **Comparison:** each scan is compared with the site's last *completed* scan, supplemented by the retained latest occurrence/coverage state. Occurrences are New, Unchanged, Fixed or Not checked. Fixed requires a successful negative result for the same check and occurrence scope, not merely absence from the new findings. Disabled checks, unvisited URLs, errors, changed query values that cannot be proven equivalent and partial coverage produce Not checked. A stopped or failed scan never becomes a baseline and never marks anything Fixed. Unchecked historical occurrences remain in the state ledger for future scans; a partial baseline cannot erase them. A group is Fixed only when every outstanding occurrence is demonstrably fixed.
+- **Comparison:** each scan is compared with the site's last *completed* scan, supplemented by the retained latest occurrence/coverage state. Occurrences are New, Unchanged, Fixed or Not checked. Fixed requires a successful negative result for the same occurrence key and check, not merely absence from the new findings. A rediscovered authorized URL with the same keyed fingerprint proves query-target equivalence without storing its values; a changed value or check subject produces a different identity and cannot fix the old one. Disabled checks, unvisited URLs, errors and missing partial coverage produce Not checked. A stopped or failed scan never becomes a baseline and never marks anything Fixed. Unchecked historical occurrences remain in the state ledger for future scans; a partial baseline cannot erase them. A group is Fixed only when every outstanding occurrence is demonstrably fixed.
 - **Redaction:** before any persistence, log, error, progress event or export, remove URL userinfo and fragments, replace **every** query value with a fixed placeholder, remove `Set-Cookie` values and authorization values, and pass evidence through the engine's `redactSecrets` (`packages/engine/src/security/redact.ts`). Do not store response bodies or arbitrary header values. Findings store safe structural facts, catalogue signature names and digests; dynamic path segments may contain secrets too, so paths shown in evidence must be limited to administrator-approved route patterns or redacted path placeholders. The transport never logs raw URLs or raw exception messages.
 
 ### 5. Settings: global defaults, per-site overrides, fixed ceilings
@@ -120,28 +122,32 @@ Body content from exposed files is never stored. Only the status, the content ty
 
 | Table | Holds |
 |---|---|
-| `web_scan_settings` | the single row of global defaults, the kill switch, the contact and the retention |
-| `web_scan_sites` | hostname (unique), query-free base URL, linked repository identity (owner/name, repository id, installation id and platform-admin owner), JSON overrides, schedule and authorization reference, `next_run_at`, `last_scan_at`, soft-removal timestamp |
-| `web_scans` | site, trigger (`manual` / `scheduled`), unique occurrence key, durable enqueue/outbox state, status (`queued` / `running` / `completed` / `stopped` / `failed`), coverage summary, stop or fail reason, requests, pages, duration, effective settings, authorization audit id, timestamps |
-| `web_scan_findings` | scan, `issue_key`, `occurrence_key`, check, severity, validation, confidence, risk factors, safe URL scopes, redacted evidence facts, evidence hash, comparison state |
+| `web_scan_settings` | the single row of global defaults, the kill switch, contact, retention and an audited approved-installation list of `(admin_user_id, installation_id, github_account_id)` bindings, empty by default |
+| `web_scan_sites` | hostname (unique), query-free base URL, linked repository identity (owner/name, repository id, installation id and platform-admin owner), purpose-scoped encrypted identity key and envelope key version, JSON overrides, schedule and authorization reference, `next_run_at`, `last_scan_at`, soft-removal timestamp |
+| `web_scans` | site, trigger (`manual` / `scheduled`), unique schedule/manual idempotency key, durable enqueue/outbox state, worker attempt id and heartbeat, status (`queued` / `running` / `completed` / `stopped` / `failed`), coverage summary, stop or fail reason, requests, pages, duration, effective settings, authorization audit id, timestamps |
+| `web_scan_findings` | scan, `issue_key`, `occurrence_key`, `target_key`, check id/version and stable subject, severity, validation, confidence, risk factors, safe URL scopes, redacted evidence facts, evidence hash, comparison state |
 | `web_scan_occurrences` | site and `occurrence_key` (unique), latest finding and coverage, outstanding/fixed state, evidence hash, alert generation and last successfully notified generation; retained independently from scan snapshots |
 | `web_scan_exceptions` | site, `occurrence_key`, evidence hash, kind (`accepted` / `false_positive`), reason, `expires_at` (nullable means no expiry), created by and at |
 | `web_scan_alerts` | site, validated repository/installation ids, GitHub issue number, occurrence/generation membership, idempotency marker, pending/sent/unknown delivery state and last observed open/closed issue state |
 | `web_scan_audit` | actor, action, target, before and after JSON (no secrets), timestamp |
 
-The store exposes no update or delete for `web_scan_audit`. Site removal is a soft removal: cancel queued scans and invalidate authorization, but preserve audit references and occurrence history. Database mutations and their audit inserts share one transaction; a failed audit insert rolls back the mutation.
+The store exposes no update or delete for `web_scan_audit`. Site removal is a soft removal: cancel queued scans and invalidate authorization, but preserve audit references, the identity key and occurrence history. Adding a previously removed hostname restores its original row/id transactionally after fresh authorization by its current platform-admin owner. Preserve identity/history/exceptions; reset schedules, alerts, repository binding and overrides to current safe defaults, require fresh scope, and never revive old queued work. Ownership transfer requires an explicit audited admin action, not an implicit restore by another user. Database mutations and their audit inserts share one transaction; a failed audit insert rolls back the mutation.
+
+The current provider vault API is provider-typed. Implement a separate purpose-scoped sealing API using the same envelope primitives, with AAD binding both `webscan-identity` and site id; never cast a scanner secret to a provider credential. Master-key rotation rewraps all scanner identity keys before an old master key may be retired, without changing HMAC identities. These keys never appear in API, audit or ordinary workspace credential exports. Tests cover cross-site/purpose rejection, rotation, key-version persistence and absence from output.
 
 ### 7. Execution
 
 - A dedicated BullMQ queue `web-scan` with queue-wide global concurrency 1 as well as local worker concurrency 1. Before scanning, acquire a database advisory lock held on a dedicated connection for the scan lifetime, shared by every web-scan worker. Release it in `finally`; connection loss aborts the scan and prevents further requests. A worker losing its BullMQ lock also aborts. These guards cover stalled-job recovery and rolling deployments, not just one process. Reviews use their existing independent queue and never wait behind a scan.
 - A manual scan is enqueued from the dashboard. Progress (activity, requests, pages, elapsed time) streams to the page the same way as live run updates (ADR-0021).
 - A repeatable "web-scan-tick" job every 15 minutes locks each due site row. In one database transaction, insert one queued scan/outbox record under a unique `(site_id, scheduled_for)` key, advance `next_run_at` and append audit. A dispatcher retries unpublished outbox records using the persistent scan id as BullMQ job id. Queue delivery is at-least-once; the worker atomically claims a still-queued scan and never executes a terminal scan again. A crash between Redis enqueue and the database acknowledgement cannot create a second scan or repeat a completed occurrence. Manual requests use an administrator-generated idempotency key with the same outbox path. The tick does nothing while the kill switch is on.
+- A claimed run stores its worker attempt id and heartbeat. On startup and each tick, reconciliation may acquire the same global advisory lock and, only after the heartbeat is stale and no BullMQ lock remains, mark an orphaned running attempt failed (`worker_lost`) with audit. It never replays that attempt's active requests or promotes it to a baseline. Terminal writes are fenced by attempt id; an old worker cannot overwrite reconciliation. If lock/queue state cannot be established, leave it visibly pending operator recovery and fail closed instead of guessing.
 - `packages/webscan` exports a pure `runScan(input, deps)`:
   - `input` holds the site, the effective settings and the checks.
-  - `deps` holds a guarded fetch, a clock, an `AbortSignal` and a progress callback.
+  - `deps` holds a guarded fetch, a clock, cancellable sleep, an `AbortSignal`, a progress callback and app-supplied identity functions.
 
   The package never imports from `apps/` or `packages/engine`. The app injects the SSRF-guarded fetch, and the package also re-checks the host list itself as a second guard.
-- Reaching the configured page or active-link cap completes the bounded scan with `partialCoverage: true`; the coverage ledger determines what can be marked Fixed. Request/time ceilings, rate limiting, cancellation, kill switch, authorization revocation and lease loss stop the scan. An unexpected target/transport error fails it. These reasons are fixed catalogue codes with localized display text, never raw URLs or target response text.
+  `runScan` returns the current observation only. The app loads retained occurrence state and passes both to the separate pure `compareScan(current, retained)` export before committing occurrence transitions. The implementation plan defines the exact coverage/comparison interfaces.
+- Reaching the configured page or active-link cap completes the bounded scan with `partialCoverage: true`; the coverage ledger determines what can be marked Fixed. A refused/no-listener result from the query-free HTTP transport probe is check-scoped Not checked and scanning continues on HTTPS. Request/time ceilings, rate limiting, cancellation, kill switch, authorization revocation and lease loss stop the scan. Other unexpected target/transport errors fail it. These reasons are fixed catalogue codes with localized display text, never raw URLs or target response text. A request/time-stopped run can show observed findings but deliberately cannot supply a completed baseline; operators must narrow scope to fit the bounded budget.
 
 ### 8. Alerts (GitHub issues)
 
@@ -151,7 +157,7 @@ The store exposes no update or delete for `web_scan_audit`. Site removal is a so
   - have an alert generation not yet successfully notified to the currently validated repository, or whose prior issue was closed and which meet the recurrence rule below.
 
   Notification state is separate from New/Unchanged comparison. First eligibility, changed evidence, expired/revoked exceptions and recurrence after a confirmed fix create a new notification generation. A manual scan updates occurrence state but never consumes an unnotified generation. Re-running a manual baseline therefore cannot suppress the next scheduled alert.
-- Alerts require a **private** repository accessible to the same platform administrator through an installation belonging to an explicitly approved account. Never select an arbitrary customer installation by matching `owner/name`. Bind immutable repository and installation ids when the site is saved and re-check visibility, account authorization and issue permissions before each write; failure disables that delivery and records the reason.
+- Alerts require a **private** repository accessible to the same currently authorized platform administrator through an exact approved-installation binding in `web_scan_settings`. Approval is an explicit audited admin configuration action; the server verifies the installation's GitHub account id and the administrator's authenticated GitHub installation access before saving it. Missing identity/access proof keeps alerts disabled. Workspace membership or a repository name alone is not approval. Bind immutable repository and installation ids when the site is saved and re-check the binding, current administrator membership, private visibility, account id and issue permissions before each write; removal/revocation disables delivery and records the reason.
 - At most one issue per scheduled scan contains aggregate counts by severity and a platform-admin dashboard link, without site hostname, affected URLs or evidence. Each issue has a deterministic delivery marker. Reserve a delivery record transactionally before writing, and reconcile by marker before retrying an ambiguous write; do not blindly repeat issue creation after a timeout. An unresolved delivery stays Unknown and needs operator attention if reconciliation cannot establish whether it succeeded.
 - Fetch the current state of referenced issues before deduplication. A closed issue is not permanently treated as open; reopening is observed on the next evaluation. Closing an issue while the finding remains unchanged acknowledges that notification generation and does not create one issue per scan. A newly eligible or recurrent generation may notify again even if an older issue remains open.
 - A later completed scan with coverage proving all referenced occurrences Fixed adds one idempotent "fixed" comment. Missing coverage never triggers it. The worker never closes issues or changes their existing bodies. Alert delivery records and audit capture both the attempt and its confirmed outcome without claiming a database/GitHub distributed transaction.
@@ -201,6 +207,7 @@ No test contacts an external website. Use injected request/DNS boundaries or loc
   - `429` backoff and stop.
 - **Checks:** fixed HTML and header fixtures for every check, including encoded, partial, attribute and duplicate reflections. A reflection never rises above Indicator.
 - **Scope and safety:** decoded action paths/query names, denied query links without explicit authorization, path-prefix boundaries, redirects to another separately listed site, non-default ports, and query/path secret sentinels absent from persistence/events/exports. These fixtures demonstrate the guards; they cannot prove arbitrary GETs have no side effects.
+- **Identity and revocation:** distinct cookie subjects and query variants, stable keyed identity for the same rediscovered baseline, correct negative coverage, sealed site keys surviving master-key rotation, wrong-site/purpose rejection, and revoked/unverified/deleted authorizing users. Check same-host redirects outside scope and HTTP queries/downgrades are denied, and a closed HTTP port does not abort HTTPS checks.
 - **Settings:**
   - ceilings rejected by the API and clamped by the worker;
   - the high-value confirmation;
@@ -210,6 +217,7 @@ No test contacts an external website. Use injected request/DNS boundaries or loc
 - **Authorization:** a non-admin gets 404 on every route.
 - **Redaction:** no token or cookie value is stored in evidence.
 - **Worker:** two replicas, stalled-job recovery, database/BullMQ lock loss, zero-request paused/revoked jobs, crash boundaries across schedule/outbox/Redis, and atomic audit rollback. Kuwait schedules cover biweekly anchors, days 29–31, leap years and one catch-up after downtime.
+- **Recovery:** restoring a tombstoned hostname preserves its original identity/history without reviving jobs; orphaned running attempts fail under reconciliation with attempt-id fencing and no replay of active requests.
 - **Alerts:** manual-first baselines, exception expiry, changed evidence, fixed-then-recurring issues, closed/reopened issues, visibility/account changes, missing permissions and ambiguous GitHub writes with marker reconciliation. No target details enter issue bodies.
 
 ## Rollout
@@ -221,7 +229,7 @@ Four pull requests, started after #188 and #189 are merged. The migration, ADR a
 3. **API and dashboard:** platform admin routes and the web pages, in Arabic and English.
 4. **GitHub issue alerts:** needs the owner to add `Issues: write` to the App.
 
-Everything ships switched off: no sites and no schedules. The owner runs the first real scan manually on `demo.testfire.net`, a site built for testing, to calibrate the checks, then on one of the owner's own sites.
+Everything ships switched off: no sites and no schedules. The owner runs the first real calibration manually with the same fresh ownership/permission confirmation as every manual scan. `demo.testfire.net` is only a candidate when the owner has explicit permission; otherwise use an owned site or local fixture, then calibrate on an authorized owned site.
 
 ## Consequences
 
