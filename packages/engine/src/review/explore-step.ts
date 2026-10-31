@@ -40,6 +40,10 @@ export interface ExploreStepOptions {
   priorEntries?: readonly ExploreEntry[] | undefined;
   additionalReserveTokens?: number | undefined;
   additionalReserveOutputTokens?: number | undefined;
+  /** Number of later answers that may reuse this evidence. */
+  additionalEvidenceCopies?: number | undefined;
+  /** Maximum added input per answer, including the separator, within the total batch cap. */
+  evidenceTokenLimit?: number | undefined;
   /** The review config: the explore limits and the skip rules of the paths. */
   review: { explore?: Partial<ExploreLimits> | undefined; exclude: readonly string[]; callTimeoutMs?: number };
   /** Whether the review is batched: a batched review does not explore. */
@@ -77,6 +81,8 @@ export interface ExploreStepResult {
   usage: TokenUsage | undefined;
   /** What the verifier explores with, when a round ran: the budget and the review's results. */
   explorePass: ExplorePassInput | undefined;
+  /** Gathered originals, kept separately from this answer's fitted evidence. */
+  gatheredEntries: readonly ExploreEntry[];
   /**
    * What the run discloses about its exploration, as the result carries it. It is read after the
    * verify pass, which may explore as well (ADR-0046).
@@ -96,6 +102,7 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
   let prompt = opts.prompt;
   let promptTokens = opts.promptTokens;
   let usage: TokenUsage | undefined;
+  let gatheredEntries: readonly ExploreEntry[] = opts.priorEntries ?? [];
   // The block the review's prompt carries: the verifier judges against the same evidence.
   let priorBlock = '';
   // The entries the review's exploration gathered: the verifier does not show them again when the
@@ -104,6 +111,13 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
 
   if (budget && opts.explore && !opts.batched) {
     opts.spend.requireAffordableNext();
+    const copies = 1 + (opts.additionalEvidenceCopies ?? 0);
+    const evidenceRoom = Math.max(0, Math.min(opts.promptLimit - opts.promptTokens, opts.evidenceTokenLimit ?? Infinity));
+    const reserve = {
+      promptTokens: opts.promptTokens + (opts.additionalReserveTokens ?? 0) +
+        (opts.verifyReserve ? opts.verifyReserve.promptTokens + limits.maxReadTokens : 0),
+      outputTokens: opts.reviewOutputTokens + (opts.additionalReserveOutputTokens ?? 0) + (opts.verifyReserve?.outputTokens ?? 0),
+    };
     const explored = await runExploration({
       model: opts.model,
       spend: opts.spend,
@@ -125,23 +139,26 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       // The money the review call and the verification call need stays out of the exploration's
       // reach. The verification call may carry the review's explored block, so the read budget is
       // reserved for it too.
-      reserve: {
-        promptTokens:
-          opts.promptTokens + (opts.additionalReserveTokens ?? 0) +
-          (opts.verifyReserve ? opts.verifyReserve.promptTokens + limits.maxReadTokens : 0),
-        outputTokens: opts.reviewOutputTokens + (opts.additionalReserveOutputTokens ?? 0) + (opts.verifyReserve?.outputTokens ?? 0),
-      },
+      reserve,
+      evidenceReserveTokens: opts.additionalEvidenceCopies === undefined ? undefined : evidenceRoom * copies,
     });
     usage = explored.usage;
     const entries = uniqueExploreEntries([...explored.entries, ...(opts.priorEntries ?? [])]);
-    priorEntries = fitExploredEntries(entries, opts.knownSecrets, opts.promptLimit - opts.promptTokens - EXPLORED_SEPARATOR_TOKENS);
+    gatheredEntries = entries;
+    // Pricing may change during exploration. Protect every remaining answer before attaching evidence.
+    const affordableRoom = affordableEvidenceTokens(opts.spend, reserve, copies, evidenceRoom);
+    priorEntries = fitExploredEntries(entries, opts.knownSecrets, affordableRoom - EXPLORED_SEPARATOR_TOKENS);
     const block = renderExploredBlock(priorEntries, opts.knownSecrets);
     // Only newly gathered evidence counts here; carried evidence may fit differently per batch.
-    if (explored.entries.some((entry) => !priorEntries.some((kept) => kept.label === entry.label && kept.content === entry.content))) budget.noteTrimmed();
+    if (explored.entries.some((entry) => !priorEntries.some((kept) =>
+      renderExploredBlock([entry], opts.knownSecrets) === renderExploredBlock([kept], opts.knownSecrets),
+    ))) budget.noteTrimmed();
+    if (!block && entries.length > 0 && affordableRoom < evidenceRoom) budget.noteSkipped('explored results left out: budget limit reached');
     if (block) {
       const user = `${opts.prompt.user}\n\n${block}`;
       const tokens = estimateTokens(opts.prompt.system + user);
-      if (tokens <= opts.promptLimit && opts.spend.canAfford(tokens, opts.reviewOutputTokens)) {
+      const addedTokens = tokens - opts.promptTokens;
+      if (tokens <= opts.promptLimit && opts.spend.canAfford(reserve.promptTokens + addedTokens * copies, reserve.outputTokens)) {
         prompt = { system: opts.prompt.system, user };
         promptTokens = tokens;
         priorBlock = block;
@@ -165,10 +182,23 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
     promptTokens,
     usage,
     explorePass,
+    gatheredEntries,
     disclosure: () => {
       if (!opts.explore || !budget) return {};
       const exploration = opts.batched ? BATCHED_EXPLORATION : budget.disclosure();
       return { exploration };
     },
   };
+}
+
+/** Fits repeated evidence at the current price while leaving all answer and verify reserves intact. */
+function affordableEvidenceTokens(spend: SpendTracker, reserve: { promptTokens: number; outputTokens: number }, copies: number, limit: number): number {
+  let low = 0;
+  let high = limit;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (spend.canAfford(reserve.promptTokens + mid * copies, reserve.outputTokens)) low = mid;
+    else high = mid - 1;
+  }
+  return low;
 }

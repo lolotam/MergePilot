@@ -56,6 +56,25 @@ function input(
 }
 
 const READ_GUARD = JSON.stringify({ explore: [{ read: { path: 'src/guard.ts' } }] });
+it('uses the full answer cap when fixed overhead leaves no practical exploration patch room', async () => {
+  const overrides = {
+    files: [{ path: 'src/a.ts', status: 'modified', patch: bigPatch(300), changes: 301 }],
+    rulesFiles: [{ path: 'CLAUDE.md', content: 'rule '.repeat(6000) }],
+  };
+  const probe = recordingModel();
+  await runReview(input(probe.model, overrides));
+  const promptLimit = estimateTokens(probe.requests[0]!.system + probe.requests[0]!.user) + 20;
+  const { model, requests } = recordingModel();
+  const result = await runReview(input(model, { ...overrides, explore: { reader: fakeReader() } }, {
+    maxPromptTokens: promptLimit, batchTokens: 1000, explore: { maxRounds: 1 },
+  }));
+
+  expect(requests).toHaveLength(1);
+  expect(requests[0]!.user).toContain('const value299 = 299;');
+  expect(result).toMatchObject({ status: 'completed', complete: true, exploration: { rounds: 0, skipped: 'exploration reserve leaves insufficient patch room' } });
+  expect(estimateTokens(requests[0]!.system + requests[0]!.user)).toBeLessThanOrEqual(promptLimit);
+});
+
 describe('large PR exploration budgets (B23)', () => {
   it('reuses exploration evidence in every batch without exceeding the input cap (B23)', async () => {
     const requests: ReviewModelRequest[] = [];

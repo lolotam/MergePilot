@@ -44,6 +44,7 @@ export interface ReviewPassContext {
   libraryDocs?: LibraryDoc[] | undefined;
   /** The repository context of a batch (ADR-0029), for up-front and recovery batches alike. */
   contextFor?: ((files: ReviewableFileWithPatch[], maxTokens?: number) => ContextFile[]) | undefined;
+  contextSent?: ExecuteBatchedReviewInput['contextSent'];
   /** Every changed file of the PR, for the manifest of each batch (ADR-0031). */
   manifestFiles?: readonly ManifestFile[] | undefined;
 }
@@ -155,6 +156,7 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     redactedReviewableFiles: ctx.redactedReviewableFiles,
     libraryDocs: ctx.libraryDocs,
     contextFor: ctx.contextFor,
+    contextSent: ctx.contextSent,
     manifestFiles: ctx.manifestFiles,
     signal,
     totalUsage: combineUsage(response.usage, empty.usage),
@@ -214,6 +216,7 @@ export async function runBatchedPass(
     knownSecrets: ctx.knownSecrets,
     libraryDocs: ctx.libraryDocs,
     contextFor: ctx.contextFor,
+    contextSent: ctx.contextSent,
     manifestFiles: ctx.manifestFiles,
     signal: ctx.signal,
     deadline: ctx.deadline,

@@ -325,6 +325,8 @@ export interface ExploreRunOptions {
    * it requests. The exploration may spend what is left, never the reserve (ADR-0046).
    */
   reserve: { promptTokens: number; outputTokens: number };
+  /** Rendered evidence reserved across all remaining answers, when the caller plans batches. */
+  evidenceReserveTokens?: number | undefined;
   /** The input-token limit the prompt of a round must fit; no limit when it is absent. */
   promptLimit?: number | undefined;
   /**
@@ -394,7 +396,7 @@ export async function runExploration(opts: ExploreRunOptions): Promise<ExploreRu
     // tokens are reserved, and so is the read budget that may still be added to the prompt. The
     // results so far are reserved too: the call that follows carries them again in its prompt.
     const affordable = spend.canAfford(
-      promptTokens + opts.reserve.promptTokens + estimateTokens(block) + budget.remainingTokens,
+      promptTokens + opts.reserve.promptTokens + (opts.evidenceReserveTokens ?? (estimateTokens(block) + budget.remainingTokens)),
       requested + opts.reserve.outputTokens,
     );
     if (!affordable) {

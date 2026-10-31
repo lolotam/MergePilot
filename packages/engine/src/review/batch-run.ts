@@ -62,6 +62,8 @@ export interface ExecuteBatchedReviewInput {
   libraryDocs?: LibraryDoc[] | undefined;
   /** The repository context of a batch: only its own files' context (ADR-0029). */
   contextFor?: ((files: ReviewableFileWithPatch[], maxTokens?: number) => ContextFile[]) | undefined;
+  /** Records only context retained after the rendered prompt is fitted. */
+  contextSent?: ((files: ContextFile[]) => void) | undefined;
   /** Every changed file of the PR for the manifest each batch gets (ADR-0031); none without it. */
   manifestFiles?: readonly ManifestFile[] | undefined;
   signal?: AbortSignal | undefined;
@@ -79,7 +81,7 @@ export interface ExecuteBatchedReviewResult {
 
 /** The prompt for batch `index` of `input.batches`, with the PR manifest when there is one. */
 export function buildBatchPrompt(
-  input: Pick<ExecuteBatchedReviewInput, 'batches' | 'config' | 'pr' | 'rulesFiles' | 'libraryDocs' | 'contextFor' | 'manifestFiles' | 'promptLimit'>,
+  input: Pick<ExecuteBatchedReviewInput, 'batches' | 'config' | 'pr' | 'rulesFiles' | 'libraryDocs' | 'contextFor' | 'contextSent' | 'manifestFiles' | 'promptLimit'>,
   index: number,
 ): { system: string; user: string } {
   const files = input.batches[index] ?? [];
@@ -104,6 +106,7 @@ export function buildBatchPrompt(
     contextFiles.pop();
     prompt = build();
   }
+  input.contextSent?.(contextFiles);
   return prompt;
 }
 

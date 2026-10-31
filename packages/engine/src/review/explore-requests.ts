@@ -332,7 +332,8 @@ async function executeFind(
   // the paths it did not see for the ones that do not exist (ADR-0046).
   const note = listing?.truncated === true ? TRUNCATED_PATHS_NOTE : '';
   const noteTokens = note ? estimateTokens(`${note}\n`) : 0;
-  const cut = cutToBudget(matches.join('\n'), Math.max(0, ctx.budget.remainingTokens - noteTokens));
+  const redacted = redactSecrets(matches.join('\n'), [...ctx.knownSecrets]).text;
+  const cut = cutToBudget(redacted, Math.max(0, ctx.budget.remainingTokens - noteTokens));
   ctx.budget.charge(cut.tokens + noteTokens);
   const content = note ? (cut.text ? `${cut.text}\n${note}` : note) : cut.text;
   return { entry: { label, content }, refused: false };
@@ -351,7 +352,7 @@ async function executeList(
   const entries = await ctx.reader.listDirectory(dir);
   if (entries === null) return { entry: { label, content: 'not found' }, refused: false };
   const allowed = entries.filter((entry) => isAllowedEntry(entry, ctx.allowPath)).slice(0, MAX_LIST_ENTRIES);
-  const content = allowed.join('\n');
+  const content = redactSecrets(allowed.join('\n'), [...ctx.knownSecrets]).text;
   const cut = cutToBudget(content, ctx.budget.remainingTokens);
   ctx.budget.charge(cut.tokens);
   return { entry: { label, content: cut.text }, refused: false };

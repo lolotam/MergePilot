@@ -26,8 +26,7 @@ import { checkBudget, costOverBudgetReason, estimateTokens } from './budget.js';
 import { reviewLimits } from './input-limits.js';
 import { ReviewDeadline, withCallTimeout } from './call.js';
 import { ContextPlan, type ContextDisclosure, type RepositoryContextFile } from './context.js';
-import { exploreLimits } from './explore.js';
-import { explorationBaseLimit, explorationBatchCap, exploreReview, fitExplorationBatches } from './explore-plan.js';
+import { planReviewExploration, exploreReview } from './explore-plan.js';
 import type { ExploreInput, ExplorationDisclosure } from './explore-step.js';
 import { runFalsePositiveFilter, type FalsePositiveOutcome } from '../judge/false-positive.js';
 import { hasJudgeUse, type JudgeUses } from '../judge/uses.js';
@@ -37,7 +36,7 @@ import { prepareFollowUp, promptPrOf, type FollowUp } from './follow-up.js';
 import { secretsToRedact, type ReviewModel } from './model.js';
 import { renderManifest, manifestFileOf, type ManifestFile } from './manifest.js';
 import { reviewOutputTokensFor, verifyOutputTokensFor, type OutputLimitDisclosure } from './output-budget.js';
-import { buildReviewPrompt, type LibraryDoc } from './prompt.js';
+import { buildReviewPrompt, type ContextFile, type LibraryDoc } from './prompt.js';
 import type { Finding, ReviewResult, Severity } from './types.js';
 import { redactWithheld, type WithheldItem } from './withheld.js';
 import { anchorIndexOf, redactPatches } from './patch-helpers.js';
@@ -265,7 +264,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const withoutContext = buildReviewPrompt(promptInput);
   const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
   const wholePromptLimit = Math.min(limits.maxPromptTokens, budgetCfg.maxInputTokens);
-  const basePromptLimit = explorationBaseLimit(wholePromptLimit, exploreLimits(reviewCfg), input.explore !== undefined);
+  const { basePromptLimit, plan: explorationPlan, skipReason: explorationSkipReason } = planReviewExploration({
+    explore: input.explore, limit: wholePromptLimit, review: reviewCfg, batchTokens: limits.batchTokens,
+    files: redactedReviewableFiles, wholePromptTokens: withoutContextTokens,
+    emptyPrompt: buildReviewPrompt({ ...promptInput, files: [] }), manifest: renderManifest(manifestFiles, []),
+    promptFor: (batches, index) => buildBatchPrompt({ batches, config: promptConfig, pr: promptPr, rulesFiles: redactedRulesFiles, libraryDocs: input.libraryDocs, manifestFiles }, index),
+  });
+  let plan: CappedBatches | undefined = explorationPlan;
   const wholeContext = context.whole(Math.max(0, basePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS));
   let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;
   let promptTokens = estimateTokens(prompt.system + prompt.user);
@@ -288,18 +293,12 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       maxInputTokens: budgetCfg.maxInputTokens,
     });
 
-    if (!budgetResult.ok) {
-      return { status: 'skipped-budget', reason: budgetResult.reason };
-    }
+    if (!budgetResult.ok) return { status: 'skipped-budget', reason: budgetResult.reason };
   }
 
   // Size guard (ADR-0013): a prompt too big for one reliable call goes straight to capped batches.
-  let plan: CappedBatches | undefined;
   if (batched) {
-    const cap = input.explore ? explorationBatchCap(limits.batchTokens, basePromptLimit, buildReviewPrompt({ ...promptInput, files: [] }), renderManifest(manifestFiles, [])) : limits.batchTokens;
-    plan = input.explore ? fitExplorationBatches(redactedReviewableFiles, cap, reviewCfg.maxFileParts, basePromptLimit,
-      (batches, index) => buildBatchPrompt({ batches, config: promptConfig, pr: promptPr, rulesFiles: redactedRulesFiles, libraryDocs: input.libraryDocs, manifestFiles }, index))
-      : batchFilesByTokenCap(redactedReviewableFiles, cap, reviewCfg.maxFileParts);
+    plan ??= batchFilesByTokenCap(redactedReviewableFiles, limits.batchTokens, reviewCfg.maxFileParts);
     // A file too big for one batch is reviewed in parts (ADR-0045); the parts beyond
     // review.maxFileParts are not sent, and the file is reported as not fully reviewed.
     for (const skipped of plan.skippedParts) {
@@ -320,7 +319,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     pr: promptPr,
     rulesFiles: redactedRulesFiles,
     libraryDocs: input.libraryDocs,
-    contextFor: context.forBatch,
+    contextFor: context.selectForBatch,
+    contextSent: (files: ContextFile[]) => context.markSent(files),
     manifestFiles,
   };
   // Each batch prompt is priced with its context and its manifest.
@@ -369,9 +369,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
       },
       initialPricing,
     );
-    if (estimatedCostUsd > budgetCfg.perReviewUsd) {
-      return { status: 'skipped-budget', reason: costOverBudgetReason(estimatedCostUsd, budgetCfg.perReviewUsd) };
-    }
+    if (estimatedCostUsd > budgetCfg.perReviewUsd) return { status: 'skipped-budget', reason: costOverBudgetReason(estimatedCostUsd, budgetCfg.perReviewUsd) };
   }
 
   // Real spend across every call of this review; usage-less calls count at their estimate.
@@ -380,7 +378,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   // ── Steps d + e: model call(s), parse, recovery ────────────────────────
   // Explore the whole PR or each planned batch, sharing one read budget (ADR-0049).
   const explored = await exploreReview({
-    callPromptTokens,
+    callPromptTokens, totalInputLimit: budgetCfg.maxInputTokens, skipReason: explorationSkipReason,
     explore: input.explore, review: reviewCfg, batched: plan !== undefined, model, spend, deadline, signal,
     prompt, promptTokens, promptLimit: wholePromptLimit, files: redactedReviewableFiles, contextFiles: context.sentFiles(),
     knownSecrets, reviewOutputTokens, verifyReserve: reviewCfg.verify ? { promptTokens, outputTokens: verifyOutputTokens } : undefined,
@@ -403,7 +401,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
     redactedRulesFiles,
     redactedReviewableFiles,
     libraryDocs: input.libraryDocs,
-    contextFor: context.forBatch,
+    contextFor: context.selectForBatch,
+    contextSent: (files) => context.markSent(files),
     manifestFiles,
   };
 

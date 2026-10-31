@@ -45,7 +45,12 @@ export function renderExploredBlock(
 export function fitExploredEntries(entries: readonly ExploreEntry[], secrets: readonly Secret[], maxTokens: number): ExploreEntry[] {
   const kept: ExploreEntry[] = [];
   const fits = (entry: ExploreEntry): boolean => estimateTokens(renderExploredBlock([...kept, entry], secrets)) <= maxTokens;
-  for (const entry of entries) {
+  for (const original of entries) {
+    // Redact before slicing: a cut through a credential defeats exact-match redaction.
+    const entry = {
+      label: redactSecrets(original.label, [...secrets]).text,
+      content: redactSecrets(original.content, [...secrets]).text,
+    };
     if (fits(entry)) { kept.push(entry); continue; }
     const marker = '\n[explored result truncated to fit input-token limit]';
     let low = 0;
