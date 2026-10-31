@@ -41,6 +41,15 @@ export function renderExploredBlock(
   return [EXPLORED_HEADING, ...blocks].join('\n\n');
 }
 
+/** Read tokens plus bounded labels/fences and uncharged request-error/budget notes. */
+export function maxExploredBlockTokens(readTokens: number, maxEntries: number): number {
+  // Request errors are capped at 200 characters; 256 also covers their prefix and cut notes.
+  const overhead = renderExploredBlock(Array.from({ length: maxEntries }, () => ({
+    label: 'x'.repeat(MAX_LABEL_CHARS), content: 'x'.repeat(256),
+  })), []);
+  return readTokens + estimateTokens(overhead);
+}
+
 /** Retains complete results first, then a visibly shortened prefix, always inside intact fences. */
 export function fitExploredEntries(entries: readonly ExploreEntry[], secrets: readonly Secret[], maxTokens: number): ExploreEntry[] {
   const kept: ExploreEntry[] = [];

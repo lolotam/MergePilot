@@ -24,7 +24,7 @@ import {
   type ExplorePassInput,
   type ExplorationDisclosure,
 } from './explore.js';
-import { fitExploredEntries, renderExploredBlock } from './explore-block.js';
+import { fitExploredEntries, maxExploredBlockTokens, renderExploredBlock } from './explore-block.js';
 import { EXPLORED_SEPARATOR_TOKENS, uniqueExploreEntries, type ExploreEntry } from './explore-requests.js';
 import { reviewLimits } from './input-limits.js';
 import type { ReviewModel } from './model.js';
@@ -140,7 +140,8 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       // reach. The verification call may carry the review's explored block, so the read budget is
       // reserved for it too.
       reserve,
-      evidenceReserveTokens: opts.additionalEvidenceCopies === undefined ? undefined : evidenceRoom * copies,
+      evidenceReserveTokens: opts.additionalEvidenceCopies === undefined ? undefined
+        : Math.min(evidenceRoom, maxExploredBlockTokens(limits.maxReadTokens, limits.maxRounds * limits.maxRequestsPerRound)) * copies,
     });
     usage = explored.usage;
     const entries = uniqueExploreEntries([...explored.entries, ...(opts.priorEntries ?? [])]);

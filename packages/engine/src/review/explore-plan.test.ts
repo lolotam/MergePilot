@@ -40,7 +40,7 @@ describe('review-wide exploration evidence', () => {
     expect(explored.explorePass?.priorBlock).not.toContain('[explored result truncated');
   });
 
-  it.each(['money', 'input'] as const)('protects all batch answers against repeated evidence exceeding the %s cap', async (cap) => {
+  it.each(['money', 'money-affordable', 'input'] as const)('protects all batch answers against repeated evidence exceeding the %s cap', async (cap) => {
     const requests: ReviewModelRequest[] = [];
     const model: ReviewModel = { label: 'fake:reserve', generate: async (request) => {
       requests.push(request);
@@ -52,11 +52,11 @@ describe('review-wide exploration evidence', () => {
     const prompts = batches.map((_, index) => buildBatchPrompt(promptInput, index));
     const callPromptTokens = prompts.map((prompt) => estimateTokens(prompt.system + prompt.user));
     const baseTokens = callPromptTokens.reduce((sum, tokens) => sum + tokens, 0);
-    const perReviewUsd = (baseTokens + 5000) / 1000;
-    const spend = new SpendTracker(cap === 'money' ? { inputPerMTok: 1000, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 } : undefined, perReviewUsd);
+    const perReviewUsd = (baseTokens + (cap === 'money-affordable' ? 10000 : 5000)) / 1000;
+    const spend = new SpendTracker(cap !== 'input' ? { inputPerMTok: 1000, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 } : undefined, perReviewUsd);
     const totalInputLimit = baseTokens + (cap === 'input' ? 1000 : 30000);
     const explored = await exploreReview({
-      explore: { reader }, review: { exclude: [], explore: { maxRounds: 1, maxReadTokens: 2000 } },
+      explore: { reader }, review: { exclude: [], explore: { maxRounds: 1, maxRequestsPerRound: 1, maxReadTokens: 2000 } },
       batched: true, model, spend, deadline: new ReviewDeadline(60000),
       prompt: prompts[0]!, promptTokens: callPromptTokens[0]!, promptLimit: 10000,
       callPromptTokens, totalInputLimit, files: [], contextFiles: [], knownSecrets: [], reviewOutputTokens: 100,
@@ -72,6 +72,9 @@ describe('review-wide exploration evidence', () => {
     expect(answers).toHaveLength(batches.length);
     expect(answers.reduce((sum, request) => sum + estimateTokens(request.system + request.user), 0)).toBeLessThanOrEqual(totalInputLimit);
     expect(spend.spentUsd).toBeLessThanOrEqual(perReviewUsd);
-    if (cap === 'input') expect(answers.every((request) => request.user.includes('evidence'))).toBe(true);
+    if (cap !== 'money') {
+      expect(requests.filter((request) => request.system.includes('EXPLORATION (round'))).toHaveLength(1);
+      expect(answers.every((request) => request.user.includes('evidence'))).toBe(true);
+    }
   });
 });

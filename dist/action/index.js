@@ -141866,6 +141866,13 @@ ${content}
   });
   return [EXPLORED_HEADING, ...blocks].join("\n\n");
 }
+function maxExploredBlockTokens(readTokens, maxEntries) {
+  const overhead = renderExploredBlock(Array.from({ length: maxEntries }, () => ({
+    label: "x".repeat(MAX_LABEL_CHARS),
+    content: "x".repeat(256)
+  })), []);
+  return readTokens + estimateTokens(overhead);
+}
 function fitExploredEntries(entries, secrets, maxTokens) {
   const kept = [];
   const fits = (entry) => estimateTokens(renderExploredBlock([...kept, entry], secrets)) <= maxTokens;
@@ -142529,7 +142536,7 @@ async function exploreBeforeSinglePass(opts) {
       // reach. The verification call may carry the review's explored block, so the read budget is
       // reserved for it too.
       reserve,
-      evidenceReserveTokens: opts.additionalEvidenceCopies === void 0 ? void 0 : evidenceRoom * copies
+      evidenceReserveTokens: opts.additionalEvidenceCopies === void 0 ? void 0 : Math.min(evidenceRoom, maxExploredBlockTokens(limits2.maxReadTokens, limits2.maxRounds * limits2.maxRequestsPerRound)) * copies
     });
     usage = explored.usage;
     const entries = uniqueExploreEntries([...explored.entries, ...opts.priorEntries ?? []]);
@@ -142609,8 +142616,17 @@ function planReviewExploration(opts) {
     return { basePromptLimit };
   const cap = explorationBatchCap(opts.batchTokens, basePromptLimit, opts.emptyPrompt, opts.manifest);
   const needsBatches = opts.wholePromptTokens > basePromptLimit && opts.files.length > 0;
+  if (!needsBatches)
+    return { basePromptLimit };
   const plan = cap !== void 0 && needsBatches ? fitExplorationBatches(opts.files, cap, opts.review.maxFileParts, basePromptLimit, opts.promptFor) : void 0;
-  return cap === void 0 || needsBatches && !plan ? { basePromptLimit: opts.limit, skipReason: "exploration reserve leaves insufficient patch room" } : { basePromptLimit, plan };
+  if (plan)
+    return { basePromptLimit, plan };
+  const fallback = { basePromptLimit: opts.limit, skipReason: "exploration reserve leaves insufficient patch room" };
+  if (opts.wholePromptTokens <= opts.limit)
+    return fallback;
+  const fullCap = explorationBatchCap(opts.batchTokens, opts.limit, opts.emptyPrompt, opts.manifest);
+  const fullPlan = fullCap === void 0 ? void 0 : fitExplorationBatches(opts.files, fullCap, opts.review.maxFileParts, opts.limit, opts.promptFor);
+  return fullPlan ? { ...fallback, plan: fullPlan } : { ...fallback, unfitReason: "fixed prompt overhead leaves insufficient patch room within the input-token limit" };
 }
 async function exploreReview(opts) {
   const budget = opts.explore ? new ExploreBudget(exploreLimits(opts.review)) : void 0;
@@ -143875,7 +143891,7 @@ async function runReview(input2) {
   const withoutContext = buildReviewPrompt(promptInput);
   const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
   const wholePromptLimit = Math.min(limits2.maxPromptTokens, budgetCfg.maxInputTokens);
-  const { basePromptLimit, plan: explorationPlan, skipReason: explorationSkipReason } = planReviewExploration({
+  const { basePromptLimit, plan: explorationPlan, skipReason: explorationSkipReason, unfitReason } = planReviewExploration({
     explore: input2.explore,
     limit: wholePromptLimit,
     review: reviewCfg,
@@ -143886,6 +143902,8 @@ async function runReview(input2) {
     manifest: renderManifest(manifestFiles, []),
     promptFor: (batches, index) => buildBatchPrompt({ batches, config: promptConfig, pr: promptPr, rulesFiles: redactedRulesFiles, libraryDocs: input2.libraryDocs, manifestFiles }, index)
   });
+  if (unfitReason)
+    return { status: "skipped-budget", reason: unfitReason };
   let plan = explorationPlan;
   const wholeContext = context.whole(Math.max(0, basePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS));
   let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;

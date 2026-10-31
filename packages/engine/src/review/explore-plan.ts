@@ -46,16 +46,22 @@ export function planReviewExploration(opts: {
   emptyPrompt: { system: string; user: string };
   manifest: string;
   promptFor: (batches: ReviewableFileWithPatch[][], index: number) => { system: string; user: string };
-}): { basePromptLimit: number; plan?: CappedBatches | undefined; skipReason?: string | undefined } {
+}): { basePromptLimit: number; plan?: CappedBatches | undefined; skipReason?: string | undefined; unfitReason?: string | undefined } {
   const basePromptLimit = explorationBaseLimit(opts.limit, exploreLimits(opts.review), opts.explore !== undefined);
   if (!opts.explore) return { basePromptLimit };
   const cap = explorationBatchCap(opts.batchTokens, basePromptLimit, opts.emptyPrompt, opts.manifest);
   const needsBatches = opts.wholePromptTokens > basePromptLimit && opts.files.length > 0;
+  if (!needsBatches) return { basePromptLimit };
   const plan = cap !== undefined && needsBatches
     ? fitExplorationBatches(opts.files, cap, opts.review.maxFileParts, basePromptLimit, opts.promptFor) : undefined;
-  return cap === undefined || (needsBatches && !plan)
-    ? { basePromptLimit: opts.limit, skipReason: 'exploration reserve leaves insufficient patch room' }
-    : { basePromptLimit, plan };
+  if (plan) return { basePromptLimit, plan };
+  const fallback = { basePromptLimit: opts.limit, skipReason: 'exploration reserve leaves insufficient patch room' };
+  if (opts.wholePromptTokens <= opts.limit) return fallback;
+  const fullCap = explorationBatchCap(opts.batchTokens, opts.limit, opts.emptyPrompt, opts.manifest);
+  const fullPlan = fullCap === undefined ? undefined
+    : fitExplorationBatches(opts.files, fullCap, opts.review.maxFileParts, opts.limit, opts.promptFor);
+  return fullPlan ? { ...fallback, plan: fullPlan }
+    : { ...fallback, unfitReason: 'fixed prompt overhead leaves insufficient patch room within the input-token limit' };
 }
 
 /** Shares gathered originals and reserves repeated evidence against spend and total batch input. */

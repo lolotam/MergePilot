@@ -264,12 +264,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   const withoutContext = buildReviewPrompt(promptInput);
   const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
   const wholePromptLimit = Math.min(limits.maxPromptTokens, budgetCfg.maxInputTokens);
-  const { basePromptLimit, plan: explorationPlan, skipReason: explorationSkipReason } = planReviewExploration({
+  const { basePromptLimit, plan: explorationPlan, skipReason: explorationSkipReason, unfitReason } = planReviewExploration({
     explore: input.explore, limit: wholePromptLimit, review: reviewCfg, batchTokens: limits.batchTokens,
     files: redactedReviewableFiles, wholePromptTokens: withoutContextTokens,
     emptyPrompt: buildReviewPrompt({ ...promptInput, files: [] }), manifest: renderManifest(manifestFiles, []),
     promptFor: (batches, index) => buildBatchPrompt({ batches, config: promptConfig, pr: promptPr, rulesFiles: redactedRulesFiles, libraryDocs: input.libraryDocs, manifestFiles }, index),
   });
+  if (unfitReason) return { status: 'skipped-budget', reason: unfitReason };
   let plan: CappedBatches | undefined = explorationPlan;
   const wholeContext = context.whole(Math.max(0, basePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS));
   let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;

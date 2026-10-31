@@ -75,6 +75,43 @@ it('uses the full answer cap when fixed overhead leaves no practical exploration
   expect(estimateTokens(requests[0]!.system + requests[0]!.user)).toBeLessThanOrEqual(promptLimit);
 });
 
+it('explores a fitting whole prompt even when an unused batch manifest cannot fit', async () => {
+  const requests: ReviewModelRequest[] = [];
+  const model: ReviewModel = { label: 'fake:whole-manifest', generate: async (request) => {
+    requests.push(request);
+    return { text: request.system.includes('EXPLORATION (round') ? READ_GUARD : makeAnswerJson([]), finishReason: 'stop' };
+  } };
+  const result = await runReview(input(model, {
+    files: [
+      { path: 'src/a.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 },
+      ...Array.from({ length: 250 }, (_, index) => ({ path: `deleted/long-old-path-${index}.ts`, status: 'removed', changes: 1 })),
+    ],
+    explore: { reader: fakeReader({ 'src/guard.ts': 'guard evidence' }) },
+  }, { maxPromptTokens: 6000, batchTokens: 1000, explore: { maxRounds: 1, maxReadTokens: 1000 } }));
+  expect(result.status).toBe('completed');
+  expect(requests.filter((request) => request.system.includes('EXPLORATION (round'))).toHaveLength(1);
+  const answers = requests.filter((request) => !request.system.includes('EXPLORATION (round'));
+  expect(answers).toHaveLength(1);
+  expect(answers[0]!.user).toContain('guard evidence');
+});
+
+it('refits rendered fallback batches to the full prompt cap after exploration has no room', async () => {
+  const requests: ReviewModelRequest[] = [];
+  const model: ReviewModel = { label: 'fake:full-cap-fallback', generate: async (request) => {
+    requests.push(request);
+    return { text: makeAnswerJson([]), finishReason: 'stop' };
+  } };
+  const result = await runReview(input(model, {
+    files: [{ path: 'src/a.ts', status: 'modified', patch: bigPatch(300), changes: 301 }],
+    rulesFiles: [{ path: 'CLAUDE.md', content: 'rule '.repeat(2000) }],
+    explore: { reader: fakeReader() },
+  }, { maxPromptTokens: 6000, batchTokens: 3000, maxFileParts: 50 }));
+  expect(result.status).toBe('completed');
+  expect(requests.length).toBeGreaterThan(1);
+  expect(requests.every((request) => estimateTokens(request.system + request.user) <= 6000)).toBe(true);
+  expect(requests.some((request) => request.user.includes('value299'))).toBe(true);
+});
+
 describe('large PR exploration budgets (B23)', () => {
   it('reuses exploration evidence in every batch without exceeding the input cap (B23)', async () => {
     const requests: ReviewModelRequest[] = [];
