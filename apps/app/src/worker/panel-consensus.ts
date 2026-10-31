@@ -1,4 +1,4 @@
-import { describeAnsweredBy, hasJudgeUse } from '@mergepilot/engine';
+import { anchorFindings, parsePatch, describeAnsweredBy, hasJudgeUse } from '@mergepilot/engine';
 import {
   botFindingsFates,
   capConsensusClusters,
@@ -68,7 +68,13 @@ export async function publishConsensus(
   const consensusJudge = judge && hasJudgeUse(judge.uses, 'consensus') ? judge.judge : undefined;
   const dedupeJudge = dedupeJudgeOf(judge);
 
-  const botFindings = completed.map(({ br, rr }) => ({ slot: br.bot.slot, name: br.bot.name, inline: rr.inline, summaryOnly: rr.summaryOnly }));
+  const botFindings = completed.map(({ br, rr }) => {
+    const rejected = rr.verifyRejectedFindings ?? [];
+    const anchored = anchorFindings(rejected.map((item) => item.finding), new Map(files.prFiles.filter((file) => file.patch).map((file) => [file.path, parsePatch(file.patch!)])));
+    return { slot: br.bot.slot, name: br.bot.name, inline: rr.inline, summaryOnly: rr.summaryOnly,
+      rejected: rejected.map((item) => ({ ...item, kind: anchored.inline.includes(item.finding) ? 'inline' as const : 'summaryOnly' as const })),
+    };
+  });
   const merge = await mergePanelFindings({
     bots: botFindings,
     minAgreement: settings.panelMinAgreement ?? 1,
@@ -135,6 +141,7 @@ export async function publishConsensus(
     const exploration = outcomes.find((outcome) => outcome.slot === bot.slot)?.pending?.outcome.exploration;
     return exploration ? [{ ...exploration, bot: bot.name }] : [];
   });
+  const incorporated = [...merge.kept, ...merge.below, ...merge.overLimit].flatMap((cluster) => cluster.rejectedBy ?? []);
   const summaryMarkdown = renderPanelSummary({
     language,
     baseUrl: ctx.baseUrl,
@@ -149,7 +156,7 @@ export async function publishConsensus(
     judgeAnsweredBy: mergeAnsweredBy ? describeAnsweredBy(mergeAnsweredBy) : undefined,
     dedupeJudgeAnsweredBy: dedupeAnsweredBy ? describeAnsweredBy(dedupeAnsweredBy) : undefined,
     dedupeJudgeUnavailable: deduped.semantic?.unavailable,
-    verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
+    verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).filter((f) => !incorporated.some((entry) => entry.slot === br.bot.slot && entry.finding.title === f.title && entry.finding.path === f.path && entry.finding.line === f.line)).map((f) => ({ ...f, bot: br.bot.name }))),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),
     explorations,

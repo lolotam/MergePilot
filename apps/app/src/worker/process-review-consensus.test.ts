@@ -288,3 +288,36 @@ describe('processReviewJob — consensus mode', () => {
     ]);
   });
 });
+
+
+it.each([[['bot2-model']], [['main-model', 'bot2-model']]])('incorporates rejected copies and removes the contradictory rejection list: %s', async (rejectedModels) => {
+  const h = await panelSetup({ settings: consensus(2), bots: [{ slot: 2, name: 'Owl' }],
+    findings: { 'main-model': [finding('Shared issue')], 'bot2-model': [finding('Shared issue')] }, rejectedModels });
+  await processReviewJob(h.job, h.deps);
+  expect(h.created[0]!.comments).toHaveLength(1);
+  expect(h.created[0]!.comments[0]!.body).toContain('(2/2)');
+  expect(h.created[0]!.body).not.toContain('<summary>Rejected by verification');
+  expect(h.created[0]!.body).toContain('verifier-rejected copies contributed');
+  for (const run of await h.runs()) expect(run.result).not.toHaveProperty('verifyRejectedFindings');
+});
+
+it('deduplicates revived findings against earlier comments before applying the normal cap', async () => {
+  const old = { id: 'old', side: 'RIGHT' as const, ...finding('Shared issue') } as Parameters<typeof renderFindingComment>[0];
+  const h = await panelSetup({ settings: { ...consensus(2), maxFindings: 5 }, bots: [{ slot: 2 }],
+    findings: { 'main-model': [finding('Shared issue'), { ...finding('Other issue'), path: 'src/other.ts' }], 'bot2-model': [finding('Shared issue'), { ...finding('Other issue'), path: 'src/other.ts' }] },
+    rejectedModels: ['main-model', 'bot2-model'],
+    comments: [{ id: 1, path: 'src/app.ts', line: 2, user: { login: PUBLISHER }, body: renderFindingComment(old, { language: 'en', suggestionsAsCode: false }) }] });
+  await processReviewJob(h.job, h.deps);
+  expect(h.created[0]!.comments).toHaveLength(0);
+  expect(h.created[0]!.body).toContain('Other issue');
+  expect(h.created[0]!.body).not.toContain('Shared issue');
+});
+
+
+it('leaves a lone verifier rejection in the rejection list without publishing it', async () => {
+  const h = await panelSetup({ settings: consensus(1), bots: [{ slot: 2 }], findings: { 'main-model': [finding('Lonely rejected claim')] }, rejectedModels: ['main-model'] });
+  await processReviewJob(h.job, h.deps);
+  expect(h.created[0]!.comments).toHaveLength(0);
+  expect(h.created[0]!.body).toContain('Rejected by verification');
+  expect(h.created[0]!.body).toContain('Lonely rejected claim');
+});

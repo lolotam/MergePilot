@@ -399,3 +399,20 @@ describe('runReview — verification pass', () => {
     }
   });
 });
+
+
+it('carries complete verifier rejections transiently with every model text redacted', async () => {
+  const token = 'private-rejection-token-123456';
+  const replies = [makeAnswerJson([validFindingJson({ body: `Body ${token}`, evidence: `Evidence ${token}`, title: `Title ${token}`, path: `src/${token}.ts`, suggestion: token, ruleRef: token })]),
+    makeVerifyAnswerJson([{ id: 'f1', verdict: 'rejected', reason: `Reason ${token}` }])];
+  const calls: ReviewModelRequest[] = [];
+  const model: ReviewModel = { label: 'test', generate: async (req) => { calls.push(req); return { text: replies.shift()!, finishReason: 'stop' }; } };
+  const result = await runReview({ config: makeConfig({ review: { ...makeConfig().review, verify: true } }), pr: { title: '', body: '' }, files: [{ path: 'src/index.ts', status: 'modified', patch: SIMPLE_PATCH, changes: 3 }], rulesFiles: [], model, knownSecrets: [new Secret(token)] });
+  expect(result.status).toBe('completed');
+  if (result.status !== 'completed') return;
+  expect(result.verifyRejectedFindings).toHaveLength(1);
+  expect(result.verifyRejectedFindings![0]!.finding.body).toContain('[REDACTED');
+  expect(JSON.stringify(result)).not.toContain(token);
+  expect(JSON.stringify(calls[1])).not.toContain(token);
+  expect(result.result).not.toHaveProperty('verifyRejectedFindings');
+});

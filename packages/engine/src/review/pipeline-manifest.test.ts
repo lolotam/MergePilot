@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Secret } from '../credentials/secret.js';
 import type { MergePilotConfig } from '../config/schema.js';
 import { MANIFEST_MAX_FILES, manifestFileOf, renderManifest } from './manifest.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
@@ -195,4 +196,29 @@ describe('renderManifest', () => {
     expect(line).toMatch(/^batch 1 \| added \| \+1 -0 \| …😀/u);
     expect(line).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
+});
+
+
+it.each([false, true])('shows capped redacted skipped files in review and verify prompts (batched=%s)', async (batched) => {
+  const token = 'hidden-path-token-123456';
+  const calls: ReviewModelRequest[] = [];
+  const model: ReviewModel = { label: 'test', generate: async (req) => {
+    calls.push(req);
+    return { text: JSON.stringify({ summary: 'Review', findings: [{ path: 'src/a.ts', line: 1, title: 'Issue', body: 'Bug', evidence: 'const', severity: 'high', category: 'correctness', confidence: 0.8 }], verdicts: [] }), finishReason: 'stop' };
+  } };
+  const config = batched ? batchedConfig({ verify: true }) : makeConfig({ review: { ...makeConfig().review, verify: true } });
+  const files = [added('src/a.ts'), added('src/b.ts'), { path: 'pnpm-lock.yaml', status: 'modified', changes: 4, additions: 3, deletions: 1 },
+    ...Array.from({ length: 55 }, (_, i) => ({ path: `dist/${token}/${i}.js`, status: 'added', changes: 1 }))];
+  const result = await runReview({ config, pr: { title: '', body: '' }, files, rulesFiles: [], model, knownSecrets: [new Secret(token)] });
+  expect(result.status).toBe('completed');
+  expect(calls.length).toBeGreaterThanOrEqual(batched ? 3 : 2);
+  for (const call of calls) {
+    expect(call.user).toContain('<<<UNTRUSTED:CHANGED_BUT_NOT_SHOWN>>>');
+    expect(call.user).toContain('modified | +3 -1 | pnpm-lock.yaml | skip-generated');
+    expect(call.user).toContain('and 6 more');
+    expect(call.user.split('<<<END UNTRUSTED:CHANGED_BUT_NOT_SHOWN>>>')[0]).not.toContain('/54.js');
+    expect(call.user + call.system).not.toContain(token);
+    expect(call.system).toContain('ARE changed in this pull request');
+  }
+  expect(calls[0]!.system).toContain('Never withhold a defect in changed lines');
 });

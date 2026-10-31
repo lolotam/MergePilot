@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { botFindingsFates } from './panel-findings-fate.js';
+import { renderPanelSummary } from './panel-summary.js';
 import type { Finding, Judge, JudgeRequest } from '@mergepilot/engine';
 import { foundByLabel, mergePanelFindings, withFoundBy, type PanelBotFindings } from './consensus.js';
 
@@ -321,5 +323,61 @@ describe('mergePanelFindings (consensus, ADR-0017)', () => {
     expect(foundByLabel(cluster, result.total, 'en')).toBe('Found by: Main, Owl \\*x\\* (2/3)');
     expect(foundByLabel(cluster, result.total, 'ar')).toBe('وجدها: Main، Owl \\*x\\* (2/3)');
     expect(withFoundBy(cluster, result.total, 'en').body).toBe('x may be null.\n\n_Found by: Main, Owl \\*x\\* (2/3)_');
+  });
+});
+
+
+describe('verifier agreement (ADR-0050)', () => {
+  const rejectedBot = (slot: number, findings = [f()]): PanelBotFindings => ({
+    ...bot(slot, `Bot ${slot}`, []), rejected: findings.map((finding) => ({ finding, reason: 'Contradicted', kind: 'inline' })),
+  });
+  it('counts rejected agreement while preserving verified wording and reported-count totals', async () => {
+    const kept = f({ body: 'Verified wording', severity: 'low' });
+    const bots = [bot(1, 'Main', [kept]), rejectedBot(2)];
+    const merge = await mergePanelFindings({ bots, minAgreement: 2 });
+    expect(merge.kept).toHaveLength(1);
+    expect(merge.kept[0]!.finding).toBe(kept);
+    expect(merge.kept[0]!.foundBy).toHaveLength(2);
+    expect(merge.kept[0]!.revived).toBeUndefined();
+    const fates = botFindingsFates(bots, { published: merge.kept, below: [], overLimit: [], alreadyPosted: [] });
+    for (const fate of fates) expect(fate.own + fate.mergedIntoOther + fate.below + fate.overLimit + fate.alreadyPosted).toBe(fate.reported);
+    expect(fates[1]!.rejectedInAgreement).toBe(1);
+  });
+  it('revives two distinct bots, caps confidence and labels inline and summary in both languages', async () => {
+    const bots = [rejectedBot(1), rejectedBot(2)];
+    const merge = await mergePanelFindings({ bots, minAgreement: 2 });
+    expect(merge.kept).toHaveLength(1);
+    expect(merge.kept[0]!.finding.confidence).toBe(0.69);
+    expect(merge.kept[0]!.revived).toBe(true);
+    for (const language of ['en', 'ar'] as const) {
+      const marker = language === 'en' ? 'Unverified: published although the verifier rejected it' : 'غير متحققة: نُشرت رغم رفض التحقق';
+      expect(withFoundBy(merge.kept[0]!, 2, language).body).toContain(marker);
+      expect(renderPanelSummary({ language, bots: [], merge, minAgreement: 2, inlineCount: 1 })).toContain(marker);
+    }
+    const fates = botFindingsFates(bots, { published: merge.kept, below: [], overLimit: [], alreadyPosted: [] });
+    expect(fates.every((fate) => fate.reported === 0 && fate.own + fate.mergedIntoOther === 0 && fate.rejectedInAgreement === 1)).toBe(true);
+  });
+  it('never revives one bot, even high severity or repeated copies', async () => {
+    const merge = await mergePanelFindings({ bots: [rejectedBot(1, [f({ severity: 'high' }), f({ severity: 'high' })])], minAgreement: 1 });
+    expect(merge.kept).toEqual([]);
+    expect(merge.below).toEqual([]);
+  });
+  it('applies min agreement, high exemption and the ordinary findings cap', async () => {
+    const bots = [rejectedBot(1), rejectedBot(2)];
+    expect((await mergePanelFindings({ bots, minAgreement: 3 })).below).toHaveLength(1);
+    expect((await mergePanelFindings({ bots, minAgreement: 2, maxFindings: 0 })).overLimit).toHaveLength(1);
+    const capped = await mergePanelFindings({ bots: [1, 2].map((slot) => rejectedBot(slot, [f(), f({ path: 'src/b.ts' })])), minAgreement: 2, maxFindings: 1 });
+    expect(capped.kept).toHaveLength(1);
+    expect(capped.overLimit).toHaveLength(1);
+    const highBots = [1, 2].map((slot) => rejectedBot(slot, [f({ severity: 'high' })]));
+    expect((await mergePanelFindings({ bots: highBots, minAgreement: 3 })).kept).toHaveLength(1);
+  });
+  it('includes rejected candidates within the existing semantic judge pair bound', async () => {
+    const { judge, decide } = mockJudge(() => ({}));
+    const bots = Array.from({ length: 5 }, (_, i) => rejectedBot(i + 1,
+      Array.from({ length: 10 }, (_, j) => f({ title: `Unique ${i} ${j}`, body: '', evidence: '' }))));
+    await mergePanelFindings({ bots, minAgreement: 2, judge });
+    expect(decide).toHaveBeenCalledOnce();
+    expect(Object.keys(decide.mock.calls[0]![0].questions).length).toBeLessThanOrEqual(50);
   });
 });

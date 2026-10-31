@@ -10,6 +10,7 @@
  * is not rejected as a style nit (ADR-0044).
  */
 
+import { NOT_SHOWN_RULE } from './manifest.js';
 import { REVIEW_LIMIT_DEFAULTS } from '../config/schema.js';
 import { cutToTokens, estimateTokens } from './budget.js';
 import { ESCAPED_MARKER_NOTE, escapeDelimiters, escapeLabel } from './delimiters.js';
@@ -30,6 +31,7 @@ export interface VerifyReviewableFile {
 }
 
 export interface VerifyPromptInput {
+  notShown?: string | undefined;
   language: string;
   findings: Finding[];
   files: VerifyReviewableFile[];
@@ -535,6 +537,7 @@ function buildVerifyUserPrompt(input: VerifyPromptInput, criteria: VerifyCriteri
     ].join('\n'),
   );
   const parts: string[] = [];
+  if (input.notShown) parts.push(wrapUntrusted('CHANGED_BUT_NOT_SHOWN', input.notShown));
   if (criteria.blocks.length > 0) parts.push(`Owner rules:\n\n${criteria.blocks.join('\n\n')}`);
   parts.push(...findings);
   parts.push(`Code:\n\n${files.map(renderFile).join('\n\n')}`);
@@ -543,7 +546,7 @@ function buildVerifyUserPrompt(input: VerifyPromptInput, criteria: VerifyCriteri
 
 export function buildVerifyPrompt(input: VerifyPromptInput): BuiltVerifyPrompt {
   const criteria = buildCriteria(input);
-  const system = buildVerifySystemPrompt(input.language);
+  const system = `${buildVerifySystemPrompt(input.language)}\n\n${NOT_SHOWN_RULE}`;
   return {
     // The rule exception and the trust sentence only when a rule is shown (ADR-0044).
     system: criteria.blocks.length > 0 ? withRuleCriteria(system) : system,
