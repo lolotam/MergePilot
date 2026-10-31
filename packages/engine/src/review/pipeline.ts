@@ -387,7 +387,9 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   const passContext: ReviewPassContext = {
     config: promptConfig,
-    promptLimit: input.explore ? basePromptLimit : undefined,
+    // No reserve to keep clear when the exploration is skipped: the batch prompts then answer
+    // to the batch cap and the input-token budget like a non-exploring review.
+    promptLimit: input.explore && !explorationSkipReason ? basePromptLimit : undefined,
     beforeBatch: explored.beforeBatch,
     model,
     spend,

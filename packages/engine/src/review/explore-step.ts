@@ -44,6 +44,12 @@ export interface ExploreStepOptions {
   additionalEvidenceCopies?: number | undefined;
   /** Maximum added input per answer, including the separator, within the total batch cap. */
   evidenceTokenLimit?: number | undefined;
+  /**
+   * The total tokens reserved across every copy of this evidence, as priced by the caller: each
+   * copy rides a different batch, whose own prompt headroom it must fit. Planned by the caller
+   * that knows the later batches; computed here from this prompt's own headroom otherwise.
+   */
+  evidenceReserveTokens?: number | undefined;
   /** The review config: the explore limits and the skip rules of the paths. */
   review: { explore?: Partial<ExploreLimits> | undefined; exclude: readonly string[]; callTimeoutMs?: number };
   /** Whether the review is batched: a batched review does not explore. */
@@ -140,8 +146,9 @@ export async function exploreBeforeSinglePass(opts: ExploreStepOptions): Promise
       // reach. The verification call may carry the review's explored block, so the read budget is
       // reserved for it too.
       reserve,
-      evidenceReserveTokens: opts.additionalEvidenceCopies === undefined ? undefined
-        : Math.min(evidenceRoom, maxExploredBlockTokens(limits.maxReadTokens, limits.maxRounds * limits.maxRequestsPerRound)) * copies,
+      evidenceReserveTokens: opts.evidenceReserveTokens ?? (opts.additionalEvidenceCopies === undefined ? undefined
+        : (Math.min(evidenceRoom, maxExploredBlockTokens(limits.maxReadTokens, limits.maxRounds * limits.maxRequestsPerRound))
+          + EXPLORED_SEPARATOR_TOKENS) * copies),
     });
     usage = explored.usage;
     const entries = uniqueExploreEntries([...explored.entries, ...(opts.priorEntries ?? [])]);

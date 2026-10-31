@@ -2,9 +2,9 @@
 import type { ExploreLimits, MergePilotConfig } from '../config/schema.js';
 import { estimateTokens } from './budget.js';
 import type { ExecuteBatchedReviewInput } from './batch-run.js';
-import { renderExploredBlock } from './explore-block.js';
+import { maxExploredBlockTokens, renderExploredBlock } from './explore-block.js';
 import { ExploreBudget, exploreLimits, type ExploreInput } from './explore.js';
-import { uniqueExploreEntries, exploreInstructions, type ExploreEntry } from './explore-requests.js';
+import { EXPLORED_SEPARATOR_TOKENS, uniqueExploreEntries, exploreInstructions, type ExploreEntry } from './explore-requests.js';
 import { exploreBeforeSinglePass, type ExploreStepOptions, type ExploreStepResult } from './explore-step.js';
 import { batchFilesByTokenCap, combineUsage, type CappedBatches, type ReviewableFileWithPatch } from './split.js';
 
@@ -49,19 +49,28 @@ export function planReviewExploration(opts: {
 }): { basePromptLimit: number; plan?: CappedBatches | undefined; skipReason?: string | undefined; unfitReason?: string | undefined } {
   const basePromptLimit = explorationBaseLimit(opts.limit, exploreLimits(opts.review), opts.explore !== undefined);
   if (!opts.explore) return { basePromptLimit };
+  // Batching needs files: a PR with none (it only removes or excludes files) always reviews in a
+  // single pass, so an over-cap prompt there must fail the budget the ordinary checkBudget way,
+  // and an over-reserve prompt skips the exploration reserve instead of planning impossible batches.
+  if (opts.files.length === 0) {
+    if (opts.wholePromptTokens > opts.limit) {
+      return { basePromptLimit: opts.limit, unfitReason: `Estimated prompt tokens (${opts.wholePromptTokens}) exceed maxInputTokens limit (${opts.limit}).` };
+    }
+    if (opts.wholePromptTokens <= basePromptLimit) return { basePromptLimit };
+    return { basePromptLimit: opts.limit, skipReason: 'exploration reserve leaves insufficient patch room' };
+  }
   const cap = explorationBatchCap(opts.batchTokens, basePromptLimit, opts.emptyPrompt, opts.manifest);
-  const needsBatches = opts.wholePromptTokens > basePromptLimit && opts.files.length > 0;
-  if (!needsBatches) return { basePromptLimit };
-  const plan = cap !== undefined && needsBatches
-    ? fitExplorationBatches(opts.files, cap, opts.review.maxFileParts, basePromptLimit, opts.promptFor) : undefined;
+  if (opts.wholePromptTokens <= basePromptLimit) return { basePromptLimit };
+  const plan = cap !== undefined ? fitExplorationBatches(opts.files, cap, opts.review.maxFileParts, basePromptLimit, opts.promptFor) : undefined;
   if (plan) return { basePromptLimit, plan };
   const fallback = { basePromptLimit: opts.limit, skipReason: 'exploration reserve leaves insufficient patch room' };
   if (opts.wholePromptTokens <= opts.limit) return fallback;
   const fullCap = explorationBatchCap(opts.batchTokens, opts.limit, opts.emptyPrompt, opts.manifest);
   const fullPlan = fullCap === undefined ? undefined
     : fitExplorationBatches(opts.files, fullCap, opts.review.maxFileParts, opts.limit, opts.promptFor);
-  return fullPlan ? { ...fallback, plan: fullPlan }
-    : { ...fallback, unfitReason: 'fixed prompt overhead leaves insufficient patch room within the input-token limit' };
+  // When not even the full input cap fits an exploration plan, run the ordinary batching pipeline:
+  // its batch cap and per-batch budget checks fit what the exploration plans could not.
+  return fullPlan ? { ...fallback, plan: fullPlan } : fallback;
 }
 
 /** Shares gathered originals and reserves repeated evidence against spend and total batch input. */
@@ -77,10 +86,18 @@ export async function exploreReview(opts: ExploreStepOptions & { callPromptToken
     const promptTokens = estimateTokens(prompt.system + prompt.user);
     const remainingBaseTokens = remaining.reduce((sum, tokens) => sum + tokens, 0);
     const evidenceTokenLimit = Math.max(0, Math.floor((opts.totalInputLimit - sentInputTokens - promptTokens - remainingBaseTokens) / (remaining.length + 1)));
+    // Every copy of this evidence rides a different batch prompt, and each prompt leaves its own
+    // headroom: price the reserve copy by copy, so a roomy early batch cannot promise room later
+    // batches do not have. Each copy also pays its separator.
+    const limits = exploreLimits(opts.review);
+    const blockMax = maxExploredBlockTokens(limits.maxReadTokens, limits.maxRounds * limits.maxRequestsPerRound);
+    const perCopy = (headroom: number) => Math.min(evidenceTokenLimit, blockMax, Math.max(0, headroom)) + EXPLORED_SEPARATOR_TOKENS;
+    const evidenceReserveTokens = perCopy(opts.promptLimit - promptTokens) +
+      remaining.reduce((sum, tokens) => sum + perCopy(opts.promptLimit - tokens), 0);
     const step = await exploreBeforeSinglePass({
       ...opts, budget, prompt, files, batched: false, priorEntries: gatheredEntries,
       promptTokens, evidenceTokenLimit, additionalEvidenceCopies: remaining.length,
-      additionalReserveTokens: remainingBaseTokens,
+      evidenceReserveTokens, additionalReserveTokens: remainingBaseTokens,
       additionalReserveOutputTokens: opts.reviewOutputTokens * remaining.length,
     });
     sentInputTokens += step.promptTokens;
