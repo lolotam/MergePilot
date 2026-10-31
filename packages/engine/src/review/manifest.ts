@@ -22,6 +22,7 @@ export interface ManifestFile {
   status: string;
   additions: number;
   deletions: number;
+  skipReason?: string | undefined;
 }
 
 /** What `manifestFileOf` needs of a PR file: GitHub's counts when given, else the patch's. */
@@ -108,4 +109,17 @@ function whereOf(batches: number[] | undefined): string {
   const first = batches[0]!;
   const last = batches[batches.length - 1]!;
   return first === last ? `batch ${first}` : `batches ${first}–${last}`;
+}
+
+/** Small shared disclosure, included in the existing input-token accounting. */
+export const NOT_SHOWN_RULE = 'CHANGED_BUT_NOT_SHOWN lists files that ARE changed in this pull request. Never report them as not updated, missing or unchanged. Their contents are not shown; make no claims about their contents.';
+
+export function renderNotShown(files: readonly ManifestFile[]): string {
+  const skipped = files.filter((file) => file.skipReason);
+  if (skipped.length === 0) return '';
+  const lines = skipped.slice(0, 50).map((file) =>
+    `${shown(file.status)} | +${file.additions} -${file.deletions} | ${shown(file.label)} | ${shown(file.skipReason!)}`,
+  );
+  if (skipped.length > 50) lines.push(`and ${skipped.length - 50} more`);
+  return lines.join('\n');
 }

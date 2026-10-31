@@ -10,6 +10,7 @@ This Action uses repository API-key secrets or the existing official `claude-cod
 - **No repeated comments**: every inline comment carries a hidden fingerprint (`<!-- mp:f=… -->`); a new finding on the same file and overlapping lines with the same fingerprint or a near-identical title is not posted again, including comments posted earlier by the MergePilot GitHub App.
 - **Pause / resume** from a PR comment, in English or Arabic.
 - **Periodic audits** on `schedule` or `workflow_dispatch`.
+- **Skipped files stay visible** (ADR-0051): review and verification prompts list changed files whose contents are not shown, such as lockfiles, with status, line counts and skip reason, so no finding claims they were not updated. A defect in changed lines is reported at confidence 0.5-0.69 when uncertain, not withheld.
 
 ## Workflow
 
@@ -118,7 +119,7 @@ judge:
   - `annotate` adds `Jev confidence: 0.82` to every posted finding the judge scored.
   - `filter` drops findings below `threshold` and lists them under "Filtered by Jev (n)" in the summary. Critical and high findings are never dropped; a low-confidence one that is kept gets the confidence line.
   - `dedupe` skips a finding that repeats, in meaning, an existing MergePilot comment near it.
-  - `consensus` is reserved for the coming reviewer panel; it is accepted now and does nothing yet.
+  - `consensus` controls same-issue clustering in the GitHub App reviewer panel; it does nothing in the single-bot Action.
 - `annotate` and `filter` together still cost **one** Jev request per review: findings are filtered and every remaining one is annotated. Without either of them, no such request is sent; without `dedupe`, no duplicate-check request is sent. The summary names the active uses (`Jev uses: ...`).
 - The old `mode:` still works and maps to uses: `off` → `[dedupe]`, `annotate` → `[annotate, dedupe]`, `filter` → `[filter, dedupe]`. When both are set, `uses` wins; with neither, the judge runs the duplicate check only (the old default).
 - A fallback is used only after auth, rate limit / overload (after one retry), 5xx, network, timeout (20 s), or a wrong model id (422 / 404); a valid low-confidence answer is final. An entry without its key is skipped. All attempts share 60 s. The summary names the judge that answered, e.g. `Jev: opencode-zen:jev-1.13-free (fallback 1; openrouter failed: rate-limited)`.

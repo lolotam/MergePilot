@@ -11,7 +11,7 @@ import { FINDINGS_MISSING_REASON, parseReviewAnswer, type ParseReviewAnswerResul
 import { checkBudget, estimateTokens } from './budget.js';
 import { describePaths, remindMissingFindingsList, retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { PromptPr } from './follow-up.js';
-import { renderManifest, type ManifestFile } from './manifest.js';
+import { renderManifest, renderNotShown, type ManifestFile } from './manifest.js';
 import type { ReviewModel, ReviewModelRequest, ReviewModelResponse } from './model.js';
 import { buildReviewPrompt, type ContextFile, type LibraryDoc } from './prompt.js';
 import {
@@ -87,6 +87,7 @@ export function buildBatchPrompt(
     rulesFiles: input.rulesFiles,
     pathInstructions: input.config.review.pathInstructions,
     files,
+    notShown: renderNotShown(input.manifestFiles ?? []),
     ...(input.libraryDocs ? { libraryDocs: input.libraryDocs } : {}),
     ...(contextFiles.length > 0 ? { contextFiles } : {}),
     ...(manifest !== undefined ? { batch: { number: index + 1, count: input.batches.length, manifest } } : {}),

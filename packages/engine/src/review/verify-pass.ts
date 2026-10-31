@@ -12,6 +12,7 @@
 import { z } from 'zod';
 import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
+import { redactSecrets } from '../security/redact.js';
 import { checkBudget, estimateTokens } from './budget.js';
 import { JSON_ONLY_REMINDER, retryUnusableAnswer, ReviewDeadline } from './call.js';
 import { runExploration, type ExplorePassInput } from './explore.js';
@@ -34,11 +35,13 @@ import {
   parseVerifyAnswer,
   VerifyAnswerSchema,
   type BuiltVerifyPrompt,
+  type RejectedFinding,
   type VerifyRejectedFinding,
 } from './verify.js';
 
 export interface VerifyPassInput {
   language: 'ar' | 'en';
+  notShown?: string | undefined;
   findings: Finding[];
   files: ReviewableFileWithPatch[];
   contextFiles?: readonly ContextFile[] | undefined;
@@ -77,6 +80,8 @@ export interface VerifyPassResult {
   verification?: { checked: number; rejected: number } | undefined;
   /** Every rejected finding, so the summary discloses what verification dropped. */
   rejected: VerifyRejectedFinding[];
+  /** The same rejected findings in full, redacted, for the panel's agreement check (ADR-0050). */
+  rejectedFindings?: RejectedFinding[];
   incompleteReasons: string[];
 }
 
@@ -95,7 +100,9 @@ function buildFittingVerifyPrompt(
 } {
   const base = {
     language: input.language,
-    findings: input.findings,
+    notShown: input.notShown,
+    // The model's own text can repeat a known secret; it is redacted before it reaches the prompt.
+    findings: input.findings.map((finding) => redactFinding(finding, input.knownSecrets)),
     files: input.files,
     contextFiles: input.contextFiles,
     maxCodeTokens: input.maxCodeTokens,
@@ -379,7 +386,21 @@ export async function runVerifyPass(input: VerifyPassInput): Promise<VerifyPassR
     findings: kept,
     totalUsage,
     verification: { checked: input.findings.length, rejected: rejected.length },
-    rejected: rejected.map(({ finding }) => ({ title: finding.title, path: finding.path, line: finding.line })),
+    rejectedFindings: rejected.map(({ finding, reason }) => ({
+      finding: redactFinding(finding, input.knownSecrets),
+      reason: redactSecrets(reason, [...input.knownSecrets]).text,
+    })),
+    rejected: rejected.map(({ finding }) => {
+      const { title, path, line } = redactFinding(finding, input.knownSecrets);
+      return { title, path, line };
+    }),
     incompleteReasons,
   };
+}
+
+/** Every text field of a finding redacted, for the verify prompt and the panel (ADR-0050). */
+function redactFinding(finding: Finding, knownSecrets: VerifyPassInput['knownSecrets']): Finding {
+  const secrets = [...knownSecrets];
+  const redacted = Object.entries(finding).map(([key, value]) => [key, typeof value === 'string' ? redactSecrets(value, secrets).text : value]);
+  return Object.fromEntries(redacted) as Finding;
 }

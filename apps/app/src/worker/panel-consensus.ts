@@ -1,4 +1,12 @@
-import { describeAnsweredBy, hasJudgeUse } from '@mergepilot/engine';
+import {
+  anchorFindings,
+  describeAnsweredBy,
+  hasJudgeUse,
+  parsePatch,
+  type ParsedPatch,
+  type RejectedFinding,
+  type VerifyRejectedFinding,
+} from '@mergepilot/engine';
 import {
   botFindingsFates,
   capConsensusClusters,
@@ -12,6 +20,7 @@ import {
   reviewScopeOf,
   withFoundBy,
   type ConsensusCluster,
+  type PanelBotFindings,
   type PanelBotRow,
 } from '@mergepilot/github';
 import { MAIN_BOT_SLOT } from '../core/types.js';
@@ -68,7 +77,14 @@ export async function publishConsensus(
   const consensusJudge = judge && hasJudgeUse(judge.uses, 'consensus') ? judge.judge : undefined;
   const dedupeJudge = dedupeJudgeOf(judge);
 
-  const botFindings = completed.map(({ br, rr }) => ({ slot: br.bot.slot, name: br.bot.name, inline: rr.inline, summaryOnly: rr.summaryOnly }));
+  const patches = new Map(files.prFiles.flatMap((file) => (file.patch ? [[file.path, parsePatch(file.patch)] as const] : [])));
+  const botFindings: PanelBotFindings[] = completed.map(({ br, rr }) => ({
+    slot: br.bot.slot,
+    name: br.bot.name,
+    inline: rr.inline,
+    summaryOnly: rr.summaryOnly,
+    rejected: placeRejected(rr.verifyRejectedFindings ?? [], patches),
+  }));
   const merge = await mergePanelFindings({
     bots: botFindings,
     minAgreement: settings.panelMinAgreement ?? 1,
@@ -135,6 +151,8 @@ export async function publishConsensus(
     const exploration = outcomes.find((outcome) => outcome.slot === bot.slot)?.pending?.outcome.exploration;
     return exploration ? [{ ...exploration, bot: bot.name }] : [];
   });
+  // Rejected copies a cluster took in are disclosed with that cluster, not as rejections (ADR-0050).
+  const incorporated = [...merge.kept, ...merge.below, ...merge.overLimit].flatMap((cluster) => cluster.rejectedBy ?? []);
   const summaryMarkdown = renderPanelSummary({
     language,
     baseUrl: ctx.baseUrl,
@@ -149,7 +167,9 @@ export async function publishConsensus(
     judgeAnsweredBy: mergeAnsweredBy ? describeAnsweredBy(mergeAnsweredBy) : undefined,
     dedupeJudgeAnsweredBy: dedupeAnsweredBy ? describeAnsweredBy(dedupeAnsweredBy) : undefined,
     dedupeJudgeUnavailable: deduped.semantic?.unavailable,
-    verifyRejected: completed.flatMap(({ br, rr }) => (rr.verifyRejected ?? []).map((f) => ({ ...f, bot: br.bot.name }))),
+    verifyRejected: completed.flatMap(({ br, rr }) =>
+      (rr.verifyRejected ?? []).filter((f) => !isIncorporated(f, br.bot.slot, incorporated)).map((f) => ({ ...f, bot: br.bot.name })),
+    ),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),
     explorations,
@@ -178,6 +198,23 @@ export async function publishConsensus(
   const findings = inline.length + capped.kept.filter((c) => c.kind === 'summaryOnly').length;
   logger.info({ event: 'panel.publish', jobId: job.deliveryId, mode: 'consensus', findings }, `Reviewer panel published ${findings} findings`);
   return { reviewUrl: reviewUrlOf(publish, capture.url(), { owner: ctx.owner, repo: ctx.repo, pullNumber: job.pullNumber }) };
+}
+
+/** A bot's verifier-rejected findings, each placed inline or outside the diff like its kept ones. */
+function placeRejected(rejected: readonly RejectedFinding[], patches: Map<string, ParsedPatch>): PanelBotFindings['rejected'] {
+  const inline = new Set(anchorFindings(rejected.map((r) => r.finding), patches).inline);
+  return rejected.map((r) => ({ ...r, kind: inline.has(r.finding) ? 'inline' : 'summaryOnly' }));
+}
+
+/** Whether a bot's listed rejection is one of the copies a cluster took in. */
+function isIncorporated(
+  listed: VerifyRejectedFinding,
+  slot: number,
+  incorporated: NonNullable<ConsensusCluster['rejectedBy']>,
+): boolean {
+  return incorporated.some(
+    ({ slot: s, finding: f }) => s === slot && f.title === listed.title && f.path === listed.path && f.line === listed.line,
+  );
 }
 
 function row(bot: PanelBot, outcome: BotOutcome | undefined): PanelBotRow {
