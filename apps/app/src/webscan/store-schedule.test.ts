@@ -174,6 +174,36 @@ describe('the scheduled enqueue', () => {
     }
   });
 
+  it('drops the saved slot when the schedule changes, and keeps it when the same rule is saved again', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      const monthly = { frequency: 'monthly', dayOfMonth: 28, hour: 4, minute: 0, enabled: true } as const;
+      await store.updateSite('admin-1', site.id, { schedule: monthly });
+      await store.enqueueScheduledScan('scheduler', {
+        siteId: site.id,
+        scheduledFor: new Date('2026-11-03T01:00:00.000Z'),
+        now: new Date('2026-11-02T05:00:00.000Z'),
+      });
+      const slot = (await store.getSite(site.id))?.nextRunAt;
+      expect(slot).toBeInstanceOf(Date);
+
+      // The same rule again keeps the slot it already has.
+      await store.updateSite('admin-1', site.id, { schedule: { ...monthly } });
+      expect((await store.getSite(site.id))?.nextRunAt).toEqual(slot);
+
+      // A different rule must not wait for the occurrence of the old one: the next tick
+      // gives the site a first slot of the new rule.
+      await store.updateSite('admin-1', site.id, {
+        schedule: { frequency: 'daily', hour: 4, minute: 0, enabled: true },
+      });
+      expect((await store.getSite(site.id))?.nextRunAt).toBeNull();
+    } finally {
+      await db.close();
+    }
+  });
+
   it('refuses to queue for a site without an enabled schedule', async () => {
     const { db, store } = await fixture();
     try {

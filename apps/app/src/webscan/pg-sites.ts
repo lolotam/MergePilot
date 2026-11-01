@@ -273,6 +273,10 @@ export async function updateSite(
       .set({
         overrides: input.scope ?? current.overrides,
         schedule: schedule === undefined ? current.schedule : schedule,
+        // A saved slot belongs to the old rule. Without it the next tick gives the site a first
+        // slot of the new rule, so neither a longer old rule delays the new one nor a stale past
+        // slot of a disabled rule fires a catch-up scan the moment it is switched on again.
+        nextRunAt: scheduleChanged ? null : current.nextRunAt,
         repositoryOwner:
           input.repository === undefined ? current.repositoryOwner : (input.repository?.owner ?? null),
         repositoryName:

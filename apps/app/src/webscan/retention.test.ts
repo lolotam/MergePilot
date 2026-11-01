@@ -122,4 +122,23 @@ describe('the retention of the website scanner', () => {
     expect(result.remainingSites).toBe(3);
     expect(h.store.listSites).toHaveBeenCalledTimes(1);
   });
+
+  it('reaches every site over the following nights when there are more than one batch', async () => {
+    const h = harness({ sites: 5 });
+    const day = 86_400_000;
+
+    for (let night = 0; night < 3; night += 1) {
+      await runWebScanRetention({
+        store: h.store,
+        workerStore: h.workerStore,
+        siteBatch: 2,
+        now: () => new Date(NOW.getTime() + night * day),
+      });
+    }
+
+    const touched = new Set(
+      h.order.filter((entry) => entry.startsWith('restore:')).map((entry) => entry.slice('restore:'.length)),
+    );
+    expect([...touched].sort()).toEqual(['site-0', 'site-1', 'site-2', 'site-3', 'site-4']);
+  });
 });

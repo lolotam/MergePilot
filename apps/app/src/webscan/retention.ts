@@ -84,7 +84,11 @@ export async function runWebScanRetention(
   const olderThan = new Date(now().getTime() - settings.retentionDays * DAY_MS);
 
   const sites = await deps.store.listSites();
-  const batch = sites.slice(0, siteBatch);
+  // The window moves by one batch per UTC day, so a platform with more sites than one batch
+  // still reaches every site within ceil(sites / batch) nights, without a stored cursor.
+  const start =
+    sites.length <= siteBatch ? 0 : (Math.floor(now().getTime() / DAY_MS) * siteBatch) % sites.length;
+  const batch = [...sites.slice(start), ...sites.slice(0, start)].slice(0, siteBatch);
 
   let restoredOccurrences = 0;
   let archivedOccurrences = 0;
