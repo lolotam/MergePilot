@@ -1,6 +1,6 @@
 # ADR-0049: Reserve input space for repository exploration
 
-**Date:** 2026-10-30 · **Status:** proposed (implementation for B23; pending review) · **Amends:** ADR-0046 · **Related:** ADR-0013, ADR-0045
+**Date:** 2026-10-30 · **Status:** accepted (implemented for B23; owner approved the merge on 2026-11-01; not released yet) · **Amends:** ADR-0046 · **Related:** ADR-0013, ADR-0045
 
 ## Context
 
