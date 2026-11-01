@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  MergePilotConfigSchema,
   runReview,
   type MergePilotConfig,
   type RepositoryReader,
@@ -26,15 +27,15 @@ const reviewResult = {
 } as unknown as ReviewRunResult;
 const reader = {} as unknown as RepositoryReader;
 const prFiles: PullRequestFile[] = [
-  { path: 'src/a.ts', status: 'modified', patch: '@@ -1,1 +1,1 @@\n-old\n+new', changes: 2 },
+  { path: 'src/a.ts', status: 'modified', patch: '@@ -1,1 +1,1 @@\n-old\n+new', additions: 1, deletions: 1, changes: 2 },
 ];
-const config: MergePilotConfig = {
+const config: MergePilotConfig = MergePilotConfigSchema.parse({
   provider: 'anthropic',
   model: 'claude-x',
   language: 'en',
-  review: { maxFindings: 5, minSeverity: 'medium', rulesFiles: [], exclude: ['**/*.lock'], pathInstructions: [], instructions: [] },
+  review: { maxFindings: 5, minSeverity: 'medium', rulesFiles: [], exclude: ['**/*.lock'], pathInstructions: [] },
   budget: { perReviewUsd: 1, maxInputTokens: 100_000 },
-};
+});
 const model: ReviewModel = {
   label: 'anthropic:claude-x',
   generate: async () => ({ text: '', finishReason: 'stop' }),

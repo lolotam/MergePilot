@@ -142,7 +142,7 @@ async function review(options: {
   calls.quota = options.quota ?? false;
   h.client.getPullRequest = async () => ({ head: { sha: h.job.headSha }, title: `PR ${access}`, body: refresh });
   const result = await processReviewJob(h.job, { ...deps, credentials, logger, log: (line) => logs.push(line), budgetAdmission: admission });
-  const runs = await h.store.listReviewRuns(WORKSPACE_ID);
+  const runs = await h.store.listReviewRuns(WORKSPACE_ID, 50);
   const run = runs.find((entry) => entry.botSlot === (options.extra ? 2 : 1));
   return { ...h, result, run, runs, lines, logs, admit, primaryResolves, primaryLabel: `${provider}:${model}`, fallback };
 }

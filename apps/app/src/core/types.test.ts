@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadAppConfig } from './config.js';
 import { MemoryStore } from './memory-store.js';
-import { roleAtLeast } from './types.js';
+import { roleAtLeast, type AppStore } from './types.js';
 
 describe('roleAtLeast', () => {
   it('orders member < admin < owner', () => {
@@ -19,7 +19,7 @@ describe('loadAppConfig', () => {
 
 describe('MemoryStore', () => {
   it('rejects a duplicate delivery and scopes credentials by workspace', async () => {
-    const store = new MemoryStore();
+      const store: AppStore = new MemoryStore();
     expect(await store.recordDelivery('d1', 'pull_request')).toBe(true);
     expect(await store.recordDelivery('d1', 'pull_request')).toBe(false);
     await store.saveCredential({

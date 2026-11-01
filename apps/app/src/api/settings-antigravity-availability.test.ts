@@ -10,7 +10,7 @@ beforeEach(async () => {
 afterEach(async () => h.close());
 
 const settings = (provider: string) => ({ provider, model: 'gemini-3.8-flash', language: 'en' });
-const putSettings = (body: unknown) =>
+const putSettings = (body: string | object) =>
   h.app.inject({ method: 'PUT', url: '/api/workspaces/ws-1/settings', headers: { cookie: h.adminCookie() }, payload: body });
 const putBot = (provider: string) =>
   h.app.inject({

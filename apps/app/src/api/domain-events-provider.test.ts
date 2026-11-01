@@ -11,7 +11,7 @@ import { createLogger } from '../core/logger.js';
 import type { ReviewJob, ReviewQueue } from '../core/types.js';
 import { CredentialService } from '../credentials/service.js';
 import { runMigrations } from '../db/migrate.js';
-import { PgStore } from '../db/pg-store.js';
+import { PgStore, type AppDb } from '../db/pg-store.js';
 import * as dbSchema from '../db/schema.js';
 import { createServer } from '../server/create-server.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
@@ -57,7 +57,7 @@ describe('Domain events logging - Provider & Runs', () => {
   const userId = 'u-admin-1';
   const sessionToken = ['tok', 'adm', '2'].join('-');
   let pglite: PGlite;
-  let db: ReturnType<typeof drizzle>;
+  let db: AppDb;
   let store: PgStore;
   let credentials: CredentialService;
   let enqueued: ReviewJob[];
@@ -213,7 +213,7 @@ describe('Domain events logging - Provider & Runs', () => {
     expect(cachedLog?.ok).toBe(true);
 
     // 3. Connection test
-    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 50, model: 'claude-3-5-sonnet' });
+    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 50, model: 'claude-3-5-sonnet', reply: 'OK' });
 
     const resTest = await app.inject({
       method: 'POST',

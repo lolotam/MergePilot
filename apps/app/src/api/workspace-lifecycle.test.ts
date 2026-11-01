@@ -9,7 +9,7 @@ import * as dbSchema from '../db/schema.js';
 import { registerAuthRoutes } from '../auth/fastify.js';
 import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import { runMigrations } from '../db/migrate.js';
-import { PgStore } from '../db/pg-store.js';
+import { PgStore, type AppDb } from '../db/pg-store.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { CredentialService } from '../credentials/service.js';
 import type { AppConfig } from '../core/config.js';
@@ -18,7 +18,7 @@ import { registerDashboardApi } from './routes.js';
 describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 25000 }, () => {
   let app: FastifyInstance;
   let pglite: PGlite;
-  let db: ReturnType<typeof drizzle>;
+  let db: AppDb;
   let store: PgStore;
   let vault: EnvelopeVault;
   let credentials: CredentialService;
@@ -49,8 +49,7 @@ describe('dashboard api - workspace lifecycle (rename and delete)', { timeout: 2
     // Every migration, so the stores see the current schema (0006: usage summary, lease).
     await runMigrations(pglite);
 
-    const schema = { ...authSchema, ...dbSchema };
-    db = drizzle(pglite, { schema });
+    db = drizzle(pglite, { schema: { ...authSchema, ...dbSchema } });
     store = new PgStore(db);
     vault = new EnvelopeVault(Buffer.alloc(32, 1).toString('base64'));
     credentials = new CredentialService({ store, vault });

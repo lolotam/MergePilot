@@ -27,6 +27,7 @@ describe('createServer', () => {
       webhookSecret: secret,
       clientId: 'gh-client-id',
       clientSecret: 'gh-client-secret',
+      appSlug: 'mergepilot',
     },
     google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' },
     authSecret: 'better-auth-secret-key',

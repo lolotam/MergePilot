@@ -30,6 +30,7 @@ describe('fastify auth integration', () => {
       webhookSecret: 'secret',
       clientId: 'gh-id',
       clientSecret: 'gh-secret',
+      appSlug: 'mergepilot',
     },
     google: { clientId: 'g-id', clientSecret: 'g-secret' },
     authSecret: 'sk-test-secret-32-chars-long-0000000',

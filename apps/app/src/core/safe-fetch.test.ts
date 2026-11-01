@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import type { ClientRequest, IncomingMessage, request as httpsRequest } from 'node:https';
+import type { ClientRequest, IncomingMessage } from 'node:http';
+import type { request as httpsRequest } from 'node:https';
 import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { createSafeFetch } from './safe-fetch.js';

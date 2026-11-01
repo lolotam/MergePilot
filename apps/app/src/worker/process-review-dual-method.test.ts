@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { encodeSubscription, LlmFailure, Secret, type LlmFailureCode, type PriceEntry, type ReviewModel } from '@mergepilot/engine';
+import type { Mock } from 'vitest';
+import { encodeSubscription, LlmFailure, Secret, type LlmFailureCode, type PriceEntry, type ReviewModel, type ReviewModelRequest, type ReviewModelResponse } from '@mergepilot/engine';
 import { BudgetAdmission } from './budget-admission.js';
 import type { DualAuthState } from '../credentials/dual-auth.js';
 import type { WorkspaceSettings } from '../core/types.js';
@@ -18,7 +19,9 @@ const failWith = (code: LlmFailureCode) =>
     throw new LlmFailure({ code, provider: 'anthropic', message: `${code} from anthropic` });
   });
 
-function chain(primary: ReturnType<typeof vi.fn>, keys: ReturnType<typeof vi.fn>): ReviewModel {
+type ModelMock = Mock<(request: ReviewModelRequest) => Promise<ReviewModelResponse>>;
+
+function chain(primary: ModelMock, keys: ModelMock): ReviewModel {
   return {
     label: LABEL,
     authMethod: 'subscription',

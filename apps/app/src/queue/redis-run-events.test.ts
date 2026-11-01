@@ -16,7 +16,7 @@ function fakeClients() {
   const subscriber = {
     subscribe: vi.fn(async (_channel: string) => 1),
     unsubscribe: vi.fn(async (_channel: string) => 0),
-    on: ((event: string, listener: (...args: never[]) => void) => emitter.on(event, listener)) as RunEventsSubscriberClient['on'],
+    on: ((event: string, listener: (...args: never[]) => void) => emitter.on(event, listener as (...args: unknown[]) => void)) as RunEventsSubscriberClient['on'],
     quit: vi.fn(async () => 'OK'),
   } satisfies RunEventsSubscriberClient;
   const makeSubscriber = vi.fn(() => subscriber);

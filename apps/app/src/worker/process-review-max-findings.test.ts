@@ -46,7 +46,7 @@ describe('processReviewJob — consensus review respects the findings limit', ()
 
     expect(h.created).toHaveLength(1);
     const review = h.created[0]!;
-    const titles = review.comments.map((c) => c.body.split('\n')[0]);
+    const titles = review.comments?.map((c) => c.body.split('\n')[0]) ?? [];
     expect(titles).toHaveLength(5);
     expect(titles).toEqual(expect.arrayContaining(['### Echo', '### Alpha']));
     expect(review.body).toContain('<summary>Over the findings limit (2)</summary>');
@@ -71,7 +71,7 @@ describe('processReviewJob — consensus review respects the findings limit', ()
     expect((await processReviewJob(h.job, h.deps)).status).toBe('completed');
 
     // The top cluster is already on the PR: both slots go to new findings, one is over the limit.
-    const titles = h.created[0]!.comments.map((c) => c.body.split('\n')[0]);
+    const titles = h.created[0]!.comments?.map((c) => c.body.split('\n')[0]) ?? [];
     expect(titles).toHaveLength(2);
     expect(titles).not.toContain('### Alpha');
     expect(h.created[0]!.body).toContain('<summary>Over the findings limit (1)</summary>');

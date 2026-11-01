@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { LlmFailure, Secret, type MergePilotConfig, type ReviewModel } from '@mergepilot/engine';
-import type { GitHubClient } from '@mergepilot/github';
+import { LlmFailure, MergePilotConfigSchema, Secret, type MergePilotConfig, type ReviewModel } from '@mergepilot/engine';
+import type { GitHubClient, LoadRepoConfigResult } from '@mergepilot/github';
 import pino from 'pino';
 import { MemoryStore } from '../core/memory-store.js';
 import { MAIN_BOT_SLOT, type ReviewJob, type WorkspaceSettings } from '../core/types.js';
@@ -35,11 +35,11 @@ async function runWithModel(
     status: 'running', costUsd: null, detail: null, botSlot: MAIN_BOT_SLOT,
   });
   const mainConfig: BotConfig = {
-    effectiveConfig: {
+    effectiveConfig: MergePilotConfigSchema.parse({
       provider, model: modelId, language: 'en',
-      review: { maxFindings: 5, minSeverity: 'medium', rulesFiles: [], exclude: [], pathInstructions: [], instructions: [], verify },
-      budget: { perReviewUsd: 1, maxInputTokens: 10000, pricing: { inputPerMTok: 0, outputPerMTok: 0 } },
-    },
+      review: { maxFindings: 5, minSeverity: 'medium', rulesFiles: [], exclude: [], pathInstructions: [], verify },
+      budget: { perReviewUsd: 1, maxInputTokens: 10000, pricing: { inputPerMTok: 0, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 } },
+    }),
     rulesFiles: [], configHash: 'cfg', pricing: { source: 'catalog:models.dev', inputPerMTok: 0, outputPerMTok: 0 },
   };
   const client: GitHubClient = {
@@ -49,7 +49,7 @@ async function runWithModel(
   const ctx: PanelContext = {
     job: { deliveryId: 'del', installationId: 1, repoFullName: 'acme/repo', pullNumber: 1, headSha: 'sha', baseSha: 'base' },
     deps, logger, workspaceId: 'ws-bot', settings, owner: 'acme', repo: 'repo', client, publisherLogin: 'bot',
-    prTitle: 't', prBody: 'b', repoConfigResult: { config: null, rulesFiles: [], repoPricing: null },
+    prTitle: 't', prBody: 'b', repoConfigResult: { config: null, rulesFiles: [], repoPricing: null } as unknown as LoadRepoConfigResult,
     mainChoice: { provider, model: modelId, effort: null, heavy: false }, mainConfig, panelActive: false, mode: 'separate', startTime: 0,
   };
   const br: BotRun = {
@@ -60,7 +60,7 @@ async function runWithModel(
   return { store, run: await store.getReviewRun('ws-bot', run.id) };
 }
 
-const usage = { inputTokens: 100, outputTokens: 50 };
+const usage = { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 };
 const answer = JSON.stringify({ summary: 'ok', findings: [], verdicts: [] });
 
 describe('runBot effective auth (ADR-0027)', () => {
@@ -126,16 +126,16 @@ describe('runBot effective auth (ADR-0027)', () => {
     });
 
     const mainConfig: BotConfig = {
-      effectiveConfig: {
+      effectiveConfig: MergePilotConfigSchema.parse({
         provider: 'openai',
         model: 'gpt-test',
         language: 'en',
-        review: { maxFindings: 5, minSeverity: 'medium', rulesFiles: [], exclude: [], pathInstructions: [], instructions: [] },
-        budget: { perReviewUsd: 1, maxInputTokens: 1000, pricing: { inputPerMTok: 1, outputPerMTok: 1 } },
-      },
+        review: { maxFindings: 5, minSeverity: 'medium', rulesFiles: [], exclude: [], pathInstructions: [] },
+        budget: { perReviewUsd: 1, maxInputTokens: 1000, pricing: { inputPerMTok: 1, outputPerMTok: 1, cacheReadPerMTok: 1, cacheWritePerMTok: 1 } },
+      }),
       rulesFiles: [],
       configHash: 'cfg',
-      pricing: { source: 'catalog', inputPerMTok: 1, outputPerMTok: 1 },
+      pricing: { source: 'catalog:models.dev', inputPerMTok: 1, outputPerMTok: 1 },
     };
 
     const ctx: PanelContext = {
@@ -150,7 +150,7 @@ describe('runBot effective auth (ADR-0027)', () => {
       publisherLogin: 'bot',
       prTitle: 't',
       prBody: 'b',
-      repoConfigResult: { config: null, rulesFiles: [], repoPricing: null },
+      repoConfigResult: { config: null, rulesFiles: [], repoPricing: null } as unknown as LoadRepoConfigResult,
       mainChoice: { provider: 'openai', model: 'gpt-test', effort: null, heavy: false },
       mainConfig,
       panelActive: false,

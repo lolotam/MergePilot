@@ -9,7 +9,7 @@ import * as authSchema from '../auth/schema.js';
 import * as dbSchema from '../db/schema.js';
 import { registerAuthRoutes } from '../auth/fastify.js';
 import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
-import { PgStore } from '../db/pg-store.js';
+import { PgStore, type AppDb } from '../db/pg-store.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { CredentialService } from '../credentials/service.js';
 import type { AppConfig } from '../core/config.js';
@@ -18,7 +18,7 @@ import { registerDashboardApi } from './routes.js';
 describe('dashboard api - auth and github routes (me, installations, link)', () => {
   let app: FastifyInstance;
   let pglite: PGlite;
-  let db: ReturnType<typeof drizzle>;
+  let db: AppDb;
   let store: PgStore;
   let vault: EnvelopeVault;
   let credentials: CredentialService;
@@ -51,8 +51,7 @@ describe('dashboard api - auth and github routes (me, installations, link)', () 
     await pglite.exec(appSql);
     await pglite.exec(authSql);
 
-    const schema = { ...authSchema, ...dbSchema };
-    db = drizzle(pglite, { schema });
+    db = drizzle(pglite, { schema: { ...authSchema, ...dbSchema } });
     store = new PgStore(db);
     vault = new EnvelopeVault(Buffer.alloc(32, 1).toString('base64'));
     credentials = new CredentialService({ store, vault });

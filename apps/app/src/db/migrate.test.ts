@@ -36,7 +36,7 @@ describe('runMigrations', { timeout: 20000 }, () => {
       const res = await client.query<{ count: string }>(
         'SELECT count(*)::text as count FROM schema_migrations;',
       );
-      expect(Number(res.rows[0].count)).toBe(firstRun.length);
+      expect(Number(res.rows[0]?.count)).toBe(firstRun.length);
     } finally {
       await client.close();
     }
@@ -72,7 +72,7 @@ describe('runMigrations', { timeout: 20000 }, () => {
       const gammaCheck = await client.query<{ exists: boolean }>(
         "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'test_gamma') as exists;",
       );
-      expect(gammaCheck.rows[0].exists).toBe(false);
+      expect(gammaCheck.rows[0]?.exists).toBe(false);
 
       // 0003_gamma.sql is NOT in schema_migrations
       const res = await client.query<{ name: string }>(

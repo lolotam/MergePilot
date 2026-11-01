@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createReviewModel, encodeSubscription, LlmFailure, Secret, type ReviewModel } from '@mergepilot/engine';
+import { createReviewModel, encodeSubscription, LlmFailure, Secret, type ReviewModel, type SubscriptionProvider } from '@mergepilot/engine';
 import { BudgetAdmission } from './budget-admission.js';
 import { panelSetup, WS } from './panel.fixtures.js';
 import { processReviewJob } from './process-review.js';
@@ -62,7 +62,7 @@ async function setup(budget: number | null,
     resolve: vi.fn(async (_ws: string, provider: string) => {
       if (admissionComplete && provider === 'openai' && options.redactionReadFailure === 'parent') throw new Error('redaction read failed');
       return subscribed(provider) && !(switched(provider) && options.afterAdmission === 'replaced')
-        ? new Secret(encodeSubscription(provider, { type: 'oauth', access: `${provider}-test-access`, refresh: `${provider}-test-refresh`, expires: Date.now() + 3600000 }))
+        ? new Secret(encodeSubscription(provider as SubscriptionProvider, { type: 'oauth', access: `${provider}-test-access`, refresh: `${provider}-test-refresh`, expires: Date.now() + 3600000 }))
         : new Secret('test-key');
     }),
     getDualAuthState: vi.fn(async (_ws: string, provider: string) => ({

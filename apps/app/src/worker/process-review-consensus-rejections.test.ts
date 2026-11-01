@@ -57,8 +57,8 @@ describe('consensus rejected copies — PR189 regressions', () => {
     const review = h.created[0]!;
     expect(review.body).toContain('Reviewed 1 new commit');
     expect(review.comments).toHaveLength(1);
-    expect(review.comments[0]!.body).toContain('Safe current anchor');
-    expect(review.comments[0]).toMatchObject({ path: 'src/app.ts', line: 2, side: 'RIGHT' });
+    expect(review.comments?.[0]?.body).toContain('Safe current anchor');
+    expect(review.comments?.[0]).toMatchObject({ path: 'src/app.ts', line: 2, side: 'RIGHT' });
     const outside = review.body.split('### Findings outside the diff')[1];
     expect(outside).toContain('Previous-head deletion');
     expect(outside).toContain('Earlier PR file');

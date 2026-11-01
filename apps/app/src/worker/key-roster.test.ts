@@ -4,7 +4,7 @@ import { Secret } from '@mergepilot/engine';
 import { CursorWrites, loadRosters, rotationHandler } from './key-roster.js';
 import type { ProcessReviewCredentials } from './types.js';
 
-function loggerStub(): Logger {
+function loggerStub(): Logger & { _warns: unknown[] } {
   const warns: unknown[] = [];
   return {
     warn: (obj: unknown) => warns.push(obj),

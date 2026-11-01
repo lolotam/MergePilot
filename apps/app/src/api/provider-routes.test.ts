@@ -25,7 +25,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
 
   const get = (provider: string, cookie: string, query = '') =>
     h.app.inject({ method: 'GET', url: `/api/workspaces/ws-1/providers/${provider}/models${query}`, headers: { cookie } });
-  const post = (provider: string, cookie: string, payload: unknown) =>
+  const post = (provider: string, cookie: string, payload: string | object) =>
     h.app.inject({ method: 'POST', url: `/api/workspaces/ws-1/providers/${provider}/models`, headers: { cookie }, payload });
 
   it('lists models with the stored key, caches them 10 minutes, refreshes on ?refresh=true', async () => {
@@ -87,14 +87,14 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
   it('maps failures to a category and redacts the key from the message', async () => {
     const key = keyFor('bad');
     vi.mocked(listModels).mockRejectedValueOnce(
-      new LlmFailure({ code: 'INVALID_CREDENTIAL', message: `Auth failed with key ${key}` }),
+      new LlmFailure({ code: 'INVALID_CREDENTIAL', provider: 'zai-coding', message: `Auth failed with key ${key}` }),
     );
     const auth = await post('zai-coding', h.adminCookie(), { apiKey: key });
     expect(auth.statusCode).toBe(422);
     expect(auth.json().error.code).toBe('auth');
     expect(auth.body).not.toContain(key);
 
-    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: 'QUOTA', message: 'no credit' }));
+    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: 'QUOTA', provider: 'openrouter', message: 'no credit' }));
     const quota = await post('openrouter', h.adminCookie(), { apiKey: key });
     expect([quota.statusCode, quota.json().error.code]).toEqual([429, 'quota']);
 

@@ -34,8 +34,8 @@ describe('processReviewJob — consensus mode', () => {
     expect(review.body).toContain('| **Fox** | `gemini:g-model` | ✅ completed | 1 |');
     // The agreed finding is the one inline comment, labelled with who found it.
     expect(review.comments).toHaveLength(1);
-    expect(review.comments[0]?.body).toContain('_Found by: MergePilot, Owl (2/3)_');
-    expect(review.comments[0]?.body).not.toContain('mergepilot:bot=');
+    expect(review.comments![0]?.body).toContain('_Found by: MergePilot, Owl (2/3)_');
+    expect(review.comments![0]?.body).not.toContain('mergepilot:bot=');
     // The lone low finding is listed, not dropped silently.
     expect(review.body).toContain('<summary>Below agreement (1)</summary>');
     expect(review.body).toContain('Style nit · _Found by: Fox (1/3)_');
@@ -58,7 +58,7 @@ describe('processReviewJob — consensus mode', () => {
       findings: { 'main-model': [finding('Injection', 'critical')], 'bot2-model': [finding('Race', 'high', 1)] },
     });
     await processReviewJob(h.job, h.deps);
-    const titles = h.created[0]?.comments.map((c) => c.body.split('\n')[0]);
+    const titles = h.created[0]?.comments?.map((c) => c.body.split('\n')[0]);
     expect(titles?.sort()).toEqual(['### Injection', '### Race']);
     expect(h.created[0]?.body).not.toContain('Below agreement');
   });
@@ -74,7 +74,7 @@ describe('processReviewJob — consensus mode', () => {
     expect(result.status).toBe('completed');
     expect(h.created).toHaveLength(1);
     expect(h.created[0]?.body).toContain('| **Owl** | `openai:bot2-model` | ❌ failed |');
-    expect(h.created[0]?.comments[0]?.body).toContain('_Found by: MergePilot (1/1)_');
+    expect(h.created[0]?.comments?.[0]?.body).toContain('_Found by: MergePilot (1/1)_');
     expect((await h.runs()).map((r) => r.status)).toEqual(['completed', 'failed']);
     // A failed member never saw these changes: the panel review stays partial, so the head is reviewed again.
     expect(h.created[0]?.body).toMatch(/<!-- mergepilot:review head=\S+ config=[a-f0-9]{12} status=partial -->$/);
@@ -128,7 +128,7 @@ describe('processReviewJob — consensus mode', () => {
     // One false-positive filter call per bot, then one same-issue call for the merge.
     expect(asked.filter((ids) => ids[0]?.startsWith('p'))).toHaveLength(1);
     expect(h.created[0]?.comments).toHaveLength(1);
-    expect(h.created[0]?.comments[0]?.body).toContain('_Found by: MergePilot, Owl (2/2)_');
+    expect(h.created[0]?.comments?.[0]?.body).toContain('_Found by: MergePilot, Owl (2/2)_');
     expect(h.created[0]?.body).not.toContain('Below agreement');
   });
 
@@ -173,7 +173,7 @@ describe('processReviewJob — consensus mode', () => {
 
     // Only Owl's different issue goes to the judge (against each of the other two); its "no" splits nothing else.
     expect(asked).toEqual([2]);
-    const bodies = h.created[0]!.comments.map((c) => c.body);
+    const bodies = h.created[0]!.comments?.map((c) => c.body) ?? [];
     expect(bodies).toHaveLength(2);
     expect(bodies.filter((b) => b.includes('_Found by: MergePilot, Fox (2/4)_'))).toHaveLength(1);
     expect(bodies.filter((b) => b.includes('_Found by: Owl (1/4)_'))).toHaveLength(1);
@@ -189,7 +189,7 @@ describe('processReviewJob — consensus mode', () => {
     h.deps.judgeFetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'down' } }), { status: 503 }));
     await processReviewJob(h.job, h.deps);
 
-    const bodies = h.created[0]!.comments.map((c) => c.body);
+    const bodies = h.created[0]!.comments?.map((c) => c.body) ?? [];
     expect(bodies.filter((b) => b.includes('_Found by: MergePilot, Fox (2/4)_'))).toHaveLength(1);
     expect(bodies).toHaveLength(2);
     expect(h.created[0]?.body).toContain('> ⚠️ Jev same-issue check unavailable: server — findings were merged by title and wording only');
@@ -247,7 +247,7 @@ describe('processReviewJob — consensus mode', () => {
     const { body, comments, asked } = await judgedAgainstEarlierComment('null dereference!');
     // The two titles merge without the judge; only the dedupe asks it, about the earlier comment.
     expect(asked).toEqual([1]);
-    expect(comments[0]?.body).toContain('_Found by: MergePilot, Owl (2/2)_');
+    expect(comments?.[0]?.body).toContain('_Found by: MergePilot, Owl (2/2)_');
     expect(body).toContain(`> Jev (earlier comments): \`${fallbackLabel}\``);
     expect(body).not.toContain('> Jev: ');
   });
@@ -293,7 +293,7 @@ describe('processReviewJob — consensus mode', () => {
       findings: { 'main-model': [finding('Shared issue')], 'bot2-model': [finding('Shared issue')] }, rejectedModels });
     await processReviewJob(h.job, h.deps);
     expect(h.created[0]!.comments).toHaveLength(1);
-    expect(h.created[0]!.comments[0]!.body).toContain('(2/2)');
+    expect(h.created[0]!.comments?.[0]?.body).toContain('(2/2)');
     expect(h.created[0]!.body).not.toContain('<summary>Rejected by verification');
     expect(h.created[0]!.body).toContain('verifier-rejected copies contributed');
     for (const run of await h.runs()) expect(run.result).not.toHaveProperty('verifyRejectedFindings');

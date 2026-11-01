@@ -129,7 +129,7 @@ describe('worker/main', { timeout: 20000 }, () => {
         const factory = createGitHubAppFactory({ appId: '1', privateKey, appSlug: 'my-bot-app' });
         const { client } = await factory(100);
         const pr = await client.getPullRequest({ owner: 'o', repo: 'r', pull_number: 7 });
-        expect(pr.number).toBe(7);
+        expect(pr).toMatchObject({ number: 7 });
         expect(calls.some((u) => u.endsWith('/repos/o/r/pulls/7'))).toBe(true);
       } finally {
         vi.unstubAllGlobals();
@@ -151,11 +151,10 @@ describe('worker/main', { timeout: 20000 }, () => {
               data += chunk;
             });
             response.on('end', () => {
-              resolve({ statusCode: response.statusCode, body: data });
+              resolve(response.statusCode !== undefined ? { statusCode: response.statusCode, body: data } : { body: data });
             });
           }).on('error', reject);
         });
-
         expect(res.statusCode).toBe(200);
         expect(JSON.parse(res.body)).toEqual({ ok: true, worker: 'running' });
       } finally {
@@ -301,11 +300,11 @@ describe('worker/main', { timeout: 20000 }, () => {
         },
         services: {
           store,
-          vault: {} as unknown as import('../core/types.js').Vault,
+          vault: {} as unknown as import('../vault/envelope-vault.js').EnvelopeVault,
           credentials: {} as unknown as import('../credentials/service.js').CredentialService,
           queue: {} as unknown as import('../core/types.js').ReviewQueue,
           close: vi.fn(),
-        },
+        } as unknown as import('../bootstrap/services.js').AppServices,
       });
 
       try {

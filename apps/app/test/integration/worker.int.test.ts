@@ -151,9 +151,9 @@ budget:
         workspaceId,
       ]);
       expect(rawRes.rows).toHaveLength(1);
-      expect(rawRes.rows[0].status).toBe('completed');
-      expect(Number(rawRes.rows[0].cost_usd)).toBeCloseTo(result.costUsd ?? 0, 4);
-      expect(rawRes.rows[0].finished_at).not.toBeNull();
+      expect(rawRes.rows[0]!.status).toBe('completed');
+      expect(Number(rawRes.rows[0]!.cost_usd)).toBeCloseTo(result.costUsd ?? 0, 4);
+      expect(rawRes.rows[0]!.finished_at).not.toBeNull();
     } finally {
       await ctx.close();
     }

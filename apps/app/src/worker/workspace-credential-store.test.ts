@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createReviewModel, encodeSubscription, LlmFailure, Secret, SubscriptionRefreshError, type MergePilotConfig } from '@mergepilot/engine';
 import { WorkspaceCredentialStore } from './workspace-credential-store.js';
+import type { CredentialRef } from '@mergepilot/engine';
 import type { ProcessReviewCredentials } from './types.js';
 import { loadRosters } from './key-roster.js';
 import type { Logger } from 'pino';
@@ -18,14 +19,14 @@ describe('WorkspaceCredentialStore', () => {
     error.message += ` ${access} ${refresh}`;
     const credentials: ProcessReviewCredentials = {
       resolve: vi.fn(async () => { throw error; }),
-      getEffectiveAuthMethod: vi.fn(async () => 'subscription'),
+      getEffectiveAuthMethod: vi.fn(async () => 'subscription' as const),
     };
     const onPrimaryUnavailable = vi.fn();
     const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', primary, {
       onPrimaryUnavailable,
       ...(path === 'subscription-only' ? { subscriptionOnlyProviders: new Set(['anthropic']) } : {}),
     });
-    const ref = { provider: 'anthropic', ...(path === 'subscription' ? { method: 'subscription' as const } : {}) };
+    const ref: CredentialRef<'anthropic'> = path === 'subscription' ? { provider: 'anthropic', method: 'subscription' } : { provider: 'anthropic' };
 
     const failure = await store.resolve(ref, 'review').catch((caught: unknown) => caught);
     expect(failure).toBeInstanceOf(LlmFailure);
@@ -51,10 +52,10 @@ describe('WorkspaceCredentialStore', () => {
         keyIds: ['kid'],
         startIndex: 0,
       })),
-      getEffectiveAuthMethod: vi.fn(async () => 'api-key'),
+      getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
     };
     const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', new Secret('primary-key-value-abc'));
-    const resolved = await store.resolve({ provider: 'openai' }, 'fallback');
+    const resolved = await store.resolve({ provider: 'openai' }, 'review');
     expect(resolved.reveal()).toBe(rosterSecret.reveal());
     expect(resolve).not.toHaveBeenCalled();
   });
@@ -63,11 +64,11 @@ describe('WorkspaceCredentialStore', () => {
     const primaryKey = new Secret('primary-api-key-value');
     const credentials: ProcessReviewCredentials = {
       resolve: vi.fn(async () => { throw new SubscriptionRefreshError('sign-in'); }),
-      getEffectiveAuthMethod: vi.fn(async () => 'api-key'),
+      getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
     };
     const onPrimaryUnavailable = vi.fn();
     const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', primaryKey, { onPrimaryUnavailable });
-    const ref = { provider: 'anthropic', method: 'subscription' as const };
+    const ref: CredentialRef<'anthropic'> = { provider: 'anthropic', method: 'subscription' };
     const failure = await store.resolve(ref, 'review').catch((error: unknown) => error);
 
     expect(failure).toMatchObject({ code: 'INVALID_CREDENTIAL' });
@@ -88,7 +89,7 @@ describe('WorkspaceCredentialStore', () => {
     const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', new Secret('primary-api-key-value'));
 
     await expect(store.resolve({ provider: 'anthropic', method: 'subscription' }, 'review')).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
-    await expect(store.resolve({ provider: 'openai', method: 'subscription' }, 'fallback')).resolves.toBe(openaiSubscription);
+    await expect(store.resolve({ provider: 'openai', method: 'subscription' }, 'review')).resolves.toBe(openaiSubscription);
   });
 
   it('refuses an api-key fallback without keys instead of using the subscription', async () => {
@@ -99,7 +100,7 @@ describe('WorkspaceCredentialStore', () => {
       getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
     };
     const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', new Secret('primary-key-value-abc'));
-    await expect(store.resolve({ provider: 'openai' }, 'fallback')).rejects.toThrow(/No API key is available/);
+    await expect(store.resolve({ provider: 'openai' }, 'review')).rejects.toThrow(/No API key is available/);
     expect(resolve).not.toHaveBeenCalled();
   });
 
@@ -123,7 +124,7 @@ describe('loadRosters api-key fallbacks', () => {
   it('skips an empty api-key fallback roster while the primary still loads', async () => {
     const credentials: ProcessReviewCredentials = {
       resolve: vi.fn(),
-      getEffectiveAuthMethod: vi.fn(async (_ws, provider) => (provider === 'openai' ? 'api-key' : 'api-key')),
+      getEffectiveAuthMethod: vi.fn(async (_ws: string, provider: string): Promise<'api-key'> => (provider === 'openai' ? 'api-key' : 'api-key')),
       resolveKeyRoster: vi.fn(async (_ws, provider) =>
         provider === 'gemini'
           ? { secrets: [new Secret('primary-key-value-abc')], keyIds: ['p1'], startIndex: 0 }
@@ -173,14 +174,14 @@ describe('the worker store under createReviewModel (ADR-0027)', () => {
       getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
     };
     const store = new WorkspaceCredentialStore('ws', credentials, 'anthropic', key);
-    const config: MergePilotConfig = {
+    const config = {
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',
       language: 'en',
       review: { maxFindings: 5, minSeverity: 'medium', exclude: [], rulesFiles: [], pathInstructions: [] },
       budget: { perReviewUsd: 0.5, maxInputTokens: 200_000 },
       audit: { enabled: false },
-    };
+    } as unknown as MergePilotConfig;
     const model = await createReviewModel(config, store, {
       cwd: '/tmp',
       dualMethods: { anthropic: { defaultMethod: 'api-key' } },
@@ -208,7 +209,7 @@ describe('a bot admitted free on its subscription (ADR-0033)', () => {
 
   it('keeps answering every resolve of its provider, refreshes included, with the subscription', async () => {
     const store = new WorkspaceCredentialStore('ws', switched(envelope), 'anthropic', envelope, { subscriptionOnlyProviders: new Set(['anthropic']) });
-    const config: MergePilotConfig = {
+    const config = {
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',
       language: 'en',
@@ -216,7 +217,7 @@ describe('a bot admitted free on its subscription (ADR-0033)', () => {
       review: { maxFindings: 5, minSeverity: 'medium', exclude: [], rulesFiles: [], pathInstructions: [] },
       budget: { perReviewUsd: 0.5, maxInputTokens: 200_000 },
       audit: { enabled: false },
-    };
+    } as unknown as MergePilotConfig;
     const model = await createReviewModel(config, store, { cwd: '/tmp' });
 
     expect(model).toMatchObject({ includedInSubscription: true });
@@ -236,7 +237,7 @@ describe('a bot admitted free on its subscription (ADR-0033)', () => {
   it('leaves other providers on their own effective method', async () => {
     const store = new WorkspaceCredentialStore('ws', switched(envelope), 'anthropic', envelope, { subscriptionOnlyProviders: new Set(['anthropic']) });
 
-    expect(await store.resolve({ provider: 'openai' }, 'fallback')).toBe(key);
+    expect(await store.resolve({ provider: 'openai' }, 'review')).toBe(key);
   });
 });
 
@@ -258,7 +259,8 @@ describe('a free fallback provider stays on its admitted subscription (ADR-0035)
     expect(await store.resolve({ provider: 'openai' }, 'review')).toBe(parent);
     parent = subscription();
     for (const method of [undefined, 'subscription', 'api-key'] as const) {
-      expect(await store.resolve({ provider: 'openai', ...(method ? { method } : {}) }, 'review')).toBe(parent);
+      const ref: CredentialRef<'openai'> = { provider: 'openai', ...(method ? { method } : {}) } as CredentialRef<'openai'>;
+      expect(await store.resolve(ref, 'review')).toBe(parent);
     }
     expect(credentials.getEffectiveAuthMethod).not.toHaveBeenCalled();
     expect(credentials.resolveKeyRoster).not.toHaveBeenCalled();
@@ -278,7 +280,8 @@ describe('a free fallback provider stays on its admitted subscription (ADR-0035)
     await store.resolve({ provider: 'openai' }, 'review');
     parent = new Secret('replacement-key');
     for (const method of [undefined, 'subscription', 'api-key'] as const) {
-      await expect(store.resolve({ provider: 'openai', ...(method ? { method } : {}) }, 'review'))
+      const ref: CredentialRef<'openai'> = { provider: 'openai', ...(method ? { method } : {}) } as CredentialRef<'openai'>;
+      await expect(store.resolve(ref, 'review'))
         .rejects.toMatchObject({ code: 'INVALID_CREDENTIAL', provider: 'openai' });
     }
     expect(credentials.resolveKeyRoster).not.toHaveBeenCalled();

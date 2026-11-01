@@ -12,7 +12,7 @@ import { createLogger } from '../core/logger.js';
 import type { ReviewJob, ReviewQueue } from '../core/types.js';
 import { CredentialService } from '../credentials/service.js';
 import { runMigrations } from '../db/migrate.js';
-import { PgStore } from '../db/pg-store.js';
+import { PgStore, type AppDb } from '../db/pg-store.js';
 import * as dbSchema from '../db/schema.js';
 import { createServer } from '../server/create-server.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
@@ -45,7 +45,7 @@ describe('Domain events logging - Core API', () => {
   const sessionToken = ['tok', 'adm', '1'].join('-');
   const webhookSecret = 'wh-sec';
   let pglite: PGlite;
-  let db: ReturnType<typeof drizzle>;
+  let db: AppDb;
   let store: PgStore;
   let credentials: CredentialService;
   let queue: ReviewQueue;

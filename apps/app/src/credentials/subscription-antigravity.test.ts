@@ -81,8 +81,8 @@ describe('Google Antigravity credentials', () => {
     const before = (await store.getCredential('ws', PROVIDER))!.ciphertext;
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'invalid_grant', error_description: credential().refresh }, { status: 400 })));
     const failure = await service.resolve('ws', PROVIDER).catch((error: unknown) => error as Error);
-    expect(failure.message).toBe('Subscription token refresh failed; sign in again');
-    expect(failure.message).not.toContain(credential().refresh);
+    expect((failure as Error).message).toBe('Subscription token refresh failed; sign in again');
+    expect((failure as Error).message).not.toContain(credential().refresh);
     expect((await store.getCredential('ws', PROVIDER))!.ciphertext).toBe(before);
   });
 

@@ -49,6 +49,7 @@ describe('Server structured logging', () => {
       webhookSecret,
       clientId: 'gh-id',
       clientSecret: 'gh-sec',
+      appSlug: 'mergepilot',
     },
     google: { clientId: 'g-id', clientSecret: 'g-sec' },
     authSecret: 'x'.repeat(32),

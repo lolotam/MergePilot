@@ -9,6 +9,12 @@ import { describeStoreContract, STORE_CONTRACT_WORKSPACES } from './store-contra
 
 const ISOLATION_WORKSPACES = ['ws-a', 'ws-b', 'ws-num'];
 
+/** The row a preceding length assertion guarantees; guards the index the compiler cannot. */
+function must<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('expected a row in the test');
+  return value;
+}
+
 // 1. Shared AppStore contract tests against PgStore
 describeStoreContract(
   'PgStore',
@@ -53,7 +59,7 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
       const credAList = await store.listCredentials('ws-a');
       expect(credAList).toHaveLength(1);
       expect(credAList[0]).not.toHaveProperty('ciphertext');
-      expect(Object.keys(credAList[0])).not.toContain('ciphertext');
+      expect(Object.keys(must(credAList[0]))).not.toContain('ciphertext');
     } finally {
       await close();
     }
@@ -112,10 +118,10 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
       // Run A remains unchanged
       const runsA = await store.listReviewRuns('ws-a', 10);
       expect(runsA).toHaveLength(1);
-      expect(runsA[0].status).toBe('queued');
-      expect(runsA[0].costUsd).toBeNull();
-      expect(runsA[0].detail).toBeNull();
-      expect(runsA[0].finishedAt).toBeNull();
+      expect(must(runsA[0]).status).toBe('queued');
+      expect(must(runsA[0]).costUsd).toBeNull();
+      expect(must(runsA[0]).detail).toBeNull();
+      expect(must(runsA[0]).finishedAt).toBeNull();
 
       // Finishing with correct workspaceId succeeds
       await store.finishReviewRun('ws-a', runA.id, {
@@ -124,10 +130,10 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
         detail: 'Finished by A',
       });
       const finishedRunsA = await store.listReviewRuns('ws-a', 10);
-      expect(finishedRunsA[0].status).toBe('completed');
-      expect(finishedRunsA[0].costUsd).toBe(1.25);
-      expect(typeof finishedRunsA[0].costUsd).toBe('number');
-      expect(finishedRunsA[0].detail).toBe('Finished by A');
+      expect(must(finishedRunsA[0]).status).toBe('completed');
+      expect(must(finishedRunsA[0]).costUsd).toBe(1.25);
+      expect(typeof must(finishedRunsA[0]).costUsd).toBe('number');
+      expect(must(finishedRunsA[0]).detail).toBe('Finished by A');
     } finally {
       await close();
     }
@@ -150,8 +156,8 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
 
       const listA = await store.listInstallations('ws-a');
       expect(listA).toHaveLength(1);
-      expect(listA[0].id).toBe(7001);
-      expect(typeof listA[0].id).toBe('number');
+      expect(must(listA[0]).id).toBe(7001);
+      expect(typeof must(listA[0]).id).toBe('number');
     } finally {
       await close();
     }
@@ -257,10 +263,10 @@ describe('PgStore isolation and specific requirements', { timeout: 20000 }, () =
       });
 
       const runs = await store.listReviewRuns('ws-num', 1);
-      expect(typeof runs[0].installationId).toBe('number');
-      expect(typeof runs[0].pullNumber).toBe('number');
-      expect(typeof runs[0].costUsd).toBe('number');
-      expect(runs[0].costUsd).toBe(0.001234);
+      expect(typeof must(runs[0]).installationId).toBe('number');
+      expect(typeof must(runs[0]).pullNumber).toBe('number');
+      expect(typeof must(runs[0]).costUsd).toBe('number');
+      expect(must(runs[0]).costUsd).toBe(0.001234);
     } finally {
       await close();
     }

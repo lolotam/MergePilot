@@ -107,6 +107,7 @@ describe('EnvelopeVault', () => {
       for (let i = 0; i < parts.length; i++) {
         const tamperedParts = [...parts];
         const originalPart = tamperedParts[i];
+        if (originalPart === undefined) throw new Error('part missing from the envelope');
         if (i === 0) {
           tamperedParts[i] = 'v2'; // invalid format
         } else if (i === 1) {

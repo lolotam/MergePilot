@@ -31,6 +31,7 @@ describe.skipIf(!hasIntegrationEnv)('webhook → queue end to end on real Postgr
         webhookSecret,
         clientId: 'fake-client-id-000',
         clientSecret: 'fake-client-secret-000',
+        appSlug: 'mergepilot',
       },
       google: { clientId: 'fake-google-id', clientSecret: 'fake-google-secret' },
       authSecret: 'fake-auth-secret-1234567890123456',
@@ -88,7 +89,7 @@ describe.skipIf(!hasIntegrationEnv)('webhook → queue end to end on real Postgr
         [deliveryId],
       );
       expect(deliveryRes.rows).toHaveLength(1);
-      expect(deliveryRes.rows[0].event).toBe('pull_request');
+      expect(deliveryRes.rows[0]!.event).toBe('pull_request');
 
       // 3. Exactly one job enqueued in real Redis
       const redisJob = await queue.queue.getJob(deliveryId);

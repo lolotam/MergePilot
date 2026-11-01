@@ -3,6 +3,7 @@ import { encodeSubscription, type SubscriptionCredential } from '@mergepilot/eng
 import { MemoryStore } from '../core/memory-store.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { dualProviderRestoreChange, type DualProviderRestorePlan } from './dual-restore.js';
+import type { StoredCredential, StoredProviderKey } from '../core/types.js';
 import { CredentialService } from './service.js';
 
 const subCredential = (): SubscriptionCredential => ({
@@ -107,7 +108,7 @@ describe('dualProviderRestoreChange (restore-only, R2/R3)', () => {
     await service.saveSubscription('ws', 'xai', subCredential(), 'u');
     const fileKey = ['xai', 'file', 'key', '000001'].join('-');
     const sealed = await vault.encrypt(fileKey, { workspaceId: 'ws', provider: 'xai' });
-    const keys = [
+    const keys: StoredProviderKey[] = [
       {
         id: 'k0',
         workspaceId: 'ws',
@@ -144,7 +145,7 @@ describe('dualProviderRestoreChange (restore-only, R2/R3)', () => {
 
   it('treats keys: [] differently from an absent keys field', async () => {
     const { vault } = fixture();
-    const parent = {
+    const parent: StoredCredential = {
       id: 'sub',
       workspaceId: 'ws',
       provider: 'openai',
@@ -162,7 +163,7 @@ describe('dualProviderRestoreChange (restore-only, R2/R3)', () => {
       defaultMethod: null,
       subscriptionParentFromFile: true,
       keysFieldPresent: false,
-    }, [{ id: 'old', workspaceId: 'ws', provider: 'openai', position: 0, ciphertext: 'x', keyVersion: 1, last4: 'old1', createdBy: 'u', createdAt: new Date(), lastTestStatus: null, lastTestedAt: null }], parent);
+    }, [{ id: 'old', workspaceId: 'ws', provider: 'openai', position: 0, ciphertext: 'x', keyVersion: 1, last4: 'old1', createdBy: 'u', createdAt: new Date(), lastTestStatus: null, lastTestedAt: null } as StoredProviderKey], parent);
     expect(absent.keys).toHaveLength(1);
     const empty = await dualProviderRestoreChange(vault, {
       provider: 'openai',
@@ -171,7 +172,7 @@ describe('dualProviderRestoreChange (restore-only, R2/R3)', () => {
       defaultMethod: null,
       subscriptionParentFromFile: true,
       keysFieldPresent: true,
-    }, [{ id: 'old', workspaceId: 'ws', provider: 'openai', position: 0, ciphertext: 'x', keyVersion: 1, last4: 'old1', createdBy: 'u', createdAt: new Date(), lastTestStatus: null, lastTestedAt: null }], parent);
+    }, [{ id: 'old', workspaceId: 'ws', provider: 'openai', position: 0, ciphertext: 'x', keyVersion: 1, last4: 'old1', createdBy: 'u', createdAt: new Date(), lastTestStatus: null, lastTestedAt: null } as StoredProviderKey], parent);
     expect(empty.keys).toHaveLength(0);
   });
 });

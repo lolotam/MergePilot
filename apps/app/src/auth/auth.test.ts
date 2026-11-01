@@ -18,6 +18,7 @@ describe('auth configuration', () => {
       webhookSecret: 'whsec_test',
       clientId: 'gh-client-id-test',
       clientSecret: 'gh-client-secret-test',
+      appSlug: 'mergepilot',
     },
     google: {
       clientId: 'google-client-id-test',
