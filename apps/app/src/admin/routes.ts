@@ -18,6 +18,9 @@ import {
 import { getUsers } from './queries-users.js';
 import { getWorkspaces } from './queries-workspaces.js';
 import type { FetchLike } from '@mergepilot/engine';
+import type { WebScanEventBus } from '../webscan/events.js';
+import type { WebScanStore } from '../webscan/store.js';
+import { registerWebScanRoutes } from './webscan-routes.js';
 
 export interface AdminApiDeps {
   auth: Auth;
@@ -27,6 +30,8 @@ export interface AdminApiDeps {
   store?: AppStore | undefined;
   /** Test seam: the fetch the manual price refresh uses (its URLs are fixed constants). */
   priceFetch?: FetchLike | undefined;
+  /** The website security scanner (ADR-0052); without it the scanner routes do not exist. */
+  webScan?: { store: WebScanStore; events: WebScanEventBus } | undefined;
 }
 
 const PageQuerySchema = z.object({
@@ -109,4 +114,7 @@ export function registerAdminApi(app: FastifyInstance, deps: AdminApiDeps): void
   );
 
   registerMaintenanceRoutes(app, guard, deps.store, deps.priceFetch);
+  if (deps.webScan !== undefined) {
+    registerWebScanRoutes(app, guard, deps.webScan);
+  }
 }

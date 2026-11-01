@@ -35,6 +35,7 @@ export * from './contract-judge.js';
 export * from './contract-prices.js';
 export * from './contract-subscriptions.js';
 export * from './contract-skills.js';
+export * from './contract-webscan.js';
 
 export type Severity = z.infer<typeof SeveritySchema>;
 
