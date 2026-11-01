@@ -140752,28 +140752,6 @@ function modelFromAdapter(adapter, model, effort) {
   };
 }
 
-function isSensitivePath(path12) {
-  const normalized = path12.replace(/[/\\]+$/, "");
-  const basename6 = normalized.split(/[/\\]/).pop() ?? "";
-  const lower2 = basename6.toLowerCase();
-  if (lower2 === ".env.example") {
-    return false;
-  }
-  if (lower2 === ".env" || lower2.startsWith(".env.")) {
-    return true;
-  }
-  if (lower2.endsWith(".pem") || lower2.endsWith(".key") || lower2.endsWith(".p12") || lower2.endsWith(".pfx")) {
-    return true;
-  }
-  if (lower2.startsWith("id_rsa") || lower2.startsWith("id_ed25519")) {
-    return true;
-  }
-  if (lower2 === "credentials.json" || lower2 === ".npmrc" || lower2 === ".pypirc") {
-    return true;
-  }
-  return false;
-}
-
 function anchorFindings(findings, index) {
   const inline = [];
   const summaryOnly = [];
@@ -141161,6 +141139,16 @@ function whereOf(batches) {
   const last = batches[batches.length - 1];
   return first === last ? `batch ${first}` : `batches ${first}\u2013${last}`;
 }
+var NOT_SHOWN_RULE = "CHANGED_BUT_NOT_SHOWN lists files that ARE changed in this pull request, including removals. Never claim they were omitted from the changes or not updated. Findings about consequences of removal are allowed, such as a shown caller importing a deleted module. Their contents are not shown; make no claims about their unseen contents.";
+function renderNotShown(files) {
+  const skipped = files.filter((file2) => file2.skipReason);
+  if (skipped.length === 0)
+    return "";
+  const lines = skipped.slice(0, 50).map((file2) => `${shown(file2.status)} | +${file2.additions} -${file2.deletions} | ${shown(file2.label)} | ${shown(file2.skipReason)}`);
+  if (skipped.length > 50)
+    lines.push(`and ${skipped.length - 50} more`);
+  return lines.join("\n");
+}
 
 var DESIGN_DOC_GLOBS = [
   "docs/specs/**",
@@ -141347,9 +141335,9 @@ var OUTPUT_CONTRACT = `Respond with exactly one JSON object matching this schema
     }
   ],
   "summary": "<string \u2014 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>",
-  "withheld": [{ "title": "<string \u2014 under 15 words: a problem you noticed but did not report as a finding>", "reason": "<string \u2014 a few words: below the confidence bar, out of scope, already open, or over the findings limit>" }]
+  "withheld": [{ "title": "<string \u2014 under 15 words: a problem you noticed but did not report as a finding>", "reason": "<string \u2014 a few words: already reported/open, over the findings limit, outside this PR changes, or an owner decision named in the rules>" }]
 }
-If you found nothing to report, return "findings": [] \u2014 never omit the key. "withheld" is optional (at most 5 items); if your summary names a problem, it must be a finding or appear in "withheld" with a reason.
+If you found nothing to report, return "findings": [] \u2014 never omit the key. "withheld" is optional (at most 5 items); if your summary names a problem, it must be a finding or appear in "withheld" with a reason. Never withhold a defect in changed lines as "out of scope" or on speculation. If uncertain, report at confidence 0.5-0.69 and name the code that would confirm it. Allowed withheld reasons only: already reported/open, over the findings limit, outside this PR changes, or an owner decision named in the rules.
 Keys and the severity, category and side values are spelled exactly as above, whatever language the text fields use.`;
 var WHAT_YOU_SEE = `WHAT YOU SEE: the pull request's title and description, the owner's rules, sometimes library docs, the diff of every changed file of this pull request (or of this batch of it): the changed lines with a few lines of context, each printed with its line number (new-file numbers for added and context lines, old-file numbers for removed lines), and sometimes REPOSITORY_CONTEXT blocks: read-only files of the repository at the head commit, numbered the same way. You never see the program running.`;
 var METHOD = `METHOD: first work out what the change is trying to do. Then, for every hunk, look for:
@@ -141412,6 +141400,7 @@ function buildSystemPrompt(language, maxFindings, batched, followUp, skill, hasC
     ...batched ? [BATCHES, ""] : [],
     `Return at most ${maxFindings} findings. Prefer high-severity, high-confidence findings.`,
     "",
+    NOT_SHOWN_RULE,
     TRUST_RULE,
     // Last, so "the rules above" in its precedence line covers every core section (ADR-0034).
     ...skill ? ["", renderSkillSection(skill)] : []
@@ -141419,6 +141408,8 @@ function buildSystemPrompt(language, maxFindings, batched, followUp, skill, hasC
 }
 function buildUserPrompt(input2) {
   const parts = [];
+  if (input2.notShown)
+    parts.push(wrapUntrusted("CHANGED_BUT_NOT_SHOWN", input2.notShown));
   const prBody = input2.pr.body.slice(0, PR_BODY_MAX_CHARS);
   const prText = `Title: ${input2.pr.title}
 
@@ -141486,6 +141477,7 @@ function buildBatchPrompt(input2, index) {
     rulesFiles: input2.rulesFiles,
     pathInstructions: input2.config.review.pathInstructions,
     files,
+    notShown: renderNotShown(input2.manifestFiles ?? []),
     ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {},
     ...contextFiles.length > 0 ? { contextFiles } : {},
     ...manifest !== void 0 ? { batch: { number: index + 1, count: input2.batches.length, manifest } } : {}
@@ -141626,6 +141618,45 @@ async function executeBatchedReview(input2) {
     ...withheld.length > 0 ? { withheld } : {}
   };
   return { merged, totalUsage, incompleteReasons };
+}
+
+function isSensitivePath(path12) {
+  const normalized = path12.replace(/[/\\]+$/, "");
+  const basename6 = normalized.split(/[/\\]/).pop() ?? "";
+  const lower2 = basename6.toLowerCase();
+  if (lower2 === ".env.example") {
+    return false;
+  }
+  if (lower2 === ".env" || lower2.startsWith(".env.")) {
+    return true;
+  }
+  if (lower2.endsWith(".pem") || lower2.endsWith(".key") || lower2.endsWith(".p12") || lower2.endsWith(".pfx")) {
+    return true;
+  }
+  if (lower2.startsWith("id_rsa") || lower2.startsWith("id_ed25519")) {
+    return true;
+  }
+  if (lower2 === "credentials.json" || lower2 === ".npmrc" || lower2 === ".pypirc") {
+    return true;
+  }
+  return false;
+}
+
+function classifyChangedFiles(files, opts) {
+  const changed = { reviewableFiles: [], incompleteReasons: [], manifestFiles: [] };
+  for (const file2 of files) {
+    const classification = classifyFile(file2, { exclude: opts.exclude, isSensitivePath });
+    if (!isSensitivePath(file2.path)) {
+      const skipReason = classification === "review" ? {} : { skipReason: classification };
+      changed.manifestFiles.push({ ...manifestFileOf(file2, opts.knownSecrets), ...skipReason });
+    }
+    if (classification === "incomplete-truncated") {
+      changed.incompleteReasons.push(`${file2.path}: patch truncated`);
+    } else if (classification === "review" && file2.patch) {
+      changed.reviewableFiles.push({ path: file2.path, patch: file2.patch });
+    }
+  }
+  return changed;
 }
 
 function reviewLimits(review) {
@@ -142714,6 +142745,14 @@ function verifyRetryOutputTokens(maxOutputTokens) {
   return Math.min(maxOutputTokens * 2, VERIFY_MAX_TOKENS);
 }
 
+function placeRejectedFindings(rejected, patchIndex, minSeverity) {
+  const eligible = rejected.filter(({ finding }) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK[minSeverity]);
+  const inline = new Set(anchorFindings(eligible.map(({ finding }) => finding), patchIndex).inline);
+  return eligible.map((rejection) => ({
+    ...rejection,
+    kind: inline.has(rejection.finding) ? "inline" : "summaryOnly"
+  }));
+}
 function makeRedactionFinding(path12, line, kind, idIndex) {
   return {
     id: `sec${idIndex}`,
@@ -143505,6 +143544,8 @@ function buildVerifyUserPrompt(input2, criteria) {
     `Code shown for it: ${fieldText((pathsByFinding.get(finding.id) ?? []).join(", "))}`
   ].join("\n"));
   const parts = [];
+  if (input2.notShown)
+    parts.push(wrapUntrusted2("CHANGED_BUT_NOT_SHOWN", input2.notShown));
   if (criteria.blocks.length > 0)
     parts.push(`Owner rules:
 
@@ -143517,7 +143558,9 @@ ${files.map(renderFile).join("\n\n")}`);
 }
 function buildVerifyPrompt(input2) {
   const criteria = buildCriteria(input2);
-  const system = buildVerifySystemPrompt(input2.language);
+  const system = `${buildVerifySystemPrompt(input2.language)}
+
+${NOT_SHOWN_RULE}`;
   return {
     // The rule exception and the trust sentence only when a rule is shown (ADR-0044).
     system: criteria.blocks.length > 0 ? withRuleCriteria(system) : system,
@@ -143618,7 +143661,9 @@ function applyVerdicts(findings, verdicts) {
 function buildFittingVerifyPrompt(input2, limit5) {
   const base = {
     language: input2.language,
-    findings: input2.findings,
+    notShown: input2.notShown,
+    // The model's own text can repeat a known secret; it is redacted before it reaches the prompt.
+    findings: input2.findings.map((finding) => redactFinding(finding, input2.knownSecrets)),
     files: input2.files,
     contextFiles: input2.contextFiles,
     maxCodeTokens: input2.maxCodeTokens,
@@ -143829,9 +143874,21 @@ async function runVerifyPass(input2) {
     findings: kept,
     totalUsage,
     verification: { checked: input2.findings.length, rejected: rejected.length },
-    rejected: rejected.map(({ finding }) => ({ title: finding.title, path: finding.path, line: finding.line })),
+    rejectedFindings: rejected.map(({ finding, reason }) => ({
+      finding: redactFinding(finding, input2.knownSecrets),
+      reason: redactSecrets(reason, [...input2.knownSecrets]).text
+    })),
+    rejected: rejected.map(({ finding }) => {
+      const { title, path: path12, line } = redactFinding(finding, input2.knownSecrets);
+      return { title, path: path12, line };
+    }),
     incompleteReasons
   };
+}
+function redactFinding(finding, knownSecrets) {
+  const secrets = [...knownSecrets];
+  const redacted = Object.entries(finding).map(([key, value]) => [key, typeof value === "string" ? redactSecrets(value, secrets).text : value]);
+  return Object.fromEntries(redacted);
 }
 
 var WHOLE_CONTEXT_SAFETY_TOKENS = 128;
@@ -143847,22 +143904,10 @@ async function runReview(input2) {
   const currentPricing = () => model.includedInSubscription ? subscriptionPricing : budgetCfg.pricing;
   const knownSecrets = secretsToRedact(input2.knownSecrets, input2.model, fallbackModels);
   const followUp = prepareFollowUp(input2.followUp, knownSecrets);
-  const incompleteReasons = [];
-  const reviewableFiles = [];
-  const manifestFiles = [];
-  for (const file2 of files) {
-    const classification = classifyFile(file2, {
-      exclude: reviewCfg.exclude,
-      isSensitivePath
-    });
-    if (!isSensitivePath(file2.path))
-      manifestFiles.push(manifestFileOf(file2, knownSecrets));
-    if (classification === "incomplete-truncated") {
-      incompleteReasons.push(`${file2.path}: patch truncated`);
-    } else if (classification === "review" && file2.patch) {
-      reviewableFiles.push({ path: file2.path, patch: file2.patch });
-    }
-  }
+  const { reviewableFiles, incompleteReasons, manifestFiles } = classifyChangedFiles(files, {
+    exclude: reviewCfg.exclude,
+    knownSecrets
+  });
   const redactedPrTitle = redactSecrets(pr.title, knownSecrets).text;
   const redactedPrBody = redactSecrets(pr.body, knownSecrets).text;
   const skill = input2.skill && {
@@ -143891,6 +143936,7 @@ async function runReview(input2) {
     // The rest of the PR is context on a follow-up review only (ADR-0030).
     prContextTokens: followUp ? reviewCfg.prContextTokens ?? DEFAULT_PR_CONTEXT_TOKENS : 0
   });
+  const notShown = renderNotShown(manifestFiles);
   const promptInput = {
     language: config2.language,
     maxFindings: reviewCfg.maxFindings,
@@ -143898,6 +143944,7 @@ async function runReview(input2) {
     rulesFiles: redactedRulesFiles,
     pathInstructions: redactedPathInstructions,
     files: redactedReviewableFiles,
+    notShown,
     ...input2.libraryDocs ? { libraryDocs: input2.libraryDocs } : {}
   };
   const withoutContext = buildReviewPrompt(promptInput);
@@ -144056,11 +144103,13 @@ async function runReview(input2) {
   let modelFindings = pass.findings;
   let verification;
   let verifyRejected = [];
+  let verifyRejectedFindings = [];
   if (reviewCfg.verify && modelFindings.length > 0) {
     const verified = await runVerifyPass({
       language: config2.language,
       findings: modelFindings,
       files: redactedReviewableFiles,
+      notShown,
       contextFiles: context.sentFiles(),
       maxCodeTokens: limits2.batchTokens,
       rulesFiles: redactedRulesFiles,
@@ -144079,6 +144128,7 @@ async function runReview(input2) {
     totalUsage = verified.totalUsage;
     verification = verified.verification;
     verifyRejected = verified.rejected;
+    verifyRejectedFindings = verified.rejectedFindings ?? [];
     incompleteReasons.push(...verified.incompleteReasons);
   }
   let judge;
@@ -144103,6 +144153,7 @@ async function runReview(input2) {
   });
   const patchIndex = anchorIndexOf(redactedReviewableFiles, input2.anchorFiles);
   const { inline, summaryOnly } = anchorFindings(selected, patchIndex);
+  const placedRejected = placeRejectedFindings(verifyRejectedFindings, patchIndex, reviewCfg.minSeverity);
   const complete = incompleteReasons.length === 0;
   const withheld = redactWithheld(pass.withheld ?? [], knownSecrets);
   const result = {
@@ -144126,7 +144177,7 @@ async function runReview(input2) {
     droppedInvalid: pass.droppedInvalid,
     complete,
     ...verification !== void 0 ? { verification } : {},
-    ...verifyRejected.length > 0 ? { verifyRejected } : {},
+    ...verifyRejected.length > 0 ? { verifyRejected, verifyRejectedFindings: placedRejected } : {},
     ...judge ? { judge } : {},
     ...contextDisclosure ? { context: contextDisclosure } : {},
     ...explored.disclosure(),

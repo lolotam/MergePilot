@@ -1,7 +1,25 @@
 import type { Secret } from '../credentials/secret.js';
 import { parsePatch, type ParsedPatch } from '../diff/parse-patch.js';
 import { redactSecrets } from '../security/redact.js';
-import type { Finding } from './types.js';
+import { anchorFindings } from '../validate/anchor.js';
+import { SEVERITY_RANK, type Finding, type Severity } from './types.js';
+import type { RejectedFinding } from './verify.js';
+
+export type PlacedRejectedFinding = RejectedFinding & { kind: 'inline' | 'summaryOnly' };
+
+/** Rejections may vote only when the bot's own severity and anchor policy allows them. */
+export function placeRejectedFindings(
+  rejected: readonly RejectedFinding[],
+  patchIndex: Map<string, ParsedPatch>,
+  minSeverity: Severity,
+): PlacedRejectedFinding[] {
+  const eligible = rejected.filter(({ finding }) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK[minSeverity]);
+  const inline = new Set(anchorFindings(eligible.map(({ finding }) => finding), patchIndex).inline);
+  return eligible.map((rejection) => ({
+    ...rejection,
+    kind: inline.has(rejection.finding) ? 'inline' : 'summaryOnly',
+  }));
+}
 
 /** Builds a security Finding for a redacted secret on an added line. */
 export function makeRedactionFinding(

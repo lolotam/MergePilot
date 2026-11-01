@@ -11,6 +11,8 @@ export interface BotFindingsFate {
   name: string;
   /** The bot's findings after its own verification and selection: its count in the bots table. */
   reported: number;
+  /** Rejected copies incorporated as agreement or revived; excluded from reported. */
+  rejectedInAgreement?: number;
   /** Published with this bot's own wording. */
   own: number;
   /** Published once, with the wording of another bot that found the same issue. */
@@ -34,13 +36,15 @@ export interface PanelClusterOutcome {
 /** For each bot that completed, where its findings went. */
 export function botFindingsFates(bots: readonly PanelBotFindings[], outcome: PanelClusterOutcome): BotFindingsFate[] {
   return bots.map((bot) => {
-    const foundByBot = (cluster: ConsensusCluster): boolean => cluster.foundBy.some((b) => b.slot === bot.slot);
+    const foundByBot = (cluster: ConsensusCluster): boolean => cluster.foundBy.some((b) => b.slot === bot.slot) && !cluster.rejectedBy?.some((b) => b.slot === bot.slot);
     const count = (clusters: readonly ConsensusCluster[]): number => clusters.filter(foundByBot).length;
     const ownFindings = new Set([...bot.inline, ...bot.summaryOnly]);
     const published = outcome.published.filter(foundByBot);
     // The cluster shows its representative finding, which is the bot's own object when it won.
     const own = published.filter((cluster) => ownFindings.has(cluster.finding)).length;
+    const rejectedInAgreement = [...outcome.published, ...outcome.below, ...outcome.overLimit, ...outcome.alreadyPosted].filter((cluster) => cluster.rejectedBy?.some((entry) => entry.slot === bot.slot)).length;
     return {
+      ...(rejectedInAgreement > 0 ? { rejectedInAgreement } : {}),
       slot: bot.slot,
       name: bot.name,
       reported: bot.inline.length + bot.summaryOnly.length,

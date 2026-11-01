@@ -1,5 +1,6 @@
 import {
   judgeSameIssue,
+  UNSHOWN_CODE_MAX_CONFIDENCE,
   SEVERITY_RANK,
   type Finding,
   type Judge,
@@ -34,6 +35,7 @@ export interface PanelBotFindings {
   name: string;
   inline: Finding[];
   summaryOnly: Finding[];
+  rejected?: Array<{ finding: Finding; reason: string; kind: ClusterKind }> | undefined;
 }
 
 export type ClusterKind = 'inline' | 'summaryOnly';
@@ -44,6 +46,8 @@ export interface ConsensusCluster {
   kind: ClusterKind;
   /** The distinct bots that found it, by slot. */
   foundBy: Array<{ slot: number; name: string }>;
+  rejectedBy?: Array<{ slot: number; finding: Finding }> | undefined;
+  revived?: boolean | undefined;
 }
 
 export interface MergePanelInput {
@@ -74,6 +78,7 @@ interface Entry {
   name: string;
   kind: ClusterKind;
   finding: Finding;
+  rejected?: boolean;
 }
 
 const ALWAYS_KEPT = new Set<Finding['severity']>(['critical', 'high']);
@@ -82,13 +87,19 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
   const entries: Entry[] = input.bots.flatMap((bot) => [
     ...bot.inline.map((finding) => ({ slot: bot.slot, name: bot.name, kind: 'inline' as const, finding })),
     ...bot.summaryOnly.map((finding) => ({ slot: bot.slot, name: bot.name, kind: 'summaryOnly' as const, finding })),
+    ...(bot.rejected ?? []).map(({ finding, kind }) => ({ slot: bot.slot, name: bot.name, kind, finding, rejected: true })),
   ]);
   const clusters = new BotClusters(entries.map((e) => e.slot));
-  // Strongest evidence first, so a weaker match never takes a bot's place in a cluster that an
-  // exact title would have earned: the same title, then the wording rule by score, then the judge.
+  // Kept-to-kept deterministic matches reserve bot slots before rejected copies can consume them.
+  // Within each tier, exact titles precede wording matches; the judge follows both tiers.
   const { byTitle, byClaim, undecided } = candidatePairs(entries);
-  for (const [a, b] of byTitle) clusters.join(a, b);
-  for (const { a, b } of byClaim.sort((x, y) => y.score - x.score)) clusters.join(a, b);
+  const hasRejected = (a: number, b: number): boolean => Boolean(entries[a]!.rejected || entries[b]!.rejected);
+  const rankedClaims = byClaim.sort((x, y) => y.score - x.score);
+  for (const tier of ['kept', 'rejected'] as const) {
+    const inTier = (a: number, b: number): boolean => hasRejected(a, b) === (tier === 'rejected');
+    for (const [a, b] of byTitle) if (inTier(a, b)) clusters.join(a, b);
+    for (const { a, b } of rankedClaims) if (inTier(a, b)) clusters.join(a, b);
+  }
   const semantic = input.judge
     ? await joinByJudge(entries, clusters, undecided, { ...input, judge: input.judge })
     : undefined;
@@ -102,6 +113,8 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
   const agreed: ConsensusCluster[] = [];
   const below: ConsensusCluster[] = [];
   for (const group of groups.values()) {
+    // A cluster holds at most one finding per bot, so its length is the number of bots that raised it.
+    if (group.every((entry) => entry.rejected) && group.length < 2) continue;
     const cluster = toCluster(group);
     const enough = cluster.foundBy.length >= input.minAgreement;
     (enough || ALWAYS_KEPT.has(cluster.finding.severity) ? agreed : below).push(cluster);
@@ -192,7 +205,9 @@ function candidatePairs(entries: readonly Entry[]): {
 
 /**
  * Asks the judge, in one request, about the undecided pairs that could still join: a pair already
- * in one cluster, or whose clusters share a bot, is not asked. `merged` counts the joins made.
+ * in one cluster, or whose clusters share a bot, is not asked. Pairs of kept findings come first,
+ * so rejected copies never take a place in the pair limit that kept findings had (ADR-0050).
+ * `merged` counts the joins made.
  */
 async function joinByJudge(
   entries: readonly Entry[],
@@ -200,7 +215,9 @@ async function joinByJudge(
   undecided: readonly EntryPair[],
   input: MergePanelInput & { judge: Judge },
 ): Promise<MergePanelResult['semantic']> {
-  const asked = undecided.filter(([a, b]) => clusters.canJoin(a, b)).slice(0, MAX_CONSENSUS_PAIRS);
+  const hasRejected = ([a, b]: EntryPair): boolean => Boolean(entries[a]!.rejected || entries[b]!.rejected);
+  const joinable = undecided.filter(([a, b]) => clusters.canJoin(a, b));
+  const asked = [...joinable.filter((p) => !hasRejected(p)), ...joinable.filter(hasRejected)].slice(0, MAX_CONSENSUS_PAIRS);
   if (asked.length === 0) return undefined;
   const pairs: SameIssuePair[] = asked.map(([a, b], i) => {
     const fa = entries[a]!.finding;
@@ -239,13 +256,20 @@ function sameTitle(a: Finding, b: Finding): boolean {
 }
 
 function toCluster(group: Entry[]): ConsensusCluster {
-  const best = [...group].sort(
+  const verified = group.filter((entry) => !entry.rejected);
+  const revived = verified.length === 0;
+  const best = [...(revived ? group : verified)].sort(
     (a, b) => SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity] || a.slot - b.slot,
   )[0]!;
   const bots = new Map<number, string>();
   for (const e of group) bots.set(e.slot, e.name);
   const foundBy = [...bots.entries()].sort((a, b) => a[0] - b[0]).map(([slot, name]) => ({ slot, name }));
-  return { finding: best.finding, kind: best.kind, foundBy };
+  return {
+    finding: revived ? { ...best.finding, confidence: Math.min(best.finding.confidence, UNSHOWN_CODE_MAX_CONFIDENCE) } : best.finding,
+    kind: best.kind, foundBy,
+    ...(group.some((entry) => entry.rejected) ? { rejectedBy: group.filter((entry) => entry.rejected).map((entry) => ({ slot: entry.slot, finding: entry.finding })) } : {}),
+    ...(revived ? { revived: true } : {}),
+  };
 }
 
 function byImportance(a: ConsensusCluster, b: ConsensusCluster): number {
@@ -257,13 +281,24 @@ function byImportance(a: ConsensusCluster, b: ConsensusCluster): number {
 }
 
 /** "Found by: A, B (2/3)", localized; bot names are escaped. */
-export function foundByLabel(cluster: ConsensusCluster, total: number, language: 'ar' | 'en'): string {
+export function foundByLabel(
+  cluster: ConsensusCluster,
+  total: number,
+  language: 'ar' | 'en',
+  publication: 'published' | 'unpublished' = 'unpublished',
+): string {
   const names = cluster.foundBy.map((b) => escapeInline(b.name));
   const count = `(${cluster.foundBy.length}/${total})`;
-  return language === 'ar' ? `وجدها: ${names.join('، ')} ${count}` : `Found by: ${names.join(', ')} ${count}`;
+  const verdict = publication === 'published'
+    ? (language === 'ar' ? 'نُشرت رغم رفض التحقق' : 'published although the verifier rejected it')
+    : (language === 'ar' ? 'رفضها التحقق' : 'verifier-rejected');
+  const marker = cluster.revived ? (language === 'ar'
+    ? ` — غير متحققة: ${verdict}؛ رصدها ${cluster.foundBy.length} بوتات بشكل مستقل (لم تمر بفلتر Jev)`
+    : ` - Unverified: ${verdict}; raised independently by ${cluster.foundBy.length} bots (not checked by Jev)`) : '';
+  return (language === 'ar' ? `وجدها: ${names.join('، ')} ${count}` : `Found by: ${names.join(', ')} ${count}`) + marker;
 }
 
 /** The cluster's finding with its "found by" label added to the body, for the inline comment. */
 export function withFoundBy(cluster: ConsensusCluster, total: number, language: 'ar' | 'en'): Finding {
-  return { ...cluster.finding, body: `${cluster.finding.body}\n\n_${foundByLabel(cluster, total, language)}_` };
+  return { ...cluster.finding, body: `${cluster.finding.body}\n\n_${foundByLabel(cluster, total, language, 'published')}_` };
 }

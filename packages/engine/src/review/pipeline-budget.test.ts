@@ -248,7 +248,7 @@ describe('runReview - USD budget and pricing', () => {
     const model: ReviewModel = { label: 'fake:spy', generate: generateMock };
     const budget = {
       // Covers the review prompt and output at $100/MTok, but not verification too.
-      perReviewUsd: 0.65,
+      perReviewUsd: 0.70,
       maxInputTokens: 200000,
       pricing: { inputPerMTok: 100, outputPerMTok: 100 },
     };

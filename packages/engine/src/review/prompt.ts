@@ -11,6 +11,7 @@
  *   untrusted blocks and to optionally report them as a finding.
  */
 
+import { NOT_SHOWN_RULE } from './manifest.js';
 import { matchesGlob } from '../diff/glob.js';
 import { ESCAPED_MARKER_NOTE, escapeDelimiters, escapeLabel } from './delimiters.js';
 import { DESIGN_REVIEW_SECTION, isDesignReview } from './design-review.js';
@@ -32,6 +33,8 @@ export interface ReviewableFile {
 }
 
 export interface PromptInput {
+  /** Already redacted skipped-file manifest. */
+  notShown?: string | undefined;
   /** Comment / summary language. Only `'ar'` triggers Arabic instructions; anything else → English. */
   language: string;
   maxFindings: number;
@@ -211,10 +214,10 @@ reply starts with "{" and ends with "}", with no markdown fence around it.
     }
   ],
   "summary": "<string — 2-4 sentences: what the PR changes, its biggest risk if any, your overall assessment; never a list of the findings>",
-  "withheld": [{ "title": "<string — under 15 words: a problem you noticed but did not report as a finding>", "reason": "<string — a few words: below the confidence bar, out of scope, already open, or over the findings limit>" }]
+  "withheld": [{ "title": "<string — under 15 words: a problem you noticed but did not report as a finding>", "reason": "<string — a few words: already reported/open, over the findings limit, outside this PR changes, or an owner decision named in the rules>" }]
 }
 If you found nothing to report, return "findings": [] — never omit the key. "withheld" is optional (at most 5 items); if \
-your summary names a problem, it must be a finding or appear in "withheld" with a reason.
+your summary names a problem, it must be a finding or appear in "withheld" with a reason. Never withhold a defect in changed lines as "out of scope" or on speculation. If uncertain, report at confidence 0.5-0.69 and name the code that would confirm it. Allowed withheld reasons only: already reported/open, over the findings limit, outside this PR changes, or an owner decision named in the rules.
 Keys and the severity, category and side values are spelled exactly as above, whatever language the text fields use.`;
 
 const WHAT_YOU_SEE = `\
@@ -362,6 +365,7 @@ function buildSystemPrompt(
     ...(batched ? [BATCHES, ''] : []),
     `Return at most ${maxFindings} findings. Prefer high-severity, high-confidence findings.`,
     '',
+    NOT_SHOWN_RULE,
     TRUST_RULE,
     // Last, so "the rules above" in its precedence line covers every core section (ADR-0034).
     ...(skill ? ['', renderSkillSection(skill)] : []),
@@ -374,6 +378,7 @@ function buildSystemPrompt(
 
 function buildUserPrompt(input: PromptInput): string {
   const parts: string[] = [];
+  if (input.notShown) parts.push(wrapUntrusted('CHANGED_BUT_NOT_SHOWN', input.notShown));
 
   // PR title + body (truncated)
   const prBody = input.pr.body.slice(0, PR_BODY_MAX_CHARS);

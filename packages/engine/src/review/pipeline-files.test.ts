@@ -65,7 +65,8 @@ describe('runReview — file handling', () => {
       knownSecrets: [],
     });
 
-    expect(capturedUser).not.toContain('pnpm-lock.yaml');
+    expect(capturedUser).toContain('pnpm-lock.yaml | skip-generated');
+    expect(capturedUser).not.toContain('UNTRUSTED:PATCH:pnpm-lock.yaml');
     expect(capturedUser).toContain('src/index.ts');
   });
 
@@ -93,7 +94,8 @@ describe('runReview — file handling', () => {
       knownSecrets: [],
     });
 
-    expect(capturedUser).not.toContain('src/old.ts');
+    expect(capturedUser).toContain('src/old.ts | skip-removed');
+    expect(capturedUser).not.toContain('UNTRUSTED:PATCH:src/old.ts');
     expect(capturedUser).toContain('src/new.ts');
   });
 

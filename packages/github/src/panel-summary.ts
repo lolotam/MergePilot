@@ -81,15 +81,20 @@ interface Labels {
   dedupeUnavailable: (code: string) => string;
   incomplete: string;
   outside: string;
+  /** Inline claims published although every bot's verifier rejected them (ADR-0050). */
+  revived: string;
   below: (n: number) => string;
   overLimit: (n: number) => string;
   summaries: string;
   /** The withheld problems of one bot, under its summary (ADR-0042). */
   withheld: (n: number) => string;
   fatesHeader: string;
+  rejectedFatesHeader: string;
   fateOf: (notOwn: number, reported: number) => string;
   fateParts: Record<FatePart, (n: number) => string>;
   fatesVerifyNote: string;
+  /** Rejected copies that counted as agreement or revival, outside the table count (ADR-0050). */
+  rejectedInAgreement: (n: number) => string;
   counts: (inline: number, outside: number) => string;
   disclaimer: string;
 }
@@ -109,11 +114,13 @@ const EN: Labels = {
   dedupeUnavailable: (code) => `> ⚠️ Jev duplicate check unavailable: ${code}`,
   incomplete: '### ⚠️ Warning: Incomplete review',
   outside: '### Findings outside the diff',
+  revived: '### Published although the verifier rejected them',
   below: (n) => `Below agreement (${n})`,
   overLimit: (n) => `Over the findings limit (${n})`,
   summaries: 'Bot summaries',
   withheld: (n) => `Noticed but not reported (${n}):`,
   fatesHeader: "> ℹ️ Findings counted in the table but not published as the bot's own comment:",
+  rejectedFatesHeader: '> ℹ️ Verifier-rejected copies incorporated in clusters (excluded from the table count):',
   fateOf: (notOwn, reported) => `${notOwn} of ${reported}`,
   fateParts: {
     mergedIntoOther: (n) => `${n} presented in another bot's wording`,
@@ -122,6 +129,7 @@ const EN: Labels = {
     alreadyPosted: (n) => `${n} already posted by an earlier review`,
   },
   fatesVerifyNote: '> Findings rejected by verification are not counted in the table; they are listed under «Rejected by verification».',
+  rejectedInAgreement: (n) => `${n} verifier-rejected copies contributed to agreement or unverified revival; excluded from the table count`,
   counts: (inline, outside) => `Inline comments: ${inline} · Outside diff: ${outside}`,
   disclaimer: 'MergePilot only comments and never approves or blocks merging.',
 };
@@ -138,11 +146,13 @@ const AR: Labels = {
   dedupeUnavailable: (code) => `> ⚠️ فحص التكرار بالمعنى (Jev) غير متاح: ${code}`,
   incomplete: '### ⚠️ تحذير: مراجعة غير مكتملة',
   outside: '### ملاحظات خارج التغييرات',
+  revived: '### منشورة رغم رفض التحقق',
   below: (n) => `أقل من حد الاتفاق (${n})`,
   overLimit: (n) => `فوق الحد الأقصى للملاحظات (${n})`,
   summaries: 'ملخصات المراجعين',
   withheld: (n) => `رصدها ولم ينشرها كملاحظات (${n}):`,
   fatesHeader: '> ℹ️ ملاحظات محسوبة في الجدول لم تُنشر كتعليق خاص بالمراجع:',
+  rejectedFatesHeader: '> ℹ️ نسخ رفضها التحقق دخلت في التجميع (خارج عدد الجدول):',
   fateOf: (notOwn, reported) => `${notOwn} من ${reported}`,
   fateParts: {
     mergedIntoOther: (n) => `${n} اتعرضت بصياغة بوت تاني`,
@@ -151,6 +161,7 @@ const AR: Labels = {
     alreadyPosted: (n) => `${n} منشورة من مراجعة سابقة`,
   },
   fatesVerifyNote: '> الملاحظات التي رفضها التحقق لا تُحسب في الجدول؛ تجدها تحت «رفضها التحقق».',
+  rejectedInAgreement: (n) => `${n} نسخ رفضها التحقق دخلت في الاتفاق أو التجميع غير المتحقق؛ خارج عدد الجدول`,
   counts: (inline, outside) => `تعليقات مضمنة: ${inline} · خارج التغييرات: ${outside}`,
   disclaimer: '`MergePilot` يكتفي بالتعليق فقط ولا يوافق على الدمج أو يمنعه.',
 };
@@ -173,9 +184,9 @@ function renderTable(input: PanelSummaryInput, labels: Labels): string {
   return [head, rule, ...rows].join('\n');
 }
 
-function clusterLine(cluster: ConsensusCluster, total: number, language: 'ar' | 'en'): string {
+function clusterLine(cluster: ConsensusCluster, total: number, language: 'ar' | 'en', publication: 'published' | 'unpublished'): string {
   const f = cluster.finding;
-  return `**${f.severity}** · \`${neutralize(f.path)}:${f.line}\` — ${neutralize(f.title.trim())} · _${foundByLabel(cluster, total, language)}_`;
+  return `**${f.severity}** · \`${neutralize(f.path)}:${f.line}\` — ${neutralize(f.title.trim())} · _${foundByLabel(cluster, total, language, publication)}_`;
 }
 
 /**
@@ -183,15 +194,22 @@ function clusterLine(cluster: ConsensusCluster, total: number, language: 'ar' | 
  * the rest went (ADR-0034 amendment); undefined when every bot published all it reported.
  */
 function renderFindingsFates(input: PanelSummaryInput, labels: Labels): string | undefined {
-  const lines = (input.findingsFates ?? []).flatMap((fate) => {
+  const fates = input.findingsFates ?? [];
+  const lines = fates.flatMap((fate) => {
     const notOwn = fate.reported - fate.own;
     if (notOwn <= 0) return [];
     const parts = FATE_PARTS.filter((part) => fate[part] > 0).map((part) => labels.fateParts[part](fate[part]));
     return [`> - **${escapeInline(fate.name)}** (${labels.fateOf(notOwn, fate.reported)}): ${parts.join(' · ')}`];
   });
-  if (lines.length === 0) return undefined;
+  const rejectedLines = fates.flatMap((fate) => fate.rejectedInAgreement
+    ? [`> - **${escapeInline(fate.name)}**: ${labels.rejectedInAgreement(fate.rejectedInAgreement)}`] : []);
+  if (lines.length === 0 && rejectedLines.length === 0) return undefined;
   const verifyNote = (input.verifyRejected ?? []).length > 0 ? [labels.fatesVerifyNote] : [];
-  return [labels.fatesHeader, ...lines, ...verifyNote].join('\n');
+  return [
+    ...(lines.length > 0 ? [labels.fatesHeader, ...lines] : []),
+    ...(rejectedLines.length > 0 ? [labels.rejectedFatesHeader, ...rejectedLines] : []),
+    ...verifyNote,
+  ].join('\n');
 }
 
 function details(summary: string, body: string): string {
@@ -241,20 +259,25 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
     sections.push(`${labels.incomplete}\n\n${reasons.map((r) => `- ${neutralize(r.trim())}`).join('\n')}`);
   }
 
+  const revived = merge.kept.filter((cluster) => cluster.revived && cluster.kind === 'inline');
+  if (revived.length > 0) {
+    const items = revived.map((cluster) => `- ${clusterLine(cluster, merge.total, input.language, 'published')}`);
+    sections.push(`${labels.revived}\n\n${items.join('\n')}`);
+  }
   const outside = merge.kept.filter((c) => c.kind === 'summaryOnly');
   if (outside.length > 0) {
     const items = outside.map(
-      (c) => `${clusterLine(c, merge.total, input.language)}\n\n${neutralize(c.finding.body.trim())}`,
+      (c) => `${clusterLine(c, merge.total, input.language, 'published')}\n\n${neutralize(c.finding.body.trim())}`,
     );
     sections.push(`${labels.outside}\n\n${items.join('\n\n')}`);
   }
 
   if (merge.below.length > 0) {
-    const items = merge.below.map((c) => `- ${clusterLine(c, merge.total, input.language)}`);
+    const items = merge.below.map((c) => `- ${clusterLine(c, merge.total, input.language, 'unpublished')}`);
     sections.push(details(labels.below(merge.below.length), items.join('\n')));
   }
   if (merge.overLimit.length > 0) {
-    const items = merge.overLimit.map((c) => `- ${clusterLine(c, merge.total, input.language)}`);
+    const items = merge.overLimit.map((c) => `- ${clusterLine(c, merge.total, input.language, 'unpublished')}`);
     sections.push(details(labels.overLimit(merge.overLimit.length), items.join('\n')));
   }
 
