@@ -1,4 +1,5 @@
 import type { AppStore, MaintenanceRun } from '../core/types.js';
+import { runWebScanRetention, type WebScanRetentionDeps } from '../webscan/retention.js';
 
 /** Runs deleted per statement; the loop repeats until a batch comes back short. */
 export const RETENTION_BATCH_SIZE = 1000;
@@ -22,6 +23,13 @@ export interface RetentionOptions {
   pauseMs?: number;
   sleep?: (ms: number) => Promise<void>;
   logger?: RetentionLogger | undefined;
+  /**
+   * The website scanner retention (ADR-0052 section 11).
+   *
+   * It runs in the same nightly job: the scanner has its own retention horizon and its
+   * own tombstones, and it must not be left to a second, independent schedule.
+   */
+  webScan?: WebScanRetentionDeps | undefined;
 }
 
 export interface RetentionResult {
@@ -98,6 +106,24 @@ async function executeRetention(
     }
   } catch (err) {
     error ??= describeError(err);
+  }
+
+  // The website scanner keeps its own ledger, its own tombstones and its own snapshot
+  // horizon (ADR-0052 section 11). Its pass runs after the workspace cleanup, and a
+  // failure there is recorded without undoing the cleanup that already ran.
+  if (options.webScan) {
+    try {
+      await runWebScanRetention(options.webScan);
+    } catch (err) {
+      error ??= describeError(err);
+      options.logger?.error(
+        {
+          event: 'maintenance.webscan_retention_failed',
+          errorName: err instanceof Error ? err.name : 'unknown',
+        },
+        'Website scanner retention failed',
+      );
+    }
   }
 
   await store.finishMaintenanceRun(run.id, { deletedCount: deleted, error });

@@ -357,3 +357,8 @@ export const schemaMigrations = pgTable('schema_migrations', {
     .notNull()
     .defaultNow(),
 });
+
+// The website security scan tables (ADR-0052). They live in their own module so the
+// scanner stays out of the workspace-scoped schema; the re-export keeps them reachable
+// through this module like every other table.
+export * from './schema-webscan.js';

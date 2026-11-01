@@ -5,8 +5,19 @@ import { MemoryStore } from '../core/memory-store.js';
 import { CredentialService } from '../credentials/service.js';
 import { EnvelopeVault } from './envelope-vault.js';
 import { reencryptAll } from './rotate.js';
+import { MemoryScannerEnvelopeStore } from './rotate.test-helpers.js';
+import { PurposeScopedVault } from './scoped-secrets.js';
 
 const fakeValue = (...parts: string[]) => parts.join('-');
+
+/**
+ * A scanner rotation with no identity envelopes, sharing the credential vault's master key
+ * ring. The rotation refuses to run when the two vaults disagree on the key version, so the
+ * test always builds the scanner vault from the same keys.
+ */
+function scannerRotation(current: number, keys: Map<number, Buffer>) {
+  return { store: new MemoryScannerEnvelopeStore(), vault: new PurposeScopedVault({ current, keys }) };
+}
 
 /** A v1 store holding one xai subscription (no key slots), and a v2 vault for rotation. */
 async function subscriptionFixture(expires: number) {
@@ -22,7 +33,8 @@ async function subscriptionFixture(expires: number) {
   };
   await service.saveSubscription('ws', 'xai', sub, 'u');
   expect(await store.listProviderKeys('ws', 'xai')).toEqual([]);
-  return { store, service, vaultV1, vaultV2, onlyV2, sub };
+  const scanner = scannerRotation(2, new Map([[1, key1], [2, key2]]));
+  return { store, service, vaultV1, vaultV2, onlyV2, sub, scanner };
 }
 
 /** Runs `concurrent` once, just before the next locked credential change, as another process would. */
@@ -107,7 +119,7 @@ describe('reencryptAll', () => {
     });
 
     // Re-encrypt only ws-1
-    const result = await reencryptAll(store, vaultV2, ['ws-1']);
+    const result = await reencryptAll(store, vaultV2, ['ws-1'], scannerRotation(2, new Map([[1, key1], [2, key2]])));
     expect(result.reencrypted).toBe(1);
     expect(result.skipped).toBe(1);
 
@@ -152,9 +164,9 @@ describe('reencryptAll', () => {
     });
     beforeNextCredentialLock(store, () => store.deleteWorkspace('ws-del'));
 
-    const result = await reencryptAll(store, vaultV2, ['ws-del']);
+    const result = await reencryptAll(store, vaultV2, ['ws-del'], scannerRotation(2, new Map([[1, key1], [2, key2]])));
 
-    expect(result).toEqual({ reencrypted: 0, skipped: 0 });
+    expect(result).toEqual({ reencrypted: 0, skipped: 0, scannerReencrypted: 0, scannerSkipped: 0 });
     expect(await store.listCredentials('ws-del')).toEqual([]);
   });
 
@@ -171,7 +183,8 @@ describe('reencryptAll', () => {
       userId: 'u',
     });
 
-    expect(await reencryptAll(store, vault, ['ws-current'])).toEqual({ reencrypted: 0, skipped: 2 });
+    expect(await reencryptAll(store, vault, ['ws-current'], scannerRotation(1, new Map([[1, key1]]))))
+      .toEqual({ reencrypted: 0, skipped: 2, scannerReencrypted: 0, scannerSkipped: 0 });
   });
 
   it('does not resurrect a deleted multi-key credential via the outer parent branch', async () => {
@@ -213,7 +226,7 @@ describe('reencryptAll', () => {
       return rows;
     });
 
-    await reencryptAll(store, vaultV2, ['ws-gone']);
+    await reencryptAll(store, vaultV2, ['ws-gone'], scannerRotation(2, new Map([[1, key1], [2, key2]])));
 
     expect(await store.getCredential('ws-gone', 'gemini')).toBeNull();
     expect(await store.listProviderKeys('ws-gone', 'gemini')).toEqual([]);
@@ -245,7 +258,7 @@ describe('reencryptAll', () => {
       }),
     );
 
-    const result = await reencryptAll(store, vaultV2, ['ws-rot']);
+    const result = await reencryptAll(store, vaultV2, ['ws-rot'], scannerRotation(2, new Map([[1, key1], [2, key2]])));
     expect(result.reencrypted).toBeGreaterThan(0);
     expect(lockedSlotCount).toBe(2);
 
@@ -300,7 +313,7 @@ describe('reencryptAll', () => {
       });
     });
 
-    await reencryptAll(store, vaultV2, ['ws-race']);
+    await reencryptAll(store, vaultV2, ['ws-race'], scannerRotation(2, new Map([[1, key1], [2, key2]])));
 
     const slots = await store.listProviderKeys('ws-race', 'gemini');
     expect(slots).toHaveLength(3);
@@ -354,7 +367,7 @@ describe('reencryptAll', () => {
     expect(plainSub).toContain('mergepilot:oauth');
 
     const encrypt = vi.spyOn(vaultV2, 'encrypt');
-    await reencryptAll(store, vaultV2, ['ws-sub']);
+    await reencryptAll(store, vaultV2, ['ws-sub'], scannerRotation(2, new Map([[1, key1], [2, key2]])));
     expect(encrypt).toHaveBeenCalled();
 
     const parentAfter = await store.getCredential('ws-sub', 'openai');
@@ -382,7 +395,7 @@ describe('reencryptAll', () => {
     await service.saveSubscription('ws-both', 'anthropic', sub, 'u');
     await service.appendProviderKey({ workspaceId: 'ws-both', provider: 'anthropic', apiKey, userId: 'u' });
 
-    await reencryptAll(store, vaultV2, ['ws-both']);
+    await reencryptAll(store, vaultV2, ['ws-both'], scannerRotation(2, new Map([[1, key1], [2, key2]])));
 
     const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
     const context = { workspaceId: 'ws-both', provider: 'anthropic' } as const;
@@ -395,17 +408,17 @@ describe('reencryptAll', () => {
   });
 
   it('keeps a subscription token refreshed concurrently with rotation instead of the stale read', async () => {
-    const { store, service, vaultV2, onlyV2 } = await subscriptionFixture(0);
+    const { store, service, vaultV2, onlyV2, scanner } = await subscriptionFixture(0);
     const fetchMock = vi.fn(async () => Response.json({
       access_token: fakeValue('new', 'access', '2222'), refresh_token: fakeValue('new', 'refresh'), expires_in: 3600,
     }));
     vi.stubGlobal('fetch', fetchMock);
     beforeNextCredentialLock(store, () => service.resolve('ws', 'xai'));
 
-    const result = await reencryptAll(store, vaultV2, ['ws']);
+    const result = await reencryptAll(store, vaultV2, ['ws'], scanner);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ reencrypted: 1, skipped: 0 });
+    expect(result).toEqual({ reencrypted: 1, skipped: 0, scannerReencrypted: 0, scannerSkipped: 0 });
     const stored = await store.getCredential('ws', 'xai');
     expect(stored?.keyVersion).toBe(2);
     expect(stored?.last4).toBe('2222');
@@ -415,22 +428,22 @@ describe('reencryptAll', () => {
   });
 
   it('does not resurrect a single-key credential disconnected during rotation', async () => {
-    const { store, service, vaultV2 } = await subscriptionFixture(Date.now() + 3_600_000);
+    const { store, service, vaultV2, scanner } = await subscriptionFixture(Date.now() + 3_600_000);
     beforeNextCredentialLock(store, () => service.deleteKey('ws', 'xai'));
 
-    const result = await reencryptAll(store, vaultV2, ['ws']);
+    const result = await reencryptAll(store, vaultV2, ['ws'], scanner);
 
-    expect(result).toEqual({ reencrypted: 0, skipped: 0 });
+    expect(result).toEqual({ reencrypted: 0, skipped: 0, scannerReencrypted: 0, scannerSkipped: 0 });
     expect(await store.getCredential('ws', 'xai')).toBeNull();
     expect(await store.listCredentials('ws')).toEqual([]);
   });
 
   it('writes nothing and leaks no token when re-encryption fails inside the lock', async () => {
-    const { store, vaultV1, vaultV2, sub } = await subscriptionFixture(Date.now() + 3_600_000);
+    const { store, vaultV1, vaultV2, sub, scanner } = await subscriptionFixture(Date.now() + 3_600_000);
     const before = await store.getCredential('ws', 'xai');
     vi.spyOn(vaultV2, 'encrypt').mockRejectedValue(new Error('vault unavailable'));
 
-    const error: unknown = await reencryptAll(store, vaultV2, ['ws']).then(() => null, (caught: unknown) => caught);
+    const error: unknown = await reencryptAll(store, vaultV2, ['ws'], scanner).then(() => null, (caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(Error);
     const surfaced = `${String(error)}\n${(error as Error).stack ?? ''}`;

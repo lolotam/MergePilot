@@ -11,6 +11,8 @@ import {
 import { MemoryStore } from '../core/memory-store.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { reencryptAll } from '../vault/rotate.js';
+import { MemoryScannerEnvelopeStore } from '../vault/rotate.test-helpers.js';
+import { PurposeScopedVault } from '../vault/scoped-secrets.js';
 import { CredentialService } from './service.js';
 
 const PROVIDER = 'google-antigravity';
@@ -118,7 +120,10 @@ describe('Google Antigravity credentials', () => {
     const onlyV2 = new EnvelopeVault({ current: 2, keys: new Map([[2, key2]]) });
     const store = new MemoryStore();
     await new CredentialService({ store, vault: vaultV1 }).saveSubscription('ws', PROVIDER, credential(), 'u');
-    expect(await reencryptAll(store, vaultV2, ['ws'])).toMatchObject({ reencrypted: 1 });
+    expect(await reencryptAll(store, vaultV2, ['ws'], {
+      store: new MemoryScannerEnvelopeStore(),
+      vault: new PurposeScopedVault({ current: 2, keys: new Map([[1, key1], [2, key2]]) }),
+    })).toMatchObject({ reencrypted: 1 });
     const row = (await store.getCredential('ws', PROVIDER))!;
     expect(decodeSubscription(await onlyV2.decrypt(row.ciphertext, { workspaceId: 'ws', provider: PROVIDER }), PROVIDER)?.credential.projectId).toBe('project-1');
   });

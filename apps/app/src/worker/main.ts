@@ -18,6 +18,8 @@ import { processPauseCommandJob } from './process-pause-command.js';
 import { processReviewCommandJob } from './process-review-command.js';
 import { processReviewJob } from './process-review.js';
 import { startMaintenanceScheduler, type MaintenanceScheduler } from './retention-schedule.js';
+import { startWebScanRuntime, type WebScanRuntime } from '../webscan/runtime.js';
+import { RedisWebScanEventBus } from '../webscan/events.js';
 import type { GitHubAppClientFactory, ProcessReviewDeps } from './types.js';
 import { isEntryPoint } from '../core/entry-point.js';
 
@@ -149,6 +151,8 @@ export interface WorkerInstance {
   healthServer: http.Server;
   config: AppConfig;
   deps: ProcessReviewDeps;
+  /** The website security scanner. Absent when the scanner cannot run here. */
+  webScan?: WebScanRuntime | undefined;
   stop: () => Promise<void>;
 }
 
@@ -226,10 +230,74 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     }
   };
 
-  // Daily run retention (ADR-0014) and model price refresh (ADR-0016). Started in the background: a slow Redis must not hold up reviews.
+  // The website security scanner (ADR-0052). It runs only where there is a real
+  // database, a real Redis and the master key ring of the scanner vault; a local
+  // in-memory setup never scans anything.
+  let webScan: WebScanRuntime | undefined;
+  let webScanEvents: RedisWebScanEventBus | undefined;
+  const scannerPool = services.pool;
+  const scannerVault = services.scannerVault;
+  const scannerReady =
+    connection !== undefined &&
+    scannerPool !== undefined &&
+    scannerVault !== undefined &&
+    !config.databaseUrl.startsWith('memory:');
+  if (scannerReady && connection !== undefined && scannerPool !== undefined && scannerVault !== undefined) {
+    try {
+      // The progress of a scan reaches the dashboard over Redis pub/sub. Without this
+      // publisher the worker scans and nobody ever sees the scan run.
+      webScanEvents = new RedisWebScanEventBus({
+        redisUrl: config.redisUrl,
+        onError: (errorName) => {
+          workerLog.warn(
+            { event: 'webscan.events_failed', errorName },
+            'The web scan event bus failed',
+          );
+        },
+      });
+      webScan = await startWebScanRuntime({
+        db: services.db,
+        pool: scannerPool,
+        vault: scannerVault,
+        platformAdmins: config.platformAdmins ?? [],
+        connection,
+        events: webScanEvents,
+        logger: {
+          info: (message, details) => workerLog.info({ event: 'webscan', ...details }, message),
+          warn: (message, details) => workerLog.warn({ event: 'webscan', ...details }, message),
+          error: (message, details) => workerLog.error({ event: 'webscan', ...details }, message),
+        },
+      });
+      workerLog.info(
+        { event: 'worker.webscan_started' },
+        'The website scanner queue and worker started (one scan at a time)',
+      );
+    } catch (err) {
+      const name = err instanceof Error ? err.name : 'unknown error';
+      workerLog.error(
+        { event: 'worker.webscan_start_failed', errorName: name },
+        `Failed to start the website scanner: ${name}`,
+      );
+      await webScanEvents?.close().catch(() => {});
+      webScanEvents = undefined;
+    }
+  }
+
+  // Daily run retention (ADR-0014), model price refresh (ADR-0016) and the website
+  // scanner retention (ADR-0052 section 11). Started in the background: a slow Redis
+  // must not hold up reviews.
   // `stop()` awaits this promise, so a scheduler that finishes starting during shutdown is closed too.
   const maintenanceStart: Promise<MaintenanceScheduler | undefined> = connection
-    ? startMaintenanceScheduler(services.store, connection, workerLog).then(
+    ? startMaintenanceScheduler(services.store, connection, workerLog, {
+        ...(webScan === undefined
+          ? {}
+          : {
+              webScan: {
+                store: webScan.store,
+                workerStore: webScan.workerStore,
+              },
+            }),
+      }).then(
         (scheduler) => {
           workerLog.info({ event: 'worker.retention_scheduled' }, 'Daily run retention (03:00 UTC) and model price refresh (02:30 UTC) scheduled');
           return scheduler;
@@ -276,11 +344,18 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
   const stop = async () => {
     stopping = true;
     clearInterval(sweepTimer);
+    // The scanner stops first. It aborts the run that is in flight and waits for it, so
+    // the database is never closed under a running scan and no request leaves the
+    // process after the shutdown began.
+    await Promise.allSettled([webScan?.close() ?? Promise.resolve()]);
     await Promise.allSettled([
       new Promise<void>((resolve) => healthServer.close(() => resolve())),
       worker.close(),
       closeMaintenance(),
+    ]);
+    await Promise.allSettled([
       services.close(),
+      webScanEvents?.close() ?? Promise.resolve(),
     ]);
   };
 
@@ -290,6 +365,7 @@ export async function createWorker(options?: WorkerOptions): Promise<WorkerInsta
     healthServer,
     config,
     deps,
+    webScan,
     stop,
   };
 }

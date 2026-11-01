@@ -1,0 +1,272 @@
+import { describe, expect, it } from 'vitest';
+import {
+  backdateLedger,
+  fixture,
+  occurrenceFinding,
+  registeredSite,
+  unpause,
+} from './store.fixtures.js';
+
+/**
+ * The audit log of the maintenance and of the alerts (ADR-0052 section 10).
+ *
+ * A state change and the record of that change belong together: either both are
+ * written or neither is. A tombstone that is archived, pruned or restored without a
+ * record of why would leave the ledger unauditable, and the same is true of a delivery
+ * state of an alert.
+ */
+
+const ISSUE_KEY = 'headers|headers/strict-transport-security|example.com';
+
+/** Observes one occurrence as outstanding, so the ledger of the site holds it. */
+async function observeOutstanding(
+  store: Awaited<ReturnType<typeof fixture>>['store'],
+  siteId: string,
+  idempotencyKey: string,
+  occurrenceKey: string,
+  evidenceHash: string,
+): Promise<void> {
+  const { scan } = await store.enqueueManualScan('admin-1', { siteId, idempotencyKey });
+  await store.recordScanOutcome('worker', {
+    scanId: scan.id,
+    siteId,
+    status: 'completed',
+    requests: 3,
+    pages: 1,
+    durationMs: 120,
+    findings: [],
+    coverage: [],
+    updates: [
+      {
+        state: 'outstanding',
+        finding: occurrenceFinding({
+          occurrenceKey,
+          issueKey: ISSUE_KEY,
+          evidenceHash,
+          comparison: 'New',
+          evidence: { header: 'missing' },
+        }),
+      },
+    ],
+  });
+}
+
+describe('the audit log of the maintenance', () => {
+  it('records the archival of the retained ledger', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      await observeOutstanding(store, site.id, 'key-1', 'occ-1', 'hash-1');
+      await store.updateSettings('admin-1', { retentionDays: 1 });
+      await backdateLedger(db, site.id);
+
+      expect(await store.archiveUnprovenOccurrences(site.id)).toBe(1);
+
+      const audit = await store.listAudit({ targetType: 'site', targetId: site.id });
+      const archived = audit.filter((entry) => entry.action === 'occurrence.archive');
+      expect(archived).toHaveLength(1);
+      expect(archived[0]?.actor).toBe('scanner:maintenance');
+      expect(archived[0]?.after).toEqual({ archived: 1 });
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('records the pruning of the tombstones a completed scan proved fixed', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      await observeOutstanding(store, site.id, 'key-1', 'occ-1', 'hash-1');
+      await store.updateSettings('admin-1', { retentionDays: 1 });
+      await backdateLedger(db, site.id);
+      await store.archiveUnprovenOccurrences(site.id);
+
+      // A completed scan proves the identity fixed, so the tombstone becomes prunable.
+      const { scan } = await store.enqueueManualScan('admin-1', { siteId: site.id, idempotencyKey: 'key-2' });
+      await store.recordScanOutcome('worker', {
+        scanId: scan.id,
+        siteId: site.id,
+        status: 'completed',
+        requests: 3,
+        pages: 1,
+        durationMs: 120,
+        findings: [],
+        coverage: [],
+        updates: [
+          {
+            state: 'fixed',
+            finding: occurrenceFinding({
+              occurrenceKey: 'occ-1',
+              issueKey: ISSUE_KEY,
+              evidenceHash: 'hash-1',
+              comparison: 'Fixed',
+              evidence: { header: 'present' },
+            }),
+          },
+        ],
+      });
+
+      expect(await store.pruneProvenFixedTombstones(site.id)).toBe(1);
+
+      const audit = await store.listAudit({ targetType: 'site', targetId: site.id });
+      const pruned = audit.filter((entry) => entry.action === 'occurrence.prune');
+      expect(pruned).toHaveLength(1);
+      expect(pruned[0]?.after).toEqual({ pruned: 1 });
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('records the restoration of the tombstones of an expired resolution', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      await observeOutstanding(store, site.id, 'key-1', 'occ-1', 'hash-1');
+
+      // A live resolution pins the tombstone it covers.
+      const exception = await store.createException('admin-1', {
+        siteId: site.id,
+        occurrenceKey: 'occ-1',
+        evidenceHash: 'hash-1',
+        kind: 'accepted',
+        reasonCategory: 'accepted_risk',
+        reason: 'The header is set by the edge proxy.',
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+
+      await store.updateSettings('admin-1', { retentionDays: 1 });
+      await backdateLedger(db, site.id);
+      expect(await store.archiveUnprovenOccurrences(site.id)).toBe(1);
+
+      // The resolution ends.
+      await db.client.query(
+        'UPDATE web_scan_exceptions SET expires_at = $1 WHERE id = $2',
+        [new Date(Date.now() - 1000), exception.id],
+      );
+
+      expect(await store.restoreExpiredExceptionOccurrences(site.id)).toBe(1);
+
+      const audit = await store.listAudit({ targetType: 'site', targetId: site.id });
+      const restored = audit.filter((entry) => entry.action === 'occurrence.restore');
+      expect(restored).toHaveLength(1);
+      expect(restored[0]?.after).toMatchObject({ restored: 1 });
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('never writes the scope, the evidence or a free-form reason into the log', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      await observeOutstanding(store, site.id, 'key-1', 'occ-1', 'hash-1');
+      await store.updateSettings('admin-1', { retentionDays: 1 });
+      await backdateLedger(db, site.id);
+      await store.archiveUnprovenOccurrences(site.id);
+      await store.createException('admin-1', {
+        siteId: site.id,
+        occurrenceKey: 'occ-1',
+        evidenceHash: 'hash-1',
+        kind: 'accepted',
+        reasonCategory: 'accepted_risk',
+        reason: 'The header is set by the edge proxy.',
+      });
+      await store.upsertAlert({
+        siteId: site.id,
+        issueKey: 'issue-1',
+        episodeKey: 'episode-1',
+        repositoryId: 1,
+        installationId: 2,
+        githubAccountId: 3,
+        deliveryMarker: 'marker-1',
+        deliveryState: 'pending',
+        issueState: 'unknown',
+        occurrenceKeys: ['occ-1'],
+      });
+
+      // The maintenance rows and the alert row carry counts and states, never the
+      // scope, the evidence, the occurrence keys or the free-form reason.
+      const maintenance = (await store.listAudit({})).filter(
+        (entry) =>
+          entry.action === 'occurrence.archive' ||
+          entry.action === 'occurrence.prune' ||
+          entry.action === 'occurrence.restore' ||
+          entry.action === 'alert.upsert',
+      );
+      expect(maintenance.length).toBeGreaterThan(0);
+      const text = JSON.stringify(maintenance);
+      expect(text).not.toContain('The header is set by the edge proxy.');
+      expect(text).not.toContain('crawlPaths');
+      expect(text).not.toContain('occ-1');
+      expect(text).not.toContain('missing');
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+describe('the audit log of the alerts', () => {
+  it('records the delivery state of an alert', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      const alert = await store.upsertAlert({
+        siteId: site.id,
+        issueKey: 'issue-1',
+        episodeKey: 'episode-1',
+        repositoryId: 1,
+        installationId: 2,
+        githubAccountId: 3,
+        deliveryMarker: 'marker-1',
+        deliveryState: 'pending',
+        issueState: 'unknown',
+        occurrenceKeys: ['occ-1'],
+      });
+
+      const audit = await store.listAudit({ targetType: 'alert', targetId: alert.id });
+      expect(audit).toHaveLength(1);
+      expect(audit[0]?.action).toBe('alert.upsert');
+      expect(audit[0]?.after).toMatchObject({ deliveryState: 'pending', issueState: 'unknown' });
+      // The occurrence keys of the alert are not written into the log.
+      expect(JSON.stringify(audit)).not.toContain('occ-1');
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('rolls the delivery state back when its audit row cannot be written', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      await db.client.query('ALTER TABLE web_scan_audit RENAME TO web_scan_audit_hidden');
+
+      await expect(
+        store.upsertAlert({
+          siteId: site.id,
+          issueKey: 'issue-1',
+          episodeKey: 'episode-1',
+          repositoryId: 1,
+          installationId: 2,
+          githubAccountId: 3,
+          deliveryMarker: 'marker-1',
+          deliveryState: 'pending',
+          issueState: 'unknown',
+          occurrenceKeys: [],
+        }),
+      ).rejects.toThrow();
+
+      // The delivery state was not written either: the mutation and its audit row
+      // share one transaction.
+      await db.client.query('ALTER TABLE web_scan_audit_hidden RENAME TO web_scan_audit');
+      expect(await store.listAlerts(site.id)).toHaveLength(0);
+    } finally {
+      await db.close();
+    }
+  });
+});
