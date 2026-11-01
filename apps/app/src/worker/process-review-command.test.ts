@@ -107,7 +107,7 @@ describe('processReviewCommandJob — @mergepilot review', () => {
     const env = await setup();
     await env.store.createReviewRun({
       workspaceId: 'ws-1', installationId: 7, repoFullName: 'acme/repo', pullNumber: 12, headSha: 'head-1',
-      status: 'running', jobId: 'other',
+      status: 'running', costUsd: null, detail: null, jobId: 'other',
     });
 
     expect(await processReviewCommandJob(env.command, env.deps)).toBe('running');
@@ -123,7 +123,7 @@ describe('processReviewCommandJob — @mergepilot review', () => {
       const active = await check(...args);
       await env.store.createReviewRun({
         workspaceId: 'ws-1', installationId: 7, repoFullName: 'acme/repo', pullNumber: 12, headSha: 'head-1',
-        status: 'running', jobId: 'push-job',
+        status: 'running', costUsd: null, detail: null, jobId: 'push-job',
       });
       return active;
     });
@@ -151,7 +151,7 @@ describe('processReviewCommandJob — @mergepilot review', () => {
       const active = await check(...args);
       await env.store.createReviewRun({
         workspaceId: 'ws-1', installationId: 7, repoFullName: 'acme/repo', pullNumber: 12, headSha: 'head-1',
-        status: 'running', jobId: 'push-job',
+        status: 'running', costUsd: null, detail: null, jobId: 'push-job',
       });
       return active;
     });
@@ -189,7 +189,7 @@ describe('processReviewJob — a push with nothing new to review', () => {
     if (!('permission' in options)) {
       await env.store.createReviewRun({
         workspaceId: 'ws-1', installationId: 7, repoFullName: 'acme/repo', pullNumber: 12, headSha: 'head-1',
-        status: 'running', jobId: 'other',
+        status: 'running', costUsd: null, detail: null, jobId: 'other',
       });
     }
     env.client.createIssueComment = vi.fn(async () => { throw httpError(status, headers); });

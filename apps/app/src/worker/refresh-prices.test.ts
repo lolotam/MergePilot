@@ -10,7 +10,7 @@ const VERCEL = { data: [{ id: 'typesafe-ai/jev', pricing: { input: '0.00000005',
 const MODELS_DEV = { anthropic: { models: { m: { id: 'm', cost: { input: 3, output: 15 } }, n: { id: 'n', cost: { input: 1, output: 1 } } } } };
 
 function catalogFetch(overrides: Partial<Record<string, () => Response>> = {}): FetchLike {
-  const routes: Record<string, () => Response> = {
+  const routes: Record<string, (() => Response) | undefined> = {
     [PRICE_SOURCE_URLS.openrouter]: () => json(OPENROUTER),
     [PRICE_SOURCE_URLS.vercel]: () => json(VERCEL),
     [PRICE_SOURCE_URLS['models.dev']]: () => json(MODELS_DEV),

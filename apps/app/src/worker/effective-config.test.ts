@@ -7,7 +7,7 @@ import { effectiveConfigFor, skillKeyOf } from './effective-config.js';
 // The review marker's config hash covers the workspace findings limit wherever the review inherits
 // it (ADR-0033), so changing the dashboard limit makes the next review a full one.
 
-const CHOICE = { provider: 'openai' as const, model: 'gpt-x' };
+const CHOICE = { provider: 'openai' as const, model: 'gpt-x', effort: null };
 
 /** What `loadRepoConfig` returns for this file, parsed with the worker's defaults. */
 function repoFile(text: string, maxFindings: MaxFindingsChoice | undefined): LoadRepoConfigResult {
@@ -101,7 +101,7 @@ describe('workspace per-review spending cap (ADR-0036)', () => {
     if (text !== undefined) {
       const parsed = parseConfig(text, { defaults: { ...CHOICE, perReviewUsd, maxFindings } });
       if (!parsed.ok) throw new Error(parsed.errors.join('\n'));
-      repo = { configText: text, config: parsed.config, rulesFiles: [], defaulted: parsed.defaulted };
+      repo = { configText: text, config: parsed.config, rulesFiles: [], ...(parsed.defaulted !== undefined ? { defaulted: parsed.defaulted } : {}) };
     }
     return effectiveConfigFor(repo, CHOICE, [], { language: 'en', perReviewUsd, maxFindings }, skillKey);
   };

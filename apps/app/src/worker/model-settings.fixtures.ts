@@ -133,8 +133,8 @@ export function createHarness(options: HarnessOptions) {
   };
 
   const latestRun = async () => {
-    const runs = await store.listReviewRuns(WORKSPACE_ID);
-    return 'runs' in runs ? runs.runs[0] : runs[0];
+    const runs = await store.listReviewRuns(WORKSPACE_ID, 50);
+    return runs[0];
   };
   return { store, deps, job, reviews, credentials, client, latestRun, getCapturedConfig: () => capturedConfig };
 }

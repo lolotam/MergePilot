@@ -162,9 +162,11 @@ describe('CredentialService', () => {
 
       const listB = await service.listKeys('ws-B');
       expect(listB).toHaveLength(1);
-      expect(listB[0].provider).toBe('gemini');
-      expect(listB[0].last4).toBe('9012');
-      expect(listB[0]).not.toHaveProperty('ciphertext');
+      const first = listB[0];
+      if (!first) throw new Error('list had no key');
+      expect(first.provider).toBe('gemini');
+      expect(first.last4).toBe('9012');
+      expect(first).not.toHaveProperty('ciphertext');
     });
   });
 

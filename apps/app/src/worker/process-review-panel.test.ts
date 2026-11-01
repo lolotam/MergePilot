@@ -23,7 +23,7 @@ describe('processReviewJob — reviewer panel orchestration', () => {
     expect(h.created).toHaveLength(1);
     expect(h.created[0]?.body.startsWith('## MergePilot review')).toBe(true);
     expect(h.created[0]?.body).toContain(`<!-- mergepilot:review head=${HEAD} config=${hashOf('anthropic', 'main-model')} -->`);
-    expect(h.created[0]?.comments[0]?.body).not.toContain('mergepilot:bot=');
+    expect(h.created[0]?.comments?.[0]?.body).not.toContain('mergepilot:bot=');
     expect([...h.events('panel.start'), ...h.events('panel.bot.done'), ...h.events('panel.publish')]).toEqual([]);
     expect(h.events('job.end')[0]).not.toHaveProperty('botSlot');
   });
@@ -49,9 +49,9 @@ describe('processReviewJob — reviewer panel orchestration', () => {
     const bySlot = (slot: number) => h.created.find((c) => c.body.includes(slot === 1 ? 'MergePilot** ·' : slot === 2 ? 'Bot 2**' : 'Fox**'))!;
     expect(bySlot(1).body.startsWith(`<img src="${BASE_URL}/bots/pilot.svg" width="20" height="20" alt=""> **MergePilot** · \`anthropic:main-model\``)).toBe(true);
     expect(bySlot(1).body).toContain(`config=${hashOf('anthropic', 'main-model')} -->`);
-    expect(bySlot(1).comments[0]?.body).not.toContain('mergepilot:bot=');
+    expect(bySlot(1).comments?.[0]?.body).not.toContain('mergepilot:bot=');
     expect(bySlot(2).body).toContain(`<!-- mergepilot:review head=${HEAD} config=${hashOf('openai', 'bot2-model')} bot=2 -->`);
-    expect(bySlot(2).comments[0]?.body.trimEnd().endsWith('<!-- mergepilot:bot=2 -->')).toBe(true);
+    expect(bySlot(2).comments?.[0]?.body.trimEnd().endsWith('<!-- mergepilot:bot=2 -->')).toBe(true);
     expect(bySlot(3).body.startsWith(`<img src="${BASE_URL}/bots/fox.svg"`)).toBe(true);
     expect(bySlot(3).body).toContain('bot=3 -->');
 

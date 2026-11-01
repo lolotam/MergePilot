@@ -12,9 +12,9 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
     const fields = await equivalentFields(
       {
         // The run's whole usage holds the paid API-key call too; only the subscription part counts.
-        usage: { inputTokens: 1_000, outputTokens: 950 },
+        usage: { inputTokens: 1_000, outputTokens: 950, cacheReadTokens: 0, cacheWriteTokens: 0 },
         apiPrice: undefined,
-        subscriptionUsage: [{ label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50 } }],
+        subscriptionUsage: [{ label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 } }],
         onlySubscriptionCalls: false,
         fellBack: false,
         switchedMethod: false,
@@ -36,7 +36,7 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
   it('records a known empty part when the subscription answered nothing before the switch to API keys', async () => {
     const fields = await equivalentFields(
       {
-        usage: { inputTokens: 300, outputTokens: 150 },
+        usage: { inputTokens: 300, outputTokens: 150, cacheReadTokens: 0, cacheWriteTokens: 0 },
         apiPrice: undefined,
         subscriptionUsage: undefined,
         onlySubscriptionCalls: false,
@@ -55,7 +55,7 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
   it('marks the subscription part unpriced when a subscription call reported no usage', async () => {
     const fields = await equivalentFields(
       {
-        usage: { inputTokens: 300, outputTokens: 150 },
+        usage: { inputTokens: 300, outputTokens: 150, cacheReadTokens: 0, cacheWriteTokens: 0 },
         apiPrice: undefined,
         subscriptionUsage: undefined,
         onlySubscriptionCalls: false,
@@ -74,11 +74,11 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
   it('marks the subscription part unpriced when any of its models has no API price', async () => {
     const fields = await equivalentFields(
       {
-        usage: { inputTokens: 300, outputTokens: 150 },
+        usage: { inputTokens: 300, outputTokens: 150, cacheReadTokens: 0, cacheWriteTokens: 0 },
         apiPrice: undefined,
         subscriptionUsage: [
-          { label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50 } },
-          { label: 'anthropic:unpriced', usage: { inputTokens: 100, outputTokens: 50 } },
+          { label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+          { label: 'anthropic:unpriced', usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 } },
         ],
         onlySubscriptionCalls: false,
         fellBack: false,
@@ -96,9 +96,9 @@ describe('the API-equivalent of a run (ADR-0024, ADR-0047)', () => {
   it('keeps a run that stayed on its own subscription model on the ADR-0024 price', async () => {
     const fields = await equivalentFields(
       {
-        usage: { inputTokens: 100, outputTokens: 50 },
-        apiPrice: { pricing: { inputPerMTok: 2, outputPerMTok: 4 }, source: 'override' },
-        subscriptionUsage: [{ label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50 } }],
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        apiPrice: { pricing: { inputPerMTok: 2, outputPerMTok: 4, cacheReadPerMTok: 2, cacheWritePerMTok: 2 }, source: 'override' },
+        subscriptionUsage: [{ label: 'openai:gpt-x', usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 } }],
         onlySubscriptionCalls: true,
         fellBack: false,
         switchedMethod: false,

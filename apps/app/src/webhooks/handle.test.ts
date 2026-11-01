@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryStore } from '../core/memory-store.js';
+import type { AppStore } from '../core/types.js';
 import type { ReviewJob, ReviewQueue } from '../core/types.js';
 import { handleWebhook } from './handle.js';
 
@@ -11,7 +12,9 @@ class FakeQueue implements ReviewQueue {
 }
 
 describe('handleWebhook', () => {
-  let store: MemoryStore;
+  let store: AppStore;
+  // The pending installations are only visible on the in-memory store.
+  let memory: MemoryStore;
   let queue: FakeQueue;
   const log = {
     info: vi.fn(),
@@ -20,7 +23,8 @@ describe('handleWebhook', () => {
   };
 
   beforeEach(() => {
-    store = new MemoryStore();
+    memory = new MemoryStore();
+    store = memory;
     queue = new FakeQueue();
     vi.clearAllMocks();
   });
@@ -72,7 +76,7 @@ describe('handleWebhook', () => {
 
       expect(result).toMatchObject({ status: 'installation_created', installationId: 101 });
       // In MemoryStore, pending installation is stored without workspaceId:
-      const raw = store.installations.get(101);
+      const raw = memory.installations.get(101);
       expect(raw).toBeDefined();
       expect(raw?.accountLogin).toBe('test-org');
       expect(raw?.accountType).toBe('Organization');
@@ -101,7 +105,7 @@ describe('handleWebhook', () => {
       );
 
       expect(result).toMatchObject({ status: 'installation_deleted', installationId: 101 });
-      expect(store.installations.get(101)).toBeUndefined();
+      expect(memory.installations.get(101)).toBeUndefined();
     });
 
     it('installation suspend and unsuspend updates status', async () => {
@@ -204,7 +208,7 @@ describe('handleWebhook', () => {
       );
 
       expect(result.status).toBe('enqueued');
-      expect(queue.jobs[0].headSha).toBe('fork-sha');
+      expect(queue.jobs[0]?.headSha).toBe('fork-sha');
     });
 
     it('skips draft pull requests', async () => {

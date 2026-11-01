@@ -30,7 +30,7 @@ describe('workspaceJudge', () => {
     const apiKey = new Secret('anthropic-judge-api-key');
     const credentials: ProcessReviewCredentials = {
       resolve: vi.fn(),
-      getEffectiveAuthMethod: vi.fn(async () => 'api-key'),
+      getEffectiveAuthMethod: vi.fn(async () => 'api-key' as const),
       resolveKeyRoster: vi.fn(async () => ({ secrets: [apiKey], keyIds: ['judge-key'], startIndex: 0 })),
     };
     const settings = {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { MergePilotConfig, ReviewModel } from '@mergepilot/engine';
+import { MergePilotConfigSchema, type MergePilotConfig, type ReviewModel } from '@mergepilot/engine';
 import { computeFindingFingerprint } from '@mergepilot/github';
 import type {
   CreateReviewParams,
@@ -17,7 +17,7 @@ describe('executeReview — incremental review and deduplication', () => {
   const prevSha = 'sha-head-prev-000';
   const configHash = 'cfghash12345';
 
-  const config: MergePilotConfig = {
+  const config: MergePilotConfig = MergePilotConfigSchema.parse({
     provider: 'anthropic',
     model: 'claude-3-5-sonnet',
     language: 'en',
@@ -27,7 +27,8 @@ describe('executeReview — incremental review and deduplication', () => {
       rulesFiles: [],
       exclude: [],
       pathInstructions: [],
-      instructions: [],
+      // Without the verify pass, as before the config was completed by its schema.
+      verify: false,
     },
     budget: {
       perReviewUsd: 10.0,
@@ -35,9 +36,11 @@ describe('executeReview — incremental review and deduplication', () => {
       pricing: {
         inputPerMTok: 3,
         outputPerMTok: 15,
+        cacheReadPerMTok: 3,
+        cacheWritePerMTok: 3,
       },
     },
-  };
+  });
 
   // A finding as the model returns it, on the added line 5 of the PR patch.
   const sampleFinding = {
@@ -222,8 +225,6 @@ describe('executeReview — incremental review and deduplication', () => {
           id: 10,
           user: { login: 'mergepilot[bot]' },
           body: `Earlier review summary\n<!-- mergepilot:review head=${prevSha} config=${configHash} -->`,
-          state: 'COMMENTED',
-          submitted_at: '2026-10-12T09:00:00Z',
         },
       ],
       compareStatus: 'ahead',

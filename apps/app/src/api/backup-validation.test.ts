@@ -58,7 +58,11 @@ describe('settings restore validation (ADR-0018)', { timeout: 60000 }, () => {
     // A key moved to another provider no longer opens either (it is bound to its provider).
     const moved = copy();
     const [first, second] = moved.credentials;
-    if (first && second) [first.key, second.key] = [second.key, first.key];
+    if (first?.key && second?.key) {
+      const firstKey = first.key;
+      first.key = second.key;
+      second.key = firstKey;
+    }
     expect(await refusal({ file: moved })).toEqual([400, 'bad_passphrase', undefined]);
     expect(await refusal({ file, passphrase: undefined })).toEqual([400, 'passphrase_required', 'passphrase']);
     await expectWs2Untouched();

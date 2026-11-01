@@ -49,7 +49,7 @@ describe.skipIf(!hasIntegrationEnv)('vault + credentials integration on real Pos
       );
 
       expect(rawRes.rows).toHaveLength(1);
-      const row = rawRes.rows[0];
+      const row = rawRes.rows[0]!;
       expect(row.last4).toBe('8877');
       expect(row.key_version).toBe(1);
 

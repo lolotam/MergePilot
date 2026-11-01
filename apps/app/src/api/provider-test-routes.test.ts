@@ -23,7 +23,7 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     await h.close();
   });
 
-  const test = (provider: string, cookie: string, payload: unknown = {}) =>
+  const test = (provider: string, cookie: string, payload: string | object = {}) =>
     h.app.inject({ method: 'POST', url: `/api/workspaces/ws-1/credentials/${provider}/test`, headers: { cookie }, payload });
   const saveOpenAi = () =>
     h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('o'), userId: 'u-admin' });

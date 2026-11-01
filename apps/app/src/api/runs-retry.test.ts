@@ -8,12 +8,14 @@ import * as dbSchema from '../db/schema.js';
 import { registerAuthRoutes } from '../auth/fastify.js';
 import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import { runMigrations } from '../db/migrate.js';
-import { PgStore } from '../db/pg-store.js';
+import { PgStore, type AppDb } from '../db/pg-store.js';
 import { EnvelopeVault } from '../vault/envelope-vault.js';
 import { CredentialService } from '../credentials/service.js';
 import type { AppConfig } from '../core/config.js';
 import type { ReviewJob, ReviewQueue } from '../core/types.js';
 import type { GitHubAppClientFactory } from '../worker/types.js';
+
+type GitHubClientLike = Awaited<ReturnType<GitHubAppClientFactory>>['client'];
 import { registerDashboardApi } from './routes.js';
 import { resetRetryRateLimits } from './runs-retry.js';
 
@@ -24,7 +26,7 @@ const TOKEN_OTHER = ['t', 'oth'].join('-');
 describe('dashboard api - POST /api/workspaces/:workspaceId/runs/:runId/retry', { timeout: 25000 }, () => {
   let app: FastifyInstance;
   let pglite: PGlite;
-  let db: ReturnType<typeof drizzle>;
+  let db: AppDb;
   let store: PgStore;
   let vault: EnvelopeVault;
   let credentials: CredentialService;
@@ -73,11 +75,11 @@ describe('dashboard api - POST /api/workspaces/:workspaceId/runs/:runId/retry', 
               merged: false,
               head: { sha: 'sha-current-head' },
               base: { sha: 'sha-base-1' },
-            } as unknown as Awaited<ReturnType<Parameters<GitHubAppClientFactory>[0]['client']['getPullRequest']>>;
+            } as unknown as Awaited<ReturnType<GitHubClientLike['getPullRequest']>>;
           }
-          return res as unknown as Awaited<ReturnType<Parameters<GitHubAppClientFactory>[0]['client']['getPullRequest']>>;
+          return res as unknown as Awaited<ReturnType<GitHubClientLike['getPullRequest']>>;
         },
-      } as unknown as Parameters<GitHubAppClientFactory>[0]['client'],
+      } as unknown as GitHubClientLike,
       publisherLogin: 'mergepilot-test[bot]',
     });
 
@@ -85,8 +87,7 @@ describe('dashboard api - POST /api/workspaces/:workspaceId/runs/:runId/retry', 
     // Every migration, so the stores see the current schema (0006: usage summary, lease).
     await runMigrations(pglite);
 
-    const schema = { ...authSchema, ...dbSchema };
-    db = drizzle(pglite, { schema });
+    db = drizzle(pglite, { schema: { ...authSchema, ...dbSchema } });
     store = new PgStore(db);
     vault = new EnvelopeVault(Buffer.alloc(32, 1).toString('base64'));
     credentials = new CredentialService({ store, vault });

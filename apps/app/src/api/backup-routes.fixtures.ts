@@ -1,5 +1,10 @@
 import { Writable } from 'node:stream';
-import fastify, { type FastifyInstance } from 'fastify';
+import fastify, {
+  type FastifyBaseLogger,
+  type FastifyHttpOptions,
+  type FastifyInstance,
+  type RawServerDefault,
+} from 'fastify';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { createAuth } from '../auth/auth.js';
@@ -69,7 +74,11 @@ export async function createBackupHarness(): Promise<BackupHarness> {
       callback();
     },
   });
-  const app = fastify({ loggerInstance: createLogger({ stream, level: 'debug' }) });
+  // The same option type as the server factory, so the app is the plain FastifyInstance.
+  const options: FastifyHttpOptions<RawServerDefault, FastifyBaseLogger> = {
+    loggerInstance: createLogger({ stream, level: 'debug' }),
+  };
+  const app = fastify(options);
   const auth = createAuth({ db, config });
   registerAuthRoutes(app, auth);
   registerDashboardApi(app, {
