@@ -3,6 +3,7 @@ import type { FetchLike } from '@mergepilot/engine';
 import type { AppStore } from '../core/types.js';
 import { pricesNeedRefresh, runPriceRefresh } from './refresh-prices.js';
 import { runRetention, type RetentionLogger } from './retention.js';
+import type { WebScanRetentionDeps } from '../webscan/retention.js';
 
 /** Maintenance jobs have their own queue so they never wait behind (or delay) reviews. */
 export const MAINTENANCE_QUEUE = 'maintenance';
@@ -25,6 +26,13 @@ export interface MaintenanceSchedulerOptions {
   /** Test seam: the fetch the price refresh uses (its URLs are fixed constants). */
   priceFetch?: FetchLike | undefined;
   now?: (() => Date) | undefined;
+  /**
+   * The website scanner retention (ADR-0052 section 11).
+   *
+   * It runs inside the same nightly job, so the scanner never depends on a second
+   * schedule that could drift.
+   */
+  webScan?: WebScanRetentionDeps | undefined;
 }
 
 /**
@@ -55,7 +63,12 @@ export async function startMaintenanceScheduler(
   const worker = new Worker(
     MAINTENANCE_QUEUE,
     async (job) => {
-      if (job.name === RETENTION_JOB_NAME) await runRetention(store, { logger });
+      if (job.name === RETENTION_JOB_NAME) {
+        await runRetention(store, {
+          logger,
+          ...(options.webScan === undefined ? {} : { webScan: options.webScan }),
+        });
+      }
       if (job.name === REFRESH_PRICES_JOB_NAME) {
         await runPriceRefresh(store, { logger, fetch: options.priceFetch, ...(options.now ? { now: options.now } : {}) });
       }

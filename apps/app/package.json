@@ -26,6 +26,7 @@
     "@fastify/static": "^10.1.6",
     "@mergepilot/engine": "workspace:*",
     "@mergepilot/github": "workspace:*",
+    "@mergepilot/webscan": "workspace:*",
     "@octokit/app": "^16.1.4",
     "@octokit/rest": "^22.0.1",
     "better-auth": "^1.7.7",

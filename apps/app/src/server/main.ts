@@ -12,6 +12,9 @@ import type { AppStore, ReviewQueue } from '../core/types.js';
 import { createServer, type ServerProbes } from './create-server.js';
 import { registerStatic } from './static.js';
 import { isEntryPoint } from '../core/entry-point.js';
+import { RedisWebScanEventBus, type WebScanEventBus } from '../webscan/events.js';
+import { PgWebScanStore } from '../webscan/pg-store.js';
+import type { WebScanStore } from '../webscan/store.js';
 
 export interface ServerInstance {
   app: FastifyInstance;
@@ -19,7 +22,20 @@ export interface ServerInstance {
   store: AppStore;
   queue: ReviewQueue;
   services: AppServices;
+  /**
+   * The website security scanner (ADR-0052).
+   *
+   * The server never publishes a scan: it writes the durable intent and the worker
+   * publishes it. It only reads the ledger and streams the bounded progress events.
+   */
+  webScan?: WebScanServerRuntime | undefined;
   stop: () => Promise<void>;
+}
+
+/** What the server exposes of the website scanner. */
+export interface WebScanServerRuntime {
+  store: WebScanStore;
+  events: WebScanEventBus;
 }
 
 export type DashboardApiRegistrar = (
@@ -98,6 +114,34 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
     queue: options?.probes?.queue ?? defaultQueueProbe,
   };
 
+  // The website security scanner (ADR-0052). The server only reads the ledger and
+  // writes the durable intent of a manual scan; the worker owns the queue. A local
+  // in-memory setup has neither the database nor the Redis the scanner needs.
+  const serverLog = createLogger({ service: 'web' });
+  let webScan: WebScanServerRuntime | undefined;
+  const scannerReady =
+    services.scannerVault !== undefined &&
+    !config.databaseUrl.startsWith('memory:') &&
+    !config.redisUrl.startsWith('memory:');
+  if (scannerReady && services.scannerVault !== undefined) {
+    try {
+      webScan = {
+        store: new PgWebScanStore(services.db, services.scannerVault),
+        events: new RedisWebScanEventBus({
+          redisUrl: config.redisUrl,
+          onError: (errorName) => {
+            serverLog.warn({ event: 'webscan.events', errorName }, 'The web scan event bus failed');
+          },
+        }),
+      };
+    } catch (err) {
+      serverLog.warn(
+        { err },
+        'The website scanner is not available on this server; the dashboard will not show it',
+      );
+    }
+  }
+
   const app = createServer({
     config,
     store,
@@ -160,6 +204,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
           credentials: services.credentials,
           queue,
           runEvents,
+          webScan,
         });
       } else {
         try {
@@ -182,6 +227,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
               credentials: services.credentials,
               queue,
               runEvents,
+              webScan,
             });
           } else {
             instance.log.warn(
@@ -210,10 +256,11 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
 
   const stop = async () => {
     await app.close();
+    await webScan?.events.close();
     await services.close();
   };
 
-  return { app, config, store, queue, services, stop };
+  return { app, config, store, queue, services, webScan, stop };
 }
 
 export async function main(options?: MainOptions): Promise<ServerInstance> {

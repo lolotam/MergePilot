@@ -1,5 +1,6 @@
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import type { Pool } from 'pg';
 import { createAuth, type Auth } from '../auth/index.js';
 import type { AppConfig } from '../core/config.js';
 import { MemoryStore } from '../core/memory-store.js';
@@ -10,7 +11,8 @@ import { createDb, runMigrations } from '../db/index.js';
 import * as dbSchema from '../db/schema.js';
 import { BullMqReviewQueue } from '../queue/index.js';
 import { RedisRunEventBus } from '../queue/redis-run-events.js';
-import { EnvelopeVault } from '../vault/index.js';
+import { EnvelopeVault, type EnvelopeVaultOptions } from '../vault/index.js';
+import { PurposeScopedVault } from '../vault/scoped-secrets.js';
 
 export class InMemoryReviewQueue implements ReviewQueue {
   readonly jobs: ReviewJob[] = [];
@@ -49,10 +51,30 @@ export interface AppServices {
   queue: ReviewQueue;
   /** Live run updates (ADR-0021); optional so hand-built test services can leave it out. */
   runEvents?: RunEventBus | undefined;
+  /**
+   * The connection pool of the database. The website scanner takes its advisory lease
+   * on a dedicated connection of this pool. It is absent for the in-memory database.
+   */
+  pool?: Pool | undefined;
+  /**
+   * The purpose-scoped vault of the website scanner (ADR-0052). It shares the master
+   * key ring of the provider vault, so a scanner identity key survives a rotation.
+   */
+  scannerVault?: PurposeScopedVault | undefined;
   close: () => Promise<void>;
 }
 
-function buildVault(masterKey: string, env: Record<string, string | undefined>): EnvelopeVault {
+/**
+ * The master key ring of the platform.
+ *
+ * The provider vault and the purpose-scoped vault of the website scanner are built
+ * from the same ring: they wrap different envelopes, but a scanner identity key that
+ * was sealed with an older master key must still open after a rotation.
+ */
+function masterKeyOptions(
+  masterKey: string,
+  env: Record<string, string | undefined>,
+): EnvelopeVaultOptions {
   const previousKey = env.MERGEPILOT_MASTER_KEY_PREVIOUS?.trim();
   const versionStr = env.MERGEPILOT_MASTER_KEY_VERSION?.trim();
   const currentVersion = versionStr ? parseInt(versionStr, 10) : previousKey ? 2 : 1;
@@ -60,24 +82,20 @@ function buildVault(masterKey: string, env: Record<string, string | undefined>):
   if (previousKey) {
     const prevVersion = currentVersion > 1 ? currentVersion - 1 : 1;
     const actualCurrent = currentVersion === prevVersion ? currentVersion + 1 : currentVersion;
-    const keys = new Map<number, string>([
-      [actualCurrent, masterKey],
-      [prevVersion, previousKey],
-    ]);
-    return new EnvelopeVault({
+    return {
       current: actualCurrent,
-      keys,
-    });
+      keys: new Map<number, string>([
+        [actualCurrent, masterKey],
+        [prevVersion, previousKey],
+      ]),
+    };
   }
 
   if (versionStr) {
-    return new EnvelopeVault({
-      masterKey,
-      keyVersion: currentVersion,
-    });
+    return { masterKey, keyVersion: currentVersion };
   }
 
-  return new EnvelopeVault(masterKey);
+  return { masterKey };
 }
 
 export async function buildServices(
@@ -89,6 +107,7 @@ export async function buildServices(
   let db: NodePgDatabase<typeof dbSchema> | PgliteDatabase<typeof dbSchema>;
   let store: AppStore;
   let closeDb: () => Promise<void>;
+  let pool: Pool | undefined;
 
   if (config.databaseUrl.startsWith('memory:') || config.databaseUrl === 'memory:') {
     // Local-dev only: load PGlite lazily so production (which ships without dev dependencies)
@@ -113,6 +132,7 @@ export async function buildServices(
     );
     db = dbHandle.db;
     store = dbHandle.store;
+    pool = dbHandle.pool;
     closeDb = async () => {
       await dbHandle.close();
     };
@@ -139,7 +159,10 @@ export async function buildServices(
     runEvents = new RedisRunEventBus({ redisUrl: config.redisUrl });
   }
 
-  const vault = buildVault(config.masterKey, env);
+  const vaultOptions = masterKeyOptions(config.masterKey, env);
+  const vault = new EnvelopeVault(vaultOptions);
+  // The scanner vault shares the master key ring of the provider vault.
+  const scannerVault = new PurposeScopedVault(vaultOptions);
   const credentials = new CredentialService({ store, vault });
   const auth = createAuth({ db, config });
 
@@ -151,10 +174,12 @@ export async function buildServices(
     db,
     store,
     vault,
+    scannerVault,
     credentials,
     auth,
     queue,
     runEvents,
+    pool,
     close,
   };
 }

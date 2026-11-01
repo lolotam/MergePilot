@@ -15,6 +15,22 @@ export class SsrFValidationError extends Error {
   }
 }
 
+/**
+ * A name that could not be resolved.
+ *
+ * It is an outage of the resolver, not a decision about the address: the host
+ * may well be public, the resolver simply did not answer. A caller that has to
+ * fail closed still fails closed, but it can tell the two apart — a private
+ * address is a policy decision, a name that did not resolve is a transport
+ * failure.
+ */
+export class SsrFResolutionError extends SsrFValidationError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SsrFResolutionError';
+  }
+}
+
 export interface ResolvedAddress {
   address: string;
   family: number;
@@ -141,9 +157,9 @@ export async function resolveSafeAddresses(
   try {
     addresses = await lookupFn(bare);
   } catch {
-    throw new SsrFValidationError(`Could not resolve hostname "${bare}"`);
+    throw new SsrFResolutionError(`Could not resolve hostname "${bare}"`);
   }
-  if (addresses.length === 0) throw new SsrFValidationError(`Hostname "${bare}" resolved to no addresses`);
+  if (addresses.length === 0) throw new SsrFResolutionError(`Hostname "${bare}" resolved to no addresses`);
   for (const record of addresses) {
     if (isPrivateIp(record.address)) {
       throw new SsrFValidationError(`Hostname "${bare}" resolves to a private or loopback address`);

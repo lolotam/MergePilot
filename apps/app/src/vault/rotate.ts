@@ -8,6 +8,7 @@ import {
   type StoredProviderKey,
   type Vault,
 } from '../core/types.js';
+import { WEBSCAN_IDENTITY_PURPOSE, type ScopedSecretVault } from './scoped-secrets.js';
 
 function parentFromSlot(slot: StoredProviderKey): StoredCredential {
   return {
@@ -24,8 +25,67 @@ function parentFromSlot(slot: StoredProviderKey): StoredCredential {
 }
 
 export interface RotateResult {
+  /** Provider credentials that were written with the new master key. */
   reencrypted: number;
+  /** Provider credentials that were already on the current master key. */
   skipped: number;
+  /** Scanner identity envelopes that were rewrapped with the new master key. */
+  scannerReencrypted: number;
+  /** Scanner identity envelopes that were already on the current master key. */
+  scannerSkipped: number;
+}
+
+/** A scanner identity key envelope that a master-key rotation has to rewrap. */
+export interface ScannerIdentityEnvelope {
+  /** The site the identity key belongs to. It is the scope the AAD binds. */
+  siteId: string;
+  ciphertext: string;
+  keyVersion: number;
+}
+
+/** The scanner envelopes a master-key rotation has to reach. */
+export interface ScannerEnvelopeStore {
+  listIdentityEnvelopes(): Promise<readonly ScannerIdentityEnvelope[]>;
+  saveIdentityEnvelope(siteId: string, ciphertext: string, keyVersion: number): Promise<void>;
+}
+
+/**
+ * The scanner side of a master-key rotation.
+ *
+ * It is a required argument of `reencryptAll` so a rotation can never report
+ * success while a scanner identity key is still sealed with a master key that
+ * is about to be retired.
+ */
+export interface ScannerRotation {
+  store: ScannerEnvelopeStore;
+  vault: ScopedSecretVault;
+}
+
+/**
+ * Rewraps every scanner identity envelope onto the current master key.
+ *
+ * The sealed plaintext is the site identity key itself, so the key bytes and
+ * every HMAC output derived from them survive the rotation unchanged. The
+ * scope the AAD binds is the site id, which never changes, so a rewrapped
+ * envelope opens with exactly the context it was sealed with.
+ */
+async function reencryptScannerEnvelopes(scanner: ScannerRotation): Promise<RotateResult> {
+  let scannerReencrypted = 0;
+  let scannerSkipped = 0;
+
+  for (const envelope of await scanner.store.listIdentityEnvelopes()) {
+    if (envelope.keyVersion === scanner.vault.keyVersion) {
+      scannerSkipped++;
+      continue;
+    }
+    const context = { purpose: WEBSCAN_IDENTITY_PURPOSE, scopeId: envelope.siteId };
+    const plaintext = await scanner.vault.open(envelope.ciphertext, context);
+    const ciphertext = await scanner.vault.seal(plaintext, context);
+    await scanner.store.saveIdentityEnvelope(envelope.siteId, ciphertext, scanner.vault.keyVersion);
+    scannerReencrypted++;
+  }
+
+  return { reencrypted: 0, skipped: 0, scannerReencrypted, scannerSkipped };
 }
 
 async function reencryptParentIfNeeded(
@@ -76,13 +136,26 @@ async function reencryptSingleCredential(
 
 /**
  * Re-encrypts all credentials for the specified workspaces whose keyVersion is older
- * than the current vault keyVersion.
+ * than the current vault keyVersion, and rewraps every scanner identity envelope.
+ *
+ * The scanner rotation is not optional: both vaults are built from the same
+ * master key ring, so a rotation that skipped the scanner envelopes would leave
+ * them sealed with a key that is about to be retired. The two vaults must
+ * therefore agree on the key version, and the scanner envelopes are rewrapped
+ * in the same call before the caller may retire the old master key.
  */
 export async function reencryptAll(
   store: AppStore,
   vault: Vault,
   workspaceIds: string[],
+  scanner: ScannerRotation,
 ): Promise<RotateResult> {
+  if (scanner.vault.keyVersion !== vault.keyVersion) {
+    throw new Error(
+      `Scanner vault key version ${scanner.vault.keyVersion} does not match the credential vault key version ${vault.keyVersion}`,
+    );
+  }
+
   let reencrypted = 0;
   let skipped = 0;
 
@@ -155,5 +228,12 @@ export async function reencryptAll(
     }
   }
 
-  return { reencrypted, skipped };
+  const scannerResult = await reencryptScannerEnvelopes(scanner);
+
+  return {
+    reencrypted,
+    skipped,
+    scannerReencrypted: scannerResult.scannerReencrypted,
+    scannerSkipped: scannerResult.scannerSkipped,
+  };
 }

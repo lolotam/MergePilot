@@ -47,6 +47,7 @@ export async function createAdminTestDb(): Promise<AdminTestDb> {
     '0016_credential_sign_in_required.sql',
     '0017_bot_exploration.sql',
     '0018_bot_call_timeout.sql',
+    '0019_web_scan.sql',
   ]) {
     await client.exec(readFileSync(join(migrationsDir, file), 'utf-8'));
   }

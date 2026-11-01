@@ -1,10 +1,8 @@
-import { request as httpsRequest, type RequestOptions } from 'node:https';
-import type { LookupAddress, LookupOptions } from 'node:dns';
-import { Readable, Transform } from 'node:stream';
+import { request as httpsRequest } from 'node:https';
+import { Readable } from 'node:stream';
 import type { FetchLike } from '@mergepilot/engine';
+import { byteCapStream, pinnedLookup, toHeaders } from './http-plumbing.js';
 import { defaultLookup, parseSafeUrl, resolveSafeAddresses, type DnsLookupFn, type ResolvedAddress } from './ssrf.js';
-
-type PinnedLookup = NonNullable<RequestOptions['lookup']>;
 
 /** Limits for dashboard calls (model list, connection test): small answers, quick replies. */
 export const DASHBOARD_FETCH_LIMITS = { timeoutMs: 30_000, idleTimeoutMs: 15_000, maxResponseBytes: 5 * 1024 * 1024 };
@@ -18,49 +16,10 @@ export class SafeFetchLimitError extends Error {
   }
 }
 
-/** A lookup that only ever answers with the addresses already checked by the SSRF guard. */
-function pinnedLookup(addresses: readonly ResolvedAddress[]): PinnedLookup {
-  return ((
-    _hostname: string,
-    options: LookupOptions,
-    callback: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void,
-  ) => {
-    const first = addresses[0];
-    if (!first) {
-      callback(new Error('no checked address'), '', 0);
-      return;
-    }
-    if (options.all) callback(null, addresses.map((a) => ({ address: a.address, family: a.family })));
-    else callback(null, first.address, first.family);
-  }) as PinnedLookup;
-}
-
 function requestBody(body: RequestInit['body']): string | undefined {
   if (body === undefined || body === null) return undefined;
   if (typeof body === 'string') return body;
   throw new TypeError('the guarded fetch only sends string bodies');
-}
-
-function responseHeaders(raw: NodeJS.Dict<string | string[]>): Headers {
-  const headers = new Headers();
-  for (const [name, value] of Object.entries(raw)) {
-    if (value === undefined) continue;
-    if (Array.isArray(value)) for (const v of value) headers.append(name, v);
-    else headers.set(name, value);
-  }
-  return headers;
-}
-
-/** Passes bytes through and fails the stream once more than `max` bytes went by. */
-function sizeCap(max: number): Transform {
-  let seen = 0;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, done) {
-      seen += chunk.length;
-      if (seen > max) done(new SafeFetchLimitError(`response body exceeds ${max} bytes`));
-      else done(null, chunk);
-    },
-  });
 }
 
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
@@ -155,12 +114,12 @@ export function createSafeFetch(options: SafeFetchOptions = {}): FetchLike {
             done();
             res.resume();
           } else {
-            const capped = res.pipe(sizeCap(maxBytes));
+            const capped = res.pipe(byteCapStream(maxBytes, () => new SafeFetchLimitError(`response body exceeds ${maxBytes} bytes`)));
             res.on('error', (err) => capped.destroy(err));
             capped.once('close', done);
             stream = Readable.toWeb(capped) as unknown as ReadableStream<Uint8Array>;
           }
-          resolve(new Response(stream, { status, statusText: res.statusMessage ?? '', headers: responseHeaders(res.headers) }));
+          resolve(new Response(stream, { status, statusText: res.statusMessage ?? '', headers: toHeaders(res.headers) }));
         },
       );
       req.setTimeout(idleTimeoutMs, () => {
