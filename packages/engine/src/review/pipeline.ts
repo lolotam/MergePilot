@@ -316,7 +316,10 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
   }
   const promptArgs = {
     config: promptConfig,
-    promptLimit: input.explore ? basePromptLimit : undefined,
+    // No reserve to keep clear when the exploration is skipped: the batch prompts then answer to
+    // the batch cap and the input-token budget like a non-exploring review. The passes reuse this
+    // one limit, so an executed prompt is never larger than its priced twin.
+    promptLimit: input.explore && !explorationSkipReason ? basePromptLimit : undefined,
     pr: promptPr,
     rulesFiles: redactedRulesFiles,
     libraryDocs: input.libraryDocs,
@@ -387,9 +390,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRunResult>
 
   const passContext: ReviewPassContext = {
     config: promptConfig,
-    // No reserve to keep clear when the exploration is skipped: the batch prompts then answer
-    // to the batch cap and the input-token budget like a non-exploring review.
-    promptLimit: input.explore && !explorationSkipReason ? basePromptLimit : undefined,
+    promptLimit: promptArgs.promptLimit,
     beforeBatch: explored.beforeBatch,
     model,
     spend,
