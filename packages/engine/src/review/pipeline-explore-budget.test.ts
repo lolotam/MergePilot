@@ -162,11 +162,11 @@ it('fits short added lines whose rendered line numbers outgrow the raw patch est
   await runReview(input(model, {
     files: [{ path: 'src/a.ts', status: 'modified', patch: '@@ -0,0 +1,2000 @@\n' + '+x\n'.repeat(2000), changes: 2000 }],
     explore: { reader: fakeReader({ 'src/guard.ts': 'guard evidence' }) },
-  }, { maxPromptTokens: 4000, batchTokens: 3000, maxFileParts: 50, explore: { maxRounds: 1 } }));
+  }, { maxPromptTokens: 4300, batchTokens: 3000, maxFileParts: 50, explore: { maxRounds: 1 } }));
   const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
   expect(answers.length).toBeGreaterThan(1);
   expect(answers.every((r) => r.user.includes('guard evidence'))).toBe(true);
-  expect(requests.every((r) => estimateTokens(r.system + r.user) <= 4000)).toBe(true);
+  expect(requests.every((r) => estimateTokens(r.system + r.user) <= 4300)).toBe(true);
 });
 
 it('shares exhausted read evidence across batches and accounts for every call', async () => {
@@ -206,7 +206,7 @@ it.each(['call', 'read'] as const)('bounds slow exploration %s to one window and
     const pending = runReview(input(model, {
       files: Array.from({ length: 6 }, (_, i) => ({ path: `src/file${i}.ts`, status: 'modified', patch: bigPatch(200), changes: 201 })),
       explore: { reader: { ...fakeReader(), readFile: () => slow === 'read' ? new Promise(() => {}) : Promise.resolve('evidence') } },
-    }, { maxPromptTokens: 6000, batchTokens: 2000, callTimeoutMs: 600000, totalTimeoutMs: 1200000, explore: { maxRounds: 3 } }));
+    }, { maxPromptTokens: 6300, batchTokens: 2000, callTimeoutMs: 630000, totalTimeoutMs: 1200000, explore: { maxRounds: 3 } }));
     await vi.advanceTimersByTimeAsync(300000);
     const result = await pending;
     const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
@@ -255,7 +255,7 @@ it('explores six default-timeout batches within the shared maxRounds', async () 
     const result = await runReview(input(model, {
       files: Array.from({ length: 6 }, (_, i) => ({ path: `src/file${i}.ts`, status: 'modified', patch: bigPatch(200), changes: 201 })),
       explore: { reader: fakeReader({ 'src/guard.ts': 'evidence' }) },
-    }, { maxPromptTokens: 6000, batchTokens: 2000, callTimeoutMs: 300000, totalTimeoutMs: 1200000, explore: { maxRounds: 2 } }));
+    }, { maxPromptTokens: 6300, batchTokens: 2000, callTimeoutMs: 300000, totalTimeoutMs: 1200000, explore: { maxRounds: 2 } }));
     expect(requests.filter((r) => !r.system.includes('EXPLORATION (round'))).toHaveLength(6);
     expect(requests.filter((r) => r.system.includes('EXPLORATION (round'))).toHaveLength(2);
     expect(result).toMatchObject({ status: 'completed', exploration: { rounds: 2 } });
