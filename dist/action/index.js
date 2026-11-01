@@ -141006,6 +141006,9 @@ var ReviewDeadline = class {
     this.now = now;
     this.#endsAt = now() + totalMs;
   }
+  get remainingMs() {
+    return Math.max(0, this.#endsAt - this.now());
+  }
   get expired() {
     return this.now() >= this.#endsAt;
   }
@@ -141471,11 +141474,12 @@ function parseReviewResponse(response) {
     outputTokens: response.usage?.outputTokens
   });
 }
+var BATCH_CONTEXT_SAFETY_TOKENS = 64;
 function buildBatchPrompt(input2, index) {
   const files = input2.batches[index] ?? [];
-  const contextFiles = input2.contextFor?.(files) ?? [];
+  let contextFiles = [];
   const manifest = input2.manifestFiles ? renderManifest(input2.manifestFiles, input2.batches) : void 0;
-  return buildReviewPrompt({
+  const build = () => buildReviewPrompt({
     language: input2.config.language,
     maxFindings: input2.config.review.maxFindings,
     pr: input2.pr,
@@ -141486,6 +141490,16 @@ function buildBatchPrompt(input2, index) {
     ...contextFiles.length > 0 ? { contextFiles } : {},
     ...manifest !== void 0 ? { batch: { number: index + 1, count: input2.batches.length, manifest } } : {}
   });
+  let prompt = build();
+  const room = input2.promptLimit === void 0 ? Infinity : Math.max(0, input2.promptLimit - estimateTokens(prompt.system + prompt.user) - BATCH_CONTEXT_SAFETY_TOKENS);
+  contextFiles = input2.contextFor?.(files, room) ?? [];
+  prompt = build();
+  while (input2.promptLimit !== void 0 && estimateTokens(prompt.system + prompt.user) > input2.promptLimit && contextFiles.length > 0) {
+    contextFiles.pop();
+    prompt = build();
+  }
+  input2.contextSent?.(contextFiles);
+  return prompt;
 }
 async function reviewOneBatch(input2, prompt, promptTokens) {
   const { model, spend, signal, reviewOutputTokens, retryOutputTokens } = input2;
@@ -141572,7 +141586,9 @@ async function executeBatchedReview(input2) {
       break;
     }
     const label = labelOf2(bIdx);
-    const batchPrompt = buildBatchPrompt(input2, bIdx);
+    let batchPrompt = buildBatchPrompt(input2, bIdx);
+    if (input2.beforeBatch)
+      batchPrompt = await input2.beforeBatch(batchPrompt, batches[bIdx], bIdx);
     const bPromptTokens = estimateTokens(batchPrompt.system + batchPrompt.user);
     const tokenBudget = checkBudget({ promptTokens: bPromptTokens, maxInputTokens: input2.config.budget.maxInputTokens });
     if (!tokenBudget.ok) {
@@ -141610,6 +141626,15 @@ async function executeBatchedReview(input2) {
     ...withheld.length > 0 ? { withheld } : {}
   };
   return { merged, totalUsage, incompleteReasons };
+}
+
+function reviewLimits(review) {
+  return {
+    maxPromptTokens: review.maxPromptTokens ?? REVIEW_LIMIT_DEFAULTS.maxPromptTokens,
+    batchTokens: review.batchTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens,
+    callTimeoutMs: review.callTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.callTimeoutMs,
+    totalTimeoutMs: review.totalTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.totalTimeoutMs
+  };
 }
 
 var KIND_ORDER = {
@@ -141781,8 +141806,8 @@ var ContextPlan = class {
       }
     }
   }
-  /** The context of one batch, from its own files' context, recorded as sent. */
-  forBatch = (batch) => {
+  /** Selects batch context without recording it; rendered prompts may still remove files. */
+  selectForBatch = (batch, maxTokens = Infinity) => {
     const cap = Math.min(this.opts.contextTokens, this.opts.batchContextTokens ?? this.opts.batchTokens);
     if (!this.batchContext) {
       const batchOpts = { ...this.opts, contextTokens: cap };
@@ -141791,7 +141816,11 @@ var ContextPlan = class {
         prFiles: cap > 0 ? preparePullRequest(this.offered, batchOpts) : []
       };
     }
-    const files = this.selectPrepared(batch.map((f3) => f3.path), cap, this.batchContext.files, this.batchContext.prFiles);
+    return this.selectPrepared(batch.map((f3) => f3.path), Math.min(cap, maxTokens), this.batchContext.files, this.batchContext.prFiles);
+  };
+  /** Selects and records context for callers that send the selection without further fitting. */
+  forBatch = (batch, maxTokens = Infinity) => {
+    const files = this.selectForBatch(batch, maxTokens);
     this.markSent(files);
     return files;
   };
@@ -141836,6 +141865,71 @@ ${content}
 <<<END UNTRUSTED:${label}>>>`;
   });
   return [EXPLORED_HEADING, ...blocks].join("\n\n");
+}
+function maxExploredBlockTokens(readTokens, maxEntries) {
+  const overhead = renderExploredBlock(Array.from({ length: maxEntries }, () => ({
+    label: "x".repeat(MAX_LABEL_CHARS),
+    content: "x".repeat(256)
+  })), []);
+  return readTokens + estimateTokens(overhead);
+}
+function fitExploredEntries(entries, secrets, maxTokens) {
+  const kept = [];
+  const fits = (entry) => estimateTokens(renderExploredBlock([...kept, entry], secrets)) <= maxTokens;
+  for (const original of entries) {
+    const entry = {
+      label: redactSecrets(original.label, [...secrets]).text,
+      content: redactSecrets(original.content, [...secrets]).text
+    };
+    if (fits(entry)) {
+      kept.push(entry);
+      continue;
+    }
+    const marker = "\n[explored result truncated to fit input-token limit]";
+    let low = 0;
+    let high = entry.content.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (fits({ ...entry, content: entry.content.slice(0, mid) + marker }))
+        low = mid;
+      else
+        high = mid - 1;
+    }
+    if (low > 0) {
+      const prefix = entry.content.slice(0, low);
+      const end = prefix.lastIndexOf("\n");
+      kept.push({ ...entry, content: (end > 0 ? prefix.slice(0, end) : prefix) + marker });
+    }
+  }
+  return kept;
+}
+
+var EXPLORATION_TIME_SHARE = 0.25;
+var EXPLORATION_TIME_EXHAUSTED = "exploration time share used up";
+function boundExplorationReads(reader, remainingMs, stopped) {
+  const read = async (operation) => {
+    const room = remainingMs();
+    if (room <= 0) {
+      stopped();
+      throw new Error(EXPLORATION_TIME_EXHAUSTED);
+    }
+    let timer;
+    try {
+      return await Promise.race([operation(), new Promise((_resolve, reject) => {
+        timer = setTimeout(() => {
+          stopped();
+          reject(new Error(EXPLORATION_TIME_EXHAUSTED));
+        }, room);
+      })]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  return {
+    readFile: (path12) => read(() => reader.readFile(path12)),
+    listDirectory: (dir) => read(() => reader.listDirectory(dir)),
+    listPaths: () => read(() => reader.listPaths())
+  };
 }
 
 var MAX_MATCH_CHARS = 200;
@@ -141917,6 +142011,10 @@ var BUDGET_USED_UP = "read budget used up";
 var READ_FAILED_CONTENT = "read failed";
 var BUDGET_CUT_NOTE = "\u2026 (cut to the read budget)";
 var TRUNCATED_PATHS_NOTE = "(the repository path list is partial: GitHub truncated the tree)";
+var EXPLORED_SEPARATOR_TOKENS = 2;
+function uniqueExploreEntries(entries) {
+  return [...new Map(entries.map((entry) => [JSON.stringify(entry), entry])).values()];
+}
 function normalizeExplorePath(path12) {
   return path12.replace(/\\/g, "/").replace(/^\.\//, "");
 }
@@ -142028,7 +142126,7 @@ async function executeRead(request2, ctx) {
   if (text.length === 0)
     return { entry: { label: path12, content: "no such lines" }, refused: false };
   const label = start === 1 ? path12 : `${path12}:${start}`;
-  ctx.budget.addFileRead(path12);
+  ctx.budget.addFileRead(redactSecrets(path12, [...ctx.knownSecrets]).text);
   const key = servedKey(path12, request2);
   const served = ctx.budget.servedContent(key);
   if (served !== void 0)
@@ -142095,7 +142193,8 @@ async function executeFind(request2, ctx) {
   const note = listing?.truncated === true ? TRUNCATED_PATHS_NOTE : "";
   const noteTokens = note ? estimateTokens(`${note}
 `) : 0;
-  const cut3 = cutToBudget(matches.join("\n"), Math.max(0, ctx.budget.remainingTokens - noteTokens));
+  const redacted = redactSecrets(matches.join("\n"), [...ctx.knownSecrets]).text;
+  const cut3 = cutToBudget(redacted, Math.max(0, ctx.budget.remainingTokens - noteTokens));
   ctx.budget.charge(cut3.tokens + noteTokens);
   const content = note ? cut3.text ? `${cut3.text}
 ${note}` : note : cut3.text;
@@ -142111,7 +142210,7 @@ async function executeList(request2, ctx) {
   if (entries === null)
     return { entry: { label, content: "not found" }, refused: false };
   const allowed = entries.filter((entry) => isAllowedEntry(entry, ctx.allowPath)).slice(0, MAX_LIST_ENTRIES);
-  const content = allowed.join("\n");
+  const content = redactSecrets(allowed.join("\n"), [...ctx.knownSecrets]).text;
   const cut3 = cutToBudget(content, ctx.budget.remainingTokens);
   ctx.budget.charge(cut3.tokens);
   return { entry: { label, content: cut3.text }, refused: false };
@@ -142149,10 +142248,14 @@ var BATCHED_EXPLORATION = {
 var ExploreBudget = class {
   #remainingTokens;
   #rounds = 0;
+  #reviewAttempts = 0;
+  #timeReserveMs;
   #verifierRounds = 0;
   #requests = 0;
   #refused = 0;
+  #trimmed = false;
   #skipped;
+  #stopped;
   #filesRead = /* @__PURE__ */ new Set();
   /** The files read so far, by path: the content is fetched once and kept. */
   readFiles = /* @__PURE__ */ new Map();
@@ -142173,6 +142276,19 @@ var ExploreBudget = class {
   /** The rounds that ran. */
   get rounds() {
     return this.#rounds;
+  }
+  /** One wall-clock window from the first review exploration, shared across batches.
+   * Time between batches counts too, so the window can never be renewed. */
+  remainingExplorationMs(deadline) {
+    this.#timeReserveMs ??= deadline.remainingMs * (1 - EXPLORATION_TIME_SHARE);
+    return Math.max(0, deadline.remainingMs - this.#timeReserveMs);
+  }
+  /** Attempts include failed calls, so a failing provider cannot multiply work per batch. */
+  get reviewAttempts() {
+    return this.#reviewAttempts;
+  }
+  countReviewAttempt() {
+    this.#reviewAttempts++;
   }
   /** The requests the model asked for. */
   get requests() {
@@ -142217,6 +142333,15 @@ var ExploreBudget = class {
   noteSkipped(reason) {
     this.#skipped ??= reason;
   }
+  noteTimeStopped() {
+    if (this.#rounds === 0)
+      this.noteSkipped(EXPLORATION_TIME_EXHAUSTED);
+    else
+      this.#stopped ??= EXPLORATION_TIME_EXHAUSTED;
+  }
+  noteTrimmed() {
+    this.#trimmed = true;
+  }
   /** The file paths of the head, read once per review; a failed listing is tried again later. */
   listPaths(reader) {
     let pending = this.#listPaths;
@@ -142239,7 +142364,9 @@ var ExploreBudget = class {
       requests: this.#requests,
       filesRead: [...this.#filesRead],
       refused: this.#refused,
-      ...this.#skipped ? { skipped: this.#skipped } : {}
+      ...this.#trimmed ? { trimmed: true } : {},
+      ...this.#skipped ? { skipped: this.#skipped } : {},
+      ...this.#stopped ? { stopped: this.#stopped } : {}
     };
   }
 };
@@ -142275,7 +142402,14 @@ async function runExploration(opts) {
   for (const entry of opts.shownEntries ?? [])
     shown2.add(entryKey(entry));
   let usage;
+  const remainingTime = opts.purpose === "review" ? () => budget.remainingExplorationMs(opts.deadline) : void 0;
   for (let round = 1; round <= opts.rounds; round++) {
+    if (opts.purpose === "review" && budget.reviewAttempts >= opts.limits.maxRounds)
+      break;
+    if (remainingTime && remainingTime() <= 0) {
+      budget.noteTimeStopped();
+      break;
+    }
     if (opts.deadline.expired) {
       if (budget.rounds === 0)
         budget.noteSkipped("time limit reached");
@@ -142289,7 +142423,11 @@ async function runExploration(opts) {
     const system = `${opts.system}
 
 ${exploreInstructions(opts.purpose, opts.limits, round, opts.rounds)}`;
-    const block = renderExploredBlock(entries, opts.knownSecrets);
+    const room = opts.promptLimit === void 0 ? Infinity : opts.promptLimit - estimateTokens(system + opts.user) - EXPLORED_SEPARATOR_TOKENS;
+    const fitted = fitExploredEntries(entries, opts.knownSecrets, room);
+    const block = renderExploredBlock(fitted, opts.knownSecrets);
+    if (block !== renderExploredBlock(entries, opts.knownSecrets))
+      budget.noteTrimmed();
     const user = block ? `${opts.user}
 
 ${block}` : opts.user;
@@ -142300,7 +142438,7 @@ ${block}` : opts.user;
       break;
     }
     const requested = requestedOutputTokens(model, EXPLORE_OUTPUT_TOKENS);
-    const affordable = spend.canAfford(promptTokens + opts.reserve.promptTokens + estimateTokens(block) + budget.remainingTokens, requested + opts.reserve.outputTokens);
+    const affordable = spend.canAfford(promptTokens + opts.reserve.promptTokens + (opts.evidenceReserveTokens ?? estimateTokens(block) + budget.remainingTokens), requested + opts.reserve.outputTokens);
     if (!affordable) {
       if (budget.rounds === 0)
         budget.noteSkipped("budget limit reached");
@@ -142315,10 +142453,15 @@ ${block}` : opts.user;
     };
     let response;
     try {
-      response = await model.generate(request2);
+      if (opts.purpose === "review")
+        budget.countReviewAttempt();
+      const timeoutMs = remainingTime ? Math.min(opts.roundTimeoutMs ?? Infinity, remainingTime()) : opts.roundTimeoutMs;
+      response = await (timeoutMs === void 0 ? model.generate(request2) : generateWithTimeout(model, request2, timeoutMs));
     } catch (err) {
       spend.record(promptTokens, requested, void 0);
-      if (budget.rounds === 0)
+      if (remainingTime && remainingTime() <= 0)
+        budget.noteTimeStopped();
+      else if (budget.rounds === 0)
         budget.noteSkipped(describeCallError(err, opts.knownSecrets));
       break;
     }
@@ -142332,7 +142475,7 @@ ${block}` : opts.user;
       break;
     const asked = requests.slice(0, opts.limits.maxRequestsPerRound);
     const run2 = await executeRequests(asked, {
-      reader: opts.reader,
+      reader: remainingTime ? boundExplorationReads(opts.reader, remainingTime, () => budget.noteTimeStopped()) : opts.reader,
       budget,
       limits: opts.limits,
       allowPath: opts.allowPath,
@@ -142354,16 +142497,23 @@ ${block}` : opts.user;
 
 async function exploreBeforeSinglePass(opts) {
   const limits2 = exploreLimits(opts.review);
-  const budget = opts.explore ? new ExploreBudget(limits2) : void 0;
+  const budget = opts.explore ? opts.budget ?? new ExploreBudget(limits2) : void 0;
   const heldTexts = heldTextsOf(opts.files, opts.contextFiles);
   const allowPath = allowPathOf(opts.review.exclude);
   let prompt = opts.prompt;
   let promptTokens = opts.promptTokens;
   let usage;
+  let gatheredEntries = opts.priorEntries ?? [];
   let priorBlock = "";
   let priorEntries = [];
   if (budget && opts.explore && !opts.batched) {
     opts.spend.requireAffordableNext();
+    const copies = 1 + (opts.additionalEvidenceCopies ?? 0);
+    const evidenceRoom = Math.max(0, Math.min(opts.promptLimit - opts.promptTokens, opts.evidenceTokenLimit ?? Infinity));
+    const reserve = {
+      promptTokens: opts.promptTokens + (opts.additionalReserveTokens ?? 0) + (opts.verifyReserve ? opts.verifyReserve.promptTokens + limits2.maxReadTokens : 0),
+      outputTokens: opts.reviewOutputTokens + (opts.additionalReserveOutputTokens ?? 0) + (opts.verifyReserve?.outputTokens ?? 0)
+    };
     const explored = await runExploration({
       model: opts.model,
       spend: opts.spend,
@@ -142372,6 +142522,7 @@ async function exploreBeforeSinglePass(opts) {
       system: opts.prompt.system,
       user: opts.prompt.user,
       rounds: limits2.maxRounds,
+      roundTimeoutMs: reviewLimits(opts.review).callTimeoutMs,
       limits: limits2,
       budget,
       reader: opts.explore.reader,
@@ -142384,24 +142535,31 @@ async function exploreBeforeSinglePass(opts) {
       // The money the review call and the verification call need stays out of the exploration's
       // reach. The verification call may carry the review's explored block, so the read budget is
       // reserved for it too.
-      reserve: {
-        promptTokens: opts.promptTokens + (opts.verifyReserve ? opts.verifyReserve.promptTokens + limits2.maxReadTokens : 0),
-        outputTokens: opts.reviewOutputTokens + (opts.verifyReserve?.outputTokens ?? 0)
-      }
+      reserve,
+      evidenceReserveTokens: opts.evidenceReserveTokens ?? (opts.additionalEvidenceCopies === void 0 ? void 0 : (Math.min(evidenceRoom, maxExploredBlockTokens(limits2.maxReadTokens, limits2.maxRounds * limits2.maxRequestsPerRound)) + EXPLORED_SEPARATOR_TOKENS) * copies)
     });
     usage = explored.usage;
-    priorEntries = explored.entries;
-    if (explored.block) {
+    const entries = uniqueExploreEntries([...explored.entries, ...opts.priorEntries ?? []]);
+    gatheredEntries = entries;
+    const affordableRoom = affordableEvidenceTokens(opts.spend, reserve, copies, evidenceRoom);
+    priorEntries = fitExploredEntries(entries, opts.knownSecrets, affordableRoom - EXPLORED_SEPARATOR_TOKENS);
+    const block = renderExploredBlock(priorEntries, opts.knownSecrets);
+    if (explored.entries.some((entry) => !priorEntries.some((kept) => renderExploredBlock([entry], opts.knownSecrets) === renderExploredBlock([kept], opts.knownSecrets))))
+      budget.noteTrimmed();
+    if (!block && entries.length > 0 && affordableRoom < evidenceRoom)
+      budget.noteSkipped("explored results left out: budget limit reached");
+    if (block) {
       const user = `${opts.prompt.user}
 
-${explored.block}`;
+${block}`;
       const tokens = estimateTokens(opts.prompt.system + user);
-      if (tokens <= opts.promptLimit && opts.spend.canAfford(tokens, opts.reviewOutputTokens)) {
+      const addedTokens = tokens - opts.promptTokens;
+      if (tokens <= opts.promptLimit && opts.spend.canAfford(reserve.promptTokens + addedTokens * copies, reserve.outputTokens)) {
         prompt = { system: opts.prompt.system, user };
         promptTokens = tokens;
-        priorBlock = explored.block;
+        priorBlock = block;
       } else if (tokens > opts.promptLimit) {
-        budget.noteSkipped("explored results did not fit the input-token limit");
+        budget.noteTrimmed();
       } else {
         budget.noteSkipped("explored results left out: budget limit reached");
       }
@@ -142413,6 +142571,7 @@ ${explored.block}`;
     promptTokens,
     usage,
     explorePass,
+    gatheredEntries,
     disclosure: () => {
       if (!opts.explore || !budget)
         return {};
@@ -142420,6 +142579,119 @@ ${explored.block}`;
       return { exploration };
     }
   };
+}
+function affordableEvidenceTokens(spend, reserve, copies, limit5) {
+  let low = 0;
+  let high = limit5;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (spend.canAfford(reserve.promptTokens + mid * copies, reserve.outputTokens))
+      low = mid;
+    else
+      high = mid - 1;
+  }
+  return low;
+}
+
+var EXPLORATION_INPUT_SHARE = 0.2;
+var EXPLORATION_HEADROOM_TOKENS = 32;
+var BATCH_LABEL_TOKENS = 300;
+var PATCH_RENDER_EXPANSION = 1.3;
+var BATCH_REFIT_RATIO = 0.8;
+var MIN_EXPLORATION_PATCH_TOKENS = 32;
+function explorationBaseLimit(limit5, limits2, enabled) {
+  if (!enabled)
+    return limit5;
+  const instructions = estimateTokens(exploreInstructions("review", limits2, limits2.maxRounds, limits2.maxRounds));
+  return Math.max(1, limit5 - Math.min(limits2.maxReadTokens, Math.floor(limit5 * EXPLORATION_INPUT_SHARE)) - instructions - EXPLORATION_HEADROOM_TOKENS);
+}
+function explorationBatchCap(cap, limit5, emptyPrompt, manifest) {
+  const overhead = estimateTokens(emptyPrompt.system + emptyPrompt.user) + estimateTokens(manifest) + BATCH_LABEL_TOKENS;
+  const fitted = Math.min(cap, Math.floor((limit5 - overhead) / PATCH_RENDER_EXPANSION));
+  return fitted >= Math.min(cap, MIN_EXPLORATION_PATCH_TOKENS) ? fitted : void 0;
+}
+function planReviewExploration(opts) {
+  const basePromptLimit = explorationBaseLimit(opts.limit, exploreLimits(opts.review), opts.explore !== void 0);
+  if (!opts.explore)
+    return { basePromptLimit };
+  if (opts.files.length === 0) {
+    if (opts.wholePromptTokens > opts.limit) {
+      return { basePromptLimit: opts.limit, unfitReason: `Estimated prompt tokens (${opts.wholePromptTokens}) exceed maxInputTokens limit (${opts.limit}).` };
+    }
+    if (opts.wholePromptTokens <= basePromptLimit)
+      return { basePromptLimit };
+    return { basePromptLimit: opts.limit, skipReason: "exploration reserve leaves insufficient patch room" };
+  }
+  const cap = explorationBatchCap(opts.batchTokens, basePromptLimit, opts.emptyPrompt, opts.manifest);
+  if (opts.wholePromptTokens <= basePromptLimit)
+    return { basePromptLimit };
+  const plan = cap !== void 0 ? fitExplorationBatches(opts.files, cap, opts.review.maxFileParts, basePromptLimit, opts.promptFor) : void 0;
+  if (plan)
+    return { basePromptLimit, plan };
+  const fallback = { basePromptLimit: opts.limit, skipReason: "exploration reserve leaves insufficient patch room" };
+  if (opts.wholePromptTokens <= opts.limit)
+    return fallback;
+  const fullCap = explorationBatchCap(opts.batchTokens, opts.limit, opts.emptyPrompt, opts.manifest);
+  const fullPlan = fullCap === void 0 ? void 0 : fitExplorationBatches(opts.files, fullCap, opts.review.maxFileParts, opts.limit, opts.promptFor);
+  return fullPlan ? { ...fallback, plan: fullPlan } : fallback;
+}
+async function exploreReview(opts) {
+  const budget = opts.explore ? new ExploreBudget(exploreLimits(opts.review)) : void 0;
+  const result = await exploreBeforeSinglePass({ ...opts, budget, batched: opts.batched || opts.skipReason !== void 0 });
+  if (opts.skipReason)
+    budget?.noteSkipped(opts.skipReason);
+  result.disclosure = () => budget ? { exploration: budget.disclosure() } : {};
+  let gatheredEntries = result.gatheredEntries;
+  let sentInputTokens = 0;
+  const beforeBatch = opts.explore && !opts.skipReason ? async (prompt, files, index) => {
+    const remaining = opts.callPromptTokens.slice(index + 1);
+    const promptTokens = estimateTokens(prompt.system + prompt.user);
+    const remainingBaseTokens = remaining.reduce((sum, tokens) => sum + tokens, 0);
+    const evidenceTokenLimit = Math.max(0, Math.floor((opts.totalInputLimit - sentInputTokens - promptTokens - remainingBaseTokens) / (remaining.length + 1)));
+    const limits2 = exploreLimits(opts.review);
+    const blockMax = maxExploredBlockTokens(limits2.maxReadTokens, limits2.maxRounds * limits2.maxRequestsPerRound);
+    const perCopy = (headroom) => Math.min(evidenceTokenLimit, blockMax, Math.max(0, headroom)) + EXPLORED_SEPARATOR_TOKENS;
+    const evidenceReserveTokens = perCopy(opts.promptLimit - promptTokens) + remaining.reduce((sum, tokens) => sum + perCopy(opts.promptLimit - tokens), 0);
+    const step = await exploreBeforeSinglePass({
+      ...opts,
+      budget,
+      prompt,
+      files,
+      batched: false,
+      priorEntries: gatheredEntries,
+      promptTokens,
+      evidenceTokenLimit,
+      additionalEvidenceCopies: remaining.length,
+      evidenceReserveTokens,
+      additionalReserveTokens: remainingBaseTokens,
+      additionalReserveOutputTokens: opts.reviewOutputTokens * remaining.length
+    });
+    sentInputTokens += step.promptTokens;
+    result.usage = combineUsage(result.usage, step.usage);
+    gatheredEntries = step.gatheredEntries;
+    result.gatheredEntries = gatheredEntries;
+    if (step.explorePass) {
+      const entries = uniqueExploreEntries(gatheredEntries);
+      result.explorePass = { ...step.explorePass, priorEntries: entries, priorBlock: renderExploredBlock(entries, opts.knownSecrets) };
+    }
+    return step.prompt;
+  } : void 0;
+  return Object.assign(result, { beforeBatch });
+}
+function fitExplorationBatches(files, initialCap, maxParts, limit5, promptFor) {
+  let cap = initialCap;
+  for (; ; ) {
+    const plan = batchFilesByTokenCap(files, cap, maxParts);
+    const largest = Math.max(0, ...plan.batches.map((_, index) => {
+      const prompt = promptFor(plan.batches, index);
+      return estimateTokens(prompt.system + prompt.user);
+    }));
+    if (largest <= limit5)
+      return plan;
+    cap = Math.max(1, Math.min(cap - 1, Math.floor(cap * limit5 / largest * BATCH_REFIT_RATIO)));
+    if (cap < Math.min(initialCap, MIN_EXPLORATION_PATCH_TOKENS))
+      return void 0;
+  }
 }
 
 var BASE_REVIEW_OUTPUT_TOKENS = 4096;
@@ -142581,6 +142853,7 @@ async function recoverReviewTruncation(input2) {
       knownSecrets: input2.knownSecrets,
       libraryDocs,
       contextFor: input2.contextFor,
+      contextSent: input2.contextSent,
       manifestFiles: input2.manifestFiles,
       signal,
       initialUsage: totalUsage,
@@ -142666,6 +142939,7 @@ async function runSinglePass(ctx) {
     redactedReviewableFiles: ctx.redactedReviewableFiles,
     libraryDocs: ctx.libraryDocs,
     contextFor: ctx.contextFor,
+    contextSent: ctx.contextSent,
     manifestFiles: ctx.manifestFiles,
     signal,
     totalUsage: combineUsage(response.usage, empty.usage),
@@ -142699,6 +142973,8 @@ async function runSinglePass(ctx) {
 async function runBatchedPass(ctx, batches) {
   const result = await executeBatchedReview({
     batches,
+    beforeBatch: ctx.beforeBatch,
+    promptLimit: ctx.promptLimit,
     config: ctx.config,
     pr: ctx.promptPr,
     rulesFiles: ctx.redactedRulesFiles,
@@ -142710,6 +142986,7 @@ async function runBatchedPass(ctx, batches) {
     knownSecrets: ctx.knownSecrets,
     libraryDocs: ctx.libraryDocs,
     contextFor: ctx.contextFor,
+    contextSent: ctx.contextSent,
     manifestFiles: ctx.manifestFiles,
     signal: ctx.signal,
     deadline: ctx.deadline
@@ -143626,28 +143903,39 @@ async function runReview(input2) {
   const withoutContext = buildReviewPrompt(promptInput);
   const withoutContextTokens = estimateTokens(withoutContext.system + withoutContext.user);
   const wholePromptLimit = Math.min(limits2.maxPromptTokens, budgetCfg.maxInputTokens);
-  const contextRoom = Math.max(0, wholePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS);
-  const wholeContext = context.whole(contextRoom);
+  const { basePromptLimit, plan: explorationPlan, skipReason: explorationSkipReason, unfitReason } = planReviewExploration({
+    explore: input2.explore,
+    limit: wholePromptLimit,
+    review: reviewCfg,
+    batchTokens: limits2.batchTokens,
+    files: redactedReviewableFiles,
+    wholePromptTokens: withoutContextTokens,
+    emptyPrompt: buildReviewPrompt({ ...promptInput, files: [] }),
+    manifest: renderManifest(manifestFiles, []),
+    promptFor: (batches, index) => buildBatchPrompt({ batches, config: promptConfig, pr: promptPr, rulesFiles: redactedRulesFiles, libraryDocs: input2.libraryDocs, manifestFiles }, index)
+  });
+  if (unfitReason)
+    return { status: "skipped-budget", reason: unfitReason };
+  let plan = explorationPlan;
+  const wholeContext = context.whole(Math.max(0, basePromptLimit - withoutContextTokens - WHOLE_CONTEXT_SAFETY_TOKENS));
   let prompt = wholeContext.length > 0 ? buildReviewPrompt({ ...promptInput, contextFiles: wholeContext }) : withoutContext;
   let promptTokens = estimateTokens(prompt.system + prompt.user);
-  while (promptTokens > wholePromptLimit && wholeContext.length > 0) {
+  while (promptTokens > basePromptLimit && wholeContext.length > 0) {
     wholeContext.pop();
     prompt = buildReviewPrompt({ ...promptInput, contextFiles: wholeContext });
     promptTokens = estimateTokens(prompt.system + prompt.user);
   }
-  const batched = withoutContextTokens > limits2.maxPromptTokens && redactedReviewableFiles.length > 0;
+  const batched = withoutContextTokens > (input2.explore ? basePromptLimit : limits2.maxPromptTokens) && redactedReviewableFiles.length > 0;
   if (!batched) {
     const budgetResult = checkBudget({
       promptTokens,
       maxInputTokens: budgetCfg.maxInputTokens
     });
-    if (!budgetResult.ok) {
+    if (!budgetResult.ok)
       return { status: "skipped-budget", reason: budgetResult.reason };
-    }
   }
-  let plan;
   if (batched) {
-    plan = batchFilesByTokenCap(redactedReviewableFiles, limits2.batchTokens, reviewCfg.maxFileParts);
+    plan ??= batchFilesByTokenCap(redactedReviewableFiles, limits2.batchTokens, reviewCfg.maxFileParts);
     for (const skipped of plan.skippedParts) {
       incompleteReasons.push(`${skipped.path}: parts ${skipped.from}\u2013${skipped.total} of ${skipped.total} not reviewed (review.maxFileParts)`);
     }
@@ -143659,10 +143947,15 @@ async function runReview(input2) {
   }
   const promptArgs = {
     config: promptConfig,
+    // No reserve to keep clear when the exploration is skipped: the batch prompts then answer to
+    // the batch cap and the input-token budget like a non-exploring review. The passes reuse this
+    // one limit, so an executed prompt is never larger than its priced twin.
+    promptLimit: input2.explore && !explorationSkipReason ? basePromptLimit : void 0,
     pr: promptPr,
     rulesFiles: redactedRulesFiles,
     libraryDocs: input2.libraryDocs,
-    contextFor: context.forBatch,
+    contextFor: context.selectForBatch,
+    contextSent: (files2) => context.markSent(files2),
     manifestFiles
   };
   const callPromptTokens = plan ? plan.batches.map((_, index, batches) => {
@@ -143694,12 +143987,14 @@ async function runReview(input2) {
       verifyPromptTokens: reviewCfg.verify ? estimateTokens(verifyContextPrompt.system + verifyContextPrompt.user) : void 0,
       verifyOutputTokens
     }, initialPricing);
-    if (estimatedCostUsd > budgetCfg.perReviewUsd) {
+    if (estimatedCostUsd > budgetCfg.perReviewUsd)
       return { status: "skipped-budget", reason: costOverBudgetReason(estimatedCostUsd, budgetCfg.perReviewUsd) };
-    }
   }
   const spend = new SpendTracker(currentPricing, budgetCfg.perReviewUsd);
-  const explored = await exploreBeforeSinglePass({
+  const explored = await exploreReview({
+    callPromptTokens,
+    totalInputLimit: budgetCfg.maxInputTokens,
+    skipReason: explorationSkipReason,
     explore: input2.explore,
     review: reviewCfg,
     batched: plan !== void 0,
@@ -143718,6 +144013,8 @@ async function runReview(input2) {
   });
   const passContext = {
     config: promptConfig,
+    promptLimit: promptArgs.promptLimit,
+    beforeBatch: explored.beforeBatch,
     model,
     spend,
     knownSecrets,
@@ -143731,7 +144028,8 @@ async function runReview(input2) {
     redactedRulesFiles,
     redactedReviewableFiles,
     libraryDocs: input2.libraryDocs,
-    contextFor: context.forBatch,
+    contextFor: context.selectForBatch,
+    contextSent: (files2) => context.markSent(files2),
     manifestFiles
   };
   const pass = plan ? await runBatchedPass(passContext, plan.batches) : await runSinglePass(passContext);
@@ -143843,14 +144141,6 @@ function knownCostUsd(model, disclosure, pricing, spend) {
     return 0;
   const methodOnlyFallback = disclosure.fallbackFromMethod !== void 0 && disclosure.modelUsed === disclosure.fallbackFrom;
   return pricing && (!disclosure.fallbackFrom || methodOnlyFallback) ? spend.spentUsd : void 0;
-}
-function reviewLimits(review) {
-  return {
-    maxPromptTokens: review.maxPromptTokens ?? REVIEW_LIMIT_DEFAULTS.maxPromptTokens,
-    batchTokens: review.batchTokens ?? REVIEW_LIMIT_DEFAULTS.batchTokens,
-    callTimeoutMs: review.callTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.callTimeoutMs,
-    totalTimeoutMs: review.totalTimeoutMs ?? REVIEW_LIMIT_DEFAULTS.totalTimeoutMs
-  };
 }
 
 import { spawn as nodeSpawn } from "node:child_process";
@@ -197588,9 +197878,13 @@ function renderContextNote(context, isArabic) {
 function renderExplorationNote(exploration, isArabic) {
   if (!exploration)
     return void 0;
-  if (exploration.rounds === 0 && exploration.verifierRounds === 0 && !exploration.skipped)
+  if (exploration.rounds === 0 && exploration.verifierRounds === 0 && !exploration.skipped && !exploration.stopped && !exploration.trimmed)
     return void 0;
-  const files = exploration.filesRead.length;
+  const paths = [...new Set(exploration.filesRead)];
+  const shown2 = paths.slice(0, 10).map((path12) => `\`${neutralize2(path12.replace(/`/g, "").replace(/\s+/g, " ").slice(0, 200))}\``);
+  const rest = paths.length - shown2.length;
+  const names = shown2.length ? ` (${shown2.join(", ")}${rest ? isArabic ? ` \u0648 ${rest} \u063A\u064A\u0631\u0647\u0627` : ` and ${rest} more` : ""})` : "";
+  const files = paths.length;
   const rounds = exploration.rounds;
   const verifierRounds = exploration.verifierRounds;
   const refused = exploration.refused;
@@ -197598,13 +197892,15 @@ function renderExplorationNote(exploration, isArabic) {
   if (isArabic) {
     const verifierPart2 = verifierRounds > 0 ? `\u060C \u0648\u0627\u0644\u062A\u062D\u0642\u0642: ${verifierRounds} \u062C\u0648\u0644\u0629` : "";
     const refusedPart2 = refused > 0 ? `\u060C ${refused} \u0637\u0644\u0628 \u0645\u0631\u0641\u0648\u0636` : "";
+    const stoppedPart2 = exploration.stopped ? ` (\u0648\u0642\u0641: ${neutralize2(exploration.stopped)})` : "";
     const skippedPart2 = skipped ? ` (\u0627\u062A\u062E\u0637\u0649: ${skipped})` : "";
-    return `> \u2139\uFE0F \u0627\u0644\u0627\u0633\u062A\u0643\u0634\u0627\u0641: ${files} \u0645\u0644\u0641 \u0641\u064A ${rounds} \u062C\u0648\u0644\u0629${verifierPart2}${refusedPart2}${skippedPart2}`;
+    return `> \u2139\uFE0F \u0627\u0644\u0627\u0633\u062A\u0643\u0634\u0627\u0641: ${files} \u0645\u0644\u0641 \u0641\u064A ${rounds} \u062C\u0648\u0644\u0629${verifierPart2}${refusedPart2}${exploration.trimmed ? "\u060C \u0627\u0644\u0646\u062A\u0627\u0626\u062C \u0627\u062A\u0642\u0635\u0631\u062A \u0639\u0634\u0627\u0646 \u062A\u0646\u0627\u0633\u0628 \u062D\u062F \u0627\u0644\u0625\u062F\u062E\u0627\u0644" : ""}${skippedPart2}${stoppedPart2}${names}`;
   }
   const verifierPart = verifierRounds > 0 ? `, verifier: ${verifierRounds} ${verifierRounds === 1 ? "round" : "rounds"}` : "";
   const refusedPart = refused > 0 ? `, ${refused} ${refused === 1 ? "request" : "requests"} refused` : "";
+  const stoppedPart = exploration.stopped ? ` (stopped: ${neutralize2(exploration.stopped)})` : "";
   const skippedPart = skipped ? ` (skipped: ${skipped})` : "";
-  return `> \u2139\uFE0F Explored: ${files} ${files === 1 ? "file" : "files"} in ${rounds} ${rounds === 1 ? "round" : "rounds"}${verifierPart}${refusedPart}${skippedPart}`;
+  return `> \u2139\uFE0F Explored: ${files} ${files === 1 ? "file" : "files"} in ${rounds} ${rounds === 1 ? "round" : "rounds"}${verifierPart}${refusedPart}${exploration.trimmed ? ", results shortened to fit" : ""}${skippedPart}${stoppedPart}${names}`;
 }
 function citedOf(context, isArabic) {
   const unique = [...new Set(context.cited ?? [])];

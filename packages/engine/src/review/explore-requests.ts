@@ -86,6 +86,14 @@ export interface ExploreEntry {
   content: string;
 }
 
+/** Leave room for the two newlines between the base prompt and evidence. */
+export const EXPLORED_SEPARATOR_TOKENS = 2;
+
+/** Keep one copy of each identical result, preserving first occurrence order. */
+export function uniqueExploreEntries(entries: readonly ExploreEntry[]): ExploreEntry[] {
+  return [...new Map(entries.map((entry) => [JSON.stringify(entry), entry])).values()];
+}
+
 export interface ExecuteRequestsContext {
   reader: RepositoryReader;
   budget: ExploreBudget;
@@ -248,7 +256,7 @@ async function executeRead(
   const { text, start } = numberedLines(content, request.startLine, request.endLine, ctx.limits.maxLinesPerRead);
   if (text.length === 0) return { entry: { label: path, content: 'no such lines' }, refused: false };
   const label = start === 1 ? path : `${path}:${start}`;
-  ctx.budget.addFileRead(path);
+  ctx.budget.addFileRead(redactSecrets(path, [...ctx.knownSecrets]).text);
   // The same range of a file that was served before shows what it showed then, and it is free: a
   // read that was cut to the budget stays cut, so a repeat never gets more than the first one.
   const key = servedKey(path, request);
@@ -324,7 +332,8 @@ async function executeFind(
   // the paths it did not see for the ones that do not exist (ADR-0046).
   const note = listing?.truncated === true ? TRUNCATED_PATHS_NOTE : '';
   const noteTokens = note ? estimateTokens(`${note}\n`) : 0;
-  const cut = cutToBudget(matches.join('\n'), Math.max(0, ctx.budget.remainingTokens - noteTokens));
+  const redacted = redactSecrets(matches.join('\n'), [...ctx.knownSecrets]).text;
+  const cut = cutToBudget(redacted, Math.max(0, ctx.budget.remainingTokens - noteTokens));
   ctx.budget.charge(cut.tokens + noteTokens);
   const content = note ? (cut.text ? `${cut.text}\n${note}` : note) : cut.text;
   return { entry: { label, content }, refused: false };
@@ -343,7 +352,7 @@ async function executeList(
   const entries = await ctx.reader.listDirectory(dir);
   if (entries === null) return { entry: { label, content: 'not found' }, refused: false };
   const allowed = entries.filter((entry) => isAllowedEntry(entry, ctx.allowPath)).slice(0, MAX_LIST_ENTRIES);
-  const content = allowed.join('\n');
+  const content = redactSecrets(allowed.join('\n'), [...ctx.knownSecrets]).text;
   const cut = cutToBudget(content, ctx.budget.remainingTokens);
   ctx.budget.charge(cut.tokens);
   return { entry: { label, content: cut.text }, refused: false };

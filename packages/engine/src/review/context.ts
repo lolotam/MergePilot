@@ -302,8 +302,8 @@ export class ContextPlan {
     }
   }
 
-  /** The context of one batch, from its own files' context, recorded as sent. */
-  readonly forBatch = (batch: ReadonlyArray<{ path: string }>): ContextFile[] => {
+  /** Selects batch context without recording it; rendered prompts may still remove files. */
+  readonly selectForBatch = (batch: ReadonlyArray<{ path: string }>, maxTokens = Infinity): ContextFile[] => {
     const cap = Math.min(this.opts.contextTokens, this.opts.batchContextTokens ?? this.opts.batchTokens);
     if (!this.batchContext) {
       const batchOpts = { ...this.opts, contextTokens: cap };
@@ -312,7 +312,12 @@ export class ContextPlan {
         prFiles: cap > 0 ? preparePullRequest(this.offered, batchOpts) : [],
       };
     }
-    const files = this.selectPrepared(batch.map((f) => f.path), cap, this.batchContext.files, this.batchContext.prFiles);
+    return this.selectPrepared(batch.map((f) => f.path), Math.min(cap, maxTokens), this.batchContext.files, this.batchContext.prFiles);
+  };
+
+  /** Selects and records context for callers that send the selection without further fitting. */
+  readonly forBatch = (batch: ReadonlyArray<{ path: string }>, maxTokens = Infinity): ContextFile[] => {
+    const files = this.selectForBatch(batch, maxTokens);
     this.markSent(files);
     return files;
   };

@@ -9,7 +9,7 @@ import type { Secret } from '../credentials/secret.js';
 import type { TokenUsage } from '../llm/types.js';
 import { redactSecrets } from '../security/redact.js';
 import { FINDINGS_MISSING_REASON } from './answer.js';
-import { executeBatchedReview, parseReviewResponse } from './batch-run.js';
+import { executeBatchedReview, parseReviewResponse, type ExecuteBatchedReviewInput } from './batch-run.js';
 import { retryUnusableAnswer, type ReviewDeadline } from './call.js';
 import type { ManifestFile } from './manifest.js';
 import { reviewRetryOutputTokens } from './output-budget.js';
@@ -24,6 +24,8 @@ import type { WithheldItem } from './withheld.js';
 
 export interface ReviewPassContext {
   config: MergePilotConfig;
+  beforeBatch?: ExecuteBatchedReviewInput['beforeBatch'];
+  promptLimit?: number | undefined;
   model: ReviewModel;
   spend: SpendTracker;
   knownSecrets: readonly Secret[];
@@ -41,7 +43,8 @@ export interface ReviewPassContext {
   redactedReviewableFiles: ReviewableFileWithPatch[];
   libraryDocs?: LibraryDoc[] | undefined;
   /** The repository context of a batch (ADR-0029), for up-front and recovery batches alike. */
-  contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
+  contextFor?: ((files: ReviewableFileWithPatch[], maxTokens?: number) => ContextFile[]) | undefined;
+  contextSent?: ExecuteBatchedReviewInput['contextSent'];
   /** Every changed file of the PR, for the manifest of each batch (ADR-0031). */
   manifestFiles?: readonly ManifestFile[] | undefined;
 }
@@ -153,6 +156,7 @@ export async function runSinglePass(ctx: ReviewPassContext): Promise<ReviewPassR
     redactedReviewableFiles: ctx.redactedReviewableFiles,
     libraryDocs: ctx.libraryDocs,
     contextFor: ctx.contextFor,
+    contextSent: ctx.contextSent,
     manifestFiles: ctx.manifestFiles,
     signal,
     totalUsage: combineUsage(response.usage, empty.usage),
@@ -199,6 +203,8 @@ export async function runBatchedPass(
 ): Promise<ReviewPassResult> {
   const result = await executeBatchedReview({
     batches,
+    beforeBatch: ctx.beforeBatch,
+    promptLimit: ctx.promptLimit,
     config: ctx.config,
     pr: ctx.promptPr,
     rulesFiles: ctx.redactedRulesFiles,
@@ -210,6 +216,7 @@ export async function runBatchedPass(
     knownSecrets: ctx.knownSecrets,
     libraryDocs: ctx.libraryDocs,
     contextFor: ctx.contextFor,
+    contextSent: ctx.contextSent,
     manifestFiles: ctx.manifestFiles,
     signal: ctx.signal,
     deadline: ctx.deadline,

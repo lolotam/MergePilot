@@ -49,6 +49,7 @@ export interface RecoverReviewTruncationInput {
   libraryDocs?: LibraryDoc[] | undefined;
   /** The repository context of each recovery batch (ADR-0029). */
   contextFor?: ((files: ReviewableFileWithPatch[]) => ContextFile[]) | undefined;
+  contextSent?: ((files: ContextFile[]) => void) | undefined;
   /** Every changed file of the PR, for the manifest of each recovery batch (ADR-0031). */
   manifestFiles?: readonly ManifestFile[] | undefined;
   signal?: AbortSignal | undefined;
@@ -139,6 +140,7 @@ export async function recoverReviewTruncation(
       knownSecrets: input.knownSecrets,
       libraryDocs,
       contextFor: input.contextFor,
+      contextSent: input.contextSent,
       manifestFiles: input.manifestFiles,
       signal,
       initialUsage: totalUsage,

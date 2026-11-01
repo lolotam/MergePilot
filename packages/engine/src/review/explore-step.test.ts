@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { Secret } from '../credentials/secret.js';
+import { uniqueExploreEntries } from './explore-requests.js';
 import { estimateTokens } from './budget.js';
 import { ReviewDeadline } from './call.js';
 import { exploreBeforeSinglePass } from './explore-step.js';
@@ -91,4 +93,59 @@ describe('the exploration step budget recheck (issue #183)', () => {
     expect(spend.spentUsd).toBeGreaterThan(0);
     expect(spend.mustCheckNext).toBe(true);
   });
+});
+
+it('retains a trimmed explored result when it overflows the input limit (B23)', async () => {
+  const prompt = { system: 'review system', user: 'patch '.repeat(100) };
+  const result = await exploreBeforeSinglePass({
+    explore: { reader: { ...reader, readFile: async () => 'evidence '.repeat(500) } },
+    review: { exclude: [], explore: { maxRounds: 1 } }, batched: false,
+    model: { label: 'fake:overflow', generate: async () => ({ text: JSON.stringify({ explore: [{ read: { path: 'src/guard.ts' } }] }), finishReason: 'stop' }) },
+    spend: new SpendTracker(undefined, 1), deadline: new ReviewDeadline(60000),
+    prompt, promptTokens: estimateTokens(prompt.system + prompt.user), promptLimit: 1000,
+    files: [], contextFiles: [], knownSecrets: [], reviewOutputTokens: 4096,
+  });
+  expect(result.prompt.user).toContain('EXPLORED:src/guard.ts');
+  expect(result.prompt.user).toContain('evidence');
+  expect(result.prompt.user).toContain('[explored result truncated');
+  expect(result.promptTokens).toBeLessThanOrEqual(1000);
+  expect(result.disclosure().exploration?.trimmed).toBe(true);
+  expect(result.disclosure().exploration?.skipped).toBeUndefined();
+  result.explorePass!.budget.noteSkipped('later real skip');
+  expect(result.disclosure().exploration?.skipped).toBe('later real skip');
+});
+
+it('redacts known secrets in disclosed read paths before notes can display them', async () => {
+  const secret = new Secret('b23-private-token');
+  const path = `src/${secret.reveal()}.ts`;
+  const prompt = { system: 'system', user: 'patch' };
+  const result = await exploreBeforeSinglePass({
+    explore: { reader: { ...reader, readFile: async () => 'safe content' } },
+    review: { exclude: [], explore: { maxRounds: 1 } }, batched: false,
+    model: { label: 'fake:path', generate: async () => ({ text: JSON.stringify({ explore: [{ read: { path } }] }), finishReason: 'stop' }) },
+    spend: new SpendTracker(undefined, 1), deadline: new ReviewDeadline(60000),
+    prompt, promptTokens: estimateTokens(prompt.system + prompt.user), promptLimit: 10000,
+    files: [], contextFiles: [], knownSecrets: [secret], reviewOutputTokens: 4096,
+  });
+  expect(JSON.stringify(result.disclosure())).not.toContain(secret.reveal());
+  expect(result.disclosure().exploration?.filesRead).toEqual(['src/[REDACTED:known].ts']);
+});
+
+it('does not report a new trim for carried evidence that no longer fits', async () => {
+  const result = await exploreBeforeSinglePass({
+    explore: { reader }, priorEntries: [{ label: 'src/old.ts', content: 'old evidence '.repeat(1000) }],
+    review: { exclude: [], explore: { maxRounds: 1 } }, batched: false,
+    model: { label: 'fake:reuse', generate: async () => ({ text: '{"explore":[]}', finishReason: 'stop' }) },
+    spend: new SpendTracker(undefined, 1), deadline: new ReviewDeadline(60000),
+    prompt: { system: 'system', user: 'patch' }, promptTokens: 5, promptLimit: 1000,
+    files: [], contextFiles: [], knownSecrets: [], reviewOutputTokens: 4096,
+  });
+  expect(result.disclosure().exploration?.trimmed).toBeUndefined();
+  expect(result.disclosure().exploration?.skipped).toBeUndefined();
+});
+
+it('deduplicates identical exploration entries in first occurrence order', () => {
+  const first = { label: 'src/a.ts', content: 'first range' };
+  const second = { label: 'src/a.ts', content: 'another range' };
+  expect(uniqueExploreEntries([first, second, { ...first }])).toEqual([first, second]);
 });

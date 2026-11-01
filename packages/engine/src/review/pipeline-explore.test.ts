@@ -1,7 +1,7 @@
 /**
  * The exploration in the pipeline (ADR-0046): a review without a reader is untouched, a review
- * with one carries the explored files in its prompt, a batched review discloses that it did not
- * explore, and the verifier explores as well. The verifier's own round is checked here too: what
+ * with one carries the explored files in its prompt, and the verifier explores as well.
+ * Large PR and batch budgeting are covered in pipeline-explore-budget.test.ts. The verifier's own round is checked here too: what
  * it shows again, the prompt it sends when the spend runs out, and the call it skips when the
  * deadline runs out.
  */
@@ -58,11 +58,6 @@ function fakeReader(files: Record<string, string> = {}): RepositoryReader {
   };
 }
 
-/** A patch of about `lines` × 8 estimated tokens. */
-function bigPatch(lines: number): string {
-  return `@@ -1,1 +1,${lines + 1} @@\n const a = 1;\n${Array.from({ length: lines }, (_, i) => `+const value${i} = ${i};`).join('\n')}`;
-}
-
 function input(
   model: ReviewModel,
   overrides: Partial<RunReviewInput> = {},
@@ -116,28 +111,6 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
     });
   });
 
-  it('does not explore a batched review and says so', async () => {
-    const files = ['src/a.ts', 'src/b.ts'].map((path) => ({
-      path,
-      status: 'modified',
-      patch: bigPatch(100),
-      changes: 101,
-    }));
-    const { model, requests } = recordingModel([makeAnswerJson([]), makeAnswerJson([])]);
-
-    const result = await runReview(input(model, {
-      files,
-      explore: { reader: fakeReader({ 'src/guard.ts': 'export function guard() {}' }) },
-    }, { maxPromptTokens: 1_000, batchTokens: 800 }));
-
-    expect(requests).toHaveLength(2);
-    expect(requests.every((request) => !request.user.includes('EXPLORED ('))).toBe(true);
-    expect(result).toMatchObject({
-      status: 'completed',
-      exploration: { rounds: 0, requests: 0, filesRead: [], refused: 0, skipped: 'batched review' },
-    });
-  });
-
   it('gives the verifier the explored block of the review and its own', async () => {
     const { model, requests } = recordingModel([
       READ_GUARD,
@@ -188,28 +161,6 @@ describe('the exploration in the pipeline (ADR-0046)', () => {
     expect(result).toMatchObject({
       status: 'completed',
       exploration: { rounds: 1, requests: 1, filesRead: ['src/big.ts'] },
-    });
-  });
-
-  it('keeps the review prompt when the explored results do not fit the input limit', async () => {
-    // The prompt of an exploration round, measured with a review that explores.
-    const probe = recordingModel([READ_GUARD, NOTHING, makeAnswerJson([])]);
-    await runReview(input(probe.model, {
-      explore: { reader: fakeReader({ 'src/guard.ts': 'export function guard() {}' }) },
-    }));
-    const roundTokens = estimateTokens(probe.requests[0]!.system + probe.requests[0]!.user);
-    // A read whose block is bigger than the room the limit leaves for the round's instructions.
-    const { model, requests } = recordingModel([READ_BIG, makeAnswerJson([])]);
-    const result = await runReview(input(model, {
-      explore: { reader: fakeReader({ 'src/big.ts': 'x'.repeat(4000) }) },
-    }, { maxPromptTokens: roundTokens + 10 }));
-
-    // The exploration round ran, but its result does not fit the review prompt.
-    expect(requests).toHaveLength(2);
-    expect(requests[1]!.user).not.toContain('EXPLORED (');
-    expect(result).toMatchObject({
-      status: 'completed',
-      exploration: { skipped: 'explored results did not fit the input-token limit' },
     });
   });
 
