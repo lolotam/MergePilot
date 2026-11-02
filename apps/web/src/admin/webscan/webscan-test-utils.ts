@@ -1,5 +1,16 @@
 import { vi } from 'vitest';
-import type { WebScanSettingsDto, WebScanSiteDto, WebScanSitesPage } from '@mergepilot/app/contract';
+import type {
+  WebScanAuditPage,
+  WebScanExceptionDto,
+  WebScanExceptionsPage,
+  WebScanOccurrenceDto,
+  WebScanScanDetail,
+  WebScanScanDto,
+  WebScanScansPage,
+  WebScanSettingsDto,
+  WebScanSiteDto,
+  WebScanSitesPage,
+} from '@mergepilot/app/contract';
 
 /**
  * The test helpers of the website scan panels.
@@ -15,6 +26,21 @@ export function jsonResponse(body: unknown, status = 200): Response {
     status,
     statusText: status === 200 ? 'OK' : 'Error',
     json: async () => body,
+  } as unknown as Response;
+}
+
+/** The attachment answer of the export: a file with the name of the server. */
+export function attachmentResponse(filename: string, contentType = 'text/html'): Response {
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    headers: {
+      get: (name: string) =>
+        name.toLowerCase() === 'content-disposition' ? `attachment; filename="${filename}"` : contentType,
+    },
+    blob: async () => ({ size: 12, type: contentType }) as unknown as Blob,
+    json: async () => '',
   } as unknown as Response;
 }
 
@@ -111,6 +137,12 @@ export const siteWithScheduleFixture: WebScanSiteDto = {
   schedule: { frequency: 'daily', hour: 3, minute: 30, enabled: true },
 };
 
+/** A site whose ledger of the findings is known. */
+export const siteWithScanFixture: WebScanSiteDto = {
+  ...siteFixture,
+  lastCoverageScanId: '33333333-3333-4333-8333-333333333333',
+};
+
 /** The page of the sites list of the test fixtures. */
 export const sitesPageFixture: WebScanSitesPage = {
   sites: [siteFixture, siteWithScheduleFixture],
@@ -118,3 +150,161 @@ export const sitesPageFixture: WebScanSitesPage = {
   limit: 25,
   offset: 0,
 };
+
+/** One scan of the test fixtures. */
+export const scanFixture: WebScanScanDto = {
+  id: '33333333-3333-4333-8333-333333333333',
+  siteId: siteFixture.id,
+  trigger: 'manual',
+  status: 'running',
+  scheduledFor: null,
+  requests: 12,
+  pages: 4,
+  durationMs: 8000,
+  stopReason: null,
+  failReason: null,
+  coverageSummary: null,
+  authorizationAuditId: 'audit-1',
+  scopeVersion: 1,
+  createdAt: '2026-11-01T10:00:00.000Z',
+  startedAt: '2026-11-01T10:00:05.000Z',
+  finishedAt: null,
+};
+
+/** One occurrence of the ledger of the test fixtures. */
+export const occurrenceFixture: WebScanOccurrenceDto = {
+  id: '44444444-4444-4444-8444-444444444444',
+  occurrenceKey: 'a'.repeat(64),
+  targetKey: 'target-1',
+  issueKey: 'headers:missing-hsts',
+  checkId: 'headers',
+  checkVersion: 1,
+  issueId: 'missing-hsts',
+  subject: 'strict-transport-security',
+  severity: 'high',
+  validation: 'Confirmed',
+  confidence: 'high',
+  safeLocation: 'https://example.com/',
+  evidenceHash: 'b'.repeat(64),
+  evidence: { header: 'strict-transport-security' },
+  state: 'outstanding',
+  archiveReason: null,
+  comparison: 'New',
+  exceptionId: null,
+  lastObservedAt: '2026-11-01T10:00:09.000Z',
+  createdAt: '2026-11-01T10:00:09.000Z',
+  updatedAt: '2026-11-01T10:00:09.000Z',
+};
+
+/** The state of the scan of the test fixtures, with its ledger. */
+export const scanDetailFixture: WebScanScanDetail = {
+  scan: scanFixture,
+  coverage: [
+    {
+      targetKey: 'target-1',
+      checkId: 'headers',
+      checkVersion: 1,
+      evaluatedIssueIds: ['missing-hsts'],
+      outcome: 'checked',
+      reason: null,
+    },
+  ],
+  occurrences: [occurrenceFixture],
+};
+
+/** The page of the scan history of the test fixtures. */
+export const scansPageFixture: WebScanScansPage = {
+  scans: [scanFixture],
+  limit: 20,
+  offset: 0,
+};
+
+/** One resolution of the test fixtures. */
+export const exceptionFixture: WebScanExceptionDto = {
+  id: '55555555-5555-4555-8555-555555555555',
+  siteId: siteFixture.id,
+  occurrenceKey: 'c'.repeat(64),
+  evidenceHash: 'd'.repeat(64),
+  kind: 'accepted',
+  reasonCategory: 'accepted_risk',
+  reason: 'The site is behind a gateway that owns the header.',
+  expiresAt: '2026-12-01T00:00:00.000Z',
+  createdBy: 'u-admin',
+  createdAt: '2026-11-01T10:00:00.000Z',
+  revokedAt: null,
+  revokedBy: null,
+};
+
+/** The resolutions of the site of the test fixtures. */
+export const exceptionsPageFixture: WebScanExceptionsPage = {
+  exceptions: [exceptionFixture],
+};
+
+/** The audit log of the test fixtures. */
+export const auditPageFixture: WebScanAuditPage = {
+  audit: [
+    {
+      id: '66666666-6666-4666-8666-666666666666',
+      actor: 'u-admin',
+      action: 'scan.started',
+      targetType: 'site',
+      targetId: siteFixture.id,
+      before: null,
+      after: null,
+      createdAt: '2026-11-01T10:00:00.000Z',
+    },
+  ],
+  limit: 25,
+  offset: 0,
+};
+
+/**
+ * The stream of the scan, as the browser sees it.
+ *
+ * The tests drive the events themselves: the panel reads the state of the scan
+ * from the server and the counters from the stream, and the two are checked
+ * apart.
+ */
+export class FakeEventSource {
+  /** Every stream the panel opened. */
+  static instances: FakeEventSource[] = [];
+
+  readonly url: string;
+  readonly withCredentials: boolean;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  private readonly listeners = new Map<string, ((event: Event) => void)[]>();
+
+  constructor(url: string, options?: { withCredentials?: boolean }) {
+    this.url = url;
+    this.withCredentials = options?.withCredentials ?? false;
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: Event) => void): void {
+    const list = this.listeners.get(type) ?? [];
+    list.push(listener);
+    this.listeners.set(type, list);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  /** Sends one event of the stream. */
+  emit(type: string, data: unknown): void {
+    const event = { data: JSON.stringify(data) } as MessageEvent<string>;
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+
+  /** Opens the stream, as a first connect or a reconnect does. */
+  open(): void {
+    this.onopen?.();
+  }
+
+  /** Drops the stream. */
+  fail(): void {
+    this.onerror?.();
+  }
+}

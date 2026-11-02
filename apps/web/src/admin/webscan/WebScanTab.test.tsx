@@ -3,7 +3,16 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../admin-test-utils.js';
 import { WebScanTab } from './WebScanTab.js';
-import { installFetch, jsonResponse, settingsFixture, sitesPageFixture } from './webscan-test-utils.js';
+import {
+  auditPageFixture,
+  exceptionsPageFixture,
+  installFetch,
+  jsonResponse,
+  scanDetailFixture,
+  scansPageFixture,
+  settingsFixture,
+  sitesPageFixture,
+} from './webscan-test-utils.js';
 
 const originalFetch = global.fetch;
 
@@ -13,8 +22,13 @@ afterEach(() => {
 
 function answerWithFixtures() {
   installFetch((call) => {
+    const path = call.url.split('?')[0] ?? '';
     if (call.url.startsWith('/api/admin/web-scan/settings')) return jsonResponse(settingsFixture);
-    if (call.url.startsWith('/api/admin/web-scan/sites')) return jsonResponse(sitesPageFixture);
+    if (path.endsWith('/sites')) return jsonResponse(sitesPageFixture);
+    if (path.endsWith('/scans')) return jsonResponse(scansPageFixture);
+    if (path.includes('/scans/')) return jsonResponse(scanDetailFixture);
+    if (path.endsWith('/exceptions')) return jsonResponse(exceptionsPageFixture);
+    if (path.endsWith('/audit')) return jsonResponse(auditPageFixture);
     return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
   });
 }
@@ -73,14 +87,34 @@ describe('the website scan tab', () => {
     expect(screen.getByRole('tab', { name: 'Settings' }).getAttribute('aria-selected')).toBe('true');
   });
 
-  it('shows the empty state of the sections that are not here yet', async () => {
+  it('shows the real panel of every section', async () => {
     answerWithFixtures();
     const user = userEvent.setup();
     renderWithProviders(<WebScanTab />);
 
     await user.click(screen.getByRole('tab', { name: 'Scans' }));
+    const picker = (await screen.findByLabelText('Site')) as HTMLSelectElement;
+    expect(screen.getByText('Choose the site you want to scan.')).toBeTruthy();
+    await user.selectOptions(picker, '11111111-1111-4111-8111-111111111111');
+    expect(screen.getByRole('button', { name: 'Start a manual scan' })).toBeTruthy();
 
-    expect(screen.getByText('This section is not available yet.')).toBeTruthy();
-    expect(screen.getByText('The scan results, the exceptions and the audit log are not part of this view.')).toBeTruthy();
+    await user.click(screen.getByRole('tab', { name: 'Exceptions' }));
+    expect(await screen.findByRole('button', { name: 'Add an exception' })).toBeTruthy();
+
+    await user.click(screen.getByRole('tab', { name: 'Audit log' }));
+    expect(await screen.findByText('scan.started')).toBeTruthy();
+  });
+
+  it('keeps the chosen site while the administrator moves between the sections', async () => {
+    answerWithFixtures();
+    const user = userEvent.setup();
+    renderWithProviders(<WebScanTab />);
+
+    await user.click(screen.getByRole('tab', { name: 'Scans' }));
+    await user.selectOptions(await screen.findByLabelText('Site'), '11111111-1111-4111-8111-111111111111');
+
+    await user.click(screen.getByRole('tab', { name: 'Exceptions' }));
+    const picker = (await screen.findByLabelText('Site')) as HTMLSelectElement;
+    expect(picker.value).toBe('11111111-1111-4111-8111-111111111111');
   });
 });

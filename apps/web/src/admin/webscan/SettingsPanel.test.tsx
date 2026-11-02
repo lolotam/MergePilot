@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -12,19 +11,8 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-/** The digest the server expects for the limits of the test, computed its way. */
-function serverDigest(maxRequests: number): string {
-  const canonical = [
-    `maxRequests=${maxRequests}`,
-    'maxPages=100',
-    'maxActiveLinks=30',
-    'requestsPerSecond=2',
-    'requestTimeoutMs=10000',
-    'maxResponseBytes=1048576',
-    'totalTimeoutMs=1200000',
-  ].join('\n');
-  return createHash('sha256').update(canonical, 'utf8').digest('hex');
-}
+/** The digest the server sends with the refusal of a value above its default. */
+const SERVER_DIGEST = 'd41d8cd98f00b204e9800998ecf8427e'.padEnd(64, '0');
 
 describe('the global policy of the website scan', () => {
   it('shows the effective values, the defaults and the read-only approved installations', async () => {
@@ -96,6 +84,8 @@ describe('the global policy of the website scan', () => {
             error: {
               code: 'confirmation_required',
               message: 'A value above its default needs a confirmation bound to the submitted values',
+              digest: SERVER_DIGEST,
+              fieldsAboveDefault: ['maxRequests'],
             },
           },
           422,
@@ -124,8 +114,63 @@ describe('the global policy of the website scan', () => {
     const confirmPatch = calls.filter((call) => call.method === 'PATCH')[1];
     expect(confirmPatch?.body).toEqual({
       limits: { maxRequests: 800 },
-      limitConfirmation: { digest: serverDigest(800) },
+      limitConfirmation: { digest: SERVER_DIGEST },
     });
+  });
+
+  it('lists exactly the fields the server named as above their default', async () => {
+    let patches = 0;
+    installFetch((call) => {
+      if (call.method === 'GET') return jsonResponse(settingsFixture);
+      patches += 1;
+      if (patches === 1) {
+        return jsonResponse(
+          {
+            error: {
+              code: 'confirmation_required',
+              message: 'A value above its default needs a confirmation',
+              digest: SERVER_DIGEST,
+              fieldsAboveDefault: ['maxRequests'],
+            },
+          },
+          422,
+        );
+      }
+      return jsonResponse(settingsFixture);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    const requests = await screen.findByLabelText('Requests per scan');
+    fireEvent.change(requests, { target: { value: '800' } });
+    const pages = screen.getByLabelText('Crawled pages');
+    fireEvent.change(pages, { target: { value: '200' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByText('Requests per scan: 800 requests (default 500 requests)'),
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/Crawled pages/)).toBeNull();
+  });
+
+  it('shows the server error when the refusal carries no confirmation', async () => {
+    installFetch((call) => {
+      if (call.method === 'GET') return jsonResponse(settingsFixture);
+      return jsonResponse(
+        { error: { code: 'confirmation_required', message: 'A value above its default' } },
+        422,
+      );
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    const input = await screen.findByLabelText('Requests per scan');
+    fireEvent.change(input, { target: { value: '800' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('marks a limit that is above its default', async () => {

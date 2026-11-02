@@ -1,22 +1,26 @@
 import { useId, useState, type KeyboardEvent } from 'react';
 import { useI18n } from '../../i18n/context.js';
-import { PanelNotReady } from './PanelNotReady.js';
+import { AuditPanel } from './AuditPanel.js';
+import { ExceptionsPanel } from './ExceptionsPanel.js';
+import { ScanPanel } from './ScanPanel.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { SitesPanel } from './SitesPanel.js';
+import { WebScanSelectionProvider } from './selection.js';
 
 /**
  * The sections of the website scan area (ADR-0052 section 12).
  *
  * The sub-navigation follows the tabs of the admin page: a `tablist` with the
- * arrow keys, mirrored in RTL. The scan results, the exceptions and the audit
- * log arrive with the next delivery step and show their empty state until then.
+ * arrow keys, mirrored in RTL. The site the scan sections work on is kept
+ * while the administrator moves between them, so the scan, the findings and
+ * the exceptions always belong to the same site.
  */
 const SECTIONS = [
   { id: 'settings', label: 'webscanSectionSettings', Panel: SettingsPanel },
   { id: 'sites', label: 'webscanSectionSites', Panel: SitesPanel },
-  { id: 'scans', label: 'webscanSectionScans', Panel: PanelNotReady },
-  { id: 'exceptions', label: 'webscanSectionExceptions', Panel: PanelNotReady },
-  { id: 'audit', label: 'webscanSectionAudit', Panel: PanelNotReady },
+  { id: 'scans', label: 'webscanSectionScans', Panel: ScanPanel },
+  { id: 'exceptions', label: 'webscanSectionExceptions', Panel: ExceptionsPanel },
+  { id: 'audit', label: 'webscanSectionAudit', Panel: AuditPanel },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]['id'];
@@ -80,7 +84,9 @@ export function WebScanTab() {
         aria-labelledby={`${baseId}-section-${active}`}
         className="min-w-0"
       >
-        <ActivePanel />
+        <WebScanSelectionProvider>
+          <ActivePanel />
+        </WebScanSelectionProvider>
       </div>
     </div>
   );

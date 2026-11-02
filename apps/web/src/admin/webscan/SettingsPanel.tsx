@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { WebScanLimits, WebScanSettingsPatchRequest } from '@mergepilot/app/contract';
+import type {
+  WebScanLimitField,
+  WebScanLimits,
+  WebScanSettingsPatchRequest,
+} from '@mergepilot/app/contract';
 import { useToast } from '../../components/Toast.js';
 import { useI18n } from '../../i18n/context.js';
 import { Badge } from '../ui.js';
@@ -11,13 +15,13 @@ import { LimitsCard } from './LimitsCard.js';
 import { ScheduleCard } from './ScheduleCard.js';
 import { SettingsCard, Toggle } from './components.js';
 import {
+  aboveDefaultConfirmation,
   isPermissionLost,
   needsAboveDefaultConfirmation,
-  serverConfirmationDigest,
   useWebScanSettingsQuery,
   useWebScanUpdateSettingsMutation,
 } from './hooks.js';
-import { effectiveLimits, limitsAboveDefault, limitsConfirmationDigest } from './limits.js';
+import { effectiveLimits } from './limits.js';
 import {
   buildSettingsPatch,
   toSettingsDraft,
@@ -29,8 +33,10 @@ import { ErrorState, LoadingState, PermissionLostState } from './states.js';
 interface PendingConfirmation {
   patch: WebScanSettingsPatchRequest;
   effective: WebScanLimits;
-  /** The digest the server sent with the refusal, when it sent one. */
-  digest?: string | undefined;
+  /** The digest the server sent with its refusal. */
+  digest: string;
+  /** The limit fields the server named as above their default. */
+  fields: WebScanLimitField[];
 }
 
 /**
@@ -48,6 +54,7 @@ export function SettingsPanel() {
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (data) setDraft(toSettingsDraft(data));
@@ -55,6 +62,7 @@ export function SettingsPanel() {
 
   if (isLoading) return <LoadingState />;
   if (isError) return isPermissionLost(error) ? <PermissionLostState /> : <ErrorState />;
+  if (failed) return <ErrorState />;
   if (!data || !draft) return <LoadingState />;
 
   const togglePaused = (paused: boolean) => {
@@ -85,17 +93,29 @@ export function SettingsPanel() {
           setMessage(err.message);
           return;
         }
+        // The server is the only authority of the confirmation: it sends the
+        // digest of the values it is about to store and the names of the
+        // fields that are above their default.
+        const confirmation = aboveDefaultConfirmation(err);
+        if (!confirmation) {
+          setFailed(true);
+          return;
+        }
         const effective = effectiveLimits(data.limits, patch.limits);
-        setPending({ patch, effective, digest: serverConfirmationDigest(err) });
+        setPending({
+          patch,
+          effective,
+          digest: confirmation.digest,
+          fields: confirmation.fields,
+        });
       },
     });
   };
 
-  const confirmAboveDefault = async () => {
+  const confirmAboveDefault = () => {
     if (!pending) return;
-    const digest = pending.digest ?? (await limitsConfirmationDigest(pending.effective));
     update.mutate(
-      { ...pending.patch, limitConfirmation: { digest } },
+      { ...pending.patch, limitConfirmation: { digest: pending.digest } },
       {
         onSuccess: () => {
           setPending(null);
@@ -165,10 +185,10 @@ export function SettingsPanel() {
 
       <AboveDefaultDialog
         isOpen={pending !== null}
-        fields={pending ? limitsAboveDefault(pending.effective) : []}
+        fields={pending?.fields ?? []}
         limits={pending?.effective ?? data.limits}
         isPending={update.isPending}
-        onConfirm={() => void confirmAboveDefault()}
+        onConfirm={confirmAboveDefault}
         onClose={() => setPending(null)}
       />
     </div>

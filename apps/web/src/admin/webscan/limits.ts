@@ -28,26 +28,23 @@ export const WEB_SCAN_LIMIT_SPECS: Readonly<Record<keyof WebScanLimits, WebScanL
   totalTimeoutMs: { min: 60000, default: 1200000, max: 3600000 },
 };
 
-/** Every limit field, in the canonical order the digest is built in. */
-export const WEB_SCAN_LIMIT_FIELDS = [
-  'maxRequests',
-  'maxPages',
-  'maxActiveLinks',
-  'requestsPerSecond',
-  'requestTimeoutMs',
-  'maxResponseBytes',
-  'totalTimeoutMs',
-] as const satisfies readonly (keyof WebScanLimits)[];
-
-/** The limit fields whose effective value is above its default. */
+/**
+ * The limit fields whose effective value is above its default.
+ *
+ * The dashboard marks such a value before it is saved; the confirmation of the
+ * change is the server's, and it names the fields itself.
+ */
 export function limitsAboveDefault(limits: WebScanLimits): (keyof WebScanLimits)[] {
-  return WEB_SCAN_LIMIT_FIELDS.filter((field) => limits[field] > WEB_SCAN_LIMIT_SPECS[field].default);
+  return (Object.keys(WEB_SCAN_LIMIT_SPECS) as (keyof WebScanLimits)[]).filter(
+    (field) => limits[field] > WEB_SCAN_LIMIT_SPECS[field].default,
+  );
 }
 
 /**
  * The effective limits of a patch: the stored limits with the submitted fields
  * on top. It is the same resolution the server does before it checks the
- * confirmation, so the digest covers the same values.
+ * confirmation, so the values the administrator sees are the values the server
+ * is about to store.
  */
 export function effectiveLimits(base: WebScanLimits, patch: WebScanLimitsPatch | undefined): WebScanLimits {
   return {
@@ -59,20 +56,4 @@ export function effectiveLimits(base: WebScanLimits, patch: WebScanLimitsPatch |
     maxResponseBytes: patch?.maxResponseBytes ?? base.maxResponseBytes,
     totalTimeoutMs: patch?.totalTimeoutMs ?? base.totalTimeoutMs,
   };
-}
-
-/**
- * The digest that confirms a set of effective limits (ADR-0052 section 5).
- *
- * The server binds the confirmation to the submitted values, so the dashboard
- * builds the same digest: the SHA-256 of the canonical `field=value` lines, in
- * the canonical field order. The browser's Web Crypto owns the hash, so no
- * crypto library is needed on the client.
- */
-export async function limitsConfirmationDigest(limits: WebScanLimits): Promise<string> {
-  const canonical = WEB_SCAN_LIMIT_FIELDS.map((field) => `${field}=${limits[field]}`).join('\n');
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
 }
