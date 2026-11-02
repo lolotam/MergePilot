@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from 'vitest';
 import fastify, { type FastifyInstance } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { ScanSettingsError } from '@mergepilot/webscan';
@@ -9,7 +9,9 @@ import { PurposeScopedVault } from '../vault/scoped-secrets.js';
 import { PgWebScanStore } from '../webscan/pg-store.js';
 import type { WebScanEventBus } from '../webscan/events.js';
 import { WebScanAuthorizationError, WebScanPausedError } from '../webscan/store.js';
+import { webScanSites } from '../db/schema.js';
 import { sendWebScanError } from './webscan-http.js';
+import { aTargetVerifier } from './webscan-target.fixtures.js';
 import { registerAdminApi } from './routes.js';
 import {
   adminTestConfig,
@@ -34,8 +36,10 @@ describe('web-scan site routes (Task 8A)', () => {
 
   let app: FastifyInstance;
   let handle: AdminTestDb;
+  /** The number of audit rows the log held before the test. */
+  let auditTotalBefore = 0;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     handle = await createAdminTestDb();
     const auth: Auth = createAuth({ db: handle.db, config });
     app = fastify();
@@ -54,20 +58,41 @@ describe('web-scan site routes (Task 8A)', () => {
       return sendWebScanError(reply, error) ?? reply.status(500).send();
     });
 
+    const store = new PgWebScanStore(handle.db, new PurposeScopedVault({ masterKey }));
     registerAdminApi(app, {
       auth,
       db: handle.db,
       config,
       webScan: {
-        store: new PgWebScanStore(handle.db, new PurposeScopedVault({ masterKey })),
+        store,
         events,
+        // The repository of this file needs an approved installation, and the
+        // approval of one is not what these tests are about.
+        github: aTargetVerifier({
+          selectInstallation: async () => ({
+            ok: true,
+            approved: {
+              adminUserId: 'u-admin',
+              installationId: 101,
+              githubAccountId: 401,
+            },
+          }),
+        }),
       },
     });
     await seedAdminFixtures(handle.db);
     await app.ready();
   });
 
-  afterEach(async () => {
+  beforeEach(async () => {
+    // The sites of the previous test are gone, so every test starts from an
+    // empty site list. The audit log is append-only, so its rows stay and every
+    // test reads the rows it wrote itself.
+    await handle.db.delete(webScanSites);
+    auditTotalBefore = (await getAudit()).json().total;
+  });
+
+  afterAll(async () => {
     await app.close();
     await handle.close();
   });
@@ -111,9 +136,36 @@ describe('web-scan site routes (Task 8A)', () => {
     });
 
   const getAudit = async () =>
-    app.inject({ method: 'GET', url: '/api/admin/web-scan/audit', headers: { cookie: adminCookie } });
+    app.inject({
+      method: 'GET',
+      url: '/api/admin/web-scan/audit?limit=100',
+      headers: { cookie: adminCookie },
+    });
 
-  const auditActions = async () => (await getAudit()).json().audit.map((row: { action: string }) => row.action);
+  /**
+   * The audit rows of the test, read after the rows the log held before it.
+   *
+   * The log is append-only and its page comes back newest first, so the rows of
+   * the test are the newest ones: they are the first rows of the page, and
+   * their number is how much the log grew since the test started.
+   */
+  const auditRowsOfThisTest = async (): Promise<
+    Array<{ action: string; createdAt: string; targetId: string; before: unknown; after: unknown }>
+  > => {
+    const body = (await getAudit()).json() as {
+      audit: Array<{
+        action: string;
+        createdAt: string;
+        targetId: string;
+        before: unknown;
+        after: unknown;
+      }>;
+      total: number;
+    };
+    return body.audit.slice(0, Math.max(0, body.total - auditTotalBefore));
+  };
+
+  const auditActions = async () => (await auditRowsOfThisTest()).map((row) => row.action);
 
   /**
    * The actions of the audit log, grouped by their moment and the newest moment first.
@@ -122,7 +174,7 @@ describe('web-scan site routes (Task 8A)', () => {
    * the order of their id and not the order of the write.
    */
   const auditActionGroups = async (): Promise<string[][]> => {
-    const rows = (await getAudit()).json().audit as Array<{ action: string; createdAt: string }>;
+    const rows = await auditRowsOfThisTest();
     const groups = new Map<string, string[]>();
     for (const row of rows) {
       const group = groups.get(row.createdAt);
@@ -190,7 +242,7 @@ describe('web-scan site routes (Task 8A)', () => {
     const created = await createSite();
     expect(await auditActionGroups()).toEqual([['site.authorize', 'site.create']]);
     const siteId = created.json().id as string;
-    await patchSite({ repository: { owner: 'acme', name: 'demo', repositoryId: 7, installationId: 101, githubAccountId: 401 } }, siteId);
+    await patchSite({ repository: { owner: 'acme', name: 'demo' } }, siteId);
     expect(await auditActionGroups()).toEqual([['site.update'], ['site.authorize', 'site.create']]);
 
     await app.inject({
@@ -298,60 +350,6 @@ describe('web-scan site routes (Task 8A)', () => {
     const unchanged = await getSite(siteId);
     expect(unchanged.json().authorization.scopeVersion).toBe(1);
     expect(await auditActionGroups()).toEqual([['site.authorize', 'site.create']]);
-  });
-
-  it('a repository change alone does not need the authorization confirmation', async () => {
-    const created = await createSite();
-    const siteId = created.json().id as string;
-    const patched = await patchSite(
-      { repository: { owner: 'acme', name: 'demo', repositoryId: 7, installationId: 101, githubAccountId: 401 } },
-      siteId,
-    );
-    expect(patched.statusCode).toBe(200);
-    expect(patched.json().repository).toMatchObject({ repositoryId: 7 });
-    expect(await auditActionGroups()).toEqual([['site.update'], ['site.authorize', 'site.create']]);
-  });
-
-  it('a null repository unlinks the site and an absent one keeps the link', async () => {
-    const created = await createSite();
-    const siteId = created.json().id as string;
-    const linked = await patchSite(
-      { repository: { owner: 'acme', name: 'demo', repositoryId: 7, installationId: 101, githubAccountId: 401 } },
-      siteId,
-    );
-    expect(linked.statusCode).toBe(200);
-    expect(linked.json().repository).toMatchObject({ repositoryId: 7, name: 'demo' });
-
-    // A patch that carries no repository field leaves the link alone.
-    const untouched = await patchSite({ scope: { ...emptyScope }, authorize: true }, siteId);
-    expect(untouched.statusCode).toBe(200);
-    expect(untouched.json().repository).toMatchObject({ repositoryId: 7, name: 'demo' });
-
-    // A null repository unlinks the site.
-    const unlinked = await patchSite({ repository: null, authorize: true }, siteId);
-    expect(unlinked.statusCode).toBe(200);
-    expect(unlinked.json().repository).toBeNull();
-    expect((await getSite(siteId)).json().repository).toBeNull();
-
-    // The audit log shows the update and the repository it removed.
-    const audit = (await getAudit()).json().audit as Array<{
-      action: string;
-      targetId: string;
-      before: { repository: unknown };
-      after: { repository: unknown };
-    }>;
-    const updates = audit.filter((row) => row.action === 'site.update' && row.targetId === siteId);
-    const unlinkedUpdate = updates.find((row) => row.after.repository === null);
-    expect(unlinkedUpdate?.before.repository).toMatchObject({ repositoryId: 7 });
-    expect(unlinkedUpdate?.after.repository).toBeNull();
-
-    // A new repository replaces the old binding.
-    const relinked = await patchSite(
-      { repository: { owner: 'acme', name: 'other', repositoryId: 9, installationId: 101, githubAccountId: 401 } },
-      siteId,
-    );
-    expect(relinked.statusCode).toBe(200);
-    expect(relinked.json().repository).toMatchObject({ repositoryId: 9, name: 'other' });
   });
 
   it('strict schemas reject unknown keys, bad hostnames and bad ids with 422', async () => {

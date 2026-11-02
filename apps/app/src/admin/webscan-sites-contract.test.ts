@@ -93,7 +93,7 @@ describe('the web-scan site contract (Task 8A)', () => {
       headers: { cookie: adminCookie },
     });
 
-  const patchSite = async (payload: unknown, siteId: string) =>
+  const patchSite = async (payload: Record<string, unknown> | string, siteId: string) =>
     app.inject({
       method: 'PATCH',
       url: `/api/admin/web-scan/sites/${siteId}`,

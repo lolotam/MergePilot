@@ -67,6 +67,15 @@ export class WebScanNotFoundError extends Error {
   }
 }
 
+/**
+ * How many approved installations the platform holds at most.
+ *
+ * The list is a bound, not a queue: an administrator approves the installations
+ * of the accounts their own sites live in, and a bounded list keeps the settings
+ * row small and auditable.
+ */
+export const WEB_SCAN_MAX_APPROVED_INSTALLATIONS = 20;
+
 /** A change of the global settings. Only the given fields are written. */
 export interface WebScanSettingsPatch {
   paused?: boolean;
@@ -78,7 +87,6 @@ export interface WebScanSettingsPatch {
   contact?: string;
   alertMinSeverity?: WebScanSettings['alertMinSeverity'];
   alertMinValidation?: WebScanSettings['alertMinValidation'];
-  approvedInstallations?: WebScanApprovedInstallation[];
   /**
    * The moment of the snapshot the change was computed from.
    *
@@ -256,6 +264,34 @@ export interface WebScanStore {
   // -- The global settings -------------------------------------------------
   getSettings(): Promise<WebScanSettings>;
   updateSettings(actor: string, patch: WebScanSettingsPatch): Promise<WebScanSettings>;
+  /**
+   * Approves one installation of the App for one administrator.
+   *
+   * The approval is written only after GitHub proved that the administrator
+   * reaches the installation, that it is not suspended and that it grants the
+   * App `issues: write` (ADR-0052 section 8). The account id is the one GitHub
+   * reports, never one the caller supplies.
+   *
+   * The entry of one administrator and installation is written once: an approval
+   * of the same installation replaces the old entry, and the list never grows
+   * past its bound. The entry and its audit row are written in one transaction.
+   */
+  approveInstallation(
+    actor: string,
+    entry: WebScanApprovedInstallation,
+  ): Promise<WebScanSettings>;
+  /**
+   * Removes the approval of one installation of one administrator.
+   *
+   * Nothing else is detached here: a site that points at the installation keeps
+   * its binding, and the delivery of an alert to it fails closed because the
+   * approval is gone.
+   */
+  revokeInstallationApproval(
+    actor: string,
+    adminUserId: string,
+    installationId: number,
+  ): Promise<WebScanSettings>;
 
   // -- The sites ------------------------------------------------------------
   listSites(options?: { includeRemoved?: boolean }): Promise<WebScanSite[]>;

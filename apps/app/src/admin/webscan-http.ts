@@ -8,6 +8,7 @@ import {
   type WebScanLimitField,
   type WebScanLimits,
 } from '../api/contract-webscan.js';
+import type { WebScanTargetRefusedBody } from '../api/contract-webscan-target.js';
 import { WebScanScheduleError } from '../webscan/schedule.js';
 import {
   WebScanAuthorizationError,
@@ -15,6 +16,7 @@ import {
   WebScanNotFoundError,
   WebScanPausedError,
 } from '../webscan/store.js';
+import type { WebScanTargetRefusalReason } from '../webscan/github-target-reasons.js';
 
 /**
  * The shared HTTP helpers of the website security scanner (ADR-0052).
@@ -125,6 +127,46 @@ export function parseWebScanParam(
     return sendWebScanValidationError(reply, parsed.error);
   }
   return parsed.data;
+}
+
+/**
+ * The fixed message of every refusal of a GitHub target.
+ *
+ * The message names the reason and nothing else: no value of GitHub, no error
+ * body, no credential and no repository name.
+ */
+const TARGET_REFUSAL_MESSAGES: Record<WebScanTargetRefusalReason, string> = {
+  no_github_account: 'The administrator has no linked GitHub account',
+  installation_not_accessible: 'The installation is not accessible to the administrator',
+  installation_suspended: 'The installation is suspended',
+  missing_issues_permission: 'The installation does not grant the issues permission',
+  account_mismatch: 'The repository does not belong to the approved account',
+  repository_not_found: 'The repository does not exist for this installation',
+  not_private: 'The repository is not private',
+  no_user_access: 'The administrator cannot reach the repository through the installation',
+  installation_lost: 'The installation is gone',
+  repository_not_approved: 'No approved installation of the administrator owns the repository',
+  approval_missing: 'The approval of the installation is gone',
+  admin_not_authorized: 'The administrator is no longer a platform administrator',
+  github_unavailable: 'GitHub is not available',
+  unverifiable: 'The target could not be verified',
+  not_site_owner: 'Only the owner of the site can bind its repository',
+};
+
+/**
+ * Answers 422 with the bounded reason a target was refused.
+ *
+ * A refusal is never a 500 and never a guess: the answer carries the reason
+ * code of the verification and a fixed sentence beside it.
+ */
+export function sendWebScanTargetRefused(
+  reply: FastifyReply,
+  reason: WebScanTargetRefusalReason,
+): FastifyReply {
+  const body: WebScanTargetRefusedBody = {
+    error: { code: 'target_refused', reason, message: TARGET_REFUSAL_MESSAGES[reason] },
+  };
+  return reply.status(422).send(body);
 }
 
 /** The outcome of a guarded store call: its value, or the reply that already answered. */

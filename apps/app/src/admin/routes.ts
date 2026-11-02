@@ -19,6 +19,7 @@ import { getUsers } from './queries-users.js';
 import { getWorkspaces } from './queries-workspaces.js';
 import type { FetchLike } from '@mergepilot/engine';
 import type { WebScanEventBus } from '../webscan/events.js';
+import type { WebScanGitHubVerifier } from '../webscan/github-target.js';
 import type { WebScanStore } from '../webscan/store.js';
 import type { RunStreamOptions } from '../api/runs-events-routes.js';
 import { registerWebScanRoutes } from './webscan-routes.js';
@@ -37,6 +38,12 @@ export interface AdminApiDeps {
     events: WebScanEventBus;
     /** Test seam: the limits of the live scan streams. */
     streams?: Partial<RunStreamOptions> | undefined;
+    /**
+     * The GitHub boundary of the alert target (ADR-0052 section 8).
+     *
+     * Without it a request that needs a proof from GitHub is refused.
+     */
+    github?: WebScanGitHubVerifier | undefined;
   } | undefined;
 }
 

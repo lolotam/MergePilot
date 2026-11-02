@@ -12,9 +12,11 @@ import {
   WebScanUpdateSiteSchema,
   type WebScanSiteDto,
 } from '../api/contract-webscan-site.js';
+import type { WebScanGitHubVerifier } from '../webscan/github-target.js';
 import type { WebScanStore } from '../webscan/store.js';
-import type { WebScanSite } from '../webscan/types.js';
+import type { WebScanRepositoryBinding, WebScanSite } from '../webscan/types.js';
 import {
+  sendWebScanTargetRefused,
   sendWebScanValidationError,
   webScanAdminId,
   withWebScanErrors,
@@ -30,6 +32,11 @@ import { definedFields, toStoreSchedule } from './webscan-params.js';
  * ADR-0052 section 1. A scope or schedule change needs the same confirmation,
  * mirroring the fresh manual confirmation of a scan. Removal is the store's
  * soft removal.
+ *
+ * The repository of a site is server-derived: the request names the owner and
+ * the name, and the server asks GitHub for the ids of the repository, of the
+ * installation and of the account before it stores them. A repository that GitHub
+ * cannot prove private and reachable is refused, and nothing is written.
  */
 
 type SiteIdParams = { siteId: string };
@@ -107,6 +114,17 @@ export function toWebScanSiteDto(site: WebScanSite): WebScanSiteDto {
       state: episode.state,
       occurrenceKeys: [...episode.occurrenceKeys],
       lastChangedAt: episode.lastChangedAt,
+      // The state the alert engine added later is optional: an episode that
+      // never carried a field keeps it absent instead of naming a state it
+      // never had.
+      ...(episode.issueState === undefined ? {} : { issueState: episode.issueState }),
+      ...(episode.issueRequested === undefined ? {} : { issueRequested: episode.issueRequested }),
+      ...(episode.resolved === undefined ? {} : { resolved: episode.resolved }),
+      ...(episode.outcome === undefined ? {} : { outcome: episode.outcome }),
+      ...(episode.severity === undefined ? {} : { severity: episode.severity }),
+      ...(episode.validation === undefined ? {} : { validation: episode.validation }),
+      ...(episode.generation === undefined ? {} : { generation: episode.generation }),
+      ...(episode.createdAt === undefined ? {} : { createdAt: episode.createdAt }),
     })),
     lastCoverage:
       site.lastCoverage === null
@@ -132,11 +150,71 @@ export function toWebScanSiteDto(site: WebScanSite): WebScanSiteDto {
   };
 }
 
+/** The dependencies of the site routes. */
+export interface WebScanSiteRouteDeps {
+  store: WebScanStore;
+  /**
+   * The GitHub boundary of the repository verification.
+   *
+   * It is absent in a deployment without a GitHub App and in the tests that do
+   * not exercise the verification. A request that names a repository is then
+   * refused: an unverified repository is never stored.
+   */
+  github?: WebScanGitHubVerifier | undefined;
+}
+
+/**
+ * Resolves the repository a site reports into.
+ *
+ * The approved installation of the administrator that owns the repository is
+ * picked first, and the repository is then proved against it by GitHub. The
+ * binding that comes back is what GitHub reported: the ids of the request are
+ * never used, because the request does not carry any.
+ */
+async function resolveRepositoryBinding(
+  deps: WebScanSiteRouteDeps,
+  reply: FastifyReply,
+  adminId: string,
+  requested: { owner: string; name: string },
+): Promise<{ ok: true; binding: WebScanRepositoryBinding } | { ok: false; reply: FastifyReply }> {
+  if (deps.github === undefined) {
+    return { ok: false, reply: sendWebScanTargetRefused(reply, 'github_unavailable') };
+  }
+
+  const settings = await withWebScanErrors(reply, () => deps.store.getSettings());
+  if (!settings.ok) return { ok: false, reply: settings.reply };
+
+  // The approval can be gone before the binding is written: the delivery then
+  // fails closed and the revalidation before every write proves it again.
+  const selected = await deps.github.selectInstallation({
+    adminUserId: adminId,
+    owner: requested.owner,
+    approvedInstallations: settings.value.approvedInstallations,
+  });
+  if (!selected.ok) {
+    return { ok: false, reply: sendWebScanTargetRefused(reply, selected.reason) };
+  }
+
+  const verified = await deps.github.verifyRepository({
+    adminUserId: adminId,
+    owner: requested.owner,
+    name: requested.name,
+    approved: selected.approved,
+  });
+  if (!verified.ok) {
+    return { ok: false, reply: sendWebScanTargetRefused(reply, verified.reason) };
+  }
+
+  return { ok: true, binding: verified.binding };
+}
+
 export function registerWebScanSitesRoutes(
   app: FastifyInstance,
   guard: WebScanAdminGuard,
-  store: WebScanStore,
+  deps: WebScanSiteRouteDeps,
 ): void {
+  const store = deps.store;
+
   app.get('/api/admin/web-scan/sites', { preHandler: [guard] }, async (request, reply) => {
     if (webScanAdminId(request) === undefined) {
       return sendError(reply, 404, 'not_found', 'Not found');
@@ -163,6 +241,15 @@ export function registerWebScanSitesRoutes(
     if (!parsed.success) return sendWebScanValidationError(reply, parsed.error);
     const body = parsed.data;
 
+    // A named repository is proved by GitHub before the site is registered, so
+    // a refused repository leaves neither a site nor an audit row behind.
+    let repository: WebScanRepositoryBinding | undefined;
+    if (body.repository !== undefined && body.repository !== null) {
+      const resolved = await resolveRepositoryBinding(deps, reply, adminId, body.repository);
+      if (!resolved.ok) return resolved.reply;
+      repository = resolved.binding;
+    }
+
     const created = await withWebScanErrors(reply, () =>
       store.createSite(
         adminId,
@@ -172,7 +259,7 @@ export function registerWebScanSitesRoutes(
           ownerUserId: adminId,
           scope: buildScope(body.hostname, body.baseUrl, body.scope),
           schedule: toStoreSchedule(body.schedule),
-          repository: body.repository ?? undefined,
+          repository,
           authorizedBy: adminId,
         }),
       ),
@@ -217,6 +304,28 @@ export function registerWebScanSitesRoutes(
     const current = await withWebScanErrors(reply, () => store.getSite(siteId));
     if (!current.ok) return current.reply;
     if (current.value === null) return sendError(reply, 404, 'not_found', 'Not found');
+
+    // A named repository is proved by GitHub before it is stored, and a null one
+    // unlinks the site without any proof: the binding is simply gone.
+    //
+    // Only the owner of the site may bind a repository to it: the alerts of the
+    // site are delivered as that administrator, so the binding has to be backed
+    // by them (ADR-0052 section 8). Every platform administrator may unlink the
+    // site instead, because an unlink removes a target and never adds one.
+    let repository: WebScanRepositoryBinding | null | undefined;
+    if (body.repository !== undefined) {
+      if (body.repository === null) {
+        repository = null;
+      } else {
+        if (current.value.ownerUserId !== adminId) {
+          return sendWebScanTargetRefused(reply, 'not_site_owner');
+        }
+        const resolved = await resolveRepositoryBinding(deps, reply, adminId, body.repository);
+        if (!resolved.ok) return resolved.reply;
+        repository = resolved.binding;
+      }
+    }
+
     const input = definedFields({
       scope:
         body.scope === undefined
@@ -226,7 +335,7 @@ export function registerWebScanSitesRoutes(
       // A null repository unlinks the site and an absent one leaves the binding
       // alone, so the null reaches the store instead of being turned into an
       // absent field.
-      repository: body.repository,
+      repository,
       authorizedBy: body.authorize === true ? adminId : undefined,
     });
     const updated = await withWebScanErrors(reply, () => store.updateSite(adminId, siteId, input));
