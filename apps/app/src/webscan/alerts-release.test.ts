@@ -147,4 +147,56 @@ describe('the release of the slot of a resolved episode', () => {
     expect(keptKeys.has(owing.episodeKey)).toBe(true);
   });
 
+
+  it('drops an episode without an issue before an unresolved one that has an issue', () => {
+    const seeded = runAlertScenario(
+      [
+        {
+          trigger: 'manual',
+          at: day(1),
+          occurrences: Array.from({ length: MAX_ALERT_EPISODES_PER_SITE }, (_value, index) =>
+            group(index, { severity: 'high', validation: 'Confirmed' }),
+          ),
+        },
+      ],
+      { thresholds: EVERY_GROUP },
+    );
+    const template = seeded.episodes[0];
+    if (template === undefined) throw new Error('the seed holds no episode');
+    // Every episode of the state has an issue behind it, except one that never requested any.
+    const withIssue = seeded.episodes.map((episode) => ({
+      ...episode,
+      issueState: 'open' as const,
+      issueRequested: true,
+    }));
+    const withoutIssue = {
+      ...template,
+      episodeKey: 'episode-without-issue',
+      issueKey: issueKeyOf(MAX_ALERT_EPISODES_PER_SITE),
+      issueState: 'none' as const,
+      issueRequested: false,
+    };
+
+    // A manual scan: it delivers nothing, so no episode has a delivery under way.
+    const evaluation = evaluateAlertEpisodes({
+      trigger: 'manual',
+      now: day(2),
+      siteId: SITE_ID,
+      dashboardBaseUrl: DASHBOARD_BASE_URL,
+      thresholds: { ...THRESHOLDS, ...EVERY_GROUP },
+      episodes: [...withIssue, withoutIssue],
+      occurrences: Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 1 }, (_value, index) =>
+        group(index, { severity: 'high', validation: 'Confirmed' }),
+      ),
+      exceptions: [],
+      issueStates: withIssue.map((episode) => ({ episodeKey: episode.episodeKey, state: 'open' as const })),
+    });
+
+    const keptKeys = new Set(evaluation.episodes.map((episode) => episode.episodeKey));
+    expect(evaluation.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    // The one without an issue goes; every episode with an issue behind it stays, so no
+    // group can open a second issue under a new marker.
+    expect(keptKeys.has('episode-without-issue')).toBe(false);
+    expect(withIssue.every((episode) => keptKeys.has(episode.episodeKey))).toBe(true);
+  });
 });

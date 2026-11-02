@@ -263,30 +263,38 @@ function capCandidates(
 }
 
 /**
- * Whether a candidate still owes something to an issue: a delivery under way, or a
- * resolved episode that has not settled yet (its comment is owed once its issue is
- * reported). Dropping it would lose that comment.
+ * How much it costs to drop a candidate: the lower the rank, the sooner it goes.
+ *
+ * 0 an episode with no issue behind it (nothing requested): its group is offered again
+ *   later, nothing is lost and no duplicate can follow;
+ * 1 a resolved episode that has nothing left to deliver;
+ * 2 a resolved episode that still owes its comment (it is lost with the episode);
+ * 3 an unresolved episode that has an issue behind it (dropping it would let the same
+ *   group open a second issue under a new marker);
+ * 4 an episode with a delivery under way.
  */
-function owesDelivery(candidate: AlertEpisodeCandidate): boolean {
-  if (candidate.pending === true) return true;
+function evictionRank(candidate: AlertEpisodeCandidate): number {
+  if (candidate.pending === true) return 4;
   const episode = candidate.episode;
-  return episode.resolved === true && !isSettled(episode);
+  if (episode.resolved === true) return isSettled(episode) ? 1 : 2;
+  const hasIssue = episode.issueRequested === true || (episode.issueState ?? 'none') !== 'none';
+  return hasIssue ? 3 : 0;
 }
 
 /**
  * The order the candidates are dropped in.
  *
- * A candidate with a delivery under way is dropped after every other one: the
- * action it owes would be lost with it, so it keeps its slot as long as another
- * episode can go. The eviction order of the episodes decides then.
+ * The rank of the candidate decides first (see `evictionRank`): an episode that has an
+ * issue behind it, or a delivery under way, keeps its slot as long as another episode
+ * can go. The eviction order of the episodes decides among equals.
  */
 function compareEvictionOrder(
   left: AlertEpisodeCandidate,
   right: AlertEpisodeCandidate,
 ): number {
-  const byOwed = Number(owesDelivery(left)) - Number(owesDelivery(right));
-  if (byOwed !== 0) {
-    return byOwed;
+  const byRank = evictionRank(left) - evictionRank(right);
+  if (byRank !== 0) {
+    return byRank;
   }
   return episodeEvictionOrder(left.episode, right.episode);
 }
