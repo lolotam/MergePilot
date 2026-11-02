@@ -20,6 +20,7 @@ import { getWorkspaces } from './queries-workspaces.js';
 import type { FetchLike } from '@mergepilot/engine';
 import type { WebScanEventBus } from '../webscan/events.js';
 import type { WebScanStore } from '../webscan/store.js';
+import type { RunStreamOptions } from '../api/runs-events-routes.js';
 import { registerWebScanRoutes } from './webscan-routes.js';
 
 export interface AdminApiDeps {
@@ -31,7 +32,12 @@ export interface AdminApiDeps {
   /** Test seam: the fetch the manual price refresh uses (its URLs are fixed constants). */
   priceFetch?: FetchLike | undefined;
   /** The website security scanner (ADR-0052); without it the scanner routes do not exist. */
-  webScan?: { store: WebScanStore; events: WebScanEventBus } | undefined;
+  webScan?: {
+    store: WebScanStore;
+    events: WebScanEventBus;
+    /** Test seam: the limits of the live scan streams. */
+    streams?: Partial<RunStreamOptions> | undefined;
+  } | undefined;
 }
 
 const PageQuerySchema = z.object({
@@ -115,6 +121,12 @@ export function registerAdminApi(app: FastifyInstance, deps: AdminApiDeps): void
 
   registerMaintenanceRoutes(app, guard, deps.store, deps.priceFetch);
   if (deps.webScan !== undefined) {
-    registerWebScanRoutes(app, guard, deps.webScan);
+    // The route files read the session and the config from here, so a Task 8A caller
+    // that passes only the store and the bus keeps working.
+    registerWebScanRoutes(app, guard, {
+      ...deps.webScan,
+      auth: deps.auth,
+      config: deps.config,
+    });
   }
 }

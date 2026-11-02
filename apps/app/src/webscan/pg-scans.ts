@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { CheckSwitches, ScanScope } from '@mergepilot/webscan';
 import type { AppDb } from '../db/pg-store.js';
 import type { AppTx } from '../db/workspace-lock.js';
 import { webScanSites, webScans } from '../db/schema.js';
 import { appendAudit } from './pg-audit.js';
-import { lockSiteRow, toWebScanScan } from './pg-rows.js';
+import { lockSiteRow, readScanRow, toWebScanScan } from './pg-rows.js';
 import { lockSettingsRow, toWebScanSettings } from './pg-settings.js';
 import { nextScheduledRun } from './schedule.js';
 import {
@@ -16,6 +16,7 @@ import {
   type EnqueueManualWebScanInput,
   type EnqueueScheduledWebScanInput,
   type EnqueueWebScanResult,
+  type StopWebScanResult,
 } from './store.js';
 import type { WebScanScan, WebScanSchedule } from './types.js';
 
@@ -418,5 +419,76 @@ export async function enqueueScheduledScan(
       case 'not_due':
         throw new WebScanConflictError('The slot is not due');
     }
+  });
+}
+
+/**
+ * Cancels a queued or running scan by an administrator request (ADR-0052 section 6).
+ *
+ * One fenced conditional update does the whole stop: only a row that is still
+ * `queued` or `running` is moved to `stopped`, and a row that is already
+ * `completed`, `stopped` or `failed` is returned as it is. Two concurrent stops, or a
+ * stop that races the completion of the worker, therefore cannot both win: the
+ * second one changes nothing and writes nothing.
+ *
+ * The stop joins the worker's attempt fence this way. A queued scan is stopped
+ * before it is ever claimed, so no request leaves the process. A running scan is
+ * marked stopped and loses its attempt id, so the attempt no longer owns the row: the
+ * worker's next live read reports `attemptOwned: false` and it stops before it sends
+ * another request, and its later terminal write is refused by the attempt fence.
+ *
+ * The counters of a running scan are left alone: the request never overwrites what the
+ * worker has already recorded. The stop state and its audit row are written in one
+ * transaction, so a scan is never stopped without its audit entry.
+ */
+export async function stopScan(db: AppDb, actor: string, scanId: string): Promise<StopWebScanResult> {
+  return db.transaction(async (tx) => {
+    // The scan is read first, so the site row that is locked is the site of the scan
+    // and not the site a caller claims. The lock order of the scanner is the same
+    // here as it is in every other write: settings, site, scan, occurrence.
+    const preview = await readScanRow(tx, scanId);
+    if (preview === null) {
+      throw new WebScanNotFoundError('The web scan');
+    }
+    if (preview.status === 'completed' || preview.status === 'stopped' || preview.status === 'failed') {
+      return { scan: toWebScanScan(preview), outcome: 'already_terminal' };
+    }
+
+    await lockSiteRow(tx, preview.siteId);
+
+    const now = new Date();
+    const updated = await tx
+      .update(webScans)
+      .set({
+        status: 'stopped',
+        stopReason: 'cancelled',
+        // The attempt no longer owns the row, so the row no longer names it.
+        attemptId: null,
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(webScans.id, scanId), inArray(webScans.status, ['queued', 'running'])))
+      .returning();
+    const row = updated[0];
+    if (row === undefined) {
+      // The row was terminal by the time of the update, so it is returned unchanged
+      // and the write stays out. It cannot be missing: the preview above read it.
+      const current = await tx.select().from(webScans).where(eq(webScans.id, scanId)).limit(1);
+      const currentRow = current[0];
+      if (currentRow === undefined) {
+        throw new WebScanNotFoundError('The web scan');
+      }
+      return { scan: toWebScanScan(currentRow), outcome: 'already_terminal' };
+    }
+
+    await appendAudit(tx, {
+      actor,
+      action: 'scan.stop',
+      targetType: 'scan',
+      targetId: scanId,
+      after: { status: 'stopped', stopReason: 'cancelled' },
+    });
+
+    return { scan: toWebScanScan(row), outcome: 'stopped' };
   });
 }

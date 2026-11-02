@@ -1,8 +1,15 @@
 import type { FastifyInstance } from 'fastify';
+import type { Auth } from '../auth/auth.js';
+import type { AppConfig } from '../core/config.js';
 import type { WebScanEventBus } from '../webscan/events.js';
 import type { WebScanStore } from '../webscan/store.js';
 import type { WebScanAdminGuard } from './webscan-http.js';
+import type { RunStreamOptions } from '../api/runs-events-routes.js';
 import { registerWebScanAuditRoutes } from './webscan-audit.js';
+import { registerWebScanEventRoutes } from './webscan-events.js';
+import { registerWebScanExceptionRoutes } from './webscan-exceptions.js';
+import { registerWebScanExportRoutes } from './webscan-exports.js';
+import { registerWebScanScanRoutes } from './webscan-scans.js';
 import { registerWebScanSettingsRoutes } from './webscan-settings.js';
 import { registerWebScanSitesRoutes } from './webscan-sites.js';
 
@@ -16,9 +23,6 @@ import { registerWebScanSitesRoutes } from './webscan-sites.js';
  * This file only registers the route files. The shared HTTP helpers live in
  * `webscan-http.ts`, which imports no route file, so no route file and this
  * file import each other.
- *
- * The injected `events` bus belongs to the live SSE routes (Task 8B); the Task 8A
- * routes carry it so a later registration needs no signature change.
  */
 
 /**
@@ -26,15 +30,23 @@ import { registerWebScanSitesRoutes } from './webscan-sites.js';
  * (`contract-webscan.ts`): both handlers and response schemas must agree on it.
  */
 
-/** The scanner dependencies the routes read: the store and, later, its event bus. */
+/** The scanner dependencies the routes read: the store, the event bus and the session. */
 export interface WebScanRouteDeps {
   store: WebScanStore;
   events: WebScanEventBus;
+  /**
+   * The live stream re-checks the session itself with the keep-alive, so a session
+   * that ends disconnects the stream even while the request is hijacked.
+   */
+  auth: Auth;
+  config: Pick<AppConfig, 'platformAdmins' | 'baseUrl'>;
+  /** Test and deployment seam: the limits of the live scan streams. */
+  streams?: Partial<RunStreamOptions> | undefined;
 }
 
 /**
- * Registers the Task 8 routes. The Task 8B routes (scans, events, exports,
- * exceptions) extend this function, not the admin route file.
+ * Registers the Task 8 routes: the settings, the sites and the audit log (Task 8A),
+ * then the scans, the exceptions, the export and the live events (Task 8B).
  */
 export function registerWebScanRoutes(
   app: FastifyInstance,
@@ -44,4 +56,8 @@ export function registerWebScanRoutes(
   registerWebScanSettingsRoutes(app, guard, deps.store);
   registerWebScanSitesRoutes(app, guard, deps.store);
   registerWebScanAuditRoutes(app, guard, deps.store);
+  registerWebScanScanRoutes(app, guard, deps.store);
+  registerWebScanExceptionRoutes(app, guard, deps.store);
+  registerWebScanExportRoutes(app, guard, { store: deps.store, config: deps.config });
+  registerWebScanEventRoutes(app, guard, deps);
 }

@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ScanSettingsError } from '@mergepilot/webscan';
 import { sendError } from '../api/helpers.js';
+import { WebScanIdSchema } from '../api/contract-webscan.js';
 import { WebScanScheduleError } from '../webscan/schedule.js';
 import {
   WebScanAuthorizationError,
@@ -59,6 +60,33 @@ export function sendWebScanError(reply: FastifyReply, error: unknown): FastifyRe
 /** The admin id comes from the guard's session; a missing one is the regular 404. */
 export function webScanAdminId(request: FastifyRequest): string | undefined {
   return request.adminUser?.id;
+}
+
+/**
+ * The regular 404 of the scanner routes.
+ *
+ * A row that is not there, a row of another site and a caller that is not a platform
+ * admin all get the same answer, so the scanner area never reveals what exists.
+ */
+export function sendWebScanNotFound(reply: FastifyReply): FastifyReply {
+  return sendError(reply, 404, 'not_found', 'Not found');
+}
+
+/**
+ * Reads and validates one uuid param (`scanId`, `exceptionId`); a bad id is a
+ * request error, not a miss.
+ */
+export function parseWebScanParam(
+  request: { params: unknown },
+  reply: FastifyReply,
+  field: string,
+): string | FastifyReply {
+  const raw = (request.params as Record<string, string>)[field];
+  const parsed = WebScanIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    return sendWebScanValidationError(reply, parsed.error);
+  }
+  return parsed.data;
 }
 
 /** The outcome of a guarded store call: its value, or the reply that already answered. */

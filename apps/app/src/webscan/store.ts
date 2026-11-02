@@ -134,6 +134,17 @@ export interface EnqueueWebScanResult {
   replayed: boolean;
 }
 
+/** The outcome of an administrator stop: either the stop wrote, or it stayed out. */
+export interface StopWebScanResult {
+  scan: WebScanScan;
+  /**
+   * `stopped` when the row moved to its terminal state in this call, and
+   * `already_terminal` when the scan already had a terminal state and nothing
+   * was written.
+   */
+  outcome: 'stopped' | 'already_terminal';
+}
+
 /** The findings and the coverage a completed scan produced. */
 export interface RecordWebScanOutcomeInput {
   scanId: string;
@@ -242,6 +253,16 @@ export interface WebScanStore {
   enqueueScheduledScan(actor: string, input: EnqueueScheduledWebScanInput): Promise<WebScanScan>;
   getScan(scanId: string): Promise<WebScanScan | null>;
   listScans(siteId: string): Promise<WebScanScan[]>;
+  /**
+   * Cancels a queued or running scan on an administrator request.
+   *
+   * A queued scan becomes terminal right away; a running scan is marked stopped while
+   * the worker still owns its attempt, and the worker's own terminal write is then
+   * refused by the attempt fence. The stop state and its audit row are written in one
+   * transaction. A scan that already has a terminal state is returned unchanged and
+   * nothing is written.
+   */
+  stopScan(actor: string, scanId: string): Promise<StopWebScanResult>;
 
   // -- The retained ledger --------------------------------------------------
   /** The retained occurrences of a site, in the shape the comparison needs. */

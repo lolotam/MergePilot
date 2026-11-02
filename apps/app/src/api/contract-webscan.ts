@@ -359,11 +359,20 @@ export const WebScanScanDtoSchema = z.strictObject({
 });
 export type WebScanScanDto = z.infer<typeof WebScanScanDtoSchema>;
 
-/** POST /api/admin/web-scan/sites/:siteId/scans — a manual scan with its idempotency key. */
+/**
+ * POST /api/admin/web-scan/sites/:siteId/scans — a manual scan with its idempotency key.
+ *
+ * `authorize: true` is the fresh confirmation the manual request itself is (ADR-0052
+ * sections 1 and 6): an enqueue without it is refused before anything is queued. The
+ * field is contract-only and never reaches the store.
+ */
 export const WebScanEnqueueManualSchema = z.strictObject({
   idempotencyKey: z.string().trim().min(8).max(128),
   scope: WebScanScopeInputSchema.optional(),
   checks: WebScanChecksSchema.optional(),
+  authorize: z.literal(true, {
+    message: 'A manual scan needs a fresh authorization confirmation',
+  }),
 });
 export type WebScanEnqueueManualRequest = z.infer<typeof WebScanEnqueueManualSchema>;
 
@@ -478,6 +487,12 @@ export const WebScanExceptionDtoSchema = z.strictObject({
   revokedBy: z.string().nullable(),
 });
 export type WebScanExceptionDto = z.infer<typeof WebScanExceptionDtoSchema>;
+
+/** GET /api/admin/web-scan/sites/:siteId/exceptions — every resolution, incl. revoked ones. */
+export const WebScanExceptionsPageSchema = z.strictObject({
+  exceptions: z.array(WebScanExceptionDtoSchema),
+});
+export type WebScanExceptionsPage = z.infer<typeof WebScanExceptionsPageSchema>;
 
 /** GET /api/admin/web-scan/audit — an offset page of the immutable history. */
 export const WebScanAuditEntrySchema = z.strictObject({

@@ -25,6 +25,7 @@ import {
   enqueueScheduledScan,
   listScans,
   readScan,
+  stopScan,
 } from './pg-scans.js';
 import { createSite, listSites, readSite, readSiteByHostname, removeSite, updateSite } from './pg-sites.js';
 import { readScanSettings, updateScanSettings } from './pg-settings.js';
@@ -35,6 +36,7 @@ import type {
   EnqueueScheduledWebScanInput,
   EnqueueWebScanResult,
   RecordWebScanOutcomeInput,
+  StopWebScanResult,
   UpdateWebScanSiteInput,
   UpsertWebScanAlertInput,
   WebScanStore,
@@ -128,6 +130,10 @@ export class PgWebScanStore implements WebScanStore, ScannerEnvelopeStore {
 
   async listScans(siteId: string): Promise<WebScanScan[]> {
     return listScans(this.db, siteId);
+  }
+
+  async stopScan(actor: string, scanId: string): Promise<StopWebScanResult> {
+    return stopScan(this.db, actor, scanId);
   }
 
   // -- The retained ledger --------------------------------------------------
