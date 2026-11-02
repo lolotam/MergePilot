@@ -98,4 +98,62 @@ describe('the authorization of a site', () => {
       await db.close();
     }
   });
+
+  it('records the confirmation of a manual scan under the administrator that gave it', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      // The site was authorized by one administrator.
+      const site = await registeredSite(store);
+      // Another administrator starts a manual scan of it.
+      const { scan } = await store.enqueueManualScan('admin-2', {
+        siteId: site.id,
+        idempotencyKey: 'key-1',
+      });
+
+      // The scan names its own authorization, not the one of the site.
+      const auditId = scan.authorizationAuditId ?? '';
+      expect(auditId).not.toBe('');
+      expect(auditId).not.toBe(site.authorization.auditId);
+
+      const row = await store.getAuditEntry(auditId);
+      expect(row?.action).toBe('site.authorize');
+      expect(row?.actor).toBe('admin-2');
+      expect(row?.after).toMatchObject({
+        authorizedBy: 'admin-2',
+        hostname: site.hostname,
+        baseUrl: site.baseUrl,
+        trigger: 'manual_scan',
+      });
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('does not record a second confirmation when the request is replayed', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      const first = await store.enqueueManualScan('admin-2', {
+        siteId: site.id,
+        idempotencyKey: 'key-1',
+      });
+      const replay = await store.enqueueManualScan('admin-2', {
+        siteId: site.id,
+        idempotencyKey: 'key-1',
+      });
+
+      expect(replay.replayed).toBe(true);
+      expect(replay.scan.id).toBe(first.scan.id);
+
+      const authorizations = (await store.listAudit({ targetType: 'site', targetId: site.id })).filter(
+        (entry) => entry.action === 'site.authorize',
+      );
+      expect(authorizations).toHaveLength(1);
+      expect(authorizations[0]?.after).toMatchObject({ authorizedBy: 'admin-2' });
+    } finally {
+      await db.close();
+    }
+  });
 });

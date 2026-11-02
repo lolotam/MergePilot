@@ -12,7 +12,7 @@ import { sendError } from '../api/helpers.js';
 import { WebScanExportQuerySchema } from '../api/contract-webscan.js';
 import type { AppConfig } from '../core/config.js';
 import type { WebScanStore } from '../webscan/store.js';
-import type { WebScanException, WebScanOccurrence, WebScanScan } from '../webscan/types.js';
+import type { WebScanException, WebScanScan } from '../webscan/types.js';
 import {
   parseWebScanParam,
   sendWebScanNotFound,
@@ -21,13 +21,14 @@ import {
   withWebScanErrors,
   type WebScanAdminGuard,
 } from './webscan-http.js';
+import { toScanFindingView, type WebScanFindingView } from './webscan-scans.js';
 
 /**
  * The report export of a scan (ADR-0052 section 12).
  *
- * The report is built from the same safe records the dashboard shows: the retained
- * occurrences of the site, its live resolutions and the coverage the scan recorded.
- * The rendering itself belongs to the scanner package; this file only maps the stored
+ * The report is built from the same safe records the dashboard shows: the findings of
+ * the scan itself, its live resolutions and the coverage the scan recorded. The
+ * rendering itself belongs to the scanner package; this file only maps the stored
  * rows onto the package's record shapes and answers with the rendered text.
  *
  * The filename is a fixed pattern around the scan id, so no field of the response and
@@ -53,8 +54,8 @@ function toReportEvidence(evidence: unknown): Record<string, string | number | b
 }
 
 /** One occurrence row, as the display layer of the package reads it. */
-function toOccurrenceRecord(occurrence: WebScanOccurrence): OccurrenceRecord {
-  const record: OccurrenceRecord = {
+function toOccurrenceRecord(occurrence: WebScanFindingView): OccurrenceRecord {
+  return {
     occurrenceKey: occurrence.occurrenceKey,
     targetKey: occurrence.targetKey,
     issueKey: occurrence.issueKey,
@@ -68,9 +69,8 @@ function toOccurrenceRecord(occurrence: WebScanOccurrence): OccurrenceRecord {
     evidenceHash: occurrence.evidenceHash,
     evidence: toReportEvidence(occurrence.evidence),
     state: occurrence.state,
-    comparison: occurrence.comparison ?? 'Not checked',
+    comparison: occurrence.comparison,
   };
-  return occurrence.archiveReason === null ? record : { ...record, archiveReason: occurrence.archiveReason };
 }
 
 /**
@@ -109,7 +109,9 @@ async function buildStoredScanReport(
 ): Promise<{ report: ReturnType<typeof buildScanReport>; site: { hostname: string } } | null> {
   const site = await store.getSite(scan.siteId);
   if (site === null) return null;
-  const occurrences = await store.listOccurrences(scan.siteId);
+  // The report describes the scan itself: it uses the findings of that scan and not
+  // the current ledger of the site. The resolutions are the live ones.
+  const findings = await store.listScanFindings(scan.id);
   const exceptions = await store.listLiveExceptions(scan.siteId, new Date());
   const coverage = scan.coverageSummary ?? [];
   const reason =
@@ -131,10 +133,13 @@ async function buildStoredScanReport(
   const report = buildScanReport({
     site: { hostname: site.hostname },
     scan: reportScan,
-    groups: groupOccurrences(occurrences.map((occurrence) => toOccurrenceRecord(occurrence)), {
-      exceptions: exceptions.map((exception) => toScanException(exception)),
-      now: Date.now(),
-    }),
+    groups: groupOccurrences(
+      findings.map((finding) => toOccurrenceRecord(toScanFindingView(finding, exceptions))),
+      {
+        exceptions: exceptions.map((exception) => toScanException(exception)),
+        now: Date.now(),
+      },
+    ),
     coverage,
     dashboard: { baseUrl: dashboardBaseUrl },
   });

@@ -184,6 +184,24 @@ export async function enqueueManualScan(
       return { scan: toWebScanScan(previous), replayed: true };
     }
 
+    // A manual scan carries its own authorization: the administrator confirmed the
+    // authorization of this scan, and the row records who confirmed it and when
+    // (ADR-0052 sections 1 and 10). The site keeps its own authorization, so a
+    // scheduled scan still runs under it. The row is written here and not on a
+    // replay, so a repeated request never writes a second confirmation.
+    const scanAuthorizationAuditId = await appendAudit(tx, {
+      actor,
+      action: 'site.authorize',
+      targetType: 'site',
+      targetId: input.siteId,
+      after: {
+        authorizedBy: actor,
+        hostname: site.hostname,
+        baseUrl: site.baseUrl,
+        trigger: 'manual_scan',
+      },
+    });
+
     const inserted = await tx
       .insert(webScans)
       .values({
@@ -195,7 +213,7 @@ export async function enqueueManualScan(
         requestFingerprint: fingerprint,
         outboxState: 'pending',
         effectiveSettings: effective,
-        authorizationAuditId: site.authorizationAuditId,
+        authorizationAuditId: scanAuthorizationAuditId,
         scopeVersion: site.scopeVersion,
       })
       .returning();
@@ -433,13 +451,17 @@ export async function enqueueScheduledScan(
  *
  * The stop joins the worker's attempt fence this way. A queued scan is stopped
  * before it is ever claimed, so no request leaves the process. A running scan is
- * marked stopped and loses its attempt id, so the attempt no longer owns the row: the
- * worker's next live read reports `attemptOwned: false` and it stops before it sends
- * another request, and its later terminal write is refused by the attempt fence.
+ * marked stopped and keeps the attempt id of the attempt that ran it: the attempt
+ * still names the row but it no longer owns it, because the row is no longer
+ * running, so the worker's next live read reports `attemptOwned: false` and it stops
+ * before it sends another request. The cancelled attempt may still add the counters
+ * it made once, so the stopped scan keeps the requests, the pages and the duration
+ * it had reached.
  *
- * The counters of a running scan are left alone: the request never overwrites what the
- * worker has already recorded. The stop state and its audit row are written in one
- * transaction, so a scan is never stopped without its audit entry.
+ * The stop itself never writes a counter: it leaves the counters of the scan alone,
+ * so it never overwrites what the worker has already recorded. The stop state and
+ * its audit row are written in one transaction, so a scan is never stopped without
+ * its audit entry.
  */
 export async function stopScan(db: AppDb, actor: string, scanId: string): Promise<StopWebScanResult> {
   return db.transaction(async (tx) => {
@@ -462,8 +484,10 @@ export async function stopScan(db: AppDb, actor: string, scanId: string): Promis
       .set({
         status: 'stopped',
         stopReason: 'cancelled',
-        // The attempt no longer owns the row, so the row no longer names it.
-        attemptId: null,
+        // The attempt id of a running scan is kept: the attempt no longer owns the
+        // row because the row is no longer running, and the cancelled attempt may
+        // still add the counters it made. A queued scan has no attempt id and
+        // keeps none.
         finishedAt: now,
         updatedAt: now,
       })

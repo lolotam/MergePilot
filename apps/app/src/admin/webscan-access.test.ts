@@ -46,19 +46,22 @@ describe('the access rules of the web-scan routes (Task 8B)', () => {
         authorize: true,
       },
     });
+    expect(created.statusCode).toBe(201);
     siteId = created.json().id as string;
-    await app.inject({
+    const settings = await app.inject({
       method: 'PATCH',
       url: '/api/admin/web-scan/settings',
       headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
       payload: { paused: false },
     });
+    expect(settings.statusCode).toBe(200);
     const queued = await app.inject({
       method: 'POST',
       url: `/api/admin/web-scan/sites/${siteId}/scans`,
       headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
       payload: { idempotencyKey: 'access-key-00001', authorize: true },
     });
+    expect(queued.statusCode).toBe(201);
     scanId = queued.json().scan.id as string;
   });
 

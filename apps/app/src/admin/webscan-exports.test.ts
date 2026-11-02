@@ -9,10 +9,52 @@ import { createWebScanAdminApp, type WebScanAdminHarness } from './webscan.fixtu
  * whose name is a fixed pattern around the scan id. A hostile finding stays inert in
  * the HTML rendering, and no hostname, target or secret of the scan shapes the file
  * name or the content type.
+ *
+ * The report describes the scan it belongs to: it shows the findings of that scan
+ * and not the findings of a later run.
  */
 
 const UNKNOWN_ID = '11111111-1111-4111-8111-111111111111';
 const HOSTILE_SUBJECT = '<script>alert("x")</script>';
+
+const OCCURRENCE_A = 'a'.repeat(64);
+const EVIDENCE_A = 'b'.repeat(64);
+const OCCURRENCE_B = 'c'.repeat(64);
+const EVIDENCE_B = 'd'.repeat(64);
+
+/** The finding of the first scan: one missing header. */
+const findingA = {
+  occurrenceKey: OCCURRENCE_A,
+  targetKey: 'target-a',
+  issueKey: 'headers|headers/strict-transport-security|example.com',
+  checkId: 'headers' as const,
+  checkVersion: 1,
+  issueId: 'headers/strict-transport-security',
+  subject: HOSTILE_SUBJECT,
+  severity: 'medium' as const,
+  validation: 'Likely' as const,
+  confidence: 'high' as const,
+  safeLocation: 'https://example.com/',
+  evidenceHash: EVIDENCE_A,
+  evidence: { header: 'missing' },
+  comparison: 'New' as const,
+};
+
+/** The finding of the second scan: another missing header. */
+const findingB = {
+  ...findingA,
+  occurrenceKey: OCCURRENCE_B,
+  targetKey: 'target-b',
+  issueKey: 'headers|headers/content-security-policy|example.com',
+  issueId: 'headers/content-security-policy',
+  subject: 'Content-Security-Policy',
+  evidenceHash: EVIDENCE_B,
+};
+
+/** The shape of the machine report the assertions read. */
+interface MachineReport {
+  groups: { occurrences: { occurrenceKey: string }[] }[];
+}
 
 describe('the web-scan export route (Task 8B)', () => {
   let h: WebScanAdminHarness;
@@ -47,13 +89,7 @@ describe('the web-scan export route (Task 8B)', () => {
       headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
       payload: { paused: false },
     });
-    const queued = await app.inject({
-      method: 'POST',
-      url: `/api/admin/web-scan/sites/${siteId}/scans`,
-      headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
-      payload: { idempotencyKey: 'export-key-00001', authorize: true },
-    });
-    scanId = queued.json().scan.id as string;
+    scanId = await enqueue('export-key-00001');
     await h.store.recordScanOutcome('worker', {
       scanId,
       siteId,
@@ -61,29 +97,9 @@ describe('the web-scan export route (Task 8B)', () => {
       requests: 3,
       pages: 1,
       durationMs: 55,
-      findings: [],
+      findings: [{ id: 'finding-a', scanId, siteId, ...findingA }],
       coverage: [],
-      updates: [
-        {
-          state: 'outstanding',
-          finding: {
-            occurrenceKey: 'd'.repeat(64),
-            targetKey: 'target-1',
-            issueKey: 'headers|headers/strict-transport-security|example.com',
-            checkId: 'headers',
-            checkVersion: 1,
-            issueId: 'headers/strict-transport-security',
-            subject: HOSTILE_SUBJECT,
-            severity: 'medium',
-            validation: 'Likely',
-            confidence: 'high',
-            safeLocation: 'https://example.com/',
-            evidenceHash: 'e'.repeat(64),
-            evidence: { header: 'missing' },
-            comparison: 'New',
-          },
-        },
-      ],
+      updates: [{ state: 'outstanding', finding: findingA }],
     });
   });
 
@@ -92,10 +108,21 @@ describe('the web-scan export route (Task 8B)', () => {
     await h.handle.close();
   });
 
-  const exportScan = (format: string) =>
+  /** Queues a manual scan and answers with its id. */
+  const enqueue = async (key: string): Promise<string> => {
+    const queued = await app.inject({
+      method: 'POST',
+      url: `/api/admin/web-scan/sites/${siteId}/scans`,
+      headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
+      payload: { idempotencyKey: key, authorize: true },
+    });
+    return queued.json().scan.id as string;
+  };
+
+  const exportScan = (format: string, id = scanId) =>
     app.inject({
       method: 'GET',
-      url: `/api/admin/web-scan/scans/${scanId}/export?format=${format}`,
+      url: `/api/admin/web-scan/scans/${id}/export?format=${format}`,
       headers: { cookie: h.adminCookie },
     });
 
@@ -134,6 +161,44 @@ describe('the web-scan export route (Task 8B)', () => {
     expect(res.body).not.toContain('<script>alert');
   });
 
+  it('reports the findings of its own scan and not the findings of a later one', async () => {
+    // The second scan proves the first finding fixed and observes a second one.
+    const secondId = await enqueue('export-key-00002');
+    await h.store.recordScanOutcome('worker', {
+      scanId: secondId,
+      siteId,
+      status: 'completed',
+      requests: 4,
+      pages: 1,
+      durationMs: 70,
+      findings: [
+        { id: 'finding-a-fixed', scanId: secondId, siteId, ...findingA, comparison: 'Fixed' },
+        { id: 'finding-b', scanId: secondId, siteId, ...findingB },
+      ],
+      coverage: [],
+      updates: [
+        { state: 'fixed', finding: { ...findingA, comparison: 'Fixed' } },
+        { state: 'outstanding', finding: findingB },
+      ],
+    });
+
+    // The report of the first scan still shows the finding it observed, and it does
+    // not show the finding of the second scan.
+    const first = JSON.parse((await exportScan('json', scanId)).body) as MachineReport;
+    const firstKeys = first.groups.flatMap((group) =>
+      group.occurrences.map((occurrence) => occurrence.occurrenceKey),
+    );
+    expect(firstKeys).toEqual([OCCURRENCE_A]);
+    expect(JSON.stringify(first)).not.toContain(OCCURRENCE_B);
+
+    // The report of the second scan shows both of its findings.
+    const second = JSON.parse((await exportScan('json', secondId)).body) as MachineReport;
+    const secondKeys = second.groups.flatMap((group) =>
+      group.occurrences.map((occurrence) => occurrence.occurrenceKey),
+    );
+    expect(secondKeys.sort()).toEqual([OCCURRENCE_A, OCCURRENCE_B].sort());
+  });
+
   it('refuses a format that is not html or json', async () => {
     for (const query of ['format=pdf', 'format=', 'format=HTML', 'format=json&extra=1', 'other=1']) {
       const res = await app.inject({
@@ -157,13 +222,7 @@ describe('the web-scan export route (Task 8B)', () => {
   });
 
   it('answers a scan that has not finished with 409', async () => {
-    const queued = await app.inject({
-      method: 'POST',
-      url: `/api/admin/web-scan/sites/${siteId}/scans`,
-      headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
-      payload: { idempotencyKey: 'export-key-00002', authorize: true },
-    });
-    const running = queued.json().scan.id as string;
+    const running = await enqueue('export-key-00003');
     const res = await app.inject({
       method: 'GET',
       url: `/api/admin/web-scan/scans/${running}/export?format=json`,

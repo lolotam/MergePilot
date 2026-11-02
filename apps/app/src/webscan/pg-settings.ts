@@ -4,7 +4,7 @@ import type { AppTx } from '../db/workspace-lock.js';
 import { WEB_SCAN_SETTINGS_ID, webScanSettings } from '../db/schema.js';
 import { appendAudit } from './pg-audit.js';
 import { parseSchedule } from './schedule.js';
-import type { WebScanSettingsPatch } from './store.js';
+import { WebScanConflictError, type WebScanSettingsPatch } from './store.js';
 import type { WebScanSettings } from './types.js';
 
 /**
@@ -60,6 +60,10 @@ export async function readScanSettings(db: AppDb): Promise<WebScanSettings> {
  *
  * The row is locked first, so two concurrent changes are applied one after the other
  * and the audit log shows both in the order they were committed.
+ *
+ * A change that carries the moment of the snapshot it was computed from is refused
+ * when the locked row moved since that snapshot: the change would merge into limits
+ * that the confirmation never covered.
  */
 export async function updateScanSettings(
   db: AppDb,
@@ -69,6 +73,16 @@ export async function updateScanSettings(
   return db.transaction(async (tx) => {
     const before = await lockSettingsRow(tx);
     const current = toWebScanSettings(before);
+
+    // The snapshot the change was computed from is checked against the locked row.
+    // The row is locked now, so a change that was made in between is visible.
+    if (
+      patch.expectedUpdatedAt !== undefined &&
+      before.updatedAt.getTime() !== patch.expectedUpdatedAt.getTime()
+    ) {
+      throw new WebScanConflictError('The settings changed while the request was prepared');
+    }
+
     const limits = { ...current.limits, ...(patch.limits ?? {}) };
     // The default schedule is normalized before it is written, so a saved rule is
     // always evaluable and a biweekly rule keeps its anchor.

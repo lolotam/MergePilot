@@ -8,6 +8,7 @@ import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import type { AppConfig } from '../core/config.js';
 import { PurposeScopedVault } from '../vault/scoped-secrets.js';
 import { MemoryWebScanEventBus } from '../webscan/events.js';
+import type { WebScanEventBus } from '../webscan/events.js';
 import { PgWebScanStore } from '../webscan/pg-store.js';
 import { registerAdminApi } from './routes.js';
 import {
@@ -60,6 +61,13 @@ export interface WebScanHarnessOptions {
   streams?:
     | { perUser?: number; global?: number; keepAliveMs?: number; maxLifetimeMs?: number }
     | undefined;
+  /**
+   * The event bus fails to subscribe.
+   *
+   * The live progress route answers 503 when the bus cannot be reached, and this is
+   * the only way to reach that branch without a broken Redis.
+   */
+  failingEvents?: boolean | undefined;
 }
 
 /** Builds the admin app with the scanner over a fresh seeded database. */
@@ -74,6 +82,16 @@ export async function createWebScanAdminApp(
   registerAuthRoutes(app, auth);
 
   const events = new MemoryWebScanEventBus();
+  const bus: WebScanEventBus =
+    options.failingEvents === true
+      ? {
+          publish: (event) => events.publish(event),
+          subscribe: async () => {
+            throw new Error('the event bus is not available');
+          },
+          close: async () => events.close(),
+        }
+      : events;
   const store = new PgWebScanStore(
     handle.db,
     new PurposeScopedVault({ masterKey: randomBytes(32).toString('base64') }),
@@ -82,7 +100,7 @@ export async function createWebScanAdminApp(
     auth,
     db: handle.db,
     config,
-    webScan: { store, events, streams: options.streams },
+    webScan: { store, events: bus, streams: options.streams },
   });
   await seedAdminFixtures(handle.db);
   await seedExtraCallers(handle.db);

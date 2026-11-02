@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { CoverageEntry } from '@mergepilot/webscan';
+import type { Comparison, CoverageEntry } from '@mergepilot/webscan';
 import {
   WebScanCoverageEntrySchema,
   WebScanEnqueueManualSchema,
@@ -10,7 +10,7 @@ import {
   type WebScanScanDto,
 } from '../api/contract-webscan.js';
 import type { WebScanStore } from '../webscan/store.js';
-import type { WebScanOccurrence, WebScanScan } from '../webscan/types.js';
+import type { WebScanException, WebScanScan, WebScanScanFinding } from '../webscan/types.js';
 import {
   parseWebScanParam,
   sendWebScanNotFound,
@@ -29,8 +29,8 @@ import { definedFields } from './webscan-params.js';
  * A manual scan is an authorization act like a registration: its body must carry
  * `authorize: true`, the fresh confirmation of ADR-0052 section 6, and it is refused
  * before anything is queued otherwise. The stop is the administrator-facing half of
- * the attempt fence: it marks a queued or running scan stopped, and the worker's own
- * terminal write is refused later because its scan is no longer running.
+ * the attempt fence: it marks a queued or running scan stopped, and the worker stops
+ * because its scan is no longer running; the cancelled attempt may only add its counters.
  */
 
 /**
@@ -74,8 +74,76 @@ export function toWebScanCoverageDto(entry: CoverageEntry): WebScanCoverageEntry
   });
 }
 
-/** Builds one occurrence response from named fields; the ledger internals stay out. */
-export function toWebScanOccurrenceDto(occurrence: WebScanOccurrence): WebScanOccurrenceDto {
+/**
+ * One finding of a scan, as the dashboard and the report read it.
+ *
+ * A scan keeps its own findings, so the detail and the report of a scan show what
+ * that scan found and not what the ledger of the site holds now: an older scan
+ * keeps showing the findings of its own run.
+ */
+export interface WebScanFindingView {
+  id: string;
+  occurrenceKey: string;
+  targetKey: string;
+  issueKey: string;
+  checkId: WebScanScanFinding['checkId'];
+  checkVersion: number;
+  issueId: string;
+  subject: string;
+  severity: WebScanScanFinding['severity'];
+  validation: WebScanScanFinding['validation'];
+  confidence: WebScanScanFinding['confidence'];
+  safeLocation: string;
+  evidenceHash: string;
+  evidence: unknown | null;
+  /** The state of the occurrence in this scan. */
+  state: 'outstanding' | 'fixed';
+  comparison: Comparison;
+  /** The live resolution that covers the finding, when there is one. */
+  exceptionId: string | null;
+  /** When the scan observed the finding. */
+  observedAt: Date;
+}
+
+/**
+ * Builds the view of one finding of a scan.
+ *
+ * A finding whose comparison is `Fixed` is the proof that the occurrence is gone, so
+ * it is a fixed occurrence. A resolution covers a finding while its occurrence key
+ * and its evidence hash both match.
+ */
+export function toScanFindingView(
+  finding: WebScanScanFinding,
+  exceptions: readonly WebScanException[],
+): WebScanFindingView {
+  const exception = exceptions.find(
+    (row) =>
+      row.occurrenceKey === finding.occurrenceKey && row.evidenceHash === finding.evidenceHash,
+  );
+  return {
+    id: finding.id,
+    occurrenceKey: finding.occurrenceKey,
+    targetKey: finding.targetKey,
+    issueKey: finding.issueKey,
+    checkId: finding.checkId,
+    checkVersion: finding.checkVersion,
+    issueId: finding.issueId,
+    subject: finding.subject,
+    severity: finding.severity,
+    validation: finding.validation,
+    confidence: finding.confidence,
+    safeLocation: finding.safeLocation,
+    evidenceHash: finding.evidenceHash,
+    evidence: finding.evidence,
+    state: finding.comparison === 'Fixed' ? 'fixed' : 'outstanding',
+    comparison: finding.comparison,
+    exceptionId: exception?.id ?? null,
+    observedAt: finding.createdAt,
+  };
+}
+
+/** Builds one occurrence response from named fields; the store internals stay out. */
+export function toWebScanOccurrenceDto(occurrence: WebScanFindingView): WebScanOccurrenceDto {
   return WebScanOccurrenceDtoSchema.parse({
     id: occurrence.id,
     occurrenceKey: occurrence.occurrenceKey,
@@ -92,12 +160,12 @@ export function toWebScanOccurrenceDto(occurrence: WebScanOccurrence): WebScanOc
     evidenceHash: occurrence.evidenceHash,
     evidence: occurrence.evidence ?? null,
     state: occurrence.state,
-    archiveReason: occurrence.archiveReason ?? null,
-    comparison: occurrence.comparison ?? null,
+    archiveReason: null,
+    comparison: occurrence.comparison,
     exceptionId: occurrence.exceptionId,
-    lastObservedAt: occurrence.lastObservedAt.toISOString(),
-    createdAt: occurrence.createdAt.toISOString(),
-    updatedAt: occurrence.updatedAt.toISOString(),
+    lastObservedAt: occurrence.observedAt.toISOString(),
+    createdAt: occurrence.observedAt.toISOString(),
+    updatedAt: occurrence.observedAt.toISOString(),
   });
 }
 
@@ -186,15 +254,21 @@ export function registerWebScanScanRoutes(
     if (found.value === null) return sendWebScanNotFound(reply);
     const scan = found.value;
 
-    // The ledger of the site is the state the scan produced; a scan that is not the
-    // latest one shows the ledger as it is now.
-    const occurrences = await withWebScanErrors(reply, () => store.listOccurrences(scan.siteId));
-    if (!occurrences.ok) return occurrences.reply;
+    // The findings of the scan are its own: an older scan keeps showing what it
+    // found, and not what the ledger of the site holds now.
+    const findings = await withWebScanErrors(reply, () => store.listScanFindings(scanId));
+    if (!findings.ok) return findings.reply;
+    const exceptions = await withWebScanErrors(reply, () =>
+      store.listLiveExceptions(scan.siteId, new Date()),
+    );
+    if (!exceptions.ok) return exceptions.reply;
     const coverage = scan.coverageSummary ?? [];
     return reply.status(200).send({
       scan: toWebScanScanDto(scan),
       coverage: coverage.map((entry) => toWebScanCoverageDto(entry)),
-      occurrences: occurrences.value.map((occurrence) => toWebScanOccurrenceDto(occurrence)),
+      occurrences: findings.value.map((finding) =>
+        toWebScanOccurrenceDto(toScanFindingView(finding, exceptions.value)),
+      ),
     });
   });
 

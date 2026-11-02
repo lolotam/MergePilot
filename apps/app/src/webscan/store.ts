@@ -18,6 +18,7 @@ import type {
   WebScanOccurrence,
   WebScanRepositoryBinding,
   WebScanScan,
+  WebScanScanFinding,
   WebScanSchedule,
   WebScanSettings,
   WebScanSite,
@@ -78,6 +79,14 @@ export interface WebScanSettingsPatch {
   alertMinSeverity?: WebScanSettings['alertMinSeverity'];
   alertMinValidation?: WebScanSettings['alertMinValidation'];
   approvedInstallations?: WebScanApprovedInstallation[];
+  /**
+   * The moment of the snapshot the change was computed from.
+   *
+   * It is a guard and not a written field: the store refuses the change when the
+   * locked row moved since that snapshot, so two changes that were computed from
+   * the same snapshot can never be merged into a combination neither of them saw.
+   */
+  expectedUpdatedAt?: Date;
 }
 
 /** The input of a site registration. It carries a fresh authorization. */
@@ -254,13 +263,21 @@ export interface WebScanStore {
   getScan(scanId: string): Promise<WebScanScan | null>;
   listScans(siteId: string): Promise<WebScanScan[]>;
   /**
+   * The findings of one scan, in a stable order.
+   *
+   * A scan keeps its own findings: the detail and the report of a scan show what
+   * that scan found and not what the ledger of the site holds now.
+   */
+  listScanFindings(scanId: string): Promise<WebScanScanFinding[]>;
+  /**
    * Cancels a queued or running scan on an administrator request.
    *
-   * A queued scan becomes terminal right away; a running scan is marked stopped while
-   * the worker still owns its attempt, and the worker's own terminal write is then
-   * refused by the attempt fence. The stop state and its audit row are written in one
-   * transaction. A scan that already has a terminal state is returned unchanged and
-   * nothing is written.
+   * A queued scan becomes terminal right away; a running scan is marked stopped and keeps
+   * its attempt id, so the worker no longer owns it and stops before its next request. The
+   * cancelled attempt's terminal write changes neither the state nor the results; it may
+   * add its request, page and duration counters once. The stop state and its audit row are
+   * written in one transaction. A scan that already has a terminal state is returned
+   * unchanged and nothing is written.
    */
   stopScan(actor: string, scanId: string): Promise<StopWebScanResult>;
 
@@ -302,7 +319,23 @@ export interface WebScanStore {
   /** The audit log is append-only: there is no update and no delete. */
   listAudit(options?: {
     limit?: number;
+    /** How many rows to skip. The newest rows come first. */
+    offset?: number;
     targetType?: string;
     targetId?: string;
   }): Promise<WebScanAuditEntry[]>;
+  /**
+   * The number of rows of the audit log.
+   *
+   * The count is a query of its own, so a page never has to read the whole log
+   * to know how many rows there are.
+   */
+  countAudit(options?: { targetType?: string; targetId?: string }): Promise<number>;
+  /**
+   * One audit row by its id.
+   *
+   * The id is how a scan names the authorization it runs under, so the row is read
+   * by its id: a page of the log is not a reliable place to look for it.
+   */
+  getAuditEntry(auditId: string): Promise<WebScanAuditEntry | null>;
 }

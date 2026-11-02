@@ -115,6 +115,23 @@ describe('web-scan site routes (Task 8A)', () => {
 
   const auditActions = async () => (await getAudit()).json().audit.map((row: { action: string }) => row.action);
 
+  /**
+   * The actions of the audit log, grouped by their moment and the newest moment first.
+   *
+   * The rows of one change share their moment, so their order inside a group is
+   * the order of their id and not the order of the write.
+   */
+  const auditActionGroups = async (): Promise<string[][]> => {
+    const rows = (await getAudit()).json().audit as Array<{ action: string; createdAt: string }>;
+    const groups = new Map<string, string[]>();
+    for (const row of rows) {
+      const group = groups.get(row.createdAt);
+      if (group === undefined) groups.set(row.createdAt, [row.action]);
+      else group.push(row.action);
+    }
+    return [...groups.values()].map((group) => [...group].sort());
+  };
+
   it('a platform admin registers, reads, changes and removes a site', async () => {
     const created = await createSite();
     expect(created.statusCode).toBe(201);
@@ -142,11 +159,9 @@ describe('web-scan site routes (Task 8A)', () => {
     // The fresh authorization and the change each carried their own audit row
     // (the store writes the update first, then the authorization), and no scan
     // was queued, so no stopped-queued-scan row exists either.
-    expect(await auditActions()).toEqual([
-      'site.authorize',
-      'site.update',
-      'site.authorize',
-      'site.create',
+    expect(await auditActionGroups()).toEqual([
+      ['site.authorize', 'site.update'],
+      ['site.authorize', 'site.create'],
     ]);
 
     const removed = await app.inject({
@@ -173,17 +188,21 @@ describe('web-scan site routes (Task 8A)', () => {
   it('the audit log shows exactly the actions of each mutation', async () => {
     expect((await auditActions()).length).toBe(0);
     const created = await createSite();
-    expect(await auditActions()).toEqual(['site.authorize', 'site.create']);
+    expect(await auditActionGroups()).toEqual([['site.authorize', 'site.create']]);
     const siteId = created.json().id as string;
     await patchSite({ repository: { owner: 'acme', name: 'demo', repositoryId: 7, installationId: 101, githubAccountId: 401 } }, siteId);
-    expect(await auditActions()).toEqual(['site.update', 'site.authorize', 'site.create']);
+    expect(await auditActionGroups()).toEqual([['site.update'], ['site.authorize', 'site.create']]);
 
     await app.inject({
       method: 'DELETE',
       url: `/api/admin/web-scan/sites/${siteId}`,
       headers: { cookie: adminCookie },
     });
-    expect(await auditActions()).toEqual(['site.remove', 'site.update', 'site.authorize', 'site.create']);
+    expect(await auditActionGroups()).toEqual([
+      ['site.remove'],
+      ['site.update'],
+      ['site.authorize', 'site.create'],
+    ]);
   });
 
   it('GET sites paginates with limit and offset', async () => {
@@ -229,7 +248,10 @@ describe('web-scan site routes (Task 8A)', () => {
       headers: { cookie: adminCookie },
     });
     expect(paused.statusCode).toBe(409);
-    expect(paused.json().error.code).toBe('paused');
+    expect(paused.json().error).toEqual({
+      code: 'paused',
+      message: 'The website security scanner is paused',
+    });
 
     const authorization = await app.inject({
       method: 'GET',
@@ -237,8 +259,11 @@ describe('web-scan site routes (Task 8A)', () => {
       headers: { cookie: adminCookie },
     });
     expect(authorization.statusCode).toBe(409);
-    expect(authorization.json().error.code).toBe('authorization_required');
-    expect(authorization.json().error.message).not.toContain('not authorized to be scanned is wrong');
+    // The whole body is compared, so a thrown error text could never reach it.
+    expect(authorization.json().error).toEqual({
+      code: 'authorization_required',
+      message: 'The site is not authorized to be scanned',
+    });
   });
 
   it('a registration without the authorization confirmation is refused and writes nothing', async () => {
@@ -272,7 +297,7 @@ describe('web-scan site routes (Task 8A)', () => {
 
     const unchanged = await getSite(siteId);
     expect(unchanged.json().authorization.scopeVersion).toBe(1);
-    expect(await auditActions()).toEqual(['site.authorize', 'site.create']);
+    expect(await auditActionGroups()).toEqual([['site.authorize', 'site.create']]);
   });
 
   it('a repository change alone does not need the authorization confirmation', async () => {
@@ -284,7 +309,49 @@ describe('web-scan site routes (Task 8A)', () => {
     );
     expect(patched.statusCode).toBe(200);
     expect(patched.json().repository).toMatchObject({ repositoryId: 7 });
-    expect(await auditActions()).toEqual(['site.update', 'site.authorize', 'site.create']);
+    expect(await auditActionGroups()).toEqual([['site.update'], ['site.authorize', 'site.create']]);
+  });
+
+  it('a null repository unlinks the site and an absent one keeps the link', async () => {
+    const created = await createSite();
+    const siteId = created.json().id as string;
+    const linked = await patchSite(
+      { repository: { owner: 'acme', name: 'demo', repositoryId: 7, installationId: 101, githubAccountId: 401 } },
+      siteId,
+    );
+    expect(linked.statusCode).toBe(200);
+    expect(linked.json().repository).toMatchObject({ repositoryId: 7, name: 'demo' });
+
+    // A patch that carries no repository field leaves the link alone.
+    const untouched = await patchSite({ scope: { ...emptyScope }, authorize: true }, siteId);
+    expect(untouched.statusCode).toBe(200);
+    expect(untouched.json().repository).toMatchObject({ repositoryId: 7, name: 'demo' });
+
+    // A null repository unlinks the site.
+    const unlinked = await patchSite({ repository: null, authorize: true }, siteId);
+    expect(unlinked.statusCode).toBe(200);
+    expect(unlinked.json().repository).toBeNull();
+    expect((await getSite(siteId)).json().repository).toBeNull();
+
+    // The audit log shows the update and the repository it removed.
+    const audit = (await getAudit()).json().audit as Array<{
+      action: string;
+      targetId: string;
+      before: { repository: unknown };
+      after: { repository: unknown };
+    }>;
+    const updates = audit.filter((row) => row.action === 'site.update' && row.targetId === siteId);
+    const unlinkedUpdate = updates.find((row) => row.after.repository === null);
+    expect(unlinkedUpdate?.before.repository).toMatchObject({ repositoryId: 7 });
+    expect(unlinkedUpdate?.after.repository).toBeNull();
+
+    // A new repository replaces the old binding.
+    const relinked = await patchSite(
+      { repository: { owner: 'acme', name: 'other', repositoryId: 9, installationId: 101, githubAccountId: 401 } },
+      siteId,
+    );
+    expect(relinked.statusCode).toBe(200);
+    expect(relinked.json().repository).toMatchObject({ repositoryId: 9, name: 'other' });
   });
 
   it('strict schemas reject unknown keys, bad hostnames and bad ids with 422', async () => {

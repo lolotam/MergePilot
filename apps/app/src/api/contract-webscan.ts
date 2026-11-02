@@ -18,6 +18,8 @@ export const WebScanErrorCodeSchema = z.enum([
   'authorization_required',
   'invalid_request',
   'confirmation_required',
+  'too_many_streams',
+  'live_updates_unavailable',
 ]);
 export type WebScanErrorCode = z.infer<typeof WebScanErrorCodeSchema>;
 
@@ -38,12 +40,17 @@ export const WebScanDigestSchema = z.string().regex(/^[0-9a-f]{64}$/, {
   message: 'The digest must be 64 lowercase hex characters',
 });
 
-/** An ISO 8601 timestamp in a request body. */
-export const WebScanIsoTimestampSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/, {
-    message: 'The timestamp must be written as ISO 8601',
-  });
+/**
+ * An ISO 8601 timestamp in a request body.
+ *
+ * The moment has to exist: the validator refuses an impossible calendar date
+ * (a 13th month, a 30th of February) and an hour that never came, and it wants
+ * the offset of the zone (`Z` or `+03:00`) so the moment is unambiguous.
+ */
+export const WebScanIsoTimestampSchema = z.string().datetime({
+  offset: true,
+  message: 'The timestamp must be written as ISO 8601',
+});
 
 /** The lowercased host name a site matches exactly (no scheme, no path, no query). */
 export const WebScanHostnameSchema = z
@@ -54,7 +61,14 @@ export const WebScanHostnameSchema = z
   });
 export type WebScanHostname = z.infer<typeof WebScanHostnameSchema>;
 
-/** The query-free origin a scan starts from. userinfo, query and fragment are refused. */
+/**
+ * The query-free base URL a scan starts from. userinfo, query and fragment are refused.
+ *
+ * It is the base of the site and not only its origin: a path is allowed, because the
+ * scanner may start from a path inside the site. The host of the URL has to be the
+ * hostname of the site, and the URL has to use the default port; both are checked
+ * where the site is registered.
+ */
 export const WebScanBaseUrlSchema = z
   .string()
   .max(300)
@@ -221,23 +235,31 @@ export type WebScanApprovedInstallation = z.infer<typeof WebScanApprovedInstalla
  * rises above its default: `limitConfirmation.digest` must be the digest of the
  * effective submitted limits (see `limitsConfirmationDigest`).
  *
+ * A patch that carries no setting to change is refused: it would write a change and
+ * an audit row for a request that asked for nothing. The confirmation alone is not a
+ * change either: it only confirms the values of the patch that carries it.
+ *
  * The approved-installation list is read-only here: ADR-0052 section 8 requires
  * every binding to be verified against GitHub before it is saved, and the
  * verifying endpoint arrives with Task 10. Until it exists, a body that carries
  * `approvedInstallations` is refused as an unknown key and nothing is written.
  */
-export const WebScanSettingsPatchSchema = z.strictObject({
-  paused: z.boolean().optional(),
-  alertsEnabled: z.boolean().optional(),
-  limits: WebScanLimitsPatchSchema.optional(),
-  checks: WebScanChecksSchema.optional(),
-  defaultSchedule: WebScanScheduleSchema.optional(),
-  retentionDays: z.number().int().min(1).max(3650).optional(),
-  contact: z.string().max(200).optional(),
-  alertMinSeverity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
-  alertMinValidation: z.enum(['Confirmed', 'Likely', 'Indicator', 'Informational']).optional(),
-  limitConfirmation: z.strictObject({ digest: WebScanDigestSchema }).optional(),
-});
+export const WebScanSettingsPatchSchema = z
+  .strictObject({
+    paused: z.boolean().optional(),
+    alertsEnabled: z.boolean().optional(),
+    limits: WebScanLimitsPatchSchema.optional(),
+    checks: WebScanChecksSchema.optional(),
+    defaultSchedule: WebScanScheduleSchema.optional(),
+    retentionDays: z.number().int().min(1).max(3650).optional(),
+    contact: z.string().max(200).optional(),
+    alertMinSeverity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
+    alertMinValidation: z.enum(['Confirmed', 'Likely', 'Indicator', 'Informational']).optional(),
+    limitConfirmation: z.strictObject({ digest: WebScanDigestSchema }).optional(),
+  })
+  .refine((value) => Object.keys(value).some((key) => key !== 'limitConfirmation'), {
+    message: 'The patch must carry at least one setting to change',
+  });
 export type WebScanSettingsPatchRequest = z.infer<typeof WebScanSettingsPatchSchema>;
 
 /** GET and PATCH /api/admin/web-scan/settings — the effective global policy. */
@@ -279,75 +301,7 @@ export const WebScanAlertEpisodeSchema = z.strictObject({
   lastChangedAt: z.string(),
 });
 
-/** GET/POST /api/admin/web-scan/sites and GET/PATCH/DELETE /api/admin/web-scan/sites/:siteId. */
-export const WebScanSiteDtoSchema = z.strictObject({
-  id: z.string(),
-  hostname: z.string(),
-  baseUrl: z.string(),
-  ownerUserId: z.string(),
-  repository: WebScanRepositorySchema.nullable(),
-  scope: WebScanScopeSchema,
-  schedule: WebScanScheduleSchema.nullable(),
-  authorization: z.strictObject({
-    auditId: z.string().nullable(),
-    authorizedBy: z.string().nullable(),
-    authorizedAt: z.string().nullable(),
-    scopeVersion: z.number(),
-  }),
-  alertEpisodes: z.array(WebScanAlertEpisodeSchema),
-  lastCoverage: z.array(WebScanCoverageEntrySchema).nullable(),
-  lastCoverageScanId: z.string().nullable(),
-  lastCoverageAt: z.string().nullable(),
-  nextRunAt: z.string().nullable(),
-  lastScanAt: z.string().nullable(),
-  removedAt: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export type WebScanSiteDto = z.infer<typeof WebScanSiteDtoSchema>;
-
-/**
- * POST /api/admin/web-scan/sites — registration carries a fresh authorization.
- *
- * `authorize: true` is the fresh ownership/permission confirmation of ADR-0052
- * section 1: a registration without it is refused before anything is written.
- * The field is contract-only and never reaches the store.
- */
-export const WebScanCreateSiteSchema = z.strictObject({
-  hostname: WebScanHostnameSchema,
-  baseUrl: WebScanBaseUrlSchema,
-  scope: WebScanScopeInputSchema,
-  schedule: WebScanScheduleSchema.nullable().optional(),
-  repository: WebScanRepositorySchema.nullable().optional(),
-  authorize: z.literal(true, {
-    message: 'A registration needs an explicit authorization confirmation',
-  }),
-});
-export type WebScanCreateSiteRequest = z.infer<typeof WebScanCreateSiteSchema>;
-
-/**
- * PATCH /api/admin/web-scan/sites/:siteId.
- *
- * A scope or schedule change needs `authorize: true`: the request itself is the
- * fresh ownership/permission confirmation of ADR-0052 section 1 and is audited as
- * one. The schedule is never cleared to null; it is switched off with `enabled: false`.
- */
-export const WebScanUpdateSiteSchema = z.strictObject({
-  scope: WebScanScopeInputSchema.optional(),
-  schedule: WebScanScheduleSchema.optional(),
-  repository: WebScanRepositorySchema.nullable().optional(),
-  authorize: z.boolean().optional(),
-});
-export type WebScanUpdateSiteRequest = z.infer<typeof WebScanUpdateSiteSchema>;
-
-/** GET /api/admin/web-scan/sites — an offset page over the registered sites. */
-export const WebScanSitesPageSchema = z.strictObject({
-  sites: z.array(WebScanSiteDtoSchema),
-  total: z.number(),
-  limit: z.number(),
-  offset: z.number(),
-});
-export type WebScanSitesPage = z.infer<typeof WebScanSitesPageSchema>;
+/** GET /api/admin/web-scan/sites — the schemas of the sites live in their own module. */
 
 /** The lifecycle of a scan. */
 export const WebScanScanStatusSchema = z.enum(['queued', 'running', 'completed', 'stopped', 'failed']);
@@ -541,8 +495,15 @@ export const WebScanPageQuerySchema = z.strictObject({
 });
 export type WebScanPageQuery = z.infer<typeof WebScanPageQuerySchema>;
 
+/**
+ * GET /api/admin/web-scan/audit — an offset page of the immutable history.
+ *
+ * The page carries the total number of rows of the log, so the dashboard can
+ * show how many pages there are without asking for them one by one.
+ */
 export const WebScanAuditPageSchema = z.strictObject({
   audit: z.array(WebScanAuditEntrySchema),
+  total: z.number(),
   limit: z.number(),
   offset: z.number(),
 });

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { eventually, listen } from '../api/runs-events.fixtures.js';
+import { WebScanErrorBodySchema } from '../api/contract-webscan.js';
 import { createWebScanAdminApp, type WebScanAdminHarness } from './webscan.fixtures.js';
 
 /**
@@ -61,6 +62,41 @@ function openScanStream(port: number, path: string, cookie: string): Promise<Ope
   });
 }
 
+/** Registers a site and queues a scan of it in the given harness. */
+async function seedScan(h: WebScanAdminHarness): Promise<{ siteId: string; scanId: string }> {
+  const created = await h.app.inject({
+    method: 'POST',
+    url: '/api/admin/web-scan/sites',
+    headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
+    payload: {
+      hostname: 'example.com',
+      baseUrl: 'https://example.com',
+      scope: {
+        crawlPaths: [],
+        blockedPaths: [],
+        parameterizedPaths: [],
+        activePaths: [],
+        extraFilePaths: [],
+      },
+      authorize: true,
+    },
+  });
+  const siteId = created.json().id as string;
+  await h.app.inject({
+    method: 'PATCH',
+    url: '/api/admin/web-scan/settings',
+    headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
+    payload: { paused: false },
+  });
+  const queued = await h.app.inject({
+    method: 'POST',
+    url: `/api/admin/web-scan/sites/${siteId}/scans`,
+    headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
+    payload: { idempotencyKey: 'events-key-00001', authorize: true },
+  });
+  return { siteId, scanId: queued.json().scan.id as string };
+}
+
 describe('the web-scan live events route (Task 8B)', () => {
   let h: WebScanAdminHarness;
   let port: number;
@@ -70,30 +106,9 @@ describe('the web-scan live events route (Task 8B)', () => {
 
   beforeEach(async () => {
     h = await createWebScanAdminApp({ streams: { perUser: 2, global: 10, keepAliveMs: 60 } });
-    const created = await h.app.inject({
-      method: 'POST',
-      url: '/api/admin/web-scan/sites',
-      headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
-      payload: {
-        hostname: 'example.com',
-        baseUrl: 'https://example.com',
-        scope: {
-          crawlPaths: [],
-          blockedPaths: [],
-          parameterizedPaths: [],
-          activePaths: [],
-          extraFilePaths: [],
-        },
-        authorize: true,
-      },
-    });
-    siteId = created.json().id as string;
-    await h.app.inject({
-      method: 'PATCH',
-      url: '/api/admin/web-scan/settings',
-      headers: { cookie: h.adminCookie, 'content-type': 'application/json' },
-      payload: { paused: false },
-    });
+    const seeded = await seedScan(h);
+    siteId = seeded.siteId;
+    scanId = seeded.scanId;
     const queue = async (key: string) => {
       const res = await h.app.inject({
         method: 'POST',
@@ -103,7 +118,6 @@ describe('the web-scan live events route (Task 8B)', () => {
       });
       return res.json().scan.id as string;
     };
-    scanId = await queue('events-key-00001');
     otherScanId = await queue('events-key-00002');
     port = await listen(h.app);
   }, 30_000);
@@ -246,12 +260,35 @@ describe('the web-scan live events route (Task 8B)', () => {
         headers: { cookie: h.adminCookie },
       });
       expect(third.statusCode).toBe(429);
+      // The body of the route is a body of the scanner contract.
+      expect(WebScanErrorBodySchema.parse(third.json()).error.code).toBe('too_many_streams');
       expect(third.json()).toEqual({
         error: { code: 'too_many_streams', message: 'Too many open live streams for this user' },
       });
     } finally {
       first.close();
       second.close();
+    }
+  });
+
+  it('answers 503 when the live updates are not available', async () => {
+    const failing = await createWebScanAdminApp({ failingEvents: true });
+    try {
+      const seeded = await seedScan(failing);
+      const res = await failing.app.inject({
+        method: 'GET',
+        url: `/api/admin/web-scan/scans/${seeded.scanId}/events`,
+        headers: { cookie: failing.adminCookie },
+      });
+      expect(res.statusCode).toBe(503);
+      // The body of the route is a body of the scanner contract.
+      expect(WebScanErrorBodySchema.parse(res.json()).error.code).toBe('live_updates_unavailable');
+      expect(res.json()).toEqual({
+        error: { code: 'live_updates_unavailable', message: 'Live updates are not available' },
+      });
+    } finally {
+      await failing.app.close();
+      await failing.handle.close();
     }
   });
 

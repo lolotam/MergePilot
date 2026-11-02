@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { redactSecrets } from '@mergepilot/engine';
 import { sendError } from '../api/helpers.js';
 import {
   WebScanCreateExceptionSchema,
@@ -24,7 +25,8 @@ import { definedFields } from './webscan-params.js';
  * A resolution is recorded against an identity that was really observed: the store
  * answers a miss for an occurrence key and evidence hash that match no row. The
  * free-form reason is stored for the dashboard and the audit trail of the store; it
- * never reaches a log line, an event, a report or an export.
+ * never reaches a log line, an event, a report or an export, and a credential that
+ * was pasted into it is redacted before it is stored.
  *
  * The removal is the store's revocation: the resolution stops applying and the
  * occurrences it pinned go back to their unresolved state.
@@ -110,7 +112,10 @@ export function registerWebScanExceptionRoutes(
             evidenceHash: body.evidenceHash,
             kind: body.kind,
             reasonCategory: body.reasonCategory,
-            reason: body.reason,
+            // The reason is free-form and an administrator may paste a credential
+            // into it. The credential is redacted on the way in, so the stored row,
+            // the response and the audit entry never hold it.
+            reason: redactSecrets(body.reason).text,
             expiresAt:
               body.expiresAt === undefined
                 ? undefined
@@ -143,8 +148,16 @@ export function registerWebScanExceptionRoutes(
       // resolutions decides, and an id that only exists elsewhere stays untouched.
       const listed = await withWebScanErrors(reply, () => store.listExceptions(siteId));
       if (!listed.ok) return listed.reply;
-      if (!listed.value.some((exception) => exception.id === exceptionId)) {
+      const exception = listed.value.find((row) => row.id === exceptionId);
+      if (exception === undefined) {
         return sendWebScanNotFound(reply);
+      }
+
+      // A revoked resolution stays revoked: a second revocation would rewrite the
+      // revocation metadata and add another audit row, so it is refused before
+      // anything is written.
+      if (exception.revokedAt !== null) {
+        return sendError(reply, 409, 'conflict', 'The request conflicts with the current state');
       }
 
       const revoked = await withWebScanErrors(reply, () => store.revokeException(adminId, exceptionId));

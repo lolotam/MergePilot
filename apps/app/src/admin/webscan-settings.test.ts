@@ -35,20 +35,26 @@ describe('web-scan settings routes (Task 8A)', () => {
   let app: FastifyInstance;
   let handle: AdminTestDb;
 
-  beforeEach(async () => {
-    handle = await createAdminTestDb();
+  /** Builds the admin app over the given store. */
+  const buildApp = async (webScanStore: PgWebScanStore): Promise<FastifyInstance> => {
     const auth: Auth = createAuth({ db: handle.db, config });
-    app = fastify();
-    registerAuthRoutes(app, auth);
-    registerAdminApi(app, {
+    const instance = fastify();
+    registerAuthRoutes(instance, auth);
+    registerAdminApi(instance, {
       auth,
       db: handle.db,
       config,
       webScan: {
-        store: new PgWebScanStore(handle.db, new PurposeScopedVault({ masterKey })),
+        store: webScanStore,
         events,
       },
     });
+    return instance;
+  };
+
+  beforeEach(async () => {
+    handle = await createAdminTestDb();
+    app = await buildApp(new PgWebScanStore(handle.db, new PurposeScopedVault({ masterKey })));
     await seedAdminFixtures(handle.db);
     await app.ready();
   });
@@ -132,6 +138,60 @@ describe('web-scan settings routes (Task 8A)', () => {
     expect(settings.json().updatedBy).toBeNull();
     const audit = await getAudit();
     expect(audit.json().audit.length).toBe(0);
+  });
+
+  it('refuses a patch that asks for nothing and writes nothing', async () => {
+    const before = (await getSettings()).json();
+    for (const payload of [{}, 'null']) {
+      const res = await patchSettings(payload);
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error.code).toBe('invalid_request');
+    }
+
+    // A request without a body is a request error too.
+    const empty = await app.inject({
+      method: 'PATCH',
+      url: '/api/admin/web-scan/settings',
+      headers: { cookie: adminCookie },
+    });
+    expect(empty.statusCode).toBe(422);
+    expect(empty.json().error.code).toBe('invalid_request');
+
+    const after = (await getSettings()).json();
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.updatedBy).toBe(before.updatedBy);
+    expect(after.paused).toBe(before.paused);
+    const audit = await getAudit();
+    expect(audit.json().audit.length).toBe(0);
+  });
+
+  it('refuses a change that was computed from a snapshot the row moved away from', async () => {
+    // A store whose settings move right after the route read them: the change is
+    // computed from a snapshot that is not the current one any more.
+    const racing = new PgWebScanStore(handle.db, new PurposeScopedVault({ masterKey }));
+    const read = racing.getSettings.bind(racing);
+    racing.getSettings = async () => {
+      const snapshot = await read();
+      await racing.updateSettings('admin-2', { contact: 'other@example.com' });
+      return snapshot;
+    };
+    const racingApp = await buildApp(racing);
+    await racingApp.ready();
+    try {
+      const res = await racingApp.inject({
+        method: 'PATCH',
+        url: '/api/admin/web-scan/settings',
+        headers: { cookie: adminCookie, 'content-type': 'application/json' },
+        payload: { paused: false },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toEqual({
+        code: 'conflict',
+        message: 'The request conflicts with the current state',
+      });
+    } finally {
+      await racingApp.close();
+    }
   });
 
   it('refuses a body that writes the approved-installation list and writes nothing', async () => {

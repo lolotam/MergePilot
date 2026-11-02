@@ -1,15 +1,16 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { AppDb } from '../db/pg-store.js';
 import type { AppTx } from '../db/workspace-lock.js';
 import { webScanFindings, webScanSites, webScans } from '../db/schema.js';
 import { appendAudit } from './pg-audit.js';
 import { applyOccurrenceUpdates } from './pg-occurrences.js';
-import { lockScanRow, lockSiteRow, readScanRow } from './pg-rows.js';
+import { lockScanRow, lockSiteRow, readScanRow, toWebScanFinding } from './pg-rows.js';
 import {
   WebScanConflictError,
   WebScanNotFoundError,
   type RecordWebScanOutcomeInput,
 } from './store.js';
+import type { WebScanScanFinding } from './types.js';
 
 /**
  * The terminal write of a scan (ADR-0052 section 6).
@@ -113,6 +114,39 @@ export async function writeScanOutcomeTx(
       findings: input.findings.length,
     },
   });
+}
+
+/**
+ * The findings of one scan.
+ *
+ * A scan keeps its own findings, so the detail and the report of a scan show what
+ * that scan found and not what the ledger of the site holds now. A scan that found
+ * nothing has no finding: there is no fallback to the ledger.
+ *
+ * The order is stable: the severity first, from the worst to the best, and the
+ * occurrence key as the tiebreaker.
+ */
+export async function listScanFindings(
+  db: AppDb,
+  scanId: string,
+): Promise<WebScanScanFinding[]> {
+  const rows = await db
+    .select()
+    .from(webScanFindings)
+    .where(eq(webScanFindings.scanId, scanId))
+    .orderBy(severityOrder(), webScanFindings.occurrenceKey);
+  return rows.map((row) => ({ ...toWebScanFinding(row), createdAt: row.createdAt }));
+}
+
+/** The severity of a finding, from the worst to the best. */
+function severityOrder() {
+  return sql`CASE ${webScanFindings.severity}
+    WHEN 'critical' THEN 0
+    WHEN 'high' THEN 1
+    WHEN 'medium' THEN 2
+    WHEN 'low' THEN 3
+    ELSE 4
+  END`;
 }
 
 /**

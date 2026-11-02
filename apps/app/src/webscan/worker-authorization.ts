@@ -192,6 +192,9 @@ async function liveAuthorizingAdministrator(
  * keeps the authorization it was queued with, so the original authorizer is the one
  * whose live verified administrator status decides whether the scan may run.
  *
+ * A manual scan names its own authorization row, because the administrator confirmed
+ * the authorization of that scan and not the one of the site.
+ *
  * The audit log is append-only, so the original authorizer is still readable there.
  */
 export async function resolveAuthorizingActor(
@@ -207,7 +210,15 @@ export async function resolveAuthorizingActor(
     return site.authorization.authorizedBy;
   }
 
-  // The site was authorized again. The original authorizer is read from the audit log.
+  // The row is read by its id: a site writes more audit rows than a page of the log
+  // holds, so the authorization of a scan must never fall off the list.
+  const entry = await readAuditEntry(deps, reference);
+  if (entry !== null) {
+    if (entry.action !== 'site.authorize') return null;
+    return authorizedByOf(entry);
+  }
+
+  // The row is not readable by its id. The site log is the fallback.
   const entries = await readSiteAudit(deps, site);
   for (const entry of entries) {
     if (entry.id !== reference || entry.action !== 'site.authorize') continue;
@@ -215,6 +226,27 @@ export async function resolveAuthorizingActor(
     if (authorizer !== null) return authorizer;
   }
   return null;
+}
+
+/**
+ * One audit row by its id, or null when it cannot be read.
+ *
+ * A row that cannot be read is not a row that authorizes anything: the scan falls
+ * back to the site log and, if that names nobody, it stops.
+ */
+async function readAuditEntry(
+  deps: WebScanWorkerDeps,
+  auditId: string,
+): Promise<WebScanAuditEntry | null> {
+  try {
+    return await deps.store.getAuditEntry(auditId);
+  } catch (error) {
+    deps.logger?.warn?.('The web scan audit row could not be read', {
+      auditId,
+      error: error instanceof Error ? error.name : 'unknown error',
+    });
+    return null;
+  }
 }
 
 /**

@@ -27,10 +27,13 @@ export type DefinedFields<T> = {
 };
 
 /**
- * Copies the fields of `source` whose value is defined; the others stay absent.
+ * Copies the fields of `source` whose value is not `undefined`; the others stay
+ * absent.
  *
  * The store reads an absent field as a field that was not submitted, so a field
- * that carries no value never reaches it as an empty one.
+ * that carries no value never reaches it as an empty one. A `null` is a value of
+ * its own and is copied: the store reads it as an explicit clearing, while an
+ * absent field leaves the stored value alone.
  */
 export function definedFields<T extends object>(source: T): DefinedFields<T> {
   const entries: Array<[string, unknown]> = Object.entries(source);

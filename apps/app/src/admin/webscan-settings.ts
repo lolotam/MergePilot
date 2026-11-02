@@ -102,15 +102,22 @@ export function registerWebScanSettingsRoutes(
       return sendError(reply, 404, 'not_found', 'Not found');
     }
 
-    const parsed = WebScanSettingsPatchSchema.safeParse(request.body ?? {});
+    // A missing body is a request error: an empty patch would write a change and an
+    // audit row for a request that asked for nothing.
+    const parsed = WebScanSettingsPatchSchema.safeParse(request.body);
     if (!parsed.success) return sendWebScanValidationError(reply, parsed.error);
     const body = parsed.data;
+
+    // The snapshot the change is computed from. The confirmation is bound to it, and
+    // the store refuses the change when the row moved in between: two changes that
+    // were computed from the same snapshot can never be merged into a combination
+    // that no confirmation covered.
+    const current = await withWebScanErrors(reply, () => store.getSettings());
+    if (!current.ok) return current.reply;
 
     if (body.limits !== undefined) {
       // The confirmation is bound to the effective values: the current limits
       // with the submitted fields on top. Nothing is written before it checks.
-      const current = await withWebScanErrors(reply, () => store.getSettings());
-      if (!current.ok) return current.reply;
       const effective = { ...current.value.limits, ...toStoreLimits(body.limits) };
       const confirmed = !requiresAboveDefaultConfirmation(effective)
         ? true
@@ -129,7 +136,10 @@ export function registerWebScanSettingsRoutes(
     }
 
     const updated = await withWebScanErrors(reply, () =>
-      store.updateSettings(adminId, toStoreSettingsPatch(body)),
+      store.updateSettings(adminId, {
+        ...toStoreSettingsPatch(body),
+        expectedUpdatedAt: current.value.updatedAt,
+      }),
     );
     if (!updated.ok) return updated.reply;
     return reply.status(200).send(toWebScanSettingsDto(updated.value));

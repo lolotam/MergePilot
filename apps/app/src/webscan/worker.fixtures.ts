@@ -204,6 +204,10 @@ export function harness(overrides: HarnessOptions = {}): Harness {
     })),
     listRetainedOccurrences: vi.fn(async () => []),
     listAudit: vi.fn(async () => overrides.audit ?? []),
+    getAuditEntry: vi.fn(
+      async (auditId: string) =>
+        (overrides.audit ?? []).find((row) => row.id === auditId) ?? null,
+    ),
   } as unknown as WebScanStore;
 
   const workerStore = {

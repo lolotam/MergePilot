@@ -3,13 +3,15 @@ import type { ScanScope } from '@mergepilot/webscan';
 import { sendError } from '../api/helpers.js';
 import {
   WebScanCoverageEntrySchema,
-  WebScanCreateSiteSchema,
   WebScanIdSchema,
   WebScanPageQuerySchema,
-  WebScanUpdateSiteSchema,
   type WebScanScopeInput,
-  type WebScanSiteDto,
 } from '../api/contract-webscan.js';
+import {
+  WebScanCreateSiteSchema,
+  WebScanUpdateSiteSchema,
+  type WebScanSiteDto,
+} from '../api/contract-webscan-site.js';
 import type { WebScanStore } from '../webscan/store.js';
 import type { WebScanSite } from '../webscan/types.js';
 import {
@@ -199,7 +201,7 @@ export function registerWebScanSitesRoutes(
     }
     const siteId = parseSiteId(request, reply);
     if (typeof siteId !== 'string') return siteId;
-    const parsed = WebScanUpdateSiteSchema.safeParse(request.body ?? {});
+    const parsed = WebScanUpdateSiteSchema.safeParse(request.body);
     if (!parsed.success) return sendWebScanValidationError(reply, parsed.error);
     const body = parsed.data;
 
@@ -221,7 +223,10 @@ export function registerWebScanSitesRoutes(
           ? undefined
           : buildScope(current.value.scope.hostname, current.value.scope.baseUrl, body.scope),
       schedule: toStoreSchedule(body.schedule),
-      repository: body.repository ?? undefined,
+      // A null repository unlinks the site and an absent one leaves the binding
+      // alone, so the null reaches the store instead of being turned into an
+      // absent field.
+      repository: body.repository,
       authorizedBy: body.authorize === true ? adminId : undefined,
     });
     const updated = await withWebScanErrors(reply, () => store.updateSite(adminId, siteId, input));
