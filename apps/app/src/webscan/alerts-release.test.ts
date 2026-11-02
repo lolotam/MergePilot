@@ -148,7 +148,9 @@ describe('the release of the slot of a resolved episode', () => {
   });
 
 
-  it('drops an episode without an issue before an unresolved one that has an issue', () => {
+  it.each(['manual', 'scheduled'] as const)(
+    'drops an episode without an issue before an unresolved one that has an issue (%s scan)',
+    (trigger) => {
     const seeded = runAlertScenario(
       [
         {
@@ -177,9 +179,10 @@ describe('the release of the slot of a resolved episode', () => {
       issueRequested: false,
     };
 
-    // A manual scan: it delivers nothing, so no episode has a delivery under way.
+    // On a scheduled scan the episode without an issue is offered an open-issue: a request for
+    // an issue that does not exist yet, which must not protect it from the cap.
     const evaluation = evaluateAlertEpisodes({
-      trigger: 'manual',
+      trigger,
       now: day(2),
       siteId: SITE_ID,
       dashboardBaseUrl: DASHBOARD_BASE_URL,
@@ -198,5 +201,6 @@ describe('the release of the slot of a resolved episode', () => {
     // group can open a second issue under a new marker.
     expect(keptKeys.has('episode-without-issue')).toBe(false);
     expect(withIssue.every((episode) => keptKeys.has(episode.episodeKey))).toBe(true);
-  });
+    },
+  );
 });

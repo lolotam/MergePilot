@@ -133,7 +133,13 @@ export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluat
     evaluated.map((entry) => ({
       episode: entry.result.episode,
       existing: entry.existing,
-      pending: entry.result.actions.length > 0,
+      // Only a write that targets an issue that exists counts as a delivery under way. A
+      // prospective open-issue targets no issue yet: it must not outrank an episode that
+      // has a real issue behind it when an over-bound state is capped.
+      pending: entry.result.actions.some((action) => action.kind !== 'open-issue'),
+      hasIssue:
+        context.episodesByIssueKey.get(entry.result.episode.issueKey)?.issueRequested === true ||
+        (entry.result.episode.issueState ?? 'none') !== 'none',
     })),
   );
   const admittedKeys = new Set(admitted.map((episode) => episode.episodeKey));

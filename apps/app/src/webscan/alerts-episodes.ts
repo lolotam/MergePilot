@@ -196,6 +196,12 @@ export interface AlertEpisodeCandidate {
    * every episode without a delivery, for the same reason.
    */
   pending?: boolean;
+  /**
+   * Whether an issue is really behind the episode: one was requested in an earlier scan, or
+   * the caller observed one. An issue this evaluation only proposes to open does not count.
+   * Absent means "derive it from the episode".
+   */
+  hasIssue?: boolean;
 }
 
 /**
@@ -277,7 +283,9 @@ function evictionRank(candidate: AlertEpisodeCandidate): number {
   if (candidate.pending === true) return 4;
   const episode = candidate.episode;
   if (episode.resolved === true) return isSettled(episode) ? 1 : 2;
-  const hasIssue = episode.issueRequested === true || (episode.issueState ?? 'none') !== 'none';
+  const hasIssue =
+    candidate.hasIssue ??
+    (episode.issueRequested === true || (episode.issueState ?? 'none') !== 'none');
   return hasIssue ? 3 : 0;
 }
 
