@@ -189,6 +189,18 @@ export interface WebScanFinding {
   comparison: Comparison;
 }
 
+/**
+ * One finding of one scan, as the scan snapshot holds it.
+ *
+ * A scan keeps its own findings, so the detail and the report of a scan show what
+ * that scan found and not what the ledger of the site holds now. The moment of the
+ * observation is part of it: it is when the scan saw the finding.
+ */
+export interface WebScanScanFinding extends WebScanFinding {
+  /** When the finding was observed. */
+  createdAt: Date;
+}
+
 /** One retained occurrence of the ledger. */
 export interface WebScanOccurrence {
   id: string;

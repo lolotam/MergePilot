@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { WebScanConflictError } from './store.js';
 import {
   backdateLedger,
   fixture,
@@ -94,6 +95,40 @@ describe('the administrator resolutions', () => {
       });
       expect((await store.listOccurrences(site.id))[0]?.exceptionId).toBeNull();
       expect(await store.listLiveExceptions(site.id, new Date())).toEqual([]);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('refuses a second revocation and keeps the first revocation and its audit row', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      await observeOutstanding(store, site.id, 'key-1', 'occ-1', 'hash-1');
+      const exception = await store.createException('admin-1', {
+        siteId: site.id,
+        occurrenceKey: 'occ-1',
+        evidenceHash: 'hash-1',
+        kind: 'accepted',
+        reasonCategory: 'accepted_risk',
+        reason: 'The header is set by the edge proxy.',
+      });
+
+      const first = await store.revokeException('admin-1', exception.id);
+      const revocations = async (): Promise<number> =>
+        (await store.listAudit({ targetType: 'exception', targetId: exception.id, limit: 50 })).filter(
+          (entry) => entry.action === 'exception.revoke',
+        ).length;
+      expect(await revocations()).toBe(1);
+
+      await expect(store.revokeException('admin-2', exception.id)).rejects.toBeInstanceOf(
+        WebScanConflictError,
+      );
+      const [row] = (await store.listExceptions(site.id)).filter((entry) => entry.id === exception.id);
+      expect(row?.revokedBy).toBe('admin-1');
+      expect(row?.revokedAt?.getTime()).toBe(first.revokedAt?.getTime());
+      expect(await revocations()).toBe(1);
     } finally {
       await db.close();
     }

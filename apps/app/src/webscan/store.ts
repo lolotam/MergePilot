@@ -18,6 +18,7 @@ import type {
   WebScanOccurrence,
   WebScanRepositoryBinding,
   WebScanScan,
+  WebScanScanFinding,
   WebScanSchedule,
   WebScanSettings,
   WebScanSite,
@@ -78,6 +79,14 @@ export interface WebScanSettingsPatch {
   alertMinSeverity?: WebScanSettings['alertMinSeverity'];
   alertMinValidation?: WebScanSettings['alertMinValidation'];
   approvedInstallations?: WebScanApprovedInstallation[];
+  /**
+   * The moment of the snapshot the change was computed from.
+   *
+   * It is a guard and not a written field: the store refuses the change when the
+   * locked row moved since that snapshot, so two changes that were computed from
+   * the same snapshot can never be merged into a combination neither of them saw.
+   */
+  expectedUpdatedAt?: Date;
 }
 
 /** The input of a site registration. It carries a fresh authorization. */
@@ -132,6 +141,30 @@ export interface EnqueueWebScanResult {
   scan: WebScanScan;
   /** True when the same idempotency key and the same request data were seen before. */
   replayed: boolean;
+}
+
+/**
+ * One page of the audit log and the number of rows the log holds.
+ *
+ * The page and the total come from one snapshot of the log, so they always
+ * describe the same version of it.
+ */
+export interface WebScanAuditPage {
+  /** The rows of the page, newest first. */
+  entries: WebScanAuditEntry[];
+  /** The number of rows the log holds. */
+  total: number;
+}
+
+/** The outcome of an administrator stop: either the stop wrote, or it stayed out. */
+export interface StopWebScanResult {
+  scan: WebScanScan;
+  /**
+   * `stopped` when the row moved to its terminal state in this call, and
+   * `already_terminal` when the scan already had a terminal state and nothing
+   * was written.
+   */
+  outcome: 'stopped' | 'already_terminal';
 }
 
 /** The findings and the coverage a completed scan produced. */
@@ -242,6 +275,26 @@ export interface WebScanStore {
   enqueueScheduledScan(actor: string, input: EnqueueScheduledWebScanInput): Promise<WebScanScan>;
   getScan(scanId: string): Promise<WebScanScan | null>;
   listScans(siteId: string): Promise<WebScanScan[]>;
+  /**
+   * The findings of one scan, in a stable order.
+   *
+   * A scan keeps its own findings: the detail and the report of a scan show what
+   * that scan found and not what the ledger of the site holds now.
+   */
+  listScanFindings(scanId: string): Promise<WebScanScanFinding[]>;
+  /**
+   * Cancels a queued or running scan on an administrator request.
+   *
+   * A queued scan becomes terminal right away; a running scan is marked stopped and keeps
+   * its attempt id until the cancelled attempt reports its counters once, so the worker
+   * no longer owns it and stops before its next request. The cancelled attempt's terminal
+   * write changes neither the state nor the results; it may add its request, page and
+   * duration counters once, and that write clears the attempt id, so the attempt can
+   * never write the counters a second time. The stop state and its audit row are
+   * written in one transaction. A scan that already has a terminal state is returned
+   * unchanged and nothing is written.
+   */
+  stopScan(actor: string, scanId: string): Promise<StopWebScanResult>;
 
   // -- The retained ledger --------------------------------------------------
   /** The retained occurrences of a site, in the shape the comparison needs. */
@@ -281,7 +334,37 @@ export interface WebScanStore {
   /** The audit log is append-only: there is no update and no delete. */
   listAudit(options?: {
     limit?: number;
+    /** How many rows to skip. The newest rows come first. */
+    offset?: number;
     targetType?: string;
     targetId?: string;
   }): Promise<WebScanAuditEntry[]>;
+  /**
+   * The number of rows of the audit log.
+   *
+   * The count is a query of its own, so a page never has to read the whole log
+   * to know how many rows there are.
+   */
+  countAudit(options?: { targetType?: string; targetId?: string }): Promise<number>;
+  /**
+   * One page of the audit log and the number of rows the log holds.
+   *
+   * The page and the total are read from one snapshot of the log, so a row that is
+   * appended between two reads can never make the page and the total disagree: a
+   * page never holds more rows than the log has.
+   */
+  listAuditPage(options?: {
+    limit?: number;
+    /** How many rows to skip. The newest rows come first. */
+    offset?: number;
+    targetType?: string;
+    targetId?: string;
+  }): Promise<WebScanAuditPage>;
+  /**
+   * One audit row by its id.
+   *
+   * The id is how a scan names the authorization it runs under, so the row is read
+   * by its id: a page of the log is not a reliable place to look for it.
+   */
+  getAuditEntry(auditId: string): Promise<WebScanAuditEntry | null>;
 }

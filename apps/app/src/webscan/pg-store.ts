@@ -4,7 +4,7 @@ import type { AppDb } from '../db/pg-store.js';
 import { webScanSites } from '../db/schema.js';
 import { WEBSCAN_IDENTITY_PURPOSE, type ScopedSecretVault } from '../vault/scoped-secrets.js';
 import type { ScannerEnvelopeStore, ScannerIdentityEnvelope } from '../vault/rotate.js';
-import { listAudit } from './pg-audit.js';
+import { countAudit, listAudit, listAuditPage, readAuditEntry } from './pg-audit.js';
 import { listAlerts, setSiteAlertEpisodes, upsertAlert } from './pg-alerts.js';
 import {
   createException,
@@ -19,12 +19,13 @@ import {
   listRetainedOccurrences,
   pruneProvenFixedTombstones,
 } from './pg-occurrences.js';
-import { recordScanOutcome } from './pg-outcome.js';
+import { listScanFindings, recordScanOutcome } from './pg-outcome.js';
 import {
   enqueueManualScan,
   enqueueScheduledScan,
   listScans,
   readScan,
+  stopScan,
 } from './pg-scans.js';
 import { createSite, listSites, readSite, readSiteByHostname, removeSite, updateSite } from './pg-sites.js';
 import { readScanSettings, updateScanSettings } from './pg-settings.js';
@@ -35,8 +36,10 @@ import type {
   EnqueueScheduledWebScanInput,
   EnqueueWebScanResult,
   RecordWebScanOutcomeInput,
+  StopWebScanResult,
   UpdateWebScanSiteInput,
   UpsertWebScanAlertInput,
+  WebScanAuditPage,
   WebScanStore,
   WebScanSettingsPatch,
 } from './store.js';
@@ -47,6 +50,7 @@ import type {
   WebScanException,
   WebScanOccurrence,
   WebScanScan,
+  WebScanScanFinding,
   WebScanSettings,
   WebScanSite,
 } from './types.js';
@@ -130,6 +134,14 @@ export class PgWebScanStore implements WebScanStore, ScannerEnvelopeStore {
     return listScans(this.db, siteId);
   }
 
+  async listScanFindings(scanId: string): Promise<WebScanScanFinding[]> {
+    return listScanFindings(this.db, scanId);
+  }
+
+  async stopScan(actor: string, scanId: string): Promise<StopWebScanResult> {
+    return stopScan(this.db, actor, scanId);
+  }
+
   // -- The retained ledger --------------------------------------------------
 
   async listRetainedOccurrences(siteId: string): Promise<RetainedOccurrence[]> {
@@ -199,10 +211,28 @@ export class PgWebScanStore implements WebScanStore, ScannerEnvelopeStore {
 
   async listAudit(options?: {
     limit?: number;
+    offset?: number;
     targetType?: string;
     targetId?: string;
   }): Promise<WebScanAuditEntry[]> {
     return listAudit(this.db, options);
+  }
+
+  async countAudit(options?: { targetType?: string; targetId?: string }): Promise<number> {
+    return countAudit(this.db, options);
+  }
+
+  async listAuditPage(options?: {
+    limit?: number;
+    offset?: number;
+    targetType?: string;
+    targetId?: string;
+  }): Promise<WebScanAuditPage> {
+    return listAuditPage(this.db, options);
+  }
+
+  async getAuditEntry(auditId: string): Promise<WebScanAuditEntry | null> {
+    return readAuditEntry(this.db, auditId);
   }
 
   // -- The identity keys ----------------------------------------------------

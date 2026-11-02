@@ -1,7 +1,8 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, type SQL } from 'drizzle-orm';
 import type { AppDb } from '../db/pg-store.js';
 import type { AppTx } from '../db/workspace-lock.js';
 import { webScanAudit } from '../db/schema.js';
+import type { WebScanAuditPage } from './store.js';
 import type { WebScanAuditEntry } from './types.js';
 
 /**
@@ -108,27 +109,108 @@ export async function appendAudit(tx: AppTx, entry: AuditEntryInput): Promise<st
   return id;
 }
 
-/** Reads the audit log, newest first. */
-export async function listAudit(
-  db: AppDb,
-  options?: { limit?: number; targetType?: string; targetId?: string },
-): Promise<WebScanAuditEntry[]> {
-  const conditions = [];
+/**
+ * The conditions of one read of the audit log.
+ *
+ * The page and the count filter the log the same way, so both read the same rows.
+ */
+function auditConditions(options?: { targetType?: string; targetId?: string }): SQL[] {
+  const conditions: SQL[] = [];
   if (options?.targetType !== undefined) {
     conditions.push(eq(webScanAudit.targetType, options.targetType));
   }
   if (options?.targetId !== undefined) {
     conditions.push(eq(webScanAudit.targetId, options.targetId));
   }
+  return conditions;
+}
+
+/**
+ * Reads the audit log, newest first.
+ *
+ * The rows are ordered by their moment and by their id, because the log is
+ * append-only and two rows can carry the same moment: the id is the tiebreaker
+ * that keeps the order of two pages of the same log the same.
+ */
+export async function listAudit(
+  db: AppDb,
+  options?: { limit?: number; offset?: number; targetType?: string; targetId?: string },
+): Promise<WebScanAuditEntry[]> {
+  const conditions = auditConditions(options);
 
   const rows = await db
     .select()
     .from(webScanAudit)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(webScanAudit.createdAt))
-    .limit(options?.limit ?? 100);
+    .orderBy(desc(webScanAudit.createdAt), desc(webScanAudit.id))
+    .limit(options?.limit ?? 100)
+    .offset(options?.offset ?? 0);
 
-  return rows.map((row) => ({
+  return rows.map(toWebScanAuditEntry);
+}
+
+/**
+ * Reads one page of the audit log and the number of rows the log holds.
+ *
+ * The page and the total come from one snapshot of the log. The repeatable read
+ * transaction is the snapshot: both reads see the same log, so a row that is
+ * appended between them can never make the page and the total disagree. A page
+ * never holds more rows than the log has, and an offset past the end of the log
+ * is an empty page that still reports the real total.
+ */
+export async function listAuditPage(
+  db: AppDb,
+  options?: { limit?: number; offset?: number; targetType?: string; targetId?: string },
+): Promise<WebScanAuditPage> {
+  const conditions = auditConditions(options);
+
+  return db.transaction(
+    async (tx) => {
+      const rows = await tx
+        .select()
+        .from(webScanAudit)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(webScanAudit.createdAt), desc(webScanAudit.id))
+        .limit(options?.limit ?? 100)
+        .offset(options?.offset ?? 0);
+
+      const counted = await tx
+        .select({ n: count() })
+        .from(webScanAudit)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+      return {
+        entries: rows.map(toWebScanAuditEntry),
+        total: Number(counted[0]?.n ?? 0),
+      };
+    },
+    { isolationLevel: 'repeatable read' },
+  );
+}
+
+/**
+ * Reads one audit row by its id.
+ *
+ * The log is append-only and a scan names its authorization by the id of the row
+ * that recorded it, so the row is read by its id: a site writes more rows than a
+ * page of the log holds, and the authorization of a scan must never fall off it.
+ */
+export async function readAuditEntry(
+  db: AppDb,
+  auditId: string,
+): Promise<WebScanAuditEntry | null> {
+  const rows = await db
+    .select()
+    .from(webScanAudit)
+    .where(eq(webScanAudit.id, auditId))
+    .limit(1);
+  const row = rows[0];
+  return row === undefined ? null : toWebScanAuditEntry(row);
+}
+
+/** Maps an audit row onto the domain type. */
+function toWebScanAuditEntry(row: typeof webScanAudit.$inferSelect): WebScanAuditEntry {
+  return {
     id: row.id,
     actor: row.actor,
     action: row.action,
@@ -137,5 +219,20 @@ export async function listAudit(
     before: row.before,
     after: row.after,
     createdAt: row.createdAt,
-  }));
+  };
+}
+
+/** Counts the rows of the audit log, without reading them. */
+export async function countAudit(
+  db: AppDb,
+  options?: { targetType?: string; targetId?: string },
+): Promise<number> {
+  const conditions = auditConditions(options);
+
+  const rows = await db
+    .select({ n: count() })
+    .from(webScanAudit)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+  return Number(rows[0]?.n ?? 0);
 }

@@ -63,6 +63,45 @@ describe('the web scan settings', () => {
       await db.close();
     }
   });
+
+  it('refuses a change that was computed from a snapshot the row moved away from', async () => {
+    const { db, store } = await fixture();
+    try {
+      // Two changes are computed from the same snapshot of the row.
+      const snapshot = await store.getSettings();
+      const first = await store.updateSettings('admin-1', {
+        limits: { maxRequests: 600 },
+        expectedUpdatedAt: snapshot.updatedAt,
+      });
+      expect(first.limits.maxRequests).toBe(600);
+
+      // The second one would merge into limits that the first one never saw.
+      await expect(
+        store.updateSettings('admin-2', {
+          limits: { maxPages: 200 },
+          expectedUpdatedAt: snapshot.updatedAt,
+        }),
+      ).rejects.toBeInstanceOf(WebScanConflictError);
+
+      // The settings are the ones of the first change.
+      const settings = await store.getSettings();
+      expect(settings.limits.maxRequests).toBe(600);
+      expect(settings.limits.maxPages).toBe(100);
+      expect(await store.listAudit({ targetType: 'settings' })).toHaveLength(1);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('accepts a change that carries no snapshot', async () => {
+    const { db, store } = await fixture();
+    try {
+      const updated = await store.updateSettings('admin-1', { paused: false });
+      expect(updated.paused).toBe(false);
+    } finally {
+      await db.close();
+    }
+  });
 });
 
 describe('the web scan sites', () => {

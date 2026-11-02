@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { TestDbHandle } from '../db/test-db.js';
 import {
   backdateLedger,
   fixture,
@@ -203,6 +204,136 @@ describe('the audit log of the maintenance', () => {
       expect(text).not.toContain('crawlPaths');
       expect(text).not.toContain('occ-1');
       expect(text).not.toContain('missing');
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+describe('the pages of the audit log', () => {
+  /** The moment every row of the test shares, so the id is the only tiebreaker. */
+  const MOMENT = new Date('2026-01-01T00:00:00.000Z');
+
+  /** The ids of the rows; the id orders them from the newest to the oldest. */
+  const IDS = [
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000002',
+    '00000000-0000-4000-8000-000000000003',
+    '00000000-0000-4000-8000-000000000004',
+    '00000000-0000-4000-8000-000000000005',
+  ];
+
+  /** Writes one audit row with a fixed id and the given moment. */
+  async function writeRow(
+    db: TestDbHandle,
+    id: string,
+    createdAt: Date = MOMENT,
+  ): Promise<void> {
+    await db.client.query(
+      'INSERT INTO web_scan_audit (id, actor, action, target_type, target_id, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, 'admin-1', 'site.create', 'site', 'site-1', createdAt],
+    );
+  }
+
+  it('reads the pages of rows that share a moment without a gap or a duplicate', async () => {
+    const { db, store } = await fixture();
+    try {
+      for (const id of IDS) await writeRow(db, id);
+
+      const first = await store.listAudit({ limit: 2, offset: 0 });
+      const second = await store.listAudit({ limit: 2, offset: 2 });
+      const third = await store.listAudit({ limit: 2, offset: 4 });
+
+      // The rows share their moment, so the id decides the order of every page.
+      expect(first.map((row) => row.id)).toEqual([IDS[4], IDS[3]]);
+      expect(second.map((row) => row.id)).toEqual([IDS[2], IDS[1]]);
+      expect(third.map((row) => row.id)).toEqual([IDS[0]]);
+
+      // The pages together hold every row of the log exactly once.
+      const walked = [...first, ...second, ...third].map((row) => row.id);
+      expect(walked).toHaveLength(IDS.length);
+      expect(new Set(walked).size).toBe(IDS.length);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('reads the rows of an offset and counts the log', async () => {
+    const { db, store } = await fixture();
+    try {
+      for (const id of IDS) await writeRow(db, id);
+
+      // The rows before the offset are skipped by the database, not read and dropped.
+      const deep = await store.listAudit({ limit: 2, offset: 3 });
+      expect(deep.map((row) => row.id)).toEqual([IDS[1], IDS[0]]);
+
+      // An offset past the end of the log is an empty page, and the log still
+      // holds every row it held before.
+      const beyond = await store.listAudit({ limit: 10, offset: 50 });
+      expect(beyond).toEqual([]);
+      expect(await store.countAudit()).toBe(IDS.length);
+
+      // The count knows the rows of one target apart from the whole log.
+      expect(await store.countAudit({ targetType: 'site' })).toBe(IDS.length);
+      expect(await store.countAudit({ targetType: 'exception' })).toBe(0);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('reads the page and its total from one call', async () => {
+    const { db, store } = await fixture();
+    try {
+      for (const id of IDS) await writeRow(db, id);
+
+      const page = await store.listAuditPage({ limit: 2, offset: 0 });
+
+      // The page holds the newest rows, in the order of the log.
+      expect(page.entries.map((row) => row.id)).toEqual([IDS[4], IDS[3]]);
+      // The total is the number of rows of the whole log.
+      expect(page.total).toBe(IDS.length);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('never lets a page hold more rows than the log has', async () => {
+    const { db, store } = await fixture();
+    try {
+      for (const id of IDS) await writeRow(db, id);
+
+      // A small first page of a log that holds more rows than it reads.
+      const page = await store.listAuditPage({ limit: 2, offset: 0 });
+      expect(page.entries.length).toBe(2);
+      expect(page.entries.length).toBeLessThanOrEqual(page.total);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('reports the total of the log for a page that is past its end', async () => {
+    const { db, store } = await fixture();
+    try {
+      for (const id of IDS) await writeRow(db, id);
+
+      // An empty page is still a page of the log, so it still knows its total.
+      const beyond = await store.listAuditPage({ limit: 10, offset: 50 });
+      expect(beyond.entries).toEqual([]);
+      expect(beyond.total).toBe(IDS.length);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('orders the rows by their moment', async () => {
+    const { db, store } = await fixture();
+    try {
+      await writeRow(db, IDS[0], new Date('2026-01-01T00:00:00.000Z'));
+      await writeRow(db, IDS[1], new Date('2026-01-02T00:00:00.000Z'));
+      await writeRow(db, IDS[2], new Date('2026-01-03T00:00:00.000Z'));
+
+      const audit = await store.listAudit({ limit: 3 });
+      expect(audit.map((row) => row.id)).toEqual([IDS[2], IDS[1], IDS[0]]);
     } finally {
       await db.close();
     }

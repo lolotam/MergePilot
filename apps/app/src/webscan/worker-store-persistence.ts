@@ -238,6 +238,35 @@ export class PgWebScanWorkerStore implements WebScanWorkerStore {
       if (scan.siteId !== input.siteId) return 'fenced';
       // The fence: an attempt that no longer owns the scan cannot write its outcome.
       if (scan.attemptId !== input.attemptId) return 'fenced';
+      // A scan an administrator cancelled keeps the attempt id of the attempt that
+      // ran it, so that attempt may still add the counters it made. Nothing else of
+      // its outcome is written: the terminal state, the stop reason, the finished
+      // moment, the findings, the coverage and the ledger stay as the administrator
+      // left them, and no audit row is written.
+      // The conditional update is the "first write wins" rule: the first write of the
+      // counters clears the attempt id in the same update, so the attempt that owns
+      // the scan cannot write the counters a second time. A later delivery of the
+      // same outcome finds the row without its attempt id and is fenced, so it
+      // changes nothing and reports nothing that was not written.
+      if (scan.status === 'stopped' && scan.stopReason === 'cancelled') {
+        await tx
+          .update(webScans)
+          .set({
+            requests: input.requests,
+            pages: input.pages,
+            durationMs: input.durationMs,
+            attemptId: null,
+          })
+          .where(
+            and(
+              eq(webScans.id, input.scanId),
+              eq(webScans.attemptId, input.attemptId),
+              eq(webScans.status, 'stopped'),
+              eq(webScans.stopReason, 'cancelled'),
+            ),
+          );
+        return 'already_terminal';
+      }
       if (
         scan.status === 'completed' ||
         scan.status === 'stopped' ||

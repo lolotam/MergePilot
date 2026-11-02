@@ -245,6 +245,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
         db: services.db,
         config,
         store,
+        webScan,
       });
 
       // 5. SPA static files from apps/web/dist
