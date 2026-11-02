@@ -299,5 +299,8 @@ describe('the shape of the records of GitHub', () => {
     // A base64 blob of the PEM is not a PEM.
     expect(isSignablePrivateKey(Buffer.from(PRIVATE_KEY).toString('base64'))).toBe(false);
     expect(isSignablePrivateKey('')).toBe(false);
+    // Only an RSA key can sign the RS256 token of the App.
+    const { privateKey: ecKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    expect(isSignablePrivateKey(ecKey.export({ type: 'pkcs8', format: 'pem' }).toString())).toBe(false);
   });
 });

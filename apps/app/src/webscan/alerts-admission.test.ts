@@ -178,7 +178,8 @@ describe('the admission of the episodes of the website scanner', () => {
       { thresholds: EVERY_GROUP },
     );
 
-    // Scan 2: the comment is delivered and the resolved episode still holds its slot.
+    // Scan 2: the comment is handed over for delivery (the episode records the reservation) and
+    // the resolved episode still holds its slot.
     expect(actionsOfKind(scenario.actions[1] ?? [], 'fixed-comment')).toHaveLength(1);
     const afterSecond = scenario.evaluations[1]?.episodes ?? [];
     expect(admittedKeys(afterSecond).has(issueKeyOf(0))).toBe(true);

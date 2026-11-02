@@ -60,13 +60,21 @@ export interface WebScanServerRuntime {
 function createWebScanGitHubVerifier(
   config: AppConfig,
   auth: Auth,
+  log: Pick<FastifyBaseLogger, 'warn'>,
 ): WebScanGitHubVerifier | undefined {
   const appId = config.github.appId.trim();
   const privateKey = config.github.privateKey.trim();
   if (appId === '' || privateKey === '') return undefined;
   // A key that cannot sign is a configuration error: no verifier, so a request that needs
   // GitHub is refused as unavailable instead of failing every check as "unverifiable".
-  if (!isSignablePrivateKey(privateKey)) return undefined;
+  if (!isSignablePrivateKey(privateKey)) {
+    // The operator has to see why the verifier is missing; the key itself is never logged.
+    log.warn(
+      { event: 'webscan.github' },
+      'The GitHub App private key cannot sign (an RSA PEM is required): the web scan alert target stays unavailable',
+    );
+    return undefined;
+  }
 
   const api = createGitHubTargetApi({ appId, privateKey });
   const readUserToken = async (userId: string): Promise<string | null> => {
@@ -173,7 +181,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
             serverLog.warn({ event: 'webscan.events', errorName }, 'The web scan event bus failed');
           },
         }),
-        github: createWebScanGitHubVerifier(config, services.auth),
+        github: createWebScanGitHubVerifier(config, services.auth, serverLog),
       };
     } catch (err) {
       serverLog.warn(

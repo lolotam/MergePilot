@@ -65,7 +65,20 @@ export interface AlertEvaluationInput {
   occurrences: readonly RetainedOccurrence[];
   /** The resolutions of the site. Only the live ones are honoured. */
   exceptions: readonly WebScanException[];
-  /** The state of the issue of every episode, as observed by the caller. */
+  /**
+   * The state of the issue of every episode, as observed by the caller.
+   *
+   * The caller reports every episode that has an issue requested (ADR-0052 section 8:
+   * the state of every referenced issue is fetched before eligibility). An issue that
+   * was requested but does not exist (the delivery was refused, or it was never
+   * created) is reported as `missing`: that is what frees a resolved episode and what
+   * lets the next scheduled scan offer the issue again. An episode with a requested
+   * issue and no report keeps its slot, because the issue may exist.
+   *
+   * The outcome the engine records on an episode when it emits a comment is the
+   * reservation of that delivery (ADR-0052 section 8 reserves a durable delivery row
+   * before it writes): the delivery layer reconciles an ambiguous write by marker.
+   */
   issueStates?: readonly AlertIssueObservation[];
 }
 

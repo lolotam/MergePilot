@@ -239,8 +239,8 @@ function createAppJwt(appId: string, privateKey: string, at: Date): string {
  */
 export function isSignablePrivateKey(privateKey: string): boolean {
   try {
-    createPrivateKey(privateKey);
-    return true;
+    // The App token is signed with RS256, so only an RSA key can sign it.
+    return createPrivateKey(privateKey).asymmetricKeyType === 'rsa';
   } catch {
     return false;
   }

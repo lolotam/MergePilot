@@ -263,6 +263,17 @@ function capCandidates(
 }
 
 /**
+ * Whether a candidate still owes something to an issue: a delivery under way, or a
+ * resolved episode that has not settled yet (its comment is owed once its issue is
+ * reported). Dropping it would lose that comment.
+ */
+function owesDelivery(candidate: AlertEpisodeCandidate): boolean {
+  if (candidate.pending === true) return true;
+  const episode = candidate.episode;
+  return episode.resolved === true && !isSettled(episode);
+}
+
+/**
  * The order the candidates are dropped in.
  *
  * A candidate with a delivery under way is dropped after every other one: the
@@ -273,9 +284,9 @@ function compareEvictionOrder(
   left: AlertEpisodeCandidate,
   right: AlertEpisodeCandidate,
 ): number {
-  const byPending = Number(left.pending === true) - Number(right.pending === true);
-  if (byPending !== 0) {
-    return byPending;
+  const byOwed = Number(owesDelivery(left)) - Number(owesDelivery(right));
+  if (byOwed !== 0) {
+    return byOwed;
   }
   return episodeEvictionOrder(left.episode, right.episode);
 }
