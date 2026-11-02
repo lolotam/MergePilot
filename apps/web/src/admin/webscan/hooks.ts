@@ -112,7 +112,7 @@ function isEffectiveLimits(value: unknown): value is WebScanLimits {
   const limits = value as Record<string, unknown>;
   return (Object.keys(WEB_SCAN_LIMIT_SPECS) as (keyof WebScanLimits)[]).every((field) => {
     const number = limits[field];
-    return typeof number === 'number' && Number.isFinite(number);
+    return typeof number === 'number' && Number.isSafeInteger(number) && number > 0;
   });
 }
 

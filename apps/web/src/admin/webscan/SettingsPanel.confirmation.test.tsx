@@ -45,6 +45,39 @@ describe('the confirmation of a limit above its default', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it.each([0, -5, 1.5])(
+    'refuses a refusal whose effective limits hold the value %s, which is not a positive integer',
+    async (bad) => {
+      installFetch((call) => {
+        if (call.method === 'GET') return jsonResponse(settingsFixture);
+        return jsonResponse(
+          {
+            error: {
+              code: 'confirmation_required',
+              message: 'A value above its default needs a confirmation',
+              digest: SERVER_DIGEST,
+              fieldsAboveDefault: ['maxRequests'],
+              effectiveLimits: { ...settingsFixture.limits, maxRequests: bad },
+            },
+          },
+          422,
+        );
+      });
+      const user = userEvent.setup();
+      renderWithProviders(<SettingsPanel />);
+
+      fireEvent.change(await screen.findByLabelText('Requests per scan'), {
+        target: { value: '800' },
+      });
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      // The malformed confirmation is unusable: no dialog, the form and its draft stay.
+      expect((await screen.findByRole('alert')).textContent).toContain('The settings were not saved');
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect((screen.getByLabelText('Requests per scan') as HTMLInputElement).value).toBe('800');
+    },
+  );
+
   it('confirms the values of the server even when they are outside the bounds of the dashboard', async () => {
     // The server is the authority of the limits it sends: the bounds the
     // dashboard knows are its own copy and never refuse its confirmation.
