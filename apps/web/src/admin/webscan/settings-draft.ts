@@ -148,3 +148,47 @@ export function buildSettingsPatch(
   }
   return patch;
 }
+
+/** True when the administrator did not touch a value since the baseline it came from. */
+function untouched<T>(baseline: T, draft: T): boolean {
+  return JSON.stringify(baseline) === JSON.stringify(draft);
+}
+
+/** Merges one record field by field: an edited field stays, an untouched one follows the server. */
+function mergeRecord<T extends object>(baseline: T, draft: T, server: T): T {
+  const merged: T = { ...server };
+  for (const key of Object.keys(server) as Array<keyof T>) {
+    merged[key] = untouched(baseline[key], draft[key]) ? server[key] : draft[key];
+  }
+  return merged;
+}
+
+/**
+ * Moves a draft onto a newer answer of the server.
+ *
+ * What the administrator edited stays as it is; everything else follows the
+ * server, so a change another administrator (or another tab) made, the kill
+ * switch above all, is never silently reverted by an unrelated save.
+ */
+export function rebaseDraft(
+  baseline: WebScanSettingsDto,
+  draft: SettingsDraft,
+  server: WebScanSettingsDto,
+): SettingsDraft {
+  const before = toSettingsDraft(baseline);
+  const after = toSettingsDraft(server);
+  const pick = <K extends 'paused' | 'alertsEnabled' | 'retentionDays' | 'contact' | 'alertMinSeverity' | 'alertMinValidation' | 'defaultSchedule'>(
+    key: K,
+  ): SettingsDraft[K] => (untouched(before[key], draft[key]) ? after[key] : draft[key]);
+  return {
+    paused: pick('paused'),
+    alertsEnabled: pick('alertsEnabled'),
+    limits: mergeRecord(before.limits, draft.limits, after.limits),
+    checks: mergeRecord(before.checks, draft.checks, after.checks),
+    defaultSchedule: pick('defaultSchedule'),
+    retentionDays: pick('retentionDays'),
+    contact: pick('contact'),
+    alertMinSeverity: pick('alertMinSeverity'),
+    alertMinValidation: pick('alertMinValidation'),
+  };
+}

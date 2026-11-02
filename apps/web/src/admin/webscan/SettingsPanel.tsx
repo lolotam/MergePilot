@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type {
   WebScanLimitField,
   WebScanLimits,
+  WebScanSettingsDto,
   WebScanSettingsPatchRequest,
 } from '@mergepilot/app/contract';
 import { useToast } from '../../components/Toast.js';
@@ -25,6 +26,7 @@ import { effectiveLimits } from './limits.js';
 import { useWebScanRights } from './rights.js';
 import {
   buildSettingsPatch,
+  rebaseDraft,
   toSettingsDraft,
   type SettingsDraft,
 } from './settings-draft.js';
@@ -54,22 +56,34 @@ export function SettingsPanel() {
   const rights = useWebScanRights();
   const update = useWebScanUpdateSettingsMutation();
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
+  // The answer of the server the draft was built from: every patch is the difference
+  // to it, so a field the administrator did not touch is never sent.
+  const [baseline, setBaseline] = useState<WebScanSettingsDto | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    // The draft is the work of the administrator: it is built once from the
-    // server, and an answer of the server never overwrites the edits that
-    // are not saved yet.
-    if (data && draft === null) setDraft(toSettingsDraft(data));
-  }, [data, draft]);
+    // The draft is the work of the administrator. A newer answer of the server never
+    // overwrites an edit that is not saved yet, and it is never ignored either: the
+    // fields the administrator did not touch follow it (the kill switch included).
+    if (!data) return;
+    if (baseline === null || draft === null) {
+      setBaseline(data);
+      setDraft(toSettingsDraft(data));
+      return;
+    }
+    if (data !== baseline) {
+      setDraft(rebaseDraft(baseline, draft, data));
+      setBaseline(data);
+    }
+  }, [data, baseline, draft]);
 
   if (rights.lost) return <PermissionLostState />;
   if (isLoading) return <LoadingState />;
   if (isError) return isPermissionLost(error) ? <PermissionLostState /> : <ErrorState />;
   if (failed) return <ErrorState />;
-  if (!data || !draft) return <LoadingState />;
+  if (!data || !draft || !baseline) return <LoadingState />;
 
   const togglePaused = (paused: boolean) => {
     setDraft({ ...draft, paused });
@@ -81,7 +95,9 @@ export function SettingsPanel() {
           if (rights.report(err)) return;
           // Only the pause goes back to the state of the server: the other
           // edits of the administrator stay in the form.
-          setDraft((current) => (current === null ? current : { ...current, paused: data.paused }));
+          setDraft((current) =>
+            current === null ? current : { ...current, paused: baseline.paused },
+          );
           setMessage(err.message);
         },
       },
@@ -89,7 +105,7 @@ export function SettingsPanel() {
   };
 
   const save = () => {
-    const patch = buildSettingsPatch(data, draft);
+    const patch = buildSettingsPatch(baseline, draft);
     if (Object.keys(patch).length === 0) {
       setMessage(t('webscanNothingToSave'));
       return;
@@ -111,7 +127,7 @@ export function SettingsPanel() {
           setFailed(true);
           return;
         }
-        const effective = effectiveLimits(data.limits, patch.limits);
+        const effective = effectiveLimits(baseline.limits, patch.limits);
         setPending({
           patch,
           effective,

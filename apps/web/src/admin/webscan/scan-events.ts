@@ -101,11 +101,12 @@ export function useScanEvents(
 
     source.addEventListener('scan', onScan as EventListener);
     // An open stream may have missed events: the state comes from the server.
+    // A stream that dropped while the scan finished leaves the history stale too.
     source.onopen = () => {
-      refetch();
+      refetchState();
     };
     source.onerror = () => {
-      refetch();
+      refetchState();
     };
 
     return () => {

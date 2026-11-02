@@ -93,6 +93,23 @@ describe('the stream of a scan', () => {
     expect(invalidate).toHaveBeenCalledTimes(4);
   });
 
+  it('refreshes the scan and its history when the stream opens or drops', () => {
+    const { invalidate, stream } = listen();
+
+    // A scan that finished while the stream was down shows in both views after a reconnect.
+    act(() => {
+      stream?.onopen?.();
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['webscan', 'scan', 'scan-1'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['webscan', 'scans'] });
+    expect(invalidate).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      stream?.onerror?.();
+    });
+    expect(invalidate).toHaveBeenCalledTimes(4);
+  });
+
   it('ignores an event that carries no usable progress', () => {
     const { invalidate, onProgress, stream } = listen();
 

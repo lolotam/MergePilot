@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { focusManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../admin-test-utils.js';
 import { SettingsPanel } from './SettingsPanel.js';
@@ -222,11 +223,12 @@ describe('the global policy of the website scan', () => {
   });
 
   it('keeps the unsaved edits of the other fields when the kill switch is flipped', async () => {
-    const calls = installFetch((call) =>
-      call.method === 'GET'
-        ? jsonResponse(settingsFixture)
-        : jsonResponse({ ...settingsFixture, paused: true }),
-    );
+    // The server remembers the pause, like the real one.
+    let paused = false;
+    const calls = installFetch((call) => {
+      if (call.method !== 'GET') paused = true;
+      return jsonResponse({ ...settingsFixture, paused });
+    });
     const user = userEvent.setup();
     renderWithProviders(<SettingsPanel />);
 
@@ -240,6 +242,37 @@ describe('the global policy of the website scan', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
+    await waitFor(() => {
+      const patches = calls.filter((call) => call.method === 'PATCH');
+      expect(patches[patches.length - 1]?.body).toEqual({ limits: { maxRequests: 800 } });
+    });
+  });
+
+  it('never reverses a change another administrator made when an unrelated field is saved', async () => {
+    let paused = false;
+    const calls = installFetch(() => jsonResponse({ ...settingsFixture, paused }));
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    const input = await screen.findByLabelText('Requests per scan');
+    fireEvent.change(input, { target: { value: '800' } });
+
+    // Another administrator pauses every scan; this tab refetches when it regains the focus.
+    paused = true;
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    await waitFor(() => {
+      const toggle = screen.getByRole('switch', { name: 'Pause all scans' });
+      expect(toggle.getAttribute('aria-checked') === 'true' || (toggle as HTMLInputElement).checked).toBe(true);
+    });
+    // The edit of this administrator is still in the form.
+    expect((screen.getByLabelText('Requests per scan') as HTMLInputElement).value).toBe('800');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    // The patch carries the limit and never takes the kill switch back.
     await waitFor(() => {
       const patches = calls.filter((call) => call.method === 'PATCH');
       expect(patches[patches.length - 1]?.body).toEqual({ limits: { maxRequests: 800 } });

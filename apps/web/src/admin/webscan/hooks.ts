@@ -22,8 +22,6 @@ export const WEB_SCAN_SCANS_PAGE_SIZE = 20;
 export const WEB_SCAN_AUDIT_PAGE_SIZE = 25;
 /** How many sites the picker of the scan panels asks for in one page. */
 export const WEB_SCAN_SITE_OPTIONS_LIMIT = 100;
-/** How many pages of sites the picker of the scan panels loads at most. */
-export const WEB_SCAN_SITE_OPTIONS_MAX_PAGES = 20;
 
 /**
  * A 404 from the scanner API means the session lost its platform-admin rights:
@@ -156,26 +154,26 @@ export function useWebScanSitesQuery(offset: number) {
  *
  * The picker has no search and no paging of its own, so it needs every site:
  * the query walks the pages of the list until the count it collected reaches
- * the total the server reports, and it never asks for more pages than the
- * maximum. The answer keeps the shape of a page, so the callers read it the
- * same way they read the page of the sites list.
+ * the total the server reports, so the answer is never a silently partial list.
+ * The answer keeps the shape of a page, so the callers read it the same way
+ * they read the page of the sites list.
  */
 export function useWebScanSiteOptionsQuery() {
   return useQuery({
     queryKey: ['webscan', 'sites', 'options'],
     queryFn: async () => {
       const sites: WebScanSiteDto[] = [];
-      let total = 0;
-      let offset = 0;
-      for (let page = 0; page < WEB_SCAN_SITE_OPTIONS_MAX_PAGES; page += 1) {
-        const answer = await webScanApi.getSites({ limit: WEB_SCAN_SITE_OPTIONS_LIMIT, offset });
+      let total: number;
+      do {
+        const answer = await webScanApi.getSites({
+          limit: WEB_SCAN_SITE_OPTIONS_LIMIT,
+          offset: sites.length,
+        });
         total = answer.total;
         sites.push(...answer.sites);
-        offset += answer.sites.length;
-        // Every site is here, or the list ends before the total the server
-        // reported: an empty page is the end of the list.
-        if (answer.sites.length === 0 || sites.length >= answer.total) break;
-      }
+        // An empty page is the end of the list, even before the reported total.
+        if (answer.sites.length === 0) break;
+      } while (sites.length < total);
       return { sites, total, limit: WEB_SCAN_SITE_OPTIONS_LIMIT, offset: 0 };
     },
     ...WEB_SCAN_QUERY_OPTIONS,
