@@ -15,7 +15,7 @@ import { createServer, type ServerProbes } from './create-server.js';
 import { registerStatic } from './static.js';
 import { isEntryPoint } from '../core/entry-point.js';
 import { RedisWebScanEventBus, type WebScanEventBus } from '../webscan/events.js';
-import { createGitHubTargetApi } from '../webscan/github-target-api.js';
+import { createGitHubTargetApi, isSignablePrivateKey } from '../webscan/github-target-api.js';
 import type { WebScanGitHubVerifier } from '../webscan/github-target.js';
 import { createGitHubTargetVerifier } from '../webscan/github-target-verify.js';
 import { PgWebScanStore } from '../webscan/pg-store.js';
@@ -64,6 +64,9 @@ function createWebScanGitHubVerifier(
   const appId = config.github.appId.trim();
   const privateKey = config.github.privateKey.trim();
   if (appId === '' || privateKey === '') return undefined;
+  // A key that cannot sign is a configuration error: no verifier, so a request that needs
+  // GitHub is refused as unavailable instead of failing every check as "unverifiable".
+  if (!isSignablePrivateKey(privateKey)) return undefined;
 
   const api = createGitHubTargetApi({ appId, privateKey });
   const readUserToken = async (userId: string): Promise<string | null> => {

@@ -1,4 +1,4 @@
-import { sign as cryptoSign } from 'node:crypto';
+import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
 import { listUserInstallations } from '../auth/github-installations.js';
 import {
   GitHubTargetApiError,
@@ -230,6 +230,22 @@ function createAppJwt(appId: string, privateKey: string, at: Date): string {
 }
 
 /** Builds the production api of the alert target. */
+/**
+ * Whether a configured private key of the App can sign.
+ *
+ * A key that cannot sign (a base64 blob, a truncated PEM) would make every approval and
+ * binding check end in "unverifiable", indistinguishable from a GitHub outage, so the
+ * server refuses to build the verifier from it and says "GitHub unavailable" instead.
+ */
+export function isSignablePrivateKey(privateKey: string): boolean {
+  try {
+    createPrivateKey(privateKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTargetApi {
   const fetchFn = options.fetchFn ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? 10_000;

@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { GitHubTargetApiError } from './github-target.js';
-import { createGitHubTargetApi } from './github-target-api.js';
+import { createGitHubTargetApi, isSignablePrivateKey } from './github-target-api.js';
 import { createGitHubTargetVerifier } from './github-target-verify.js';
 import { ADMIN, APPROVED, deps } from './github-target.fixtures.js';
 
@@ -291,5 +291,13 @@ describe('the shape of the records of GitHub', () => {
     });
 
     await expect(api.getRepository(101, 'acme', 'demo')).rejects.toBeInstanceOf(GitHubTargetApiError);
+  });
+
+  it('tells a private key that can sign from one that cannot', () => {
+    expect(isSignablePrivateKey(PRIVATE_KEY)).toBe(true);
+    expect(isSignablePrivateKey('not-a-key')).toBe(false);
+    // A base64 blob of the PEM is not a PEM.
+    expect(isSignablePrivateKey(Buffer.from(PRIVATE_KEY).toString('base64'))).toBe(false);
+    expect(isSignablePrivateKey('')).toBe(false);
   });
 });

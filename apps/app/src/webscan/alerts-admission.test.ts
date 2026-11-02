@@ -154,10 +154,49 @@ describe('the admission of the episodes of the website scanner', () => {
     );
   });
 
-  it('admits exactly one of the waiting groups when a group of the site is resolved', () => {
+  it('admits exactly one of the waiting groups once the comment of a resolved group is delivered', () => {
+    const resolvedGroup = fixedGroup(0, { severity: 'high', validation: 'Confirmed' });
+    const afterResolution = [resolvedGroup, ...crowdedGroups().slice(1)];
     const scenario = runAlertScenario(
       [
         { trigger: 'scheduled', at: day(1), occurrences: crowdedGroups() },
+        // The issue of the group exists (the caller observed it): the group is fixed now, so its
+        // comment is owed and the episode keeps its slot while the comment is delivered.
+        {
+          trigger: 'scheduled',
+          at: day(2),
+          occurrences: afterResolution,
+          issueStates: [{ issueKey: issueKeyOf(0), state: 'open' }],
+        },
+        {
+          trigger: 'scheduled',
+          at: day(3),
+          occurrences: afterResolution,
+          issueStates: [{ issueKey: issueKeyOf(0), state: 'open' }],
+        },
+      ],
+      { thresholds: EVERY_GROUP },
+    );
+
+    // Scan 2: the comment is delivered and the resolved episode still holds its slot.
+    expect(actionsOfKind(scenario.actions[1] ?? [], 'fixed-comment')).toHaveLength(1);
+    const afterSecond = scenario.evaluations[1]?.episodes ?? [];
+    expect(admittedKeys(afterSecond).has(issueKeyOf(0))).toBe(true);
+    expect(admittedKeys(afterSecond).has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(false);
+
+    // Scan 3: nothing is left to deliver for it, so exactly one waiting group takes the slot.
+    const admitted = admittedKeys(scenario.episodes);
+    expect(scenario.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    expect(admitted.has(issueKeyOf(0))).toBe(false);
+    expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(true);
+    expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE + 1))).toBe(false);
+  });
+
+  it('keeps the slot of a resolved episode whose requested issue was not observed yet', () => {
+    const scenario = runAlertScenario(
+      [
+        { trigger: 'scheduled', at: day(1), occurrences: crowdedGroups() },
+        // The group of the first issue is fixed before the caller reported what that issue is.
         {
           trigger: 'scheduled',
           at: day(2),
@@ -171,20 +210,8 @@ describe('the admission of the episodes of the website scanner', () => {
     );
 
     const admitted = admittedKeys(scenario.episodes);
-
-    // The scan opened the issue of the strongest group that waited for one, so
-    // the group that entered the state waits for a later scan.
-    const opened = actionsOfKind(scenario.actions[1] ?? [], 'open-issue');
-    expect(opened).toHaveLength(1);
-    expect(openedIssueKey(scenario.episodes, opened[0]?.episodeKey)).toBe(issueKeyOf(1));
-    const waiting = scenario.episodes.find(
-      (episode) => episode.issueKey === issueKeyOf(MAX_ALERT_EPISODES_PER_SITE),
-    );
-    expect(waiting?.issueRequested).toBe(false);
-    expect(scenario.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
-    expect(admitted.has(issueKeyOf(0))).toBe(false);
-    expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(true);
-    expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE + 1))).toBe(false);
+    expect(admitted.has(issueKeyOf(0))).toBe(true);
+    expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(false);
   });
 
   it('prefers the group with the stronger severity when two groups wait for one slot', () => {
