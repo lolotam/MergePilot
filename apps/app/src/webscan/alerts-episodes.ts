@@ -320,7 +320,7 @@ function compareEvictionOrder(
 function isSettled(episode: WebScanAlertEpisode): boolean {
   if (episode.resolved !== true || episode.issueState === 'unknown') return false;
   if (episode.outcome !== undefined) return true;
-  if (episode.issueState === 'missing') return true;
+  if (episode.issueState === 'missing') return episode.issueRequested !== true;
   // An issue that was requested but not observed yet may already exist: the episode keeps
   // its slot until the caller reports what the issue is, or its comment would be lost.
   return episode.issueState === 'none' && episode.issueRequested !== true;

@@ -15,7 +15,7 @@ import { createServer, type ServerProbes } from './create-server.js';
 import { registerStatic } from './static.js';
 import { isEntryPoint } from '../core/entry-point.js';
 import { RedisWebScanEventBus, type WebScanEventBus } from '../webscan/events.js';
-import { createGitHubTargetApi, isSignablePrivateKey } from '../webscan/github-target-api.js';
+import { createGitHubTargetApi, isSignablePrivateKey } from '@mergepilot/github';
 import type { WebScanGitHubVerifier } from '../webscan/github-target.js';
 import { createGitHubTargetVerifier } from '../webscan/github-target-verify.js';
 import { PgWebScanStore } from '../webscan/pg-store.js';

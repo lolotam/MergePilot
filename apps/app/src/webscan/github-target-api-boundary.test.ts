@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { GitHubTargetApiError } from './github-target.js';
-import { createGitHubTargetApi, isSignablePrivateKey } from './github-target-api.js';
+import { createGitHubTargetApi, isSignablePrivateKey } from '@mergepilot/github';
 import { createGitHubTargetVerifier } from './github-target-verify.js';
 import { ADMIN, APPROVED, deps } from './github-target.fixtures.js';
 

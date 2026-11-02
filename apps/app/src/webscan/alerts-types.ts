@@ -71,9 +71,11 @@ export interface AlertEvaluationInput {
    * The caller reports every episode that has an issue requested (ADR-0052 section 8:
    * the state of every referenced issue is fetched before eligibility). An issue that
    * was requested but does not exist (the delivery was refused, or it was never
-   * created) is reported as `missing`: that is what frees a resolved episode and what
-   * lets the next scheduled scan offer the issue again. An episode with a requested
-   * issue and no report keeps its slot, because the issue may exist.
+   * created) is reported as `missing`. The first missing observation permits exactly
+   * one replacement with the same marker. Once that replacement is requested, repeated
+   * missing observations do not emit another request or release its slot: the durable
+   * delivery layer owns retries and marker reconciliation, including any owed comment.
+   * An episode with a requested issue and no report also keeps its slot.
    *
    * The outcome the engine records on an episode when it emits a comment is the
    * reservation of that delivery (ADR-0052 section 8 reserves a durable delivery row

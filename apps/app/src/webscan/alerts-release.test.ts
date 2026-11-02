@@ -64,6 +64,28 @@ function admittedKeys(episodes: readonly { issueKey: string }[]): Set<string> {
 }
 
 describe('the release of the slot of a resolved episode', () => {
+  it('holds a resolved replacement at capacity until delivery is accounted for', () => {
+    const seeded = runAlertScenario(
+      [{ trigger: 'manual', at: day(1), occurrences: crowdedGroups() }],
+      { thresholds: EVERY_GROUP },
+    );
+    const evaluation = evaluateAlertEpisodes({
+      trigger: 'manual', now: day(2), siteId: SITE_ID,
+      dashboardBaseUrl: DASHBOARD_BASE_URL,
+      thresholds: { ...THRESHOLDS, ...EVERY_GROUP },
+      episodes: seeded.episodes.map((episode) => ({
+        ...episode, issueRequested: true,
+        issueState: episode.issueKey === issueKeyOf(0) ? 'missing' as const : 'open' as const,
+      })),
+      occurrences: [fixedGroup(0, { severity: 'high', validation: 'Confirmed' }), ...crowdedGroups().slice(1)],
+      exceptions: [], issueStates: [],
+    });
+    expect(evaluation.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    expect(admittedKeys(evaluation.episodes).has(issueKeyOf(0))).toBe(true);
+    expect(admittedKeys(evaluation.episodes).has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(false);
+    expect(evaluation.actions).toEqual([]);
+  });
+
   it('frees the slot of a resolved episode once its requested issue is reported missing', () => {
     const afterResolution = [
       fixedGroup(0, { severity: 'high', validation: 'Confirmed' }),
@@ -91,7 +113,7 @@ describe('the release of the slot of a resolved episode', () => {
     expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(true);
   });
 
-  it('does not drop a resolved episode that owes a comment when a state beyond the bound is capped', () => {
+  it.each(['none', 'missing'] as const)('does not drop a resolved episode that owes a comment with issue state %s when a state beyond the bound is capped', (issueState) => {
     const seeded = runAlertScenario(
       [
         {
@@ -110,7 +132,7 @@ describe('the release of the slot of a resolved episode', () => {
     const owing = {
       ...template,
       resolved: true,
-      issueState: 'none' as const,
+      issueState,
       issueRequested: true,
     };
     const extraIndex = MAX_ALERT_EPISODES_PER_SITE;

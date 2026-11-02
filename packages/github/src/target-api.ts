@@ -1,12 +1,12 @@
 import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
-import { listUserInstallations } from '../auth/github-installations.js';
+import { listUserInstallations } from './user-installations.js';
 import {
   GitHubTargetApiError,
   type GitHubTargetApi,
   type GitHubTargetApiStatus,
   type GitHubTargetInstallation,
   type GitHubTargetRepository,
-} from './github-target.js';
+} from './target-types.js';
 
 /**
  * The production GitHub boundary of the alert target (ADR-0052 section 8).

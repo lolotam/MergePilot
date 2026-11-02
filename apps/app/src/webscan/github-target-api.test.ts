@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { GitHubTargetApiError } from './github-target.js';
-import { createGitHubTargetApi } from './github-target-api.js';
+import { createGitHubTargetApi } from '@mergepilot/github';
 
 /**
  * The tests of the production GitHub boundary of the alert target.
