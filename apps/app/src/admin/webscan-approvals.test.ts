@@ -74,7 +74,7 @@ describe('the approval routes of the scanner', () => {
    */
   const auditRowsOfThisTest = async () => {
     const body = (await getAudit(harness.adminCookie)).json() as {
-      audit: Array<{ action: string }>;
+      audit: Array<{ action: string; actor: string }>;
       total: number;
     };
     return body.audit.slice(0, Math.max(0, body.total - auditTotalBefore));

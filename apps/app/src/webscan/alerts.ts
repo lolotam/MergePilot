@@ -1,6 +1,7 @@
 import type { GroupOccurrence, IssueGroup } from '@mergepilot/webscan';
 import {
   admitEpisodes,
+  compareAdmissionOrder,
   compareCodeUnits,
   episodeKey,
   episodeOf,
@@ -52,6 +53,9 @@ import type { WebScanAlertEpisode, WebScanException } from './types.js';
  *   eligible severity or validation. A churn of targets, values or subjects
  *   joins the episode of its group and never opens a second issue.
  * - A manual scan updates the state and never consumes an unnotified episode.
+ * - A scheduled scan opens at most one issue: the strongest group of the scan
+ *   wins it, and the other groups keep their episode unnotified, so the next
+ *   scheduled scan offers them again.
  * - An unknown state of the issue is never closed, never open and never
  *   advances the notification of the episode.
  * - The bounded episode state of a site is a budget of slots: an episode that
@@ -84,6 +88,14 @@ interface IssueKeyResult {
   actions: AlertAction[];
 }
 
+/** One evaluated issue key of the site. */
+interface EvaluatedEntry {
+  /** The episode the evaluation produced and the actions it owes. */
+  result: IssueKeyResult;
+  /** Whether the issue key already carried an episode in the state of the site. */
+  existing: boolean;
+}
+
 /**
  * Evaluates the alert state of a site.
  *
@@ -95,6 +107,10 @@ interface IssueKeyResult {
  * their slot, and a new episode is admitted only while a slot is free. A new
  * episode that the admission refuses produces no action either, so the issue
  * of an episode whose state was never kept is never opened.
+ *
+ * A scheduled scan opens at most one issue. The limit is applied to the
+ * episodes the admission kept, so the issue that opens always belongs to a
+ * state that is persisted.
  */
 export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluation {
   if (!input.thresholds.alertsEnabled) {
@@ -102,39 +118,121 @@ export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluat
   }
 
   const context = buildContext(input);
-  const results: IssueKeyResult[] = [];
+  const evaluated: EvaluatedEntry[] = [];
   for (const issueKey of context.issueKeys) {
     const result = evaluateIssueKey(context, issueKey);
     if (result !== undefined) {
-      results.push(result);
+      evaluated.push({
+        result,
+        existing: context.episodesByIssueKey.has(result.episode.issueKey),
+      });
     }
   }
 
-  const evaluated = results.map((result) => ({
-    result,
-    existing: context.episodesByIssueKey.has(result.episode.issueKey),
-  }));
-  const episodes = admitEpisodes(
+  const admitted = admitEpisodes(
     evaluated.map((entry) => ({
       episode: entry.result.episode,
       existing: entry.existing,
       pending: entry.result.actions.length > 0,
     })),
   );
-  const admitted = new Set(episodes.map((episode) => episode.episodeKey));
+  const admittedKeys = new Set(admitted.map((episode) => episode.episodeKey));
+
+  // An episode that is not part of the persisted state leaves no action behind,
+  // whether it is a new candidate the admission refused (its group is offered
+  // again on a later scan) or an existing one an over-bound state dropped: an issue
+  // opened for a state that is forgotten at once would be opened again later.
+  const persisted = evaluated.filter((entry) => admittedKeys.has(entry.result.episode.episodeKey));
+
+  // A scheduled scan opens one issue at most: the strongest group of the scan
+  // wins it, and the other groups wait for the next one.
+  const limited = limitOpenIssues(context, persisted);
 
   const actions: AlertAction[] = [];
-  for (const entry of evaluated) {
-    // An episode that is not part of the persisted state leaves no action behind,
-    // whether it is a new candidate the admission refused (its group is offered
-    // again on a later scan) or an existing one an over-bound state dropped: an issue
-    // opened for a state that is forgotten at once would be opened again later.
-    if (!admitted.has(entry.result.episode.episodeKey)) {
+  for (const entry of persisted) {
+    actions.push(...(limited.get(entry.result.episode.episodeKey) ?? entry.result).actions);
+  }
+  const episodes = admitted.map((episode) => limited.get(episode.episodeKey)?.episode ?? episode);
+  return { episodes, actions };
+}
+
+/**
+ * Keeps one open issue per scheduled scan.
+ *
+ * A scheduled scan opens at most one issue (ADR-0052 section 8), so a scan with
+ * many eligible groups never floods the repository: the strongest group wins the
+ * scan, and the other ones keep their episode unnotified, so the next scheduled
+ * scan offers them again.
+ *
+ * The winner is the strongest severity, then the strongest validation, then the
+ * smallest issue key in the order of its code units: the order of the admission,
+ * so the choice never depends on the order of the evaluation. A comment and a
+ * mark of an unknown state are never limited: they report on an issue that is
+ * already there.
+ */
+function limitOpenIssues(
+  context: AlertContext,
+  entries: readonly EvaluatedEntry[],
+): Map<string, IssueKeyResult> {
+  const results = new Map<string, IssueKeyResult>(
+    entries.map((entry) => [entry.result.episode.episodeKey, entry.result]),
+  );
+  const requesting = entries.filter((entry) => opensIssue(entry.result));
+  if (requesting.length <= 1) {
+    return results;
+  }
+  const ordered = [...requesting].sort((left, right) =>
+    compareAdmissionOrder(left.result.episode, right.result.episode),
+  );
+  const winner = ordered[0];
+  if (winner === undefined) {
+    return results;
+  }
+  for (const entry of requesting) {
+    if (entry.result.episode.episodeKey === winner.result.episode.episodeKey) {
       continue;
     }
-    actions.push(...entry.result.actions);
+    results.set(entry.result.episode.episodeKey, withholdOpenIssue(context, entry.result));
   }
-  return { episodes, actions };
+  return results;
+}
+
+/** Whether the evaluation hands the episode an action that opens its issue. */
+function opensIssue(result: IssueKeyResult): boolean {
+  return result.actions.some((action) => action.kind === 'open-issue');
+}
+
+/**
+ * Withholds the open issue of one episode.
+ *
+ * The action is dropped and the episode never claims that its issue was
+ * requested: a continued episode keeps the request and the issue state it had
+ * before the evaluation, and a new episode starts without a request. The next
+ * scheduled scan offers the group again.
+ */
+function withholdOpenIssue(context: AlertContext, result: IssueKeyResult): IssueKeyResult {
+  const existing = context.episodesByIssueKey.get(result.episode.issueKey);
+  const continued =
+    existing !== undefined && existing.episodeKey === result.episode.episodeKey;
+  const episode = episodeOf({
+    episodeKey: result.episode.episodeKey,
+    issueKey: result.episode.issueKey,
+    state: result.episode.state,
+    occurrenceKeys: result.episode.occurrenceKeys,
+    lastChangedAt: result.episode.lastChangedAt,
+    issueState: continued ? (existing.issueState ?? 'none') : 'none',
+    issueRequested: continued ? existing.issueRequested : false,
+    resolved: result.episode.resolved,
+    outcome: result.episode.outcome,
+    severity: result.episode.severity,
+    validation: result.episode.validation,
+    generation: result.episode.generation,
+    createdAt: result.episode.createdAt,
+  });
+  return {
+    episode,
+    actions: result.actions.filter((action) => action.kind !== 'open-issue'),
+  };
 }
 
 /** Resolves the input of one evaluation. */

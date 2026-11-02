@@ -35,7 +35,7 @@ describe('the alert episodes of a site', () => {
 
   const events: WebScanEventBus = {
     publish: () => {},
-    subscribe: async () => {},
+    subscribe: async () => () => {},
     close: async () => {},
   };
 

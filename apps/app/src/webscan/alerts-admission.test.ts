@@ -12,6 +12,7 @@ import {
   SITE_ID,
   THRESHOLDS,
 } from './alerts.fixtures.js';
+import type { WebScanAlertEpisode } from './types.js';
 
 /**
  * The admission of the episodes of a site (ADR-0052 section 8).
@@ -79,6 +80,32 @@ function admittedKeys(episodes: readonly { issueKey: string }[]): Set<string> {
   return new Set(episodes.map((episode) => episode.issueKey));
 }
 
+/** One episode of a state that was written before the bound changed. */
+function carriedEpisode(index: number): WebScanAlertEpisode {
+  return {
+    episodeKey: `ep-${index}`,
+    issueKey: issueKeyOf(index),
+    state: 'open',
+    occurrenceKeys: [occurrenceKeyOf(index)],
+    lastChangedAt: day(1).toISOString(),
+    issueState: 'open',
+    issueRequested: true,
+    resolved: false,
+    severity: 'high',
+    validation: 'Confirmed',
+    generation: 0,
+    createdAt: day(1).toISOString(),
+  };
+}
+
+/** The issue key of the episode an opened issue belongs to. */
+function openedIssueKey(
+  episodes: readonly { episodeKey: string; issueKey: string }[],
+  episodeKey: string | undefined,
+): string | undefined {
+  return episodes.find((episode) => episode.episodeKey === episodeKey)?.issueKey;
+}
+
 describe('the admission of the episodes of the website scanner', () => {
   it('admits the strongest groups of a site and opens no issue for the groups it refuses', () => {
     const scenario = runAlertScenario(
@@ -91,14 +118,16 @@ describe('the admission of the episodes of the website scanner', () => {
     const episodeKeys = new Set(scenario.episodes.map((episode) => episode.episodeKey));
 
     expect(scenario.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
-    expect(opened).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    // A scheduled scan opens one issue: the strongest group of the scan.
+    expect(opened).toHaveLength(1);
     expect(opened.every((action) => episodeKeys.has(action.episodeKey))).toBe(true);
+    expect(openedIssueKey(scenario.episodes, opened[0]?.episodeKey)).toBe(issueKeyOf(0));
     expect(admitted.has(issueKeyOf(0))).toBe(true);
     expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(false);
     expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE + 1))).toBe(false);
   });
 
-  it('opens no issue again for the groups of a site that grew past the bound', () => {
+  it('opens one issue per scan for the groups of a site that grew past the bound', () => {
     const scenario = runAlertScenario(
       [
         { trigger: 'scheduled', at: day(1), occurrences: crowdedGroups() },
@@ -107,10 +136,15 @@ describe('the admission of the episodes of the website scanner', () => {
       { thresholds: EVERY_GROUP },
     );
 
-    expect(actionsOfKind(scenario.actions[0] ?? [], 'open-issue')).toHaveLength(
-      MAX_ALERT_EPISODES_PER_SITE,
-    );
-    expect(actionsOfKind(scenario.actions[1] ?? [], 'open-issue')).toHaveLength(0);
+    const first = actionsOfKind(scenario.actions[0] ?? [], 'open-issue');
+    const second = actionsOfKind(scenario.actions[1] ?? [], 'open-issue');
+
+    // The scan opens one issue, and the next scan opens the next group, the
+    // strongest one first.
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(openedIssueKey(scenario.episodes, first[0]?.episodeKey)).toBe(issueKeyOf(0));
+    expect(openedIssueKey(scenario.episodes, second[0]?.episodeKey)).toBe(issueKeyOf(1));
     expect(scenario.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
     expect(admittedKeys(scenario.episodes).has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(
       false,
@@ -138,7 +172,15 @@ describe('the admission of the episodes of the website scanner', () => {
 
     const admitted = admittedKeys(scenario.episodes);
 
-    expect(actionsOfKind(scenario.actions[1] ?? [], 'open-issue')).toHaveLength(1);
+    // The scan opened the issue of the strongest group that waited for one, so
+    // the group that entered the state waits for a later scan.
+    const opened = actionsOfKind(scenario.actions[1] ?? [], 'open-issue');
+    expect(opened).toHaveLength(1);
+    expect(openedIssueKey(scenario.episodes, opened[0]?.episodeKey)).toBe(issueKeyOf(1));
+    const waiting = scenario.episodes.find(
+      (episode) => episode.issueKey === issueKeyOf(MAX_ALERT_EPISODES_PER_SITE),
+    );
+    expect(waiting?.issueRequested).toBe(false);
     expect(scenario.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
     expect(admitted.has(issueKeyOf(0))).toBe(false);
     expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(true);
@@ -214,7 +256,9 @@ describe('the admission of the episodes of the website scanner', () => {
 
     const admitted = admittedKeys(scenario.episodes);
 
-    expect(actionsOfKind(scenario.actions[1] ?? [], 'open-issue')).toHaveLength(0);
+    // The episode whose issue is unknown keeps its slot, so no group enters the
+    // state: the scan opens the issue of the strongest group that waits for one.
+    expect(actionsOfKind(scenario.actions[1] ?? [], 'open-issue')).toHaveLength(1);
     expect(scenario.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
     expect(admitted.has(issueKeyOf(0))).toBe(true);
     expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(false);
@@ -303,7 +347,10 @@ describe('the admission of the episodes of the website scanner', () => {
     // Every action belongs to an episode that is persisted: nothing is opened and then forgotten.
     expect(evaluation.actions.every((action) => keptKeys.has(action.episodeKey))).toBe(true);
     expect(keptKeys.has(`extra-episode-${extraIndex}`)).toBe(false);
-    expect(actionsOfKind(evaluation.actions, 'open-issue')).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    // The scan opens one issue, and it opens the issue of an episode the state keeps.
+    const opened = actionsOfKind(evaluation.actions, 'open-issue');
+    expect(opened).toHaveLength(1);
+    expect(keptKeys.has(opened[0]?.episodeKey ?? '')).toBe(true);
   });
 
   it('refuses the group with the last issue key when the groups are of the same level', () => {
@@ -324,5 +371,38 @@ describe('the admission of the episodes of the website scanner', () => {
 
     expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE - 1))).toBe(true);
     expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(false);
+  });
+
+  it('keeps the episode whose comment is owed and drops another one instead', () => {
+    // A state written before the bound existed: one episode more than a site may keep.
+    const episodes = Array.from(
+      { length: MAX_ALERT_EPISODES_PER_SITE + 1 },
+      (_value, index) => carriedEpisode(index),
+    );
+
+    const evaluation = evaluateAlertEpisodes({
+      trigger: 'scheduled',
+      now: day(2),
+      siteId: SITE_ID,
+      dashboardBaseUrl: DASHBOARD_BASE_URL,
+      thresholds: { ...THRESHOLDS, ...EVERY_GROUP },
+      episodes,
+      occurrences: [
+        fixedGroup(0, { severity: 'high', validation: 'Confirmed' }),
+        ...Array.from({ length: MAX_ALERT_EPISODES_PER_SITE }, (_value, index) =>
+          group(index + 1, { severity: 'high', validation: 'Confirmed' }),
+        ),
+      ],
+      exceptions: [],
+      issueStates: [],
+    });
+
+    const keptKeys = new Set(evaluation.episodes.map((episode) => episode.episodeKey));
+    expect(evaluation.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    // The episode that owes a comment keeps its slot: another episode goes.
+    expect(keptKeys.has('ep-0')).toBe(true);
+    expect(keptKeys.has('ep-1')).toBe(false);
+    // The comment is offered, because the episode it belongs to is still there.
+    expect(actionsOfKind(evaluation.actions, 'fixed-comment')).toHaveLength(1);
   });
 });

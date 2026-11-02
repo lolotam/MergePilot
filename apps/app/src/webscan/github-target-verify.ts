@@ -24,13 +24,14 @@ import type { WebScanApprovedInstallation, WebScanRepositoryBinding } from './ty
 /**
  * True when the failure means the target is definitely gone.
  *
- * Only a definite 404 of the App's own record of the installation and a
- * repository that does not exist are such a failure. A loss of access is not a
- * deletion: the installation and the repository may still be there for the
- * account, and the access can come back.
+ * Only a definite 404 of the App's own record of the installation is such a
+ * failure: the App itself says that the installation is no longer there. A
+ * repository the installation cannot see is not a deletion: the repository may
+ * still be there for the account, the selection of the repositories may have
+ * changed, and the access can come back.
  */
 export function isLostWebScanTargetReason(reason: WebScanGitHubTargetReason): boolean {
-  return reason === 'installation_lost' || reason === 'repository_not_found';
+  return reason === 'installation_lost';
 }
 
 /**

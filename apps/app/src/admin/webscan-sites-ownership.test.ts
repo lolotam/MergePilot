@@ -43,7 +43,7 @@ describe('the owner of the repository of a site', () => {
 
   const events: WebScanEventBus = {
     publish: () => {},
-    subscribe: async () => {},
+    subscribe: async () => () => {},
     close: async () => {},
   };
 
@@ -122,7 +122,7 @@ describe('the owner of the repository of a site', () => {
       },
     });
 
-  const patchSite = async (cookie: string, payload: unknown, siteId: string) =>
+  const patchSite = async (cookie: string, payload: Record<string, unknown> | string, siteId: string) =>
     app.inject({
       method: 'PATCH',
       url: `/api/admin/web-scan/sites/${siteId}`,

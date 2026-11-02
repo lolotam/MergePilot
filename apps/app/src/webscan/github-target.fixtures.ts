@@ -27,9 +27,9 @@ export const ACCOUNT_ID = 401;
 /** The fake of the GitHub boundary. Every call can be made to fail. */
 export class FakeGitHubApi implements GitHubTargetApi {
   installations: UserInstallation[] = [];
-  installation?: GitHubTargetInstallation;
+  installation?: GitHubTargetInstallation | undefined;
   visible: GitHubTargetRepository[] = [];
-  repository?: GitHubTargetRepository;
+  repository?: GitHubTargetRepository | undefined;
   failures: Partial<Record<keyof GitHubTargetApi, GitHubTargetApiStatus>> = {};
   /** The calls that were made, in order. */
   calls: string[] = [];

@@ -6,10 +6,13 @@
  * dashboard bundle.
  *
  * A reason is a fixed code, never a message of GitHub and never a value of a
- * credential. `installation_lost` and `repository_not_found` mean the target is
- * definitely gone; `unverifiable` means the proof could not be established at
- * all. A loss of access is neither of them: it is a recoverable change of the
- * authorization, and both answer the same way: the target is not approved.
+ * credential. Only `installation_lost` means the target is definitely gone: the
+ * own record of the App of the installation answered 404. `repository_not_found`
+ * also covers an installation that cannot see the repository, which is a
+ * recoverable change and not a deletion, and `unverifiable` means the proof
+ * could not be established at all. A loss of access is none of them: it is a
+ * recoverable change of the authorization, and it answers the same way: the
+ * target is not approved.
  */
 export const WEB_SCAN_GITHUB_TARGET_REASONS = [
   /** The administrator has no GitHub account of their own linked. */
@@ -29,7 +32,12 @@ export const WEB_SCAN_GITHUB_TARGET_REASONS = [
   'missing_issues_permission',
   /** The repository does not belong to the approved account (a transfer, for example). */
   'account_mismatch',
-  /** The repository does not exist or the installation cannot see it. */
+  /**
+   * The repository does not exist, or the installation cannot see it.
+   *
+   * The second case is a loss of access and not a deletion: the repository may
+   * still be there for the account, and the access can come back.
+   */
   'repository_not_found',
   /** The repository is public or internal. */
   'not_private',

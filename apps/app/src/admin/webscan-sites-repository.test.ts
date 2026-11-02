@@ -131,7 +131,7 @@ describe('the repository of a site', () => {
       },
     });
 
-  const patchSite = async (payload: unknown, siteId: string) =>
+  const patchSite = async (payload: Record<string, unknown> | string, siteId: string) =>
     harness.app.inject({
       method: 'PATCH',
       url: `/api/admin/web-scan/sites/${siteId}`,

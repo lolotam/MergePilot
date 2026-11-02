@@ -37,29 +37,47 @@ interface Reply {
   headers?: Record<string, string>;
 }
 
+/** The init of one call of the fake transport. */
+interface CallInit {
+  headers: Record<string, string>;
+}
+
+/** One call of the fake transport. */
+interface Call {
+  input: string | URL | Request;
+  init?: CallInit | undefined;
+}
+
 /** Builds a fake transport that answers by the path of the url. */
 function fakeFetch(replies: Record<string, Reply | (() => never)>) {
-  return vi.fn(async (input: string | URL | Request) => {
+  const calls: Call[] = [];
+  const fetchFn = vi.fn(async (input: string | URL | Request, init?: CallInit) => {
+    calls.push({ input, init });
     const url = typeof input === 'string' ? input : input.toString();
     const path = url.replace('https://api.github.com', '');
-    const key = Object.keys(replies).find((candidate) => path.startsWith(candidate));
-    if (key === undefined) {
+    const entry = Object.entries(replies).find(([candidate]) => path.startsWith(candidate));
+    if (entry === undefined) {
       return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } });
     }
-    const reply = replies[key];
-    if (typeof reply === 'function') reply();
+    const reply = entry[1];
+    if (typeof reply === 'function') {
+      // The transport of a failure: it throws and never answers.
+      return reply();
+    }
     return new Response(JSON.stringify(reply.body ?? {}), {
       status: reply.status,
       headers: { 'Content-Type': 'application/json', ...(reply.headers ?? {}) },
     });
   });
+  return { fetchFn, calls };
 }
 
 /** The api under test, with the fake transport. */
 function apiWith(replies: Record<string, Reply | (() => never)>) {
-  const fetchFn = fakeFetch(replies);
+  const { fetchFn, calls } = fakeFetch(replies);
   return {
     fetchFn,
+    calls,
     api: createGitHubTargetApi({
       appId: '12345',
       privateKey: PRIVATE_KEY,
@@ -98,7 +116,7 @@ describe('the production GitHub boundary of the alert target', () => {
   });
 
   it('reads the record of the installation with the App itself', async () => {
-    const { api, fetchFn } = apiWith({
+    const { api, calls } = apiWith({
       '/app/installations/101': {
         status: 200,
         body: {
@@ -120,9 +138,9 @@ describe('the production GitHub boundary of the alert target', () => {
     });
 
     // The App jwt is the credential of the call, and it never leaves the header.
-    const init = fetchFn.mock.calls[0]?.[1] as { headers: Record<string, string> };
-    expect(init.headers.Authorization).toMatch(/^Bearer /);
-    expect(init.headers.Authorization).not.toContain(HOSTILE_TOKEN);
+    const headers = calls[0]?.init?.headers;
+    expect(headers?.Authorization).toMatch(/^Bearer /);
+    expect(headers?.Authorization).not.toContain(HOSTILE_TOKEN);
   });
 
   it('reads a repository with the token of the installation', async () => {
@@ -148,8 +166,10 @@ describe('the production GitHub boundary of the alert target', () => {
 
   it('follows the pages of the repositories of an installation', async () => {
     let call = 0;
-    const fetchFn = vi.fn(async () => {
+    const urls: string[] = [];
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
       call += 1;
+      urls.push(typeof input === 'string' ? input : input.toString());
       if (call === 1) {
         return new Response(
           JSON.stringify({
@@ -182,6 +202,8 @@ describe('the production GitHub boundary of the alert target', () => {
     const repositories = await api.listInstallationRepositories(HOSTILE_TOKEN, 101);
     expect(repositories.map((repository) => repository.id)).toEqual([7, 8]);
     expect(fetchFn).toHaveBeenCalledTimes(2);
+    // Every page of the listing goes to the GitHub api and to no other host.
+    expect(urls.every((url) => url.startsWith('https://api.github.com'))).toBe(true);
   });
 
   it('tells the class of a failure apart and never leaks the token', async () => {

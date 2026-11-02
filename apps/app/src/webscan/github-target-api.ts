@@ -18,9 +18,14 @@ import {
  * A token never reaches a log, an error or a response: the body of a GitHub
  * reply is never read into an error, and the only thing an error carries is its
  * class.
+ *
+ * Every request goes to the origin of the GitHub api and to no other one, so a
+ * page that names another host never carries a bearer token out of here.
  */
 
 const GITHUB_API = 'https://api.github.com';
+/** The one origin a request of this api is allowed to go to. */
+const GITHUB_API_ORIGIN = new URL(GITHUB_API).origin;
 const USER_AGENT = 'MergePilot';
 const API_VERSION = '2022-11-28';
 /** The App jwt lives for ten minutes at most; GitHub refuses anything longer. */
@@ -55,6 +60,144 @@ function errorName(error: unknown): string {
   return typeof name === 'string' ? name : '';
 }
 
+/**
+ * Refuses a url that does not go to the GitHub api of this api.
+ *
+ * The bearer token of the administrator travels with every page of a listing,
+ * so a page that names another origin (a malformed or a hostile `Link` header)
+ * is refused before the token leaves this process.
+ */
+function assertGitHubOrigin(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new GitHubTargetApiError('network');
+  }
+  if (parsed.protocol !== 'https:' || parsed.origin !== GITHUB_API_ORIGIN) {
+    throw new GitHubTargetApiError('network');
+  }
+}
+
+/** The url of a fetch argument, whatever shape it has. */
+function urlOf(input: string | URL | Request): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
+/** A record of GitHub, or nothing when the value is not an object. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** A positive safe integer, or nothing when the value is not one. */
+function positiveInteger(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return null;
+  return value;
+}
+
+/** A non-empty string, or nothing when the value is not one. */
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/** Whether the installation reports itself as suspended. */
+function isSuspended(suspendedAt: unknown): boolean {
+  if (typeof suspendedAt === 'string') return suspendedAt !== '';
+  return suspendedAt !== undefined && suspendedAt !== null;
+}
+
+/** Whether the installation grants the App `issues: write`. */
+function grantsIssuesWrite(permissions: unknown): boolean {
+  const record = asRecord(permissions);
+  if (record === null) return false;
+  const issues = record['issues'];
+  return typeof issues === 'string' && issues === 'write';
+}
+
+/**
+ * The strict parser of a repository record.
+ *
+ * Every field the proof rests on is checked, so a record without an id, without
+ * a name or without an owner is a broken answer and never a repository with
+ * the id 0.
+ */
+function parseRepository(payload: unknown): GitHubTargetRepository {
+  const record = asRecord(payload);
+  if (record === null) throw new GitHubTargetApiError('network');
+  const id = positiveInteger(record['id']);
+  const name = nonEmptyString(record['name']);
+  const owner = asRecord(record['owner']);
+  const ownerId = owner === null ? null : positiveInteger(owner['id']);
+  const ownerLogin = owner === null ? null : nonEmptyString(owner['login']);
+  const isPrivate = record['private'];
+  if (
+    id === null ||
+    name === null ||
+    ownerId === null ||
+    ownerLogin === null ||
+    (isPrivate !== undefined && typeof isPrivate !== 'boolean')
+  ) {
+    throw new GitHubTargetApiError('network');
+  }
+  const visibility = record['visibility'];
+  return {
+    id,
+    owner: ownerLogin,
+    name,
+    private: isPrivate === true,
+    ownerAccountId: ownerId,
+    visibility:
+      visibility === 'private' || visibility === 'internal' || visibility === 'public'
+        ? visibility
+        : isPrivate === true
+          ? 'private'
+          : 'public',
+  };
+}
+
+/**
+ * The strict parser of the record of an installation.
+ *
+ * The ids of GitHub are the identity of the installation and of its account, so
+ * they are checked like every other identity: a record without them is a
+ * broken answer and never an installation with the id 0.
+ */
+function parseInstallation(payload: unknown): GitHubTargetInstallation {
+  const record = asRecord(payload);
+  if (record === null) throw new GitHubTargetApiError('network');
+  const id = positiveInteger(record['id']);
+  const account = asRecord(record['account']);
+  const accountId = account === null ? null : positiveInteger(account['id']);
+  const accountLogin = account === null ? null : nonEmptyString(account['login']);
+  if (id === null || accountId === null || accountLogin === null) {
+    throw new GitHubTargetApiError('network');
+  }
+  return {
+    id,
+    accountId,
+    accountLogin,
+    suspended: isSuspended(record['suspended_at']),
+    issuesWrite: grantsIssuesWrite(record['permissions']),
+  };
+}
+
+/**
+ * The list of the repositories of a reply.
+ *
+ * A reply without a list is a broken answer and never an empty list: an empty
+ * list is a proof that the installation sees nothing, and it has to be said.
+ */
+function repositoryListOf(payload: unknown): unknown[] {
+  const record = asRecord(payload);
+  if (record === null) throw new GitHubTargetApiError('network');
+  const list: unknown = record['repositories'];
+  if (!Array.isArray(list)) throw new GitHubTargetApiError('network');
+  return list;
+}
+
 /** Base64url without padding, as the jwt needs it. */
 function base64url(input: Buffer): string {
   return input.toString('base64url');
@@ -86,40 +229,6 @@ function createAppJwt(appId: string, privateKey: string, at: Date): string {
   return `${header}.${payload}.${base64url(signature)}`;
 }
 
-/** The shape of the account of an installation or of a repository. */
-interface GitHubAccountPayload {
-  id?: number;
-  login?: string;
-}
-
-/** The shape of the installation record of the App. */
-interface InstallationPayload {
-  id?: number;
-  account?: GitHubAccountPayload | null;
-  suspended_at?: string | null;
-  permissions?: { issues?: string } | null;
-}
-
-/** The shape of a repository record. */
-interface RepositoryPayload {
-  id?: number;
-  name?: string;
-  private?: boolean;
-  visibility?: string;
-  owner?: GitHubAccountPayload | null;
-}
-
-/** The shape of the repository list of one installation. */
-interface RepositoryListPayload {
-  total_count?: number;
-  repositories?: RepositoryPayload[];
-}
-
-/** The shape of the access token of one installation. */
-interface InstallationTokenPayload {
-  token?: string;
-}
-
 /** Builds the production api of the alert target. */
 export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTargetApi {
   const fetchFn = options.fetchFn ?? globalThis.fetch;
@@ -128,6 +237,9 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
 
   /** One GitHub call. The reply body is only read when the call succeeded. */
   async function call(method: 'GET' | 'POST', url: string, token: string): Promise<unknown> {
+    // The credential of the call goes with it, so a url of another origin is
+    // refused before the call leaves this process.
+    assertGitHubOrigin(url);
     let response: Response;
     try {
       response = await fetchFn(url, {
@@ -170,34 +282,18 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
 
   /** The access token of one installation. */
   async function installationToken(installationId: number): Promise<string> {
-    const payload = (await call(
-      'POST',
-      `${GITHUB_API}/app/installations/${installationId}/access_tokens`,
-      appJwt(),
-    )) as InstallationTokenPayload;
-    const token = payload.token;
+    const payload = asRecord(
+      await call(
+        'POST',
+        `${GITHUB_API}/app/installations/${installationId}/access_tokens`,
+        appJwt(),
+      ),
+    );
+    const token = payload === null ? null : payload['token'];
     if (typeof token !== 'string' || token === '') {
       throw new GitHubTargetApiError('network');
     }
     return token;
-  }
-
-  /** Maps a repository record onto the shape the verification reads. */
-  function toRepository(payload: RepositoryPayload): GitHubTargetRepository {
-    const visibility = payload.visibility;
-    return {
-      id: payload.id ?? 0,
-      owner: payload.owner?.login ?? '',
-      name: payload.name ?? '',
-      private: payload.private === true,
-      ownerAccountId: payload.owner?.id ?? 0,
-      visibility:
-        visibility === 'private' || visibility === 'internal' || visibility === 'public'
-          ? visibility
-          : payload.private === true
-            ? 'private'
-            : 'public',
-    };
   }
 
   /** The next page of a paginated list, as the Link header names it. */
@@ -223,6 +319,9 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
         // never classifies the failure of a later one.
         lastStatus = undefined;
         timedOut = false;
+        // The token of the administrator goes with every page of the listing,
+        // so a page of another origin is refused before the token leaves.
+        assertGitHubOrigin(urlOf(input));
         try {
           // The shared listing sets no deadline of its own: every page of it gets
           // the same timeout as every other call, so a hanging GitHub is a refusal.
@@ -258,6 +357,9 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
       let nextUrl: string | null =
         `${GITHUB_API}/user/installations/${installationId}/repositories?per_page=100`;
       while (nextUrl !== null) {
+        // The token of the administrator goes with every page of the listing,
+        // so a page of another origin is refused before the token leaves.
+        assertGitHubOrigin(nextUrl);
         let response: Response;
         try {
           response = await fetchFn(nextUrl, {
@@ -279,9 +381,9 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
         if (!response.ok) {
           throw new GitHubTargetApiError(statusOf(response.status));
         }
-        let payload: RepositoryListPayload;
+        let payload: unknown;
         try {
-          payload = (await response.json()) as RepositoryListPayload;
+          payload = await response.json();
         } catch {
           // A body that is not JSON is a broken answer, never a raw failure:
           // the call of the api throws the class of the failure and nothing else.
@@ -289,10 +391,9 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
         }
         // Valid JSON of the wrong shape (null, a list that is not a list) is as broken
         // an answer as a body that is not JSON.
-        const list: unknown = payload === null ? null : payload?.repositories ?? [];
-        if (!Array.isArray(list)) throw new GitHubTargetApiError('network');
+        const list = repositoryListOf(payload);
         for (const repository of list) {
-          repositories.push(toRepository(repository));
+          repositories.push(parseRepository(repository));
         }
         nextUrl = nextLink(response);
       }
@@ -300,22 +401,12 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
     },
 
     async getInstallation(installationId: number): Promise<GitHubTargetInstallation> {
-      const payload = (await call(
+      const payload = await call(
         'GET',
         `${GITHUB_API}/app/installations/${installationId}`,
         appJwt(),
-      )) as InstallationPayload;
-      const accountId = payload.account?.id;
-      if (typeof accountId !== 'number') {
-        throw new GitHubTargetApiError('network');
-      }
-      return {
-        id: payload.id ?? installationId,
-        accountId,
-        accountLogin: payload.account?.login ?? '',
-        suspended: Boolean(payload.suspended_at),
-        issuesWrite: payload.permissions?.issues === 'write',
-      };
+      );
+      return parseInstallation(payload);
     },
 
     async getRepository(
@@ -324,12 +415,12 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
       name: string,
     ): Promise<GitHubTargetRepository> {
       const token = await installationToken(installationId);
-      const payload = (await call(
+      const payload = await call(
         'GET',
         `${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
         token,
-      )) as RepositoryPayload;
-      return toRepository(payload);
+      );
+      return parseRepository(payload);
     },
   };
 }

@@ -99,7 +99,17 @@ describe('the revalidation of a stored binding', () => {
     const api = happyApi();
     api.failures = { getRepository: 'not_found' };
     expect(await revalidate(api)).toEqual({ ok: false, reason: 'repository_not_found' });
-    expect(isLostWebScanTargetReason('repository_not_found')).toBe(true);
+    // The installation may simply not see the repository anymore: that is a
+    // loss of access and not a deletion, so the target is not proven gone.
+    expect(isLostWebScanTargetReason('repository_not_found')).toBe(false);
+  });
+
+  it('calls only the installation that the App itself lost a lost target', () => {
+    expect(isLostWebScanTargetReason('installation_lost')).toBe(true);
+    expect(isLostWebScanTargetReason('repository_not_found')).toBe(false);
+    expect(isLostWebScanTargetReason('no_user_access')).toBe(false);
+    expect(isLostWebScanTargetReason('installation_not_accessible')).toBe(false);
+    expect(isLostWebScanTargetReason('unverifiable')).toBe(false);
   });
 
   it('refuses an administrator who is no longer a platform administrator', async () => {

@@ -192,7 +192,8 @@ export interface AlertEpisodeCandidate {
    *
    * An episode with a delivery under way keeps its slot even when it is resolved:
    * the slot goes only once nothing is left to deliver for it, otherwise the action
-   * would be dropped together with the episode.
+   * would be dropped together with the episode. An over-bound state drops it after
+   * every episode without a delivery, for the same reason.
    */
   pending?: boolean;
 }
@@ -241,8 +242,10 @@ export function admitEpisodes(
  *
  * A state that was written before the bound changed can hold more episodes
  * than the bound allows, so the excess is dropped with the eviction order: a
- * resolved episode before an unresolved one, so the eviction never drops the
- * state of a group that still needs an operator.
+ * candidate with a delivery under way after every other one, so the action it
+ * owes is never dropped together with it, and a resolved episode before an
+ * unresolved one, so the eviction never drops the state of a group that still
+ * needs an operator.
  */
 function capCandidates(
   candidates: readonly AlertEpisodeCandidate[],
@@ -252,11 +255,29 @@ function capCandidates(
   }
   const evicted = new Set(
     [...candidates]
-      .sort((left, right) => episodeEvictionOrder(left.episode, right.episode))
+      .sort((left, right) => compareEvictionOrder(left, right))
       .slice(0, candidates.length - MAX_ALERT_EPISODES_PER_SITE)
       .map((candidate) => candidate.episode.episodeKey),
   );
   return candidates.filter((candidate) => !evicted.has(candidate.episode.episodeKey));
+}
+
+/**
+ * The order the candidates are dropped in.
+ *
+ * A candidate with a delivery under way is dropped after every other one: the
+ * action it owes would be lost with it, so it keeps its slot as long as another
+ * episode can go. The eviction order of the episodes decides then.
+ */
+function compareEvictionOrder(
+  left: AlertEpisodeCandidate,
+  right: AlertEpisodeCandidate,
+): number {
+  const byPending = Number(left.pending === true) - Number(right.pending === true);
+  if (byPending !== 0) {
+    return byPending;
+  }
+  return episodeEvictionOrder(left.episode, right.episode);
 }
 
 /**
@@ -307,7 +328,7 @@ function releasedIndex(candidates: readonly AlertEpisodeCandidate[]): number {
  * issue key breaks the tie in the order of its code units, so the admission
  * never depends on the order of the evaluation.
  */
-function compareAdmissionOrder(
+export function compareAdmissionOrder(
   left: WebScanAlertEpisode,
   right: WebScanAlertEpisode,
 ): number {
