@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SCAN_LIMIT_SPECS } from '@mergepilot/webscan';
+import { SCAN_LIMIT_FIELDS, SCAN_LIMIT_SPECS } from '@mergepilot/webscan';
 
 /**
  * REST contract of the platform-admin website security scan (ADR-0052).
@@ -162,16 +162,37 @@ export const WebScanLimitsSchema = z.strictObject({
 export type WebScanLimits = z.infer<typeof WebScanLimitsSchema>;
 
 /** Only the limit fields a change writes. Every value is still bounded. */
-export const WebScanLimitsPatchSchema = z.strictObject({
-  maxRequests: limitField('maxRequests').optional(),
-  maxPages: limitField('maxPages').optional(),
-  maxActiveLinks: limitField('maxActiveLinks').optional(),
-  requestsPerSecond: limitField('requestsPerSecond').optional(),
-  requestTimeoutMs: limitField('requestTimeoutMs').optional(),
-  maxResponseBytes: limitField('maxResponseBytes').optional(),
-  totalTimeoutMs: limitField('totalTimeoutMs').optional(),
-});
+export const WebScanLimitsPatchSchema = WebScanLimitsSchema.partial();
 export type WebScanLimitsPatch = z.infer<typeof WebScanLimitsPatchSchema>;
+
+/** The names of the limit fields, as the confirmation lists them. */
+export const WebScanLimitFieldSchema = z.enum(SCAN_LIMIT_FIELDS);
+export type WebScanLimitField = z.infer<typeof WebScanLimitFieldSchema>;
+
+/**
+ * The 422 body of a limits change that still needs its confirmation.
+ *
+ * The dashboard runs in a browser and cannot compute the digest of the
+ * effective limits, so the server hands it back: `digest` is the digest of the
+ * effective submitted limits and `fieldsAboveDefault` names the limit fields
+ * that are above their default. The administrator confirms those fields, and
+ * the dashboard re-sends the same patch with `limitConfirmation: { digest }`.
+ *
+ * This is the body of the above-default confirmation only. The other
+ * `confirmation_required` answers (the site scope and schedule one) carry no
+ * digest, so they keep the plain `WebScanErrorBodySchema` shape.
+ */
+export const WebScanConfirmationRequiredBodySchema = z.strictObject({
+  error: z.strictObject({
+    code: z.literal('confirmation_required'),
+    message: z.string(),
+    digest: WebScanDigestSchema,
+    fieldsAboveDefault: z.array(WebScanLimitFieldSchema),
+  }),
+});
+export type WebScanConfirmationRequiredBody = z.infer<
+  typeof WebScanConfirmationRequiredBodySchema
+>;
 
 /** The six catalogue checks of ADR-0052 section 3. */
 export const WebScanChecksSchema = z.strictObject({

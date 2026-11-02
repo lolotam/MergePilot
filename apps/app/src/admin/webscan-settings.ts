@@ -1,5 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { requiresAboveDefaultConfirmation, limitsConfirmationDigest } from '@mergepilot/webscan';
+import {
+  requiresAboveDefaultConfirmation,
+  limitsAboveDefault,
+  limitsConfirmationDigest,
+} from '@mergepilot/webscan';
 import { sendError } from '../api/helpers.js';
 import type { WebScanSettingsDto } from '../api/contract-webscan.js';
 import {
@@ -9,6 +13,7 @@ import {
 import type { WebScanStore, WebScanSettingsPatch } from '../webscan/store.js';
 import type { WebScanSettings } from '../webscan/types.js';
 import {
+  sendWebScanConfirmationRequired,
   sendWebScanValidationError,
   webScanAdminId,
   withWebScanErrors,
@@ -111,11 +116,14 @@ export function registerWebScanSettingsRoutes(
         ? true
         : body.limitConfirmation?.digest === limitsConfirmationDigest(effective);
       if (!confirmed) {
-        return sendError(
+        // The dashboard cannot compute the digest itself, so the answer carries
+        // it: the digest of the effective limits and the fields above their
+        // default. The administrator confirms, and the same patch is re-sent
+        // with that digest.
+        return sendWebScanConfirmationRequired(
           reply,
-          422,
-          'confirmation_required',
-          'A value above its default needs a confirmation bound to the submitted values',
+          limitsConfirmationDigest(effective),
+          limitsAboveDefault(effective),
         );
       }
     }

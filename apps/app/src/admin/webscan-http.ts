@@ -2,7 +2,11 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ScanSettingsError } from '@mergepilot/webscan';
 import { sendError } from '../api/helpers.js';
-import { WebScanIdSchema } from '../api/contract-webscan.js';
+import {
+  WebScanIdSchema,
+  type WebScanConfirmationRequiredBody,
+  type WebScanLimitField,
+} from '../api/contract-webscan.js';
 import { WebScanScheduleError } from '../webscan/schedule.js';
 import {
   WebScanAuthorizationError,
@@ -29,6 +33,33 @@ export type WebScanAdminGuard = (
 export function sendWebScanValidationError(reply: FastifyReply, error: z.ZodError): FastifyReply {
   const message = error.issues[0]?.message ?? 'Invalid request';
   return sendError(reply, 422, 'invalid_request', message);
+}
+
+/**
+ * Answers 422 with the confirmation the administrator still has to give.
+ *
+ * The dashboard runs in a browser and cannot compute the digest of the
+ * effective limits itself, so the server hands it back: the digest of the
+ * effective submitted limits and the names of the limit fields that are above
+ * their default. The administrator confirms those fields, and the dashboard
+ * re-sends the same patch with `limitConfirmation: { digest }`.
+ *
+ * The digest and the field names are not secrets; the message names no value.
+ */
+export function sendWebScanConfirmationRequired(
+  reply: FastifyReply,
+  digest: string,
+  fieldsAboveDefault: readonly WebScanLimitField[],
+): FastifyReply {
+  const body: WebScanConfirmationRequiredBody = {
+    error: {
+      code: 'confirmation_required',
+      message: 'A value above its default needs a confirmation bound to the submitted values',
+      digest,
+      fieldsAboveDefault: [...fieldsAboveDefault],
+    },
+  };
+  return reply.status(422).send(body);
 }
 
 /**

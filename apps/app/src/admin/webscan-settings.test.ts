@@ -11,6 +11,7 @@ import { signedSessionCookie } from '../auth/session-cookie.fixtures.js';
 import { PurposeScopedVault } from '../vault/scoped-secrets.js';
 import { PgWebScanStore } from '../webscan/pg-store.js';
 import type { WebScanEventBus } from '../webscan/events.js';
+import { WebScanConfirmationRequiredBodySchema } from '../api/contract-webscan.js';
 import { registerAdminApi } from './routes.js';
 import {
   adminTestConfig,
@@ -188,6 +189,42 @@ describe('web-scan settings routes (Task 8A)', () => {
     expect(audit.json().audit.length).toBe(0);
   });
 
+  it('answers a missing confirmation with the digest and the fields above their default', async () => {
+    const res = await patchSettings({ limits: { maxRequests: 2000, maxPages: 250 } });
+    expect(res.statusCode).toBe(422);
+
+    const body = WebScanConfirmationRequiredBodySchema.parse(res.json());
+    expect(body.error.code).toBe('confirmation_required');
+    expect(body.error.digest).toBe(
+      limitsConfirmationDigest({ ...DEFAULT_SCAN_LIMITS, maxRequests: 2000, maxPages: 250 }),
+    );
+    expect(body.error.fieldsAboveDefault).toEqual(['maxRequests', 'maxPages']);
+
+    const settings = await getSettings();
+    expect(settings.json().limits.maxRequests).toBe(500);
+    expect(settings.json().limits.maxPages).toBe(100);
+    const audit = await getAudit();
+    expect(audit.json().audit.length).toBe(0);
+  });
+
+  it('confirms the same patch with the digest of the answer and audits it once', async () => {
+    const refused = await patchSettings({ limits: { maxRequests: 2000 } });
+    expect(refused.statusCode).toBe(422);
+    const answer = WebScanConfirmationRequiredBodySchema.parse(refused.json());
+
+    const res = await patchSettings({
+      limits: { maxRequests: 2000 },
+      limitConfirmation: { digest: answer.error.digest },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().limits.maxRequests).toBe(2000);
+
+    const audit = await getAudit();
+    const rows = audit.json().audit;
+    expect(rows.length).toBe(1);
+    expect(rows[0].after.limits.maxRequests).toBe(2000);
+  });
+
   it('accepts an above-default limit with the confirmation bound to the effective values', async () => {
     const digest = limitsConfirmationDigest({ ...DEFAULT_SCAN_LIMITS, maxRequests: 2000 });
     const res = await patchSettings({ limits: { maxRequests: 2000 }, limitConfirmation: { digest } });
@@ -208,6 +245,37 @@ describe('web-scan settings routes (Task 8A)', () => {
 
     const settings = await getSettings();
     expect(settings.json().limits.maxRequests).toBe(500);
+  });
+
+  it('answers a wrong digest with the digest of the actual effective values', async () => {
+    const other = limitsConfirmationDigest({ ...DEFAULT_SCAN_LIMITS, maxRequests: 1500 });
+    const res = await patchSettings({
+      limits: { maxRequests: 2000 },
+      limitConfirmation: { digest: other },
+    });
+    expect(res.statusCode).toBe(422);
+
+    const body = WebScanConfirmationRequiredBodySchema.parse(res.json());
+    expect(body.error.digest).toBe(
+      limitsConfirmationDigest({ ...DEFAULT_SCAN_LIMITS, maxRequests: 2000 }),
+    );
+    expect(body.error.digest).not.toBe(other);
+    expect(body.error.fieldsAboveDefault).toEqual(['maxRequests']);
+
+    const settings = await getSettings();
+    expect(settings.json().limits.maxRequests).toBe(500);
+    const audit = await getAudit();
+    expect(audit.json().audit.length).toBe(0);
+  });
+
+  it('accepts a limit within its default without any confirmation', async () => {
+    const res = await patchSettings({ limits: { maxRequests: 400, maxPages: 50 } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().limits.maxRequests).toBe(400);
+    expect(res.json().limits.maxPages).toBe(50);
+
+    const audit = await getAudit();
+    expect(audit.json().audit.length).toBe(1);
   });
 
   it('an out-of-range schedule hour is refused safely', async () => {
