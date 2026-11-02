@@ -140,7 +140,12 @@ export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluat
       hasIssue: hasIssueBehind(
         entry.result.episode,
         context.episodesByIssueKey.get(entry.result.episode.issueKey),
-        context.observations.get(entry.result.episode.episodeKey),
+        // The report belongs to the episode that was persisted, which a rollover replaces
+        // with a new key.
+        context.observations.get(
+          context.episodesByIssueKey.get(entry.result.episode.issueKey)?.episodeKey ??
+            entry.result.episode.episodeKey,
+        ),
       ),
     })),
   );
@@ -251,21 +256,23 @@ function withholdOpenIssue(context: AlertContext, result: IssueKeyResult): Issue
  * An issue that was requested earlier, or that the caller observed, is behind it. A
  * confirmed missing issue is not, unless the replacement was requested after the
  * confirmation (the stored state was already missing and a request was recorded): that
- * replacement may exist, until the caller reports it missing too. An issue this
- * evaluation only proposes to open does not count.
+ * replacement may exist, whatever is reported next. An issue this evaluation only
+ * proposes to open does not count.
  */
 function hasIssueBehind(
   episode: WebScanAlertEpisode,
   previous: WebScanAlertEpisode | undefined,
   observed: AlertIssueState | undefined,
 ): boolean {
+  // A replacement of a missing issue was requested: it is requested exactly once and may
+  // exist, whatever the caller reports about it next (the delivery layer reconciles it by
+  // marker), so the episode stays protected.
+  if (previous?.issueState === 'missing' && previous.issueRequested === true) return true;
+  // A fresh report that the issue is missing: nothing exists behind the episode, and a
+  // rollover to a new episode does not change that.
+  if (observed === 'missing') return false;
   const state = episode.issueState ?? 'none';
-  if (state === 'missing') {
-    // The caller reported the issue missing in this very scan: nothing exists behind the
-    // episode, whether it is the original issue or the replacement.
-    if (observed === 'missing') return false;
-    return previous?.issueState === 'missing' && previous.issueRequested === true;
-  }
+  if (state === 'missing') return false;
   return previous?.issueRequested === true || state !== 'none';
 }
 
@@ -381,6 +388,9 @@ function continueEpisode(
   effective: AlertIssueState,
 ): IssueKeyResult {
   const noIssue = effective === 'none' || effective === 'missing';
+  // An issue that was requested is requested exactly once (ADR-0052 section 8: one
+  // replacement with the same marker, never repeated per scan): a later report that it is
+  // still missing is for the delivery layer to reconcile by marker, not a new request.
   const suppressed =
     existing.issueRequested === true && existing.issueState === effective && noIssue;
   const wantsIssue = eligible.length > 0 && noIssue && !suppressed;

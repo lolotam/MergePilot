@@ -204,7 +204,7 @@ describe('the release of the slot of a resolved episode', () => {
     expect(keptKeys.has('z-without-issue')).toBe(false);
   });
 
-  it('drops an episode whose requested replacement was reported missing in this scan', () => {
+  it('keeps a requested replacement even when it is reported missing again', () => {
     const seeded = runAlertScenario(
       [
         {
@@ -224,8 +224,9 @@ describe('the release of the slot of a resolved episode', () => {
       issueState: 'open' as const,
       issueRequested: true,
     }));
-    // Stored as missing with a replacement requested; the caller now reports it missing too.
-    // Its key sorts last among equals, so only the rank (not the tie-break) can drop it first.
+    // Stored as missing with a replacement requested; the caller reports it missing again. It was
+    // requested exactly once and may exist, so it keeps its protection. Its key sorts last among
+    // equals, so only the rank (not the tie-break) can decide.
     const replacing = {
       ...template,
       episodeKey: 'z-replacement-requested',
@@ -234,8 +235,10 @@ describe('the release of the slot of a resolved episode', () => {
     };
     const other = {
       ...template,
-      episodeKey: 'a-other',
+      episodeKey: '0-other',
       issueKey: issueKeyOf(MAX_ALERT_EPISODES_PER_SITE),
+      // The member of its own group, so the evaluation leaves the episode unchanged (same age).
+      occurrenceKeys: [`occurrence-${String(MAX_ALERT_EPISODES_PER_SITE).padStart(2, '0')}`],
       issueState: 'open' as const,
       issueRequested: true,
     };
@@ -260,9 +263,9 @@ describe('the release of the slot of a resolved episode', () => {
 
     const keptKeys = new Set(evaluation.episodes.map((episode) => episode.episodeKey));
     expect(evaluation.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
-    // Nothing exists behind it anymore, so it goes first and every real issue stays.
-    expect(keptKeys.has('z-replacement-requested')).toBe(false);
-    expect(keptKeys.has('a-other')).toBe(true);
+    // The replacement stays; an ordinary episode goes first among equals.
+    expect(keptKeys.has('z-replacement-requested')).toBe(true);
+    expect(keptKeys.has('0-other')).toBe(false);
   });
 
   it.each([
