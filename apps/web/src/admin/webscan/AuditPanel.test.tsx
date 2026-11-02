@@ -38,6 +38,13 @@ describe('the audit log of the website scan', () => {
     expect(screen.getByText(`site · ${siteFixture.id}`)).toBeTruthy();
   });
 
+  it('gives the table of the log an accessible name', async () => {
+    installFetch(answerWithFixtures);
+    renderWithProviders(<AuditPanel />);
+
+    expect(await screen.findByRole('table', { name: 'Audit log' })).toBeTruthy();
+  });
+
   it('pages through the log with the total the server counts', async () => {
     const calls = installFetch((call) => {
       const path = call.url.split('?')[0] ?? '';

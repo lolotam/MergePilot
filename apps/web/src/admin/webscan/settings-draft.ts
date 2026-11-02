@@ -37,6 +37,8 @@ export interface ScheduleDraft {
   hour: number;
   minute: number;
   enabled: boolean;
+  /** The day the rule of every two weeks counts from, when it has one. */
+  anchorDate: string | undefined;
 }
 
 export function toSettingsDraft(settings: WebScanSettingsDto): SettingsDraft {
@@ -61,12 +63,17 @@ export function toScheduleDraft(schedule: WebScanSchedule): ScheduleDraft {
     hour: schedule.hour,
     minute: schedule.minute,
     enabled: schedule.enabled,
+    anchorDate: schedule.anchorDate,
   };
 }
 
 /**
  * The schedule as the API takes it: the frequency decides which day field is
  * required, and the irrelevant ones are left out.
+ *
+ * The anchor day of a rule of every two weeks travels with the rule: a rule
+ * that loses it counts its weeks from another day, so the weeks it runs in
+ * move. A rule of another frequency has no anchor, so it never carries one.
  */
 export function toSchedule(draft: ScheduleDraft): WebScanSchedule {
   const base = {
@@ -75,7 +82,12 @@ export function toSchedule(draft: ScheduleDraft): WebScanSchedule {
     minute: draft.minute,
     enabled: draft.enabled,
   };
-  if (draft.frequency === 'weekly' || draft.frequency === 'biweekly') {
+  if (draft.frequency === 'biweekly') {
+    return draft.anchorDate === undefined
+      ? { ...base, weekday: draft.weekday }
+      : { ...base, weekday: draft.weekday, anchorDate: draft.anchorDate };
+  }
+  if (draft.frequency === 'weekly') {
     return { ...base, weekday: draft.weekday };
   }
   if (draft.frequency === 'monthly') {
@@ -154,6 +166,21 @@ function untouched<T>(baseline: T, draft: T): boolean {
   return JSON.stringify(baseline) === JSON.stringify(draft);
 }
 
+/**
+ * Whether an answer of the server is older than the baseline it would replace.
+ *
+ * The server stamps the row with the moment it was written, so a reply that
+ * was already on its way when the baseline was installed is told apart from a
+ * newer one. A stamp that cannot be read is never treated as older: the answer
+ * is used as it is.
+ */
+export function isOlderSettings(answer: WebScanSettingsDto, baseline: WebScanSettingsDto): boolean {
+  const answerAt = Date.parse(answer.updatedAt);
+  const baselineAt = Date.parse(baseline.updatedAt);
+  if (!Number.isFinite(answerAt) || !Number.isFinite(baselineAt)) return false;
+  return answerAt < baselineAt;
+}
+
 /** Merges one record field by field: an edited field stays, an untouched one follows the server. */
 function mergeRecord<T extends object>(baseline: T, draft: T, server: T): T {
   const merged: T = { ...server };
@@ -177,7 +204,7 @@ export function rebaseDraft(
 ): SettingsDraft {
   const before = toSettingsDraft(baseline);
   const after = toSettingsDraft(server);
-  const pick = <K extends 'paused' | 'alertsEnabled' | 'retentionDays' | 'contact' | 'alertMinSeverity' | 'alertMinValidation' | 'defaultSchedule'>(
+  const pick = <K extends 'paused' | 'alertsEnabled' | 'retentionDays' | 'contact' | 'alertMinSeverity' | 'alertMinValidation'>(
     key: K,
   ): SettingsDraft[K] => (untouched(before[key], draft[key]) ? after[key] : draft[key]);
   return {
@@ -185,7 +212,19 @@ export function rebaseDraft(
     alertsEnabled: pick('alertsEnabled'),
     limits: mergeRecord(before.limits, draft.limits, after.limits),
     checks: mergeRecord(before.checks, draft.checks, after.checks),
-    defaultSchedule: pick('defaultSchedule'),
+    // The schedule is compared as the rule it is and not as text: the form
+    // rebuilds it through `toSchedule`, which writes the keys in another order
+    // and leaves the irrelevant ones out, so two schedules of the same rule
+    // would never be equal as text. The rule that was put back as it was
+    // therefore follows the server like any other untouched field.
+    //
+    // The rule is saved as one whole rule, so a change of one of its fields by
+    // another administrator is not told apart from an edit of the
+    // administrator: the local rule wins. That is the documented limitation of
+    // the rule as one unit.
+    defaultSchedule: sameSchedule(before.defaultSchedule, draft.defaultSchedule)
+      ? after.defaultSchedule
+      : draft.defaultSchedule,
     retentionDays: pick('retentionDays'),
     contact: pick('contact'),
     alertMinSeverity: pick('alertMinSeverity'),

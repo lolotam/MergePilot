@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { focusManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
+import type { WebScanSettingsDto } from '@mergepilot/app/contract';
 import { renderWithProviders } from '../admin-test-utils.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { installFetch, jsonResponse, settingsFixture } from './webscan-test-utils.js';
@@ -14,6 +15,19 @@ afterEach(() => {
 
 /** The digest the server sends with the refusal of a value above its default. */
 const SERVER_DIGEST = 'd41d8cd98f00b204e9800998ecf8427e'.padEnd(64, '0');
+
+/** The global policy with a rule of every two weeks that has its anchor day. */
+const BIWEEKLY_SETTINGS: WebScanSettingsDto = {
+  ...settingsFixture,
+  defaultSchedule: {
+    frequency: 'biweekly',
+    weekday: 3,
+    hour: 4,
+    minute: 0,
+    enabled: true,
+    anchorDate: '2026-01-05',
+  },
+};
 
 describe('the global policy of the website scan', () => {
   it('shows the effective values, the defaults and the read-only approved installations', async () => {
@@ -87,6 +101,7 @@ describe('the global policy of the website scan', () => {
               message: 'A value above its default needs a confirmation bound to the submitted values',
               digest: SERVER_DIGEST,
               fieldsAboveDefault: ['maxRequests'],
+              effectiveLimits: { ...settingsFixture.limits, maxRequests: 800 },
             },
           },
           422,
@@ -132,6 +147,7 @@ describe('the global policy of the website scan', () => {
               message: 'A value above its default needs a confirmation',
               digest: SERVER_DIGEST,
               fieldsAboveDefault: ['maxRequests'],
+              effectiveLimits: { ...settingsFixture.limits, maxRequests: 800 },
             },
           },
           422,
@@ -153,6 +169,71 @@ describe('the global policy of the website scan', () => {
       within(dialog).getByText('Requests per scan: 800 requests (default 500 requests)'),
     ).toBeTruthy();
     expect(within(dialog).queryByText(/Crawled pages/)).toBeNull();
+  });
+
+  it('lists the limits the server sent and not the ones of the form', async () => {
+    let patches = 0;
+    installFetch((call) => {
+      if (call.method === 'GET') return jsonResponse(settingsFixture);
+      patches += 1;
+      if (patches === 1) {
+        return jsonResponse(
+          {
+            error: {
+              code: 'confirmation_required',
+              message: 'A value above its default needs a confirmation',
+              digest: SERVER_DIGEST,
+              fieldsAboveDefault: ['maxRequests', 'maxPages'],
+              // The row of the server holds a limit of another administrator
+              // that this form never saw.
+              effectiveLimits: { ...settingsFixture.limits, maxRequests: 800, maxPages: 150 },
+            },
+          },
+          422,
+        );
+      }
+      return jsonResponse(settingsFixture);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    const requests = await screen.findByLabelText('Requests per scan');
+    fireEvent.change(requests, { target: { value: '800' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByText('Requests per scan: 800 requests (default 500 requests)'),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByText('Crawled pages: 150 pages (default 100 pages)'),
+    ).toBeTruthy();
+  });
+
+  it('shows the server error when the refusal carries no effective limits', async () => {
+    installFetch((call) => {
+      if (call.method === 'GET') return jsonResponse(settingsFixture);
+      return jsonResponse(
+        {
+          error: {
+            code: 'confirmation_required',
+            message: 'A value above its default',
+            digest: SERVER_DIGEST,
+            fieldsAboveDefault: ['maxRequests'],
+          },
+        },
+        422,
+      );
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    const input = await screen.findByLabelText('Requests per scan');
+    fireEvent.change(input, { target: { value: '800' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('shows the server error when the refusal carries no confirmation', async () => {
@@ -201,6 +282,44 @@ describe('the global policy of the website scan', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('maxRequests is above its ceiling');
+  });
+
+  it('keeps the anchor day of a rule of every two weeks when only its hour changes', async () => {
+    const calls = installFetch(() => jsonResponse(BIWEEKLY_SETTINGS));
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    const hour = await screen.findByLabelText('Hour');
+    fireEvent.change(hour, { target: { value: '6' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true));
+    const patch = calls.find((call) => call.method === 'PATCH');
+    expect(patch?.body).toEqual({
+      defaultSchedule: {
+        frequency: 'biweekly',
+        weekday: 3,
+        hour: 6,
+        minute: 0,
+        enabled: true,
+        anchorDate: '2026-01-05',
+      },
+    });
+  });
+
+  it('leaves the anchor day out when the rule is no longer a rule of every two weeks', async () => {
+    const calls = installFetch(() => jsonResponse(BIWEEKLY_SETTINGS));
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    await user.selectOptions(await screen.findByLabelText('Frequency'), 'weekly');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true));
+    const patch = calls.find((call) => call.method === 'PATCH');
+    expect(patch?.body).toEqual({
+      defaultSchedule: { frequency: 'weekly', weekday: 3, hour: 4, minute: 0, enabled: true },
+    });
   });
 
   it('shows the permission-lost state when the session lost its admin rights', async () => {

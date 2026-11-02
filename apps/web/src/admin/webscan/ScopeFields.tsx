@@ -11,17 +11,42 @@ import { inputClass } from './components.js';
  * which list.
  */
 
+/**
+ * The id of the next row of a list.
+ *
+ * The id is a counter and never a value of the row: a row that is removed
+ * from the middle of the list takes its id with it, so the browser removes
+ * that row and keeps the value and the focus of the other ones.
+ */
+let lastRowId = 0;
+
+export function nextRowId(): number {
+  lastRowId += 1;
+  return lastRowId;
+}
+
 /** One crawl or blocked path rule, as the form holds it. */
 export interface PathRuleDraft {
+  /** The stable id of the row. */
+  id: number;
   path: string;
   kind: 'exact' | 'prefix';
 }
 
 /** One parameterized or active path rule, as the form holds it. */
 export interface ParameterRuleDraft {
+  /** The stable id of the row. */
+  id: number;
   path: string;
   /** The parameter names, separated by a space. */
   parameters: string;
+}
+
+/** One file path, as the form holds it. */
+export interface PathDraft {
+  /** The stable id of the row. */
+  id: number;
+  path: string;
 }
 
 const removeButtonClass =
@@ -40,14 +65,14 @@ export function PathRulesField({ label, rules, onChange }: PathRulesFieldProps) 
     <fieldset className="flex flex-col gap-1.5">
       <legend className="text-xs font-semibold text-ink-800 dark:text-ink-100">{label}</legend>
       {rules.map((rule, index) => (
-        <div key={index} className="flex flex-wrap items-center gap-2">
+        <div key={rule.id} className="flex flex-wrap items-center gap-2">
           <input
             aria-label={label}
             type="text"
             dir="ltr"
             value={rule.path}
             onChange={(e) =>
-              onChange(rules.map((entry, i) => (i === index ? { ...entry, path: e.target.value } : entry)))
+              onChange(rules.map((entry) => (entry.id === rule.id ? { ...entry, path: e.target.value } : entry)))
             }
             className={`${inputClass} flex-1 min-w-[10rem]`}
           />
@@ -56,8 +81,10 @@ export function PathRulesField({ label, rules, onChange }: PathRulesFieldProps) 
             value={rule.kind}
             onChange={(e) =>
               onChange(
-                rules.map((entry, i) =>
-                  i === index ? { ...entry, kind: e.target.value === 'prefix' ? 'prefix' : 'exact' } : entry,
+                rules.map((entry) =>
+                  entry.id === rule.id
+                    ? { ...entry, kind: e.target.value === 'prefix' ? 'prefix' : 'exact' }
+                    : entry,
                 ),
               )
             }
@@ -69,7 +96,7 @@ export function PathRulesField({ label, rules, onChange }: PathRulesFieldProps) 
           <button
             type="button"
             aria-label={`${t('webscanRemoveRule')}: ${rule.path || index + 1}`}
-            onClick={() => onChange(rules.filter((_, i) => i !== index))}
+            onClick={() => onChange(rules.filter((entry) => entry.id !== rule.id))}
             className={removeButtonClass}
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -78,7 +105,7 @@ export function PathRulesField({ label, rules, onChange }: PathRulesFieldProps) 
       ))}
       <button
         type="button"
-        onClick={() => onChange([...rules, { path: '', kind: 'exact' }])}
+        onClick={() => onChange([...rules, { id: nextRowId(), path: '', kind: 'exact' }])}
         className="inline-flex items-center gap-1 self-start px-3 py-1.5 text-xs font-semibold rounded-full border border-ink-300 dark:border-ink-700 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-700 dark:text-ink-300 transition-colors"
       >
         <Plus className="w-3.5 h-3.5" />
@@ -101,7 +128,7 @@ export function ParameterRulesField({ label, rules, onChange }: ParameterRulesFi
     <fieldset className="flex flex-col gap-1.5">
       <legend className="text-xs font-semibold text-ink-800 dark:text-ink-100">{label}</legend>
       {rules.map((rule, index) => (
-        <div key={index} className="flex flex-wrap items-center gap-2">
+        <div key={rule.id} className="flex flex-wrap items-center gap-2">
           <input
             aria-label={label}
             type="text"
@@ -109,7 +136,9 @@ export function ParameterRulesField({ label, rules, onChange }: ParameterRulesFi
             value={rule.path}
             onChange={(e) =>
               onChange(
-                rules.map((entry, i) => (i === index ? { ...entry, path: e.target.value } : entry)),
+                rules.map((entry) =>
+                  entry.id === rule.id ? { ...entry, path: e.target.value } : entry,
+                ),
               )
             }
             className={`${inputClass} flex-1 min-w-[10rem]`}
@@ -121,8 +150,8 @@ export function ParameterRulesField({ label, rules, onChange }: ParameterRulesFi
             value={rule.parameters}
             onChange={(e) =>
               onChange(
-                rules.map((entry, i) =>
-                  i === index ? { ...entry, parameters: e.target.value } : entry,
+                rules.map((entry) =>
+                  entry.id === rule.id ? { ...entry, parameters: e.target.value } : entry,
                 ),
               )
             }
@@ -131,7 +160,7 @@ export function ParameterRulesField({ label, rules, onChange }: ParameterRulesFi
           <button
             type="button"
             aria-label={`${t('webscanRemoveRule')}: ${rule.path || index + 1}`}
-            onClick={() => onChange(rules.filter((_, i) => i !== index))}
+            onClick={() => onChange(rules.filter((entry) => entry.id !== rule.id))}
             className={removeButtonClass}
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -140,7 +169,7 @@ export function ParameterRulesField({ label, rules, onChange }: ParameterRulesFi
       ))}
       <button
         type="button"
-        onClick={() => onChange([...rules, { path: '', parameters: '' }])}
+        onClick={() => onChange([...rules, { id: nextRowId(), path: '', parameters: '' }])}
         className="inline-flex items-center gap-1 self-start px-3 py-1.5 text-xs font-semibold rounded-full border border-ink-300 dark:border-ink-700 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-700 dark:text-ink-300 transition-colors"
       >
         <Plus className="w-3.5 h-3.5" />
@@ -152,8 +181,8 @@ export function ParameterRulesField({ label, rules, onChange }: ParameterRulesFi
 
 export interface FilePathsFieldProps {
   label: string;
-  paths: string[];
-  onChange: (paths: string[]) => void;
+  paths: PathDraft[];
+  onChange: (paths: PathDraft[]) => void;
 }
 
 export function FilePathsField({ label, paths, onChange }: FilePathsFieldProps) {
@@ -162,20 +191,22 @@ export function FilePathsField({ label, paths, onChange }: FilePathsFieldProps) 
   return (
     <fieldset className="flex flex-col gap-1.5">
       <legend className="text-xs font-semibold text-ink-800 dark:text-ink-100">{label}</legend>
-      {paths.map((path, index) => (
-        <div key={index} className="flex flex-wrap items-center gap-2">
+      {paths.map((row, index) => (
+        <div key={row.id} className="flex flex-wrap items-center gap-2">
           <input
             aria-label={label}
             type="text"
             dir="ltr"
-            value={path}
-            onChange={(e) => onChange(paths.map((entry, i) => (i === index ? e.target.value : entry)))}
+            value={row.path}
+            onChange={(e) =>
+              onChange(paths.map((entry) => (entry.id === row.id ? { ...entry, path: e.target.value } : entry)))
+            }
             className={`${inputClass} flex-1 min-w-[10rem]`}
           />
           <button
             type="button"
-            aria-label={`${t('webscanRemoveRule')}: ${path || index + 1}`}
-            onClick={() => onChange(paths.filter((_, i) => i !== index))}
+            aria-label={`${t('webscanRemoveRule')}: ${row.path || index + 1}`}
+            onClick={() => onChange(paths.filter((entry) => entry.id !== row.id))}
             className={removeButtonClass}
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -184,7 +215,7 @@ export function FilePathsField({ label, paths, onChange }: FilePathsFieldProps) 
       ))}
       <button
         type="button"
-        onClick={() => onChange([...paths, ''])}
+        onClick={() => onChange([...paths, { id: nextRowId(), path: '' }])}
         className="inline-flex items-center gap-1 self-start px-3 py-1.5 text-xs font-semibold rounded-full border border-ink-300 dark:border-ink-700 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-700 dark:text-ink-300 transition-colors"
       >
         <Plus className="w-3.5 h-3.5" />

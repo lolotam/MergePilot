@@ -4,21 +4,22 @@ import type {
   WebScanScope,
   WebScanScopeInput,
 } from '@mergepilot/app/contract';
-import type { ParameterRuleDraft, PathRuleDraft } from './ScopeFields.js';
+import { nextRowId, type ParameterRuleDraft, type PathDraft, type PathRuleDraft } from './ScopeFields.js';
 
 /**
  * The scope of a site, as the form holds it.
  *
  * The scope is a list of rules, and the form edits them as text: an empty row
  * is dropped and a path is trimmed, so the stored scope never holds a blank
- * rule.
+ * rule. Every row carries an id of its own, so a row that is removed from the
+ * middle of a list does not move the rows after it.
  */
 export interface ScopeDraft {
   crawlPaths: PathRuleDraft[];
   blockedPaths: PathRuleDraft[];
   parameterizedPaths: ParameterRuleDraft[];
   activePaths: ParameterRuleDraft[];
-  extraFilePaths: string[];
+  extraFilePaths: PathDraft[];
 }
 
 /** The scope of a new site: empty, as the ADR requires. */
@@ -34,17 +35,19 @@ export function emptyScopeDraft(): ScopeDraft {
 
 export function toScopeDraft(scope: WebScanScope): ScopeDraft {
   return {
-    crawlPaths: scope.crawlPaths.map((rule) => ({ path: rule.path, kind: rule.kind })),
-    blockedPaths: scope.blockedPaths.map((rule) => ({ path: rule.path, kind: rule.kind })),
+    crawlPaths: scope.crawlPaths.map((rule) => ({ id: nextRowId(), path: rule.path, kind: rule.kind })),
+    blockedPaths: scope.blockedPaths.map((rule) => ({ id: nextRowId(), path: rule.path, kind: rule.kind })),
     parameterizedPaths: scope.parameterizedPaths.map((rule) => ({
+      id: nextRowId(),
       path: rule.path,
       parameters: rule.parameters.join(' '),
     })),
     activePaths: scope.activePaths.map((rule) => ({
+      id: nextRowId(),
       path: rule.path,
       parameters: rule.parameters.join(' '),
     })),
-    extraFilePaths: [...scope.extraFilePaths],
+    extraFilePaths: scope.extraFilePaths.map((path) => ({ id: nextRowId(), path })),
   };
 }
 
@@ -70,7 +73,7 @@ export function toScopeInput(draft: ScopeDraft): WebScanScopeInput {
     blockedPaths: toPathRules(draft.blockedPaths),
     parameterizedPaths: toParameterRules(draft.parameterizedPaths),
     activePaths: toParameterRules(draft.activePaths),
-    extraFilePaths: draft.extraFilePaths.map((path) => path.trim()).filter((path) => path !== ''),
+    extraFilePaths: draft.extraFilePaths.map((row) => row.path.trim()).filter((path) => path !== ''),
   };
 }
 
@@ -90,7 +93,7 @@ export function scopePathsValid(draft: ScopeDraft): boolean {
     ...draft.blockedPaths.map((rule) => rule.path),
     ...draft.parameterizedPaths.map((rule) => rule.path),
     ...draft.activePaths.map((rule) => rule.path),
-    ...draft.extraFilePaths,
+    ...draft.extraFilePaths.map((row) => row.path),
   ];
   return paths.every((path) => path.trim() === '' || path.trim().startsWith('/'));
 }

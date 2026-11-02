@@ -95,7 +95,15 @@ export function SiteForm({
     const base = site?.schedule ?? globalSchedule;
     return base
       ? toScheduleDraft(base)
-      : { frequency: 'daily' as const, weekday: 0, dayOfMonth: 1, hour: 0, minute: 0, enabled: false };
+      : {
+          frequency: 'daily' as const,
+          weekday: 0,
+          dayOfMonth: 1,
+          hour: 0,
+          minute: 0,
+          enabled: false,
+          anchorDate: undefined,
+        };
   });
   const [authorized, setAuthorized] = useState(false);
   const [errors, setErrors] = useState<{ hostname?: string; baseUrl?: string; path?: string; authorization?: string }>({});

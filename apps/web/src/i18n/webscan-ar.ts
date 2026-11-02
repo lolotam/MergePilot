@@ -150,10 +150,10 @@ export const arWebScan = {
   webscanParametersHint: 'افصل أسماء المعاملات بمسافة.',
   webscanAddRule: 'إضافة',
   webscanRemoveRule: 'إزالة',
-  webscanAuthorizationLabel: 'أنا يملك هذا الموقع أو عندي إذن صريح لاختباره',
+  webscanAuthorizationLabel: 'أنا أملك هذا الموقع أو عندي إذن صريح لاختباره',
   webscanAuthorizationRequired: 'التأكيد ده مطلوب قبل الحفظ.',
   webscanGetOnlyNotice:
-    'الفحص بيبعت طلبات GET و HEAD بس، ومش بيبعت ولا فورم ولا تسجيل دخول. وبالرغم من كده، طلب GET ممكن يكون ليه副作用 على موقع مكتوب بشكل سيء.',
+    'الفحص بيبعت طلبات GET و HEAD بس، ومش بيبعت ولا فورم ولا تسجيل دخول. وبالرغم من كده، طلب GET ممكن يكون ليه آثار جانبية على موقع مكتوب بشكل سيء.',
   webscanInvalidHostname: 'اسم المضيف لازم يكون بحروف صغيرة ومن غير مسار.',
   webscanInvalidBaseUrl:
     'الرابط الأساسي لازم يكون http أو https ومن غير بيانات دخول ولا استعلام ولا جزء.',

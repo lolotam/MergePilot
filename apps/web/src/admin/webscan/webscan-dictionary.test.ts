@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ar } from '../../i18n/ar.js';
 import { en } from '../../i18n/en.js';
+import { arWebScan } from '../../i18n/webscan-ar.js';
+import { enWebScan } from '../../i18n/webscan-en.js';
 
 /**
  * The dictionary of the website scan area.
@@ -9,6 +11,10 @@ import { en } from '../../i18n/en.js';
  * the area does: the audit log is immutable, so no language may say that it
  * is deleted.
  */
+
+/** A character of a script that no language of the area is written in. */
+const FOREIGN_SCRIPT = /[\u3000-\u9FFF\uAC00-\uD7AF]/;
+
 describe('the dictionary of the website scan', () => {
   it('has every key of the area in both languages', () => {
     const arKeys = Object.keys(ar)
@@ -35,5 +41,18 @@ describe('the dictionary of the website scan', () => {
     expect(text).not.toContain('يتمسح');
     expect(text).toContain('مش بيتعدّل');
     expect(text).toContain('مش بيتشال');
+  });
+
+  it('writes no character of another script in the copy of the area', () => {
+    const offenders = [
+      ...Object.entries(arWebScan)
+        .filter(([, value]) => FOREIGN_SCRIPT.test(value))
+        .map(([key]) => `ar:${key}`),
+      ...Object.entries(enWebScan)
+        .filter(([, value]) => FOREIGN_SCRIPT.test(value))
+        .map(([key]) => `en:${key}`),
+    ];
+
+    expect(offenders).toEqual([]);
   });
 });

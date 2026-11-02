@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useToast } from '../../components/Toast.js';
 import { useI18n } from '../../i18n/context.js';
 import { FindingsPanel } from './FindingsPanel.js';
@@ -54,9 +54,13 @@ export function ScanPanel() {
   useScanEvents(scanId, setProgress);
 
   // The site the panel works on right now: the answer of a request that
-  // belongs to another site is never installed.
+  // belongs to another site is never installed. The ref follows the site in
+  // an effect and never in the render body, so a render that React replays
+  // or discards never moves it.
   const currentSiteId = useRef(siteId);
-  currentSiteId.current = siteId;
+  useLayoutEffect(() => {
+    currentSiteId.current = siteId;
+  }, [siteId]);
 
   // Another site is another target: the confirmation of one site never
   // authorizes another one, the key of one intent never starts another one,

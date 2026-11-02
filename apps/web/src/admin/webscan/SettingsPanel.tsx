@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   WebScanLimitField,
   WebScanLimits,
@@ -22,10 +22,10 @@ import {
   useWebScanSettingsQuery,
   useWebScanUpdateSettingsMutation,
 } from './hooks.js';
-import { effectiveLimits } from './limits.js';
 import { useWebScanRights } from './rights.js';
 import {
   buildSettingsPatch,
+  isOlderSettings,
   rebaseDraft,
   toSettingsDraft,
   type SettingsDraft,
@@ -35,6 +35,7 @@ import { ErrorState, LoadingState, PermissionLostState } from './states.js';
 /** A change that waits for the second confirmation of a value above its default. */
 interface PendingConfirmation {
   patch: WebScanSettingsPatchRequest;
+  /** The effective limits the server bound its digest to. */
   effective: WebScanLimits;
   /** The digest the server sent with its refusal. */
   digest: string;
@@ -59,6 +60,10 @@ export function SettingsPanel() {
   // The answer of the server the draft was built from: every patch is the difference
   // to it, so a field the administrator did not touch is never sent.
   const [baseline, setBaseline] = useState<WebScanSettingsDto | null>(null);
+  // The newest baseline, for the callbacks that answer long after the click
+  // that started them: a refetch may have installed a newer answer of the
+  // server in between.
+  const baselineRef = useRef<WebScanSettingsDto | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const [failed, setFailed] = useState(false);
@@ -69,14 +74,19 @@ export function SettingsPanel() {
     // fields the administrator did not touch follow it (the kill switch included).
     if (!data) return;
     if (baseline === null || draft === null) {
+      baselineRef.current = data;
       setBaseline(data);
       setDraft(toSettingsDraft(data));
       return;
     }
-    if (data !== baseline) {
-      setDraft(rebaseDraft(baseline, draft, data));
-      setBaseline(data);
-    }
+    if (data === baseline) return;
+    // An answer that is older than the baseline was already on its way when the
+    // baseline was installed: it never moves the draft nor the baseline back.
+    if (isOlderSettings(data, baseline)) return;
+    const rebased = rebaseDraft(baseline, draft, data);
+    baselineRef.current = data;
+    setDraft(rebased);
+    setBaseline(data);
   }, [data, baseline, draft]);
 
   if (rights.lost) return <PermissionLostState />;
@@ -94,9 +104,12 @@ export function SettingsPanel() {
         onError: (err: Error) => {
           if (rights.report(err)) return;
           // Only the pause goes back to the state of the server: the other
-          // edits of the administrator stay in the form.
+          // edits of the administrator stay in the form. The state is the one of
+          // the newest answer of the server and not the one of the click: a
+          // refetch that landed while the request was on its way is newer.
+          const server = baselineRef.current;
           setDraft((current) =>
-            current === null ? current : { ...current, paused: baseline.paused },
+            current === null || server === null ? current : { ...current, paused: server.paused },
           );
           setMessage(err.message);
         },
@@ -127,10 +140,12 @@ export function SettingsPanel() {
           setFailed(true);
           return;
         }
-        const effective = effectiveLimits(baseline.limits, patch.limits);
+        // The values of the dialog are the ones of the server: they are the
+        // effective limits its digest was computed from, so the administrator
+        // confirms exactly what the server is about to store.
         setPending({
           patch,
-          effective,
+          effective: confirmation.effectiveLimits,
           digest: confirmation.digest,
           fields: confirmation.fields,
         });

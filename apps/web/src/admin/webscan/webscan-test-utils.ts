@@ -228,7 +228,9 @@ export const exceptionFixture: WebScanExceptionDto = {
   kind: 'accepted',
   reasonCategory: 'accepted_risk',
   reason: 'The site is behind a gateway that owns the header.',
-  expiresAt: '2026-12-01T00:00:00.000Z',
+  // The end date is far away on purpose: a rule that ends in the past would
+  // turn into an expired one and the tests would depend on the day they run.
+  expiresAt: '2099-12-31T00:00:00.000Z',
   createdBy: 'u-admin',
   createdAt: '2026-11-01T10:00:00.000Z',
   revokedAt: null,

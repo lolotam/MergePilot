@@ -31,6 +31,21 @@ const CATEGORIES = [
   'test_environment',
 ] as const satisfies readonly WebScanCreateExceptionRequest['reasonCategory'][];
 
+/** The errors of the two mandatory fields of the form. */
+interface FieldErrors {
+  occurrence?: string | undefined;
+  reason?: string | undefined;
+}
+
+/**
+ * The ids a control describes: its hint, and its error only when there is one.
+ *
+ * An id of an error that is not shown describes nothing, so it is left out.
+ */
+function describedBy(fieldId: string, error: string | undefined): string {
+  return error === undefined ? `${fieldId}-hint` : `${fieldId}-hint ${fieldId}-error`;
+}
+
 export function ExceptionForm({
   occurrences,
   isPending = false,
@@ -52,11 +67,11 @@ export function ExceptionForm({
   );
   const [reason, setReason] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
-  const [errors, setErrors] = useState<{ occurrence?: string; reason?: string }>({});
+  const [errors, setErrors] = useState<FieldErrors>({});
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const nextErrors: typeof errors = {};
+    const nextErrors: FieldErrors = {};
     const occurrence = occurrences.find((entry) => entry.occurrenceKey === occurrenceKey);
     if (!occurrence) nextErrors.occurrence = t('webscanExceptionOccurrenceRequired');
     if (reason.trim() === '') nextErrors.reason = t('webscanExceptionReasonRequired');
@@ -96,8 +111,14 @@ export function ExceptionForm({
         <select
           id={occurrenceId}
           value={occurrenceKey}
-          onChange={(event) => setOccurrenceKey(event.target.value)}
-          aria-describedby={`${occurrenceId}-hint ${occurrenceId}-error`}
+          onChange={(event) => {
+            setOccurrenceKey(event.target.value);
+            // The administrator fixed the field: its error is gone.
+            setErrors((current) => ({ ...current, occurrence: undefined }));
+          }}
+          aria-required="true"
+          aria-invalid={errors.occurrence === undefined ? undefined : true}
+          aria-describedby={describedBy(occurrenceId, errors.occurrence)}
           className={inputClass}
         >
           <option value="">{t('webscanExceptionOccurrencePlaceholder')}</option>
@@ -152,8 +173,14 @@ export function ExceptionForm({
           id={reasonId}
           rows={3}
           value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          aria-describedby={`${reasonId}-hint ${reasonId}-error`}
+          onChange={(event) => {
+            setReason(event.target.value);
+            // The administrator fixed the field: its error is gone.
+            setErrors((current) => ({ ...current, reason: undefined }));
+          }}
+          aria-required="true"
+          aria-invalid={errors.reason === undefined ? undefined : true}
+          aria-describedby={describedBy(reasonId, errors.reason)}
           className={`${inputClass} resize-y`}
         />
       </div>

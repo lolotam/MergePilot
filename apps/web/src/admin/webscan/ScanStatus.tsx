@@ -11,6 +11,11 @@ import type { ScanProgress } from './scan-events.js';
  * state of the scan itself comes from the server. The two are shown together:
  * the numbers move while the scan runs, and the status stays what the server
  * says.
+ *
+ * A scan that ended is not running any more, so its counters are the durable
+ * ones of the server: a stream that dropped in the gap between the last
+ * progress and the end of the scan would otherwise leave the numbers of that
+ * moment next to the final state.
  */
 
 /** The tone of every status of a scan. */
@@ -36,9 +41,11 @@ export interface ScanStatusProps {
 export function ScanStatus({ scan, progress, isStopping = false, onStop }: ScanStatusProps) {
   const { t } = useI18n();
   const active = scan.status === 'queued' || scan.status === 'running';
-  const requests = progress?.requests ?? scan.requests;
-  const pages = progress?.pages ?? scan.pages;
-  const elapsedMs = progress?.elapsedMs ?? scan.durationMs;
+  // The live counters belong to a scan that is running: a scan that ended
+  // shows the numbers the server stored with it.
+  const requests = active ? (progress?.requests ?? scan.requests) : scan.requests;
+  const pages = active ? (progress?.pages ?? scan.pages) : scan.pages;
+  const elapsedMs = active ? (progress?.elapsedMs ?? scan.durationMs) : scan.durationMs;
   const partial = (scan.coverageSummary ?? []).some((entry) => entry.outcome !== 'checked');
   const reason = scan.stopReason ?? scan.failReason;
   const reasonKey = scanReasonKey(reason);

@@ -42,6 +42,7 @@ describe('the sites of the website scan', () => {
     renderWithProviders(<SitesPanel />);
 
     expect(await screen.findByText('Loading...')).toBeTruthy();
+    expect(screen.getByRole('status')).toBeTruthy();
   });
 
   it('shows the empty state when no site is registered', async () => {    installFetch((call) =>
@@ -61,6 +62,7 @@ describe('the sites of the website scan', () => {
     expect(
       await screen.findByText('Your platform admin rights are gone, so this area is not available.'),
     ).toBeTruthy();
+    expect(screen.getByRole('alert')).toBeTruthy();
   });
 
   it('refuses a registration without the authorization confirmation', async () => {
@@ -256,6 +258,73 @@ describe('the sites of the website scan', () => {
     expect(patches).toHaveLength(0);
   });
 
+  it('removes the row of the middle of a list and keeps the values of the other rows', async () => {
+    answerWithFixtures();
+    const user = userEvent.setup();
+    renderWithProviders(<SitesPanel />);
+
+    await user.click(await screen.findByRole('button', { name: 'Add site' }));
+    const crawlPaths = within(screen.getByRole('group', { name: 'Crawl paths' }));
+    for (const path of ['/a', '/b', '/c']) {
+      await user.click(crawlPaths.getByRole('button', { name: 'Add' }));
+      const inputs = crawlPaths.getAllByLabelText('Crawl paths');
+      await user.type(inputs[inputs.length - 1]!, path);
+    }
+    const values = () =>
+      crawlPaths.getAllByLabelText('Crawl paths').map((input) => (input as HTMLInputElement).value);
+    expect(values()).toEqual(['/a', '/b', '/c']);
+
+    const middle = crawlPaths.getAllByLabelText('Crawl paths')[1]!;
+    await user.click(crawlPaths.getByRole('button', { name: 'Remove: /b' }));
+
+    // The row of the middle is gone with its own input.
+    expect(document.body.contains(middle)).toBe(false);
+    // The other rows keep their own values.
+    expect(values()).toEqual(['/a', '/c']);
+  });
+
+  it('goes back to the first page when the last site of the last page is removed', async () => {
+    let all = Array.from({ length: 26 }, (_, index) => ({
+      ...siteFixture,
+      id: `site-${index + 1}`,
+      hostname: `site-${index + 1}.example.com`,
+    }));
+    const calls = installFetch((call) => {
+      if (call.url.startsWith('/api/admin/web-scan/settings')) return jsonResponse(settingsFixture);
+      if (call.method === 'DELETE') {
+        all = all.slice(0, -1);
+        return jsonResponse(siteFixture);
+      }
+      if (call.method === 'GET') {
+        const offset = Number(new URL(call.url, 'http://local').searchParams.get('offset') ?? 0);
+        return jsonResponse({
+          sites: all.slice(offset, offset + 25),
+          total: all.length,
+          limit: 25,
+          offset,
+        });
+      }
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SitesPanel />);
+
+    await screen.findByText('site-1.example.com');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('site-26.example.com')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Remove: site-26.example.com' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(calls.some((call) => call.method === 'DELETE')).toBe(true));
+    // The page that is empty is left behind: the list goes back to the first page.
+    await waitFor(() => expect(screen.getByText('site-1.example.com')).toBeTruthy());
+    const siteCalls = calls.filter((call) => call.method === 'GET' && call.url.includes('/sites?'));
+    expect(siteCalls[siteCalls.length - 1]?.url).toContain('offset=0');
+    expect(screen.queryByText('site-26.example.com')).toBeNull();
+  });
+
   it('shows the error state when the global policy cannot be read', async () => {
     installFetch((call) =>
       call.url.startsWith('/api/admin/web-scan/settings')
@@ -267,6 +336,7 @@ describe('the sites of the website scan', () => {
     // The policy decides the rule every site inherits, so the list waits for
     // it instead of showing rules that do not exist.
     expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+    expect(screen.getByRole('alert')).toBeTruthy();
     expect(screen.queryByText('example.com')).toBeNull();
   });
 

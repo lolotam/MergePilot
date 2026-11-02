@@ -62,6 +62,48 @@ describe('the exceptions of the website scan', () => {
     expect(screen.getByText('In force')).toBeTruthy();
   });
 
+  it('gives the table of the exceptions an accessible name', async () => {
+    installFetch(answerWithFixtures);
+    const user = userEvent.setup();
+    renderExceptionsPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+
+    expect(await screen.findByRole('table', { name: 'Exceptions' })).toBeTruthy();
+  });
+
+  it('marks the mandatory fields as invalid until the administrator fixes them', async () => {
+    installFetch(answerWithFixtures);
+    const user = userEvent.setup();
+    renderExceptionsPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+    await user.click(await screen.findByRole('button', { name: 'Add an exception' }));
+
+    const form = screen.getByRole('form', { name: 'Add an exception' });
+    const finding = within(form).getByLabelText('Finding');
+    const reason = within(form).getByLabelText('Reason');
+
+    expect(finding.getAttribute('aria-required')).toBe('true');
+    expect(reason.getAttribute('aria-required')).toBe('true');
+    expect(finding.hasAttribute('aria-invalid')).toBe(false);
+    expect(reason.hasAttribute('aria-invalid')).toBe(false);
+    expect(finding.getAttribute('aria-describedby')).not.toContain('-error');
+
+    await user.click(within(form).getByRole('button', { name: 'Add an exception' }));
+
+    expect(finding.getAttribute('aria-invalid')).toBe('true');
+    expect(reason.getAttribute('aria-invalid')).toBe('true');
+    expect(finding.getAttribute('aria-describedby')).toContain('-error');
+
+    // The administrator fixed the reason: the error and the attribute are gone.
+    await user.type(reason, 'The header is set by the CDN.');
+
+    expect(reason.hasAttribute('aria-invalid')).toBe(false);
+    expect(reason.getAttribute('aria-describedby')).not.toContain('-error');
+    expect(within(form).queryByText('The reason is required.')).toBeNull();
+  });
+
   it('adds an exception with its category, its reason and its end date', async () => {
     const calls = installFetch(answerWithFixtures);
     const user = userEvent.setup();

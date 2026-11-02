@@ -4,6 +4,7 @@ import type {
   WebScanCreateSiteRequest,
   WebScanEnqueueManualRequest,
   WebScanLimitField,
+  WebScanLimits,
   WebScanSettingsPatchRequest,
   WebScanSiteDto,
   WebScanUpdateSiteRequest,
@@ -13,6 +14,7 @@ import { webScanApi } from '../../api/webscan.js';
 import { useToast } from '../../components/Toast.js';
 import { useI18n } from '../../i18n/context.js';
 import { WEB_SCAN_LIMIT_ROWS } from './limit-rows.js';
+import { WEB_SCAN_LIMIT_SPECS } from './limits.js';
 
 /** The page size of the sites list. */
 export const WEB_SCAN_SITES_PAGE_SIZE = 25;
@@ -75,40 +77,67 @@ export function needsAboveDefaultConfirmation(error: unknown): boolean {
  * The second confirmation of a value above its default, as the server sent it.
  *
  * The server is the only authority of the digest: it binds the confirmation to
- * the effective limits it is about to store, and it hands the digest and the
- * names of the fields that are above their default back with the refusal. The
- * dashboard never computes them itself, so it can never confirm a different
- * set of values than the one the server checks.
+ * the effective limits it is about to store, and it hands the digest, the names
+ * of the fields that are above their default and the effective limits
+ * themselves back with the refusal. The dashboard never computes them itself,
+ * so it can never confirm a different set of values than the one the server
+ * checks.
  */
 export interface AboveDefaultConfirmation {
   /** The digest of the effective limits, sent back unchanged. */
   digest: string;
   /** The limit fields that are above their default. */
   fields: WebScanLimitField[];
+  /** The effective limits the digest was computed from. */
+  effectiveLimits: WebScanLimits;
 }
 
 /** The limit fields the dashboard knows, by name. */
 const KNOWN_LIMIT_FIELDS = new Set<string>(WEB_SCAN_LIMIT_ROWS.map((row) => row.field));
 
 /**
+ * Whether a value is the whole effective limits of the server.
+ *
+ * A refusal that carries no limits is not a confirmation: the panel shows its
+ * own error instead of a dialog of values nobody can check.
+ */
+function isEffectiveLimits(value: unknown): value is WebScanLimits {
+  if (typeof value !== 'object' || value === null) return false;
+  const limits = value as Record<string, unknown>;
+  return (Object.keys(WEB_SCAN_LIMIT_SPECS) as (keyof WebScanLimits)[]).every((field) => {
+    const number = limits[field];
+    const spec = WEB_SCAN_LIMIT_SPECS[field];
+    return (
+      typeof number === 'number' &&
+      Number.isInteger(number) &&
+      number >= spec.min &&
+      number <= spec.max
+    );
+  });
+}
+
+/**
  * The confirmation the server sent with its refusal, when it sent a usable one.
  *
- * A refusal without a digest or without the fields is not a confirmation: the
- * panel shows its own error instead of resending a request it cannot build.
+ * A refusal without a digest, without the fields or without the effective
+ * limits is not a confirmation: the panel shows its own error instead of
+ * resending a request it cannot build.
  */
 export function aboveDefaultConfirmation(error: unknown): AboveDefaultConfirmation | undefined {
   if (!(error instanceof ApiClientError)) return undefined;
   if (error.code !== ABOVE_DEFAULT_CONFIRMATION_CODE) return undefined;
   const digest = error.details['digest'];
   const fields = error.details['fieldsAboveDefault'];
+  const limits = error.details['effectiveLimits'];
   if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) return undefined;
   if (!Array.isArray(fields)) return undefined;
+  if (!isEffectiveLimits(limits)) return undefined;
   const parsed: WebScanLimitField[] = [];
   for (const field of fields) {
     if (typeof field !== 'string' || !KNOWN_LIMIT_FIELDS.has(field)) return undefined;
     parsed.push(field as WebScanLimitField);
   }
-  return { digest, fields: parsed };
+  return { digest, fields: parsed, effectiveLimits: limits };
 }
 
 /**

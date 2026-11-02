@@ -192,6 +192,12 @@ export type WebScanLimitField = z.infer<typeof WebScanLimitFieldSchema>;
  * that are above their default. The administrator confirms those fields, and
  * the dashboard re-sends the same patch with `limitConfirmation: { digest }`.
  *
+ * `effectiveLimits` is the whole effective limits the digest was computed
+ * from: the stored row with the submitted fields on top. The dashboard shows
+ * those exact values in the confirmation, so it never confirms a digest of a
+ * set of values other than the one it shows (the row of the server may have
+ * moved since the dashboard read it).
+ *
  * This is the body of the above-default confirmation only. The other
  * `confirmation_required` answers (the site scope and schedule one) carry no
  * digest, so they keep the plain `WebScanErrorBodySchema` shape.
@@ -202,6 +208,7 @@ export const WebScanConfirmationRequiredBodySchema = z.strictObject({
     message: z.string(),
     digest: WebScanDigestSchema,
     fieldsAboveDefault: z.array(WebScanLimitFieldSchema),
+    effectiveLimits: WebScanLimitsSchema,
   }),
 });
 export type WebScanConfirmationRequiredBody = z.infer<

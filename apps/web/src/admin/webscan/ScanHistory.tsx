@@ -34,6 +34,7 @@ export function ScanHistory({
   return (
     <TableCard footer={<OffsetPager offset={offset} limit={limit} count={scans.length} onChange={onChangeOffset} />}>
       <table className="w-full text-start text-xs">
+        <caption className="sr-only">{t('webscanScanHistory')}</caption>
         <thead className={theadClass}>
           <tr>
             <th className={thClass}>{t('webscanColStatus')}</th>

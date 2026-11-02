@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   WebScanCreateSiteRequest,
   WebScanSchedule,
@@ -12,6 +12,7 @@ import { ConfirmDialog } from './ConfirmDialog.js';
 import { SiteForm, type SiteFormPayload } from './SiteForm.js';
 import { SourceBadge } from './components.js';
 import {
+  WEB_SCAN_SITES_PAGE_SIZE,
   isPermissionLost,
   useWebScanCreateSiteMutation,
   useWebScanDeleteSiteMutation,
@@ -121,6 +122,14 @@ export function SitesPanel() {
   };
 
   const sites = data?.sites ?? [];
+  const limit = data?.limit ?? WEB_SCAN_SITES_PAGE_SIZE;
+
+  // A page that is empty is the end of the list: the administrator goes back
+  // to the page before it, so the pager never disappears under an empty page.
+  useEffect(() => {
+    if (isLoading || isError) return;
+    if (sites.length === 0 && offset > 0) setOffset(Math.max(offset - limit, 0));
+  }, [isLoading, isError, sites.length, offset, limit]);
 
   let body;
   if (isLoading) body = <LoadingState />;

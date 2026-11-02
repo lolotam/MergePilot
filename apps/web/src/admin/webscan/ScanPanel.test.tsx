@@ -219,7 +219,7 @@ describe('the scan panel of the website scan', () => {
 
     await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
 
-    const history = await screen.findByRole('table');
+    const history = await screen.findByRole('table', { name: 'Scan history' });
     const states = within(history)
       .getAllByText(/Queued|Running|Completed|Stopped|Failed/)
       .map((node) => node.textContent);

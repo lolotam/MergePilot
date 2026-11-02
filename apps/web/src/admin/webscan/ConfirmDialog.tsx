@@ -8,6 +8,10 @@ import { useI18n } from '../../i18n/context.js';
  * The shared modal does not move the focus, so the dialog does it here: the
  * confirm button takes the focus when the dialog opens, and the keyboard can
  * reach the whole form from there.
+ *
+ * A request that is on its way cannot be dismissed: the dialog stays open
+ * until the server answers, so the administrator never closes a decision that
+ * is already running.
  */
 export interface ConfirmDialogProps {
   isOpen: boolean;
@@ -38,8 +42,14 @@ export function ConfirmDialog({
     if (isOpen) confirmRef.current?.focus();
   }, [isOpen]);
 
+  /** The dismissal of the dialog: it does nothing while the request runs. */
+  const dismiss = () => {
+    if (isPending) return;
+    onClose();
+  };
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={title} description={description ?? ''}>
+    <Modal isOpen={isOpen} onClose={dismiss} title={title} description={description ?? ''}>
       <form
         className="flex flex-col gap-4 mt-2"
         onSubmit={(e) => {
@@ -51,8 +61,9 @@ export function ConfirmDialog({
         <div className="flex justify-end gap-2.5">
           <button
             type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-medium rounded-full border border-ink-300 dark:border-ink-700 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-700 dark:text-ink-300 transition-colors"
+            onClick={dismiss}
+            disabled={isPending}
+            className="px-4 py-2 text-xs font-medium rounded-full border border-ink-300 dark:border-ink-700 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-700 dark:text-ink-300 disabled:opacity-50 disabled:pointer-events-none transition-colors"
           >
             {t('cancel')}
           </button>

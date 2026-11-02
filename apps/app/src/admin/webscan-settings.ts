@@ -124,13 +124,14 @@ export function registerWebScanSettingsRoutes(
         : body.limitConfirmation?.digest === limitsConfirmationDigest(effective);
       if (!confirmed) {
         // The dashboard cannot compute the digest itself, so the answer carries
-        // it: the digest of the effective limits and the fields above their
-        // default. The administrator confirms, and the same patch is re-sent
-        // with that digest.
+        // it: the digest of the effective limits, the fields above their
+        // default and the effective limits themselves. The administrator
+        // confirms, and the same patch is re-sent with that digest.
         return sendWebScanConfirmationRequired(
           reply,
           limitsConfirmationDigest(effective),
           limitsAboveDefault(effective),
+          effective,
         );
       }
     }

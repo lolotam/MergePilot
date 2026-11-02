@@ -38,6 +38,7 @@ export function AuditPanel() {
       ) : (
         <TableCard footer={<Pager page={audit.data} onChange={setOffset} />}>
           <table className="w-full text-start text-xs">
+            <caption className="sr-only">{t('webscanAuditTitle')}</caption>
             <thead className={theadClass}>
               <tr>
                 <th className={thClass}>{t('webscanColTime')}</th>

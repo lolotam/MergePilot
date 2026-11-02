@@ -6,6 +6,7 @@ import {
   WebScanIdSchema,
   type WebScanConfirmationRequiredBody,
   type WebScanLimitField,
+  type WebScanLimits,
 } from '../api/contract-webscan.js';
 import { WebScanScheduleError } from '../webscan/schedule.js';
 import {
@@ -44,12 +45,17 @@ export function sendWebScanValidationError(reply: FastifyReply, error: z.ZodErro
  * their default. The administrator confirms those fields, and the dashboard
  * re-sends the same patch with `limitConfirmation: { digest }`.
  *
+ * The effective limits travel with the refusal: they are the values the
+ * digest was computed from, so the dashboard shows exactly what the server is
+ * about to store, even when the row moved since the dashboard read it.
+ *
  * The digest and the field names are not secrets; the message names no value.
  */
 export function sendWebScanConfirmationRequired(
   reply: FastifyReply,
   digest: string,
   fieldsAboveDefault: readonly WebScanLimitField[],
+  effectiveLimits: WebScanLimits,
 ): FastifyReply {
   const body: WebScanConfirmationRequiredBody = {
     error: {
@@ -57,6 +63,7 @@ export function sendWebScanConfirmationRequired(
       message: 'A value above its default needs a confirmation bound to the submitted values',
       digest,
       fieldsAboveDefault: [...fieldsAboveDefault],
+      effectiveLimits: { ...effectiveLimits },
     },
   };
   return reply.status(422).send(body);

@@ -1,4 +1,4 @@
-import type { WebScanLimits, WebScanLimitsPatch } from '@mergepilot/app/contract';
+import type { WebScanLimits } from '@mergepilot/app/contract';
 
 /**
  * The documented bounds of every scan limit (ADR-0052 section 5).
@@ -38,22 +38,4 @@ export function limitsAboveDefault(limits: WebScanLimits): (keyof WebScanLimits)
   return (Object.keys(WEB_SCAN_LIMIT_SPECS) as (keyof WebScanLimits)[]).filter(
     (field) => limits[field] > WEB_SCAN_LIMIT_SPECS[field].default,
   );
-}
-
-/**
- * The effective limits of a patch: the stored limits with the submitted fields
- * on top. It is the same resolution the server does before it checks the
- * confirmation, so the values the administrator sees are the values the server
- * is about to store.
- */
-export function effectiveLimits(base: WebScanLimits, patch: WebScanLimitsPatch | undefined): WebScanLimits {
-  return {
-    maxRequests: patch?.maxRequests ?? base.maxRequests,
-    maxPages: patch?.maxPages ?? base.maxPages,
-    maxActiveLinks: patch?.maxActiveLinks ?? base.maxActiveLinks,
-    requestsPerSecond: patch?.requestsPerSecond ?? base.requestsPerSecond,
-    requestTimeoutMs: patch?.requestTimeoutMs ?? base.requestTimeoutMs,
-    maxResponseBytes: patch?.maxResponseBytes ?? base.maxResponseBytes,
-    totalTimeoutMs: patch?.totalTimeoutMs ?? base.totalTimeoutMs,
-  };
 }
