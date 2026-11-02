@@ -95,13 +95,56 @@ export interface WebScanSiteAuthorization {
   scopeVersion: number;
 }
 
-/** The state of one alert episode of a site. */
+/** The observed state of the issue of one alert episode. */
+export type WebScanAlertIssueState = 'none' | 'open' | 'closed' | 'unknown' | 'missing';
+
+/**
+ * The state of one alert episode of a site.
+ *
+ * The episode is the bounded, per-`issue_key` alert state of ADR-0052 section 8.
+ * It lives on the site row, so it survives the expiry of the snapshots it was
+ * derived from and it is never touched by the retention of the occurrences.
+ *
+ * The fields below `lastChangedAt` are optional and additive: an episode row
+ * that was written before them existed keeps the old meaning, and an absent
+ * field never invents a state. A legacy episode without `issueState` carries
+ * the state of `state`, so it is a delivered issue that is never reopened.
+ */
 export interface WebScanAlertEpisode {
   episodeKey: string;
   issueKey: string;
+  /**
+   * The last known state of the issue of the episode: `open` while the issue was
+   * observed open, `closed` once it was observed closed.
+   */
   state: 'open' | 'closed';
+  /** The occurrences that joined the episode. */
   occurrenceKeys: string[];
+  /** When the episode last changed. */
   lastChangedAt: string;
+  /**
+   * The observed state of the issue of the episode.
+   *
+   * - `none`: the episode never had an issue.
+   * - `open` and `closed`: the issue exists.
+   * - `unknown`: the state of the issue could not be established.
+   * - `missing`: the issue was confirmed missing by a marker reconciliation.
+   */
+  issueState?: WebScanAlertIssueState;
+  /** Whether a delivery of an issue has been requested for this episode. */
+  issueRequested?: boolean;
+  /** The resolution the episode already reported on its issue. */
+  outcome?: 'fixed' | 'resolved-by-exception';
+  /** Whether the group of the episode reached a terminal resolution. */
+  resolved?: boolean;
+  /** The highest severity of the eligible members when the episode started. */
+  severity?: Severity;
+  /** The highest validation of the eligible members when the episode started. */
+  validation?: Validation;
+  /** How many episodes this issue key has started. */
+  generation?: number;
+  /** When the episode started. */
+  createdAt?: string;
 }
 
 /** A registered site. */
