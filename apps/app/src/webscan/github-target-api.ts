@@ -287,7 +287,11 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
           // the call of the api throws the class of the failure and nothing else.
           throw new GitHubTargetApiError('network');
         }
-        for (const repository of payload.repositories ?? []) {
+        // Valid JSON of the wrong shape (null, a list that is not a list) is as broken
+        // an answer as a body that is not JSON.
+        const list: unknown = payload === null ? null : payload?.repositories ?? [];
+        if (!Array.isArray(list)) throw new GitHubTargetApiError('network');
+        for (const repository of list) {
           repositories.push(toRepository(repository));
         }
         nextUrl = nextLink(response);

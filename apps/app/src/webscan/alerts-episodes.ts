@@ -187,6 +187,14 @@ export interface AlertEpisodeCandidate {
    * An existing episode keeps its slot; a new one has to be admitted.
    */
   existing: boolean;
+  /**
+   * Whether this evaluation hands the episode an action to deliver.
+   *
+   * An episode with a delivery under way keeps its slot even when it is resolved:
+   * the slot goes only once nothing is left to deliver for it, otherwise the action
+   * would be dropped together with the episode.
+   */
+  pending?: boolean;
 }
 
 /**
@@ -252,6 +260,20 @@ function capCandidates(
 }
 
 /**
+ * Whether a resolved episode has nothing left to deliver, so its slot may go.
+ *
+ * An episode that resolved while a scheduled scan could not comment (a manual scan
+ * marks it resolved and posts nothing) still owes its "fixed" or "resolved by
+ * exception" comment while its issue exists, so it keeps its slot until the comment
+ * is recorded; an unknown issue keeps it too. An episode without an issue owes nothing.
+ */
+function isSettled(episode: WebScanAlertEpisode): boolean {
+  if (episode.resolved !== true || episode.issueState === 'unknown') return false;
+  if (episode.outcome !== undefined) return true;
+  return episode.issueState === 'none' || episode.issueState === 'missing';
+}
+
+/**
  * The index of the resolved episode that the eviction order releases first.
  *
  * The oldest resolved episode goes first, and the key of the episode breaks a
@@ -265,8 +287,9 @@ function releasedIndex(candidates: readonly AlertEpisodeCandidate[]): number {
   let index = -1;
   let chosen: WebScanAlertEpisode | undefined;
   for (let position = 0; position < candidates.length; position += 1) {
-    const episode = candidates[position]?.episode;
-    if (episode === undefined || episode.resolved !== true || episode.issueState === 'unknown') {
+    const candidate = candidates[position];
+    const episode = candidate?.episode;
+    if (episode === undefined || candidate?.pending === true || !isSettled(episode)) {
       continue;
     }
     if (chosen === undefined || episodeEvictionOrder(episode, chosen) < 0) {

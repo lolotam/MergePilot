@@ -115,15 +115,21 @@ export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluat
     existing: context.episodesByIssueKey.has(result.episode.issueKey),
   }));
   const episodes = admitEpisodes(
-    evaluated.map((entry) => ({ episode: entry.result.episode, existing: entry.existing })),
+    evaluated.map((entry) => ({
+      episode: entry.result.episode,
+      existing: entry.existing,
+      pending: entry.result.actions.length > 0,
+    })),
   );
   const admitted = new Set(episodes.map((episode) => episode.episodeKey));
 
   const actions: AlertAction[] = [];
   for (const entry of evaluated) {
-    // A new candidate that the admission refused leaves no action behind: its
-    // group is offered again on a later scan, when a slot frees up.
-    if (!entry.existing && !admitted.has(entry.result.episode.episodeKey)) {
+    // An episode that is not part of the persisted state leaves no action behind,
+    // whether it is a new candidate the admission refused (its group is offered
+    // again on a later scan) or an existing one an over-bound state dropped: an issue
+    // opened for a state that is forgotten at once would be opened again later.
+    if (!admitted.has(entry.result.episode.episodeKey)) {
       continue;
     }
     actions.push(...entry.result.actions);

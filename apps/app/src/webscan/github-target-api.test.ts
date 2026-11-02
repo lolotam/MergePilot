@@ -229,6 +229,29 @@ describe('the production GitHub boundary of the alert target', () => {
     expect(String(caught)).not.toContain(HOSTILE_TOKEN);
   });
 
+  it.each([['null', 'null'], ['a repository list that is not a list', '{"repositories":{}}']])(
+    'refuses valid JSON of the wrong shape from the repository listing (%s)',
+    async (_name, body) => {
+      const api = createGitHubTargetApi({
+        appId: '12345',
+        privateKey: PRIVATE_KEY,
+        fetchFn: (async () =>
+          new Response(body, {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })) as unknown as typeof fetch,
+      });
+      let caught: unknown = null;
+      try {
+        await api.listInstallationRepositories(HOSTILE_TOKEN, 101);
+      } catch (error: unknown) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(GitHubTargetApiError);
+      expect((caught as GitHubTargetApiError).status).toBe('network');
+    },
+  );
+
   it('tells a timeout and a network error apart', async () => {
     const timeout = createGitHubTargetApi({
       appId: '12345',

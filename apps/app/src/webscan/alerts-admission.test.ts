@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { RetainedOccurrence, Severity, Validation } from '@mergepilot/webscan';
 import { MAX_ALERT_EPISODES_PER_SITE } from './alerts-episodes.js';
+import { evaluateAlertEpisodes } from './alerts.js';
 import {
   actionsOfKind,
+  DASHBOARD_BASE_URL,
   day,
   outstanding,
   provenFixed,
   runAlertScenario,
+  SITE_ID,
+  THRESHOLDS,
 } from './alerts.fixtures.js';
 
 /**
@@ -214,6 +218,92 @@ describe('the admission of the episodes of the website scanner', () => {
     expect(scenario.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
     expect(admitted.has(issueKeyOf(0))).toBe(true);
     expect(admitted.has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(false);
+  });
+
+  it('keeps the slot of an episode a manual scan resolved until its comment is recorded', () => {
+    const resolvedGroup = fixedGroup(0, { severity: 'high', validation: 'Confirmed' });
+    const scenario = runAlertScenario(
+      [
+        { trigger: 'scheduled', at: day(1), occurrences: crowdedGroups() },
+        {
+          trigger: 'scheduled',
+          at: day(2),
+          occurrences: crowdedGroups(),
+          issueStates: [{ issueKey: issueKeyOf(0), state: 'open' }],
+        },
+        // The manual scan sees the group fixed but delivers nothing: the comment is still owed.
+        {
+          trigger: 'manual',
+          at: day(3),
+          occurrences: [resolvedGroup, ...crowdedGroups().slice(1)],
+          issueStates: [{ issueKey: issueKeyOf(0), state: 'open' }],
+        },
+        {
+          trigger: 'scheduled',
+          at: day(4),
+          occurrences: [resolvedGroup, ...crowdedGroups().slice(1)],
+          issueStates: [{ issueKey: issueKeyOf(0), state: 'open' }],
+        },
+      ],
+      { thresholds: EVERY_GROUP },
+    );
+
+    // After the manual scan the resolved episode still holds its slot.
+    const afterManual = scenario.evaluations[2]?.episodes ?? [];
+    expect(admittedKeys(afterManual).has(issueKeyOf(0))).toBe(true);
+    expect(admittedKeys(afterManual).has(issueKeyOf(MAX_ALERT_EPISODES_PER_SITE))).toBe(false);
+
+    // The next scheduled scan delivers the comment that was owed.
+    expect(actionsOfKind(scenario.actions[3] ?? [], 'fixed-comment')).toHaveLength(1);
+  });
+
+  it('opens no issue for an existing episode that a state beyond the bound drops', () => {
+    // A state written before the bound existed: one episode more than a site may keep, none notified.
+    const seeded = runAlertScenario(
+      [
+        {
+          trigger: 'manual',
+          at: day(1),
+          occurrences: Array.from({ length: MAX_ALERT_EPISODES_PER_SITE }, (_value, index) =>
+            group(index, { severity: 'high', validation: 'Confirmed' }),
+          ),
+        },
+      ],
+      { thresholds: EVERY_GROUP },
+    );
+    const template = seeded.episodes[0];
+    if (template === undefined) throw new Error('the seed holds no episode');
+    const extraIndex = MAX_ALERT_EPISODES_PER_SITE;
+    const overBound = [
+      ...seeded.episodes,
+      {
+        ...template,
+        episodeKey: `extra-episode-${extraIndex}`,
+        issueKey: issueKeyOf(extraIndex),
+        severity: 'info' as const,
+      },
+    ];
+
+    const evaluation = evaluateAlertEpisodes({
+      trigger: 'scheduled',
+      now: day(2),
+      siteId: SITE_ID,
+      dashboardBaseUrl: DASHBOARD_BASE_URL,
+      thresholds: { ...THRESHOLDS, ...EVERY_GROUP },
+      episodes: overBound,
+      occurrences: Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 1 }, (_value, index) =>
+        group(index, { severity: 'high', validation: 'Confirmed' }),
+      ),
+      exceptions: [],
+      issueStates: [],
+    });
+
+    const keptKeys = new Set(evaluation.episodes.map((episode) => episode.episodeKey));
+    expect(evaluation.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    // Every action belongs to an episode that is persisted: nothing is opened and then forgotten.
+    expect(evaluation.actions.every((action) => keptKeys.has(action.episodeKey))).toBe(true);
+    expect(keptKeys.has(`extra-episode-${extraIndex}`)).toBe(false);
+    expect(actionsOfKind(evaluation.actions, 'open-issue')).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
   });
 
   it('refuses the group with the last issue key when the groups are of the same level', () => {

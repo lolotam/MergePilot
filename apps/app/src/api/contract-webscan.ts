@@ -324,7 +324,7 @@ export const WebScanAlertEpisodeSchema = z.strictObject({
   outcome: z.enum(['fixed', 'resolved-by-exception']).optional(),
   severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
   validation: z.enum(['Confirmed', 'Likely', 'Indicator', 'Informational']).optional(),
-  generation: z.number().int().min(1).optional(),
+  generation: z.number().int().min(0).optional(),
   createdAt: z.string().optional(),
 });
 

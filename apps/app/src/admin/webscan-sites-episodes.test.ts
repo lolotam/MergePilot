@@ -134,6 +134,34 @@ describe('the alert episodes of a site', () => {
     expect(WebScanSiteDtoSchema.safeParse(response.json()).success).toBe(true);
   });
 
+  it('the first episode of a group (generation 0) answers the strict contract', async () => {
+    const created = await createSite('first-episode.example.com');
+    expect(created.statusCode).toBe(201);
+    const siteId = created.json().id as string;
+
+    // The engine starts every group at generation 0.
+    const episode: WebScanAlertEpisode = {
+      episodeKey: 'ep-first',
+      issueKey: 'issue-first',
+      state: 'open',
+      occurrenceKeys: ['occ-1'],
+      lastChangedAt: '2026-11-02T10:00:00.000Z',
+      issueState: 'none',
+      issueRequested: false,
+      resolved: false,
+      severity: 'high',
+      validation: 'Likely',
+      generation: 0,
+      createdAt: '2026-11-02T09:00:00.000Z',
+    };
+    await store.setSiteAlertEpisodes('u-admin', siteId, [episode]);
+
+    const response = await getSite(siteId);
+    expect(response.statusCode).toBe(200);
+    expect(WebScanSiteDtoSchema.safeParse(response.json()).success).toBe(true);
+    expect((response.json().alertEpisodes as WebScanAlertEpisode[])[0]?.generation).toBe(0);
+  });
+
   it('an episode without the newer fields keeps them absent', async () => {
     const created = await createSite('legacy.example.com');
     const siteId = created.json().id as string;
