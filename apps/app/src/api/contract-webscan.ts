@@ -257,9 +257,17 @@ export const WebScanSettingsPatchSchema = z
     alertMinValidation: z.enum(['Confirmed', 'Likely', 'Indicator', 'Informational']).optional(),
     limitConfirmation: z.strictObject({ digest: WebScanDigestSchema }).optional(),
   })
-  .refine((value) => Object.keys(value).some((key) => key !== 'limitConfirmation'), {
-    message: 'The patch must carry at least one setting to change',
-  });
+  .refine(
+    (value) => {
+      // An empty `limits` object changes nothing, just like the confirmation alone.
+      const changesLimits = value.limits !== undefined && Object.keys(value.limits).length > 0;
+      const changesOther = Object.keys(value).some(
+        (key) => key !== 'limitConfirmation' && key !== 'limits',
+      );
+      return changesLimits || changesOther;
+    },
+    { message: 'The patch must carry at least one setting to change' },
+  );
 export type WebScanSettingsPatchRequest = z.infer<typeof WebScanSettingsPatchSchema>;
 
 /** GET and PATCH /api/admin/web-scan/settings — the effective global policy. */

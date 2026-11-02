@@ -142,7 +142,7 @@ describe('web-scan settings routes (Task 8A)', () => {
 
   it('refuses a patch that asks for nothing and writes nothing', async () => {
     const before = (await getSettings()).json();
-    for (const payload of [{}, 'null']) {
+    for (const payload of [{}, 'null', { limits: {} }]) {
       const res = await patchSettings(payload);
       expect(res.statusCode).toBe(422);
       expect(res.json().error.code).toBe('invalid_request');
