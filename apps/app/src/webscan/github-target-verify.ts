@@ -284,19 +284,9 @@ export async function revalidateBinding(
   const token = await readAdminToken(deps, input.adminUserId);
   if (token === null) return { ok: false, reason: 'no_github_account' };
 
-  let installations: UserInstallation[];
-  try {
-    installations = await deps.api.listUserInstallations(token);
-  } catch {
-    return { ok: false, reason: 'unverifiable' };
-  }
-  const own = installations.find((row) => row.id === input.binding.installationId);
-  // The installation is not in the own list of the administrator. That proves
-  // that the administrator lost the access to it, never that the installation
-  // of the App is gone: the access can come back.
-  if (own === undefined) return { ok: false, reason: 'installation_not_accessible' };
-  if (own.suspended) return { ok: false, reason: 'installation_suspended' };
-
+  // The App's own record comes first: an uninstalled App also vanishes from the
+  // administrator's list, and only the record can tell a deleted installation (404)
+  // from an administrator who merely lost access.
   let record: GitHubTargetInstallation;
   try {
     record = await deps.api.getInstallation(input.binding.installationId);
@@ -306,6 +296,19 @@ export async function revalidateBinding(
     }
     return { ok: false, reason: 'unverifiable' };
   }
+
+  let installations: UserInstallation[];
+  try {
+    installations = await deps.api.listUserInstallations(token);
+  } catch {
+    return { ok: false, reason: 'unverifiable' };
+  }
+  const own = installations.find((row) => row.id === input.binding.installationId);
+  // The installation is not in the own list of the administrator. That proves
+  // that the administrator lost the access to it, never that the installation
+  // of the App is gone (the record above answered): the access can come back.
+  if (own === undefined) return { ok: false, reason: 'installation_not_accessible' };
+  if (own.suspended) return { ok: false, reason: 'installation_suspended' };
   if (record.suspended) return { ok: false, reason: 'installation_suspended' };
   if (!record.issuesWrite) return { ok: false, reason: 'missing_issues_permission' };
   if (record.accountId !== input.binding.githubAccountId) {

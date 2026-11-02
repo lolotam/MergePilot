@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import fastify, { type FastifyInstance } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { createAuth, type Auth } from '../auth/auth.js';
@@ -65,6 +65,11 @@ describe('the alert episodes of a site', () => {
     });
     await seedAdminFixtures(handle.db);
     await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await handle.close();
   });
 
   beforeEach(async () => {

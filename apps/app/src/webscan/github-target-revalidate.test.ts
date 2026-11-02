@@ -80,7 +80,18 @@ describe('the revalidation of a stored binding', () => {
     });
     expect(isLostWebScanTargetReason('installation_not_accessible')).toBe(false);
     expect(api.installation).toBeDefined();
-    expect(api.calls).toEqual(['listUserInstallations']);
+    // The App's own record is read first, then the list of the administrator.
+    expect(api.calls).toEqual(['getInstallation', 'listUserInstallations']);
+  });
+
+  it('reports an uninstalled App as lost even though it also left the list of the administrator', async () => {
+    // Uninstalling the App removes the installation from the list of the administrator
+    // too; only the 404 of the App's own record tells that from a mere loss of access.
+    const api = happyApi();
+    api.installations = [];
+    api.failures = { getInstallation: 'not_found' };
+    expect(await revalidate(api)).toEqual({ ok: false, reason: 'installation_lost' });
+    expect(isLostWebScanTargetReason('installation_lost')).toBe(true);
   });
 
   it('tells a listing of the repositories that is gone from a lost target', async () => {

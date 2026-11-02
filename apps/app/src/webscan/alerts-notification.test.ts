@@ -152,4 +152,35 @@ describe('the single issue of a scheduled scan of the website scanner', () => {
     expect(third).toHaveLength(1);
     expect(openedIssueKey(scenario.episodes, third[0]?.episodeKey)).toBe(issueKeyOf(0));
   });
+
+  it('remembers a confirmed missing issue whose replacement was withheld', () => {
+    const scenario = runAlertScenario(
+      [
+        { trigger: 'scheduled', at: day(1), occurrences: [group(0, 'high', 'Confirmed')] },
+        {
+          trigger: 'scheduled',
+          at: day(2),
+          occurrences: [group(0, 'high', 'Confirmed'), group(1, 'critical', 'Confirmed')],
+          issueStates: [{ issueKey: issueKeyOf(0), state: 'missing' }],
+        },
+        // The next scan observes nothing about the first group: the missing state of the
+        // previous scan is still the truth, so its replacement is offered now.
+        {
+          trigger: 'scheduled',
+          at: day(3),
+          occurrences: [group(0, 'high', 'Confirmed'), group(1, 'critical', 'Confirmed')],
+        },
+      ],
+      { thresholds: EVERY_GROUP },
+    );
+
+    const afterSecond = scenario.evaluations[1]?.episodes.find(
+      (episode) => episode.issueKey === issueKeyOf(0),
+    );
+    expect(afterSecond?.issueState).toBe('missing');
+    expect(afterSecond?.issueRequested).toBe(false);
+    const third = actionsOfKind(scenario.actions[2] ?? [], 'open-issue');
+    expect(third).toHaveLength(1);
+    expect(openedIssueKey(scenario.episodes, third[0]?.episodeKey)).toBe(issueKeyOf(0));
+  });
 });

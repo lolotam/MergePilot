@@ -406,7 +406,11 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
         `${GITHUB_API}/app/installations/${installationId}`,
         appJwt(),
       );
-      return parseInstallation(payload);
+      const installation = parseInstallation(payload);
+      // The reply has to be the record of the installation that was asked for: a reply
+      // about another installation proves nothing about this one.
+      if (installation.id !== installationId) throw new GitHubTargetApiError('network');
+      return installation;
     },
 
     async getRepository(
@@ -420,7 +424,15 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
         `${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
         token,
       );
-      return parseRepository(payload);
+      const repository = parseRepository(payload);
+      // Same for the repository: the reply names the repository that was asked for.
+      if (
+        repository.owner.toLowerCase() !== owner.toLowerCase() ||
+        repository.name.toLowerCase() !== name.toLowerCase()
+      ) {
+        throw new GitHubTargetApiError('network');
+      }
+      return repository;
     },
   };
 }

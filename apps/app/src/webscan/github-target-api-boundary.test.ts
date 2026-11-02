@@ -254,4 +254,42 @@ describe('the shape of the records of GitHub', () => {
     });
     expect(result).toEqual({ ok: false, reason: 'unverifiable' });
   });
+
+  it('refuses a record of another installation than the one that was asked for', async () => {
+    const { fetchFn } = fakeFetch({
+      '/app/installations/101': {
+        status: 200,
+        body: {
+          id: 202,
+          account: { id: 401, login: 'acme' },
+          suspended_at: null,
+          permissions: { issues: 'write' },
+        },
+      },
+    });
+    const api = createGitHubTargetApi({
+      appId: '12345',
+      privateKey: PRIVATE_KEY,
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    await expect(api.getInstallation(101)).rejects.toBeInstanceOf(GitHubTargetApiError);
+  });
+
+  it('refuses a repository reply that names another repository than the one asked for', async () => {
+    const { fetchFn } = fakeFetch({
+      '/app/installations/101/access_tokens': { status: 201, body: { token: INSTALLATION_TOKEN } },
+      '/repos/acme/demo': {
+        status: 200,
+        body: { id: 7, name: 'other', private: true, visibility: 'private', owner: { id: 401, login: 'acme' } },
+      },
+    });
+    const api = createGitHubTargetApi({
+      appId: '12345',
+      privateKey: PRIVATE_KEY,
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    await expect(api.getRepository(101, 'acme', 'demo')).rejects.toBeInstanceOf(GitHubTargetApiError);
+  });
 });

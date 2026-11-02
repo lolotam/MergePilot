@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import fastify, { type FastifyInstance } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { createAuth, type Auth } from '../auth/auth.js';
@@ -89,6 +89,11 @@ describe('the owner of the repository of a site', () => {
       createdAt: new Date('2026-10-12T10:00:00.000Z'),
     });
     await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await handle.close();
   });
 
   beforeEach(async () => {

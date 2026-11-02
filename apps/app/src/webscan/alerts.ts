@@ -220,8 +220,10 @@ function withholdOpenIssue(context: AlertContext, result: IssueKeyResult): Issue
     state: result.episode.state,
     occurrenceKeys: result.episode.occurrenceKeys,
     lastChangedAt: result.episode.lastChangedAt,
-    issueState: continued ? (existing.issueState ?? 'none') : 'none',
-    issueRequested: continued ? existing.issueRequested : false,
+    // The state observed in this scan is kept (a confirmed missing issue stays missing),
+    // and nothing is claimed as requested: the next scan offers the issue again.
+    issueState: continued ? (result.episode.issueState ?? 'none') : 'none',
+    issueRequested: false,
     resolved: result.episode.resolved,
     outcome: result.episode.outcome,
     severity: result.episode.severity,
