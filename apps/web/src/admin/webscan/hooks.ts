@@ -5,6 +5,7 @@ import type {
   WebScanEnqueueManualRequest,
   WebScanLimitField,
   WebScanSettingsPatchRequest,
+  WebScanSiteDto,
   WebScanUpdateSiteRequest,
 } from '@mergepilot/app/contract';
 import { ApiClientError } from '../../api/client.js';
@@ -19,8 +20,10 @@ export const WEB_SCAN_SITES_PAGE_SIZE = 25;
 export const WEB_SCAN_SCANS_PAGE_SIZE = 20;
 /** The page size of the audit log. */
 export const WEB_SCAN_AUDIT_PAGE_SIZE = 25;
-/** How many sites the picker of the scan panels offers at once. */
+/** How many sites the picker of the scan panels asks for in one page. */
 export const WEB_SCAN_SITE_OPTIONS_LIMIT = 100;
+/** How many pages of sites the picker of the scan panels loads at most. */
+export const WEB_SCAN_SITE_OPTIONS_MAX_PAGES = 20;
 
 /**
  * A 404 from the scanner API means the session lost its platform-admin rights:
@@ -31,6 +34,36 @@ export const WEB_SCAN_SITE_OPTIONS_LIMIT = 100;
 export function isPermissionLost(error: unknown): boolean {
   return error instanceof ApiClientError && error.status === 404;
 }
+
+/** How many times a failed query of the area is tried again. */
+const WEB_SCAN_QUERY_RETRIES = 2;
+
+/** The delay before a failed query of the area is tried again. */
+const WEB_SCAN_QUERY_RETRY_DELAY_MS = 200;
+
+/**
+ * The retry policy of the queries of the area.
+ *
+ * A 404 is conclusive: the session lost its admin rights and the request
+ * would be refused again, so it is never retried. Every other failure may be
+ * transient, so it is tried again at most twice before the panel shows the
+ * error instead of stranding the administrator on a broken page.
+ */
+export function webScanRetry(failureCount: number, error: unknown): boolean {
+  if (isPermissionLost(error)) return false;
+  return failureCount < WEB_SCAN_QUERY_RETRIES;
+}
+
+/**
+ * The options every query of the area shares.
+ *
+ * The delay is short: the area is a dashboard of the server itself, so a
+ * hiccup of the network is worth another try at once.
+ */
+const WEB_SCAN_QUERY_OPTIONS = {
+  retry: webScanRetry,
+  retryDelay: WEB_SCAN_QUERY_RETRY_DELAY_MS,
+} as const;
 
 /** The error code of the second confirmation a value above its default needs. */
 export const ABOVE_DEFAULT_CONFIRMATION_CODE = 'confirmation_required';
@@ -95,8 +128,7 @@ export function useWebScanSettingsQuery() {
   return useQuery({
     queryKey: ['webscan', 'settings'],
     queryFn: () => webScanApi.getSettings(),
-    // A lost admin right is answered with a 404, and a retry would only repeat it.
-    retry: false,
+    ...WEB_SCAN_QUERY_OPTIONS,
   });
 }
 
@@ -115,16 +147,38 @@ export function useWebScanSitesQuery(offset: number) {
     queryKey: ['webscan', 'sites', offset],
     queryFn: () => webScanApi.getSites({ limit: WEB_SCAN_SITES_PAGE_SIZE, offset }),
     placeholderData: keepPreviousData,
-    retry: false,
+    ...WEB_SCAN_QUERY_OPTIONS,
   });
 }
 
-/** The sites the picker of the scan panels offers. */
+/**
+ * The sites the picker of the scan panels offers.
+ *
+ * The picker has no search and no paging of its own, so it needs every site:
+ * the query walks the pages of the list until the count it collected reaches
+ * the total the server reports, and it never asks for more pages than the
+ * maximum. The answer keeps the shape of a page, so the callers read it the
+ * same way they read the page of the sites list.
+ */
 export function useWebScanSiteOptionsQuery() {
   return useQuery({
     queryKey: ['webscan', 'sites', 'options'],
-    queryFn: () => webScanApi.getSites({ limit: WEB_SCAN_SITE_OPTIONS_LIMIT, offset: 0 }),
-    retry: false,
+    queryFn: async () => {
+      const sites: WebScanSiteDto[] = [];
+      let total = 0;
+      let offset = 0;
+      for (let page = 0; page < WEB_SCAN_SITE_OPTIONS_MAX_PAGES; page += 1) {
+        const answer = await webScanApi.getSites({ limit: WEB_SCAN_SITE_OPTIONS_LIMIT, offset });
+        total = answer.total;
+        sites.push(...answer.sites);
+        offset += answer.sites.length;
+        // Every site is here, or the list ends before the total the server
+        // reported: an empty page is the end of the list.
+        if (answer.sites.length === 0 || sites.length >= answer.total) break;
+      }
+      return { sites, total, limit: WEB_SCAN_SITE_OPTIONS_LIMIT, offset: 0 };
+    },
+    ...WEB_SCAN_QUERY_OPTIONS,
   });
 }
 
@@ -178,8 +232,12 @@ export function useWebScanScansQuery(siteId: string | undefined, offset: number)
       return webScanApi.getScans(siteId, { limit: WEB_SCAN_SCANS_PAGE_SIZE, offset });
     },
     enabled: siteId !== undefined,
-    placeholderData: keepPreviousData,
-    retry: false,
+    // The rows of the page before stay while the next one is on its way, but
+    // only the rows of the same site: the history of another site is never
+    // shown under this one, and it is never clickable there.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === siteId ? previous : undefined,
+    ...WEB_SCAN_QUERY_OPTIONS,
   });
 }
 
@@ -192,7 +250,7 @@ export function useWebScanScanQuery(scanId: string | undefined) {
       return webScanApi.getScan(scanId);
     },
     enabled: scanId !== undefined,
-    retry: false,
+    ...WEB_SCAN_QUERY_OPTIONS,
   });
 }
 
@@ -232,7 +290,7 @@ export function useWebScanExceptionsQuery(siteId: string | undefined) {
       return webScanApi.getExceptions(siteId);
     },
     enabled: siteId !== undefined,
-    retry: false,
+    ...WEB_SCAN_QUERY_OPTIONS,
   });
 }
 
@@ -272,6 +330,6 @@ export function useWebScanAuditQuery(offset: number) {
     queryKey: ['webscan', 'audit', offset],
     queryFn: () => webScanApi.getAudit({ limit: WEB_SCAN_AUDIT_PAGE_SIZE, offset }),
     placeholderData: keepPreviousData,
-    retry: false,
+    ...WEB_SCAN_QUERY_OPTIONS,
   });
 }

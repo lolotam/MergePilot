@@ -111,6 +111,7 @@ export const arWebScan = {
   webscanSiteSaved: 'تم حفظ الموقع',
   webscanSiteRemoved: 'تمت إزالة الموقع',
   webscanSiteSaveFailed: 'لم يتم حفظ الموقع: {message}',
+  webscanSiteRemoveFailed: 'لم تتم إزالة الموقع',
   webscanColHostname: 'اسم المضيف',
   webscanColBaseUrl: 'الرابط الأساسي',
   webscanColSchedule: 'الجدولة',
@@ -249,6 +250,7 @@ export const arWebScan = {
   webscanExceptionCreateFailed: 'لم تتم إضافة الاستثناء',
   webscanExceptionRevoke: 'إلغاء الاستثناء',
   webscanExceptionRevoked: 'تم إلغاء الاستثناء',
+  webscanExceptionRevokeFailed: 'لم يتم إلغاء الاستثناء',
   webscanExceptionRevokeTitle: 'إلغاء الاستثناء',
   webscanExceptionRevokeDesc: 'إلغاء الاستثناء بيرجّع النتيجة اللي كان غطّاها للنتائج المفتوحة.',
   webscanExceptionStateActive: 'ساري',
@@ -268,7 +270,7 @@ export const arWebScan = {
 
   // سجل التدقيق
   webscanAuditTitle: 'سجل التدقيق',
-  webscanAuditDesc: 'كل تغيير في الفاحص، بالترتيب. السجل مش بيتعدّل وبيتمسح.',
+  webscanAuditDesc: 'كل تغيير في الفاحص، بالترتيب. السجل مش بيتعدّل ومش بيتشال.',
   webscanEmptyAudit: 'السجل فاضي.',
   webscanColTime: 'الوقت',
   webscanColActor: 'مين عمل التغيير',

@@ -112,6 +112,7 @@ export const enWebScan = {
   webscanSiteSaved: 'The site was saved',
   webscanSiteRemoved: 'The site was removed',
   webscanSiteSaveFailed: 'The site was not saved: {message}',
+  webscanSiteRemoveFailed: 'The site was not removed',
   webscanColHostname: 'Hostname',
   webscanColBaseUrl: 'Base URL',
   webscanColSchedule: 'Schedule',
@@ -253,6 +254,7 @@ export const enWebScan = {
   webscanExceptionCreateFailed: 'The exception was not added',
   webscanExceptionRevoke: 'Revoke',
   webscanExceptionRevoked: 'The exception was revoked',
+  webscanExceptionRevokeFailed: 'The exception was not revoked',
   webscanExceptionRevokeTitle: 'Revoke the exception',
   webscanExceptionRevokeDesc:
     'Revoking the exception brings the finding it covered back to the outstanding findings.',

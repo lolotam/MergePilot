@@ -19,6 +19,7 @@ import {
   useWebScanSitesQuery,
   useWebScanUpdateSiteMutation,
 } from './hooks.js';
+import { useWebScanRights } from './rights.js';
 import { SCHEDULE_FREQUENCY_KEYS, scheduleTime } from './schedule-labels.js';
 import { EmptyState, ErrorState, LoadingState, PermissionLostState } from './states.js';
 
@@ -29,21 +30,25 @@ type OpenForm = { mode: 'create' } | { mode: 'edit'; site: WebScanSiteDto };
  * The registered sites (ADR-0052 section 12).
  *
  * The list shows the effective schedule of every site and where it comes from:
- * the global default, or a rule that is set for this site.
+ * the global default, or a rule that is set for this site. The global policy
+ * is a dependency of the list and of the form: the form starts from the rule
+ * that is in force, so it is never opened before the policy is there.
  */
 export function SitesPanel() {
   const { t, language } = useI18n();
   const [offset, setOffset] = useState(0);
   const { data, isLoading, isError, error } = useWebScanSitesQuery(offset);
-  const { data: settings } = useWebScanSettingsQuery();
+  const settings = useWebScanSettingsQuery();
+  const rights = useWebScanRights();
   const create = useWebScanCreateSiteMutation();
   const update = useWebScanUpdateSiteMutation();
   const remove = useWebScanDeleteSiteMutation();
   const [form, setForm] = useState<OpenForm | null>(null);
   const [removal, setRemoval] = useState<WebScanSiteDto | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [removalError, setRemovalError] = useState<string | null>(null);
 
-  const globalSchedule = settings?.defaultSchedule;
+  const globalSchedule = settings.data?.defaultSchedule;
 
   const save = (payload: SiteFormPayload) => {
     setFormError(null);
@@ -61,7 +66,10 @@ export function SitesPanel() {
         { siteId: form.site.id, body },
         {
           onSuccess: () => setForm(null),
-          onError: (err: Error) => setFormError(err.message),
+          onError: (err: Error) => {
+            if (rights.report(err)) return;
+            setFormError(err.message);
+          },
         },
       );
       return;
@@ -81,7 +89,29 @@ export function SitesPanel() {
     };
     create.mutate(body, {
       onSuccess: () => setForm(null),
-      onError: (err: Error) => setFormError(err.message),
+      onError: (err: Error) => {
+        if (rights.report(err)) return;
+        setFormError(err.message);
+      },
+    });
+  };
+
+  /**
+   * Removes the site the administrator confirmed.
+   *
+   * The dialog stays open when the removal fails: the site is still there,
+   * and the administrator has to see that nothing happened.
+   */
+  const removeSite = () => {
+    if (!removal) return;
+    const target = removal;
+    setRemovalError(null);
+    remove.mutate(target.id, {
+      onSuccess: () => setRemoval(null),
+      onError: (err: Error) => {
+        if (rights.report(err)) return;
+        setRemovalError(t('webscanSiteRemoveFailed'));
+      },
     });
   };
 
@@ -159,7 +189,10 @@ export function SitesPanel() {
                   <button
                     type="button"
                     aria-label={`${t('webscanRemoveSite')}: ${site.hostname}`}
-                    onClick={() => setRemoval(site)}
+                    onClick={() => {
+                      setRemovalError(null);
+                      setRemoval(site);
+                    }}
                     className="ms-2 px-3 py-1.5 text-xs font-semibold rounded-full border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
                   >
                     {t('webscanRemoveSite')}
@@ -172,6 +205,19 @@ export function SitesPanel() {
       </table>
     );
   }
+
+  if (rights.lost) return <PermissionLostState />;
+  // The global policy decides the schedule every site inherits, so the list
+  // and the form wait for it: an inherited rule that is not there yet would
+  // look like a rule that does not exist.
+  if (settings.isError) {
+    return isPermissionLost(settings.error) ? <PermissionLostState /> : <ErrorState />;
+  }
+  if (settings.isLoading) return <LoadingState />;
+  // The global policy decides the schedule every site inherits, so the list
+  // and the form wait for it: an inherited rule that is not there yet would
+  // look like a rule that does not exist.
+
 
   return (
     <div className="flex flex-col gap-4">
@@ -196,6 +242,9 @@ export function SitesPanel() {
 
       {form && (
         <SiteForm
+          // The form keeps the fields of the site it was opened for: the key
+          // makes it a new form when another site is opened.
+          key={form.mode === 'edit' ? `edit:${form.site.id}` : 'create'}
           mode={form.mode}
           site={form.mode === 'edit' ? form.site : undefined}
           globalSchedule={globalSchedule}
@@ -217,13 +266,18 @@ export function SitesPanel() {
         description={removal ? `${removal.hostname} — ${t('webscanRemoveSiteDesc')}` : ''}
         confirmLabel={t('webscanRemoveSite')}
         isPending={remove.isPending}
-        onClose={() => setRemoval(null)}
-        onConfirm={() => {
-          if (!removal) return;
-          const target = removal;
-          remove.mutate(target.id, { onSettled: () => setRemoval(null) });
+        onClose={() => {
+          setRemovalError(null);
+          setRemoval(null);
         }}
-      />
+        onConfirm={removeSite}
+      >
+        {removalError && (
+          <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+            {removalError}
+          </p>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

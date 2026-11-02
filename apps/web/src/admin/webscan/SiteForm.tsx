@@ -89,11 +89,13 @@ export function SiteForm({
     site ? toScopeDraft(site.scope) : emptyScopeDraft(),
   );
   const [schedule, setSchedule] = useState<ScheduleDraft>(() => {
+    // The site follows the global default until it has a rule of its own, so
+    // the form starts from the rule that is in force and not from an empty
+    // one: the switch of an inherited rule shows that rule.
     const base = site?.schedule ?? globalSchedule;
-    const draft = base
+    return base
       ? toScheduleDraft(base)
       : { frequency: 'daily' as const, weekday: 0, dayOfMonth: 1, hour: 0, minute: 0, enabled: false };
-    return { ...draft, enabled: site?.schedule?.enabled ?? false };
   });
   const [authorized, setAuthorized] = useState(false);
   const [errors, setErrors] = useState<{ hostname?: string; baseUrl?: string; path?: string; authorization?: string }>({});
@@ -105,13 +107,32 @@ export function SiteForm({
     return sameScope(current, next) ? undefined : next;
   };
 
+  /**
+   * The rule the site follows now: the rule of its own, or the global default
+   * it inherits.
+   */
+  const effectiveSchedule = site?.schedule ?? globalSchedule;
+
+  /**
+   * The rule the form sends, and nothing when the rule did not change.
+   *
+   * A rule is never cleared: a rule the site inherits and that the
+   * administrator switches off becomes a rule of the site's own with
+   * `enabled: false`, so the site stops following the global default.
+   */
   const schedulePayload = (): WebScanSchedule | null | undefined => {
     const next = toSchedule(schedule);
-    if (mode === 'create') return schedule.enabled ? next : null;
-    const current = site?.schedule ?? null;
-    if (current === null) return schedule.enabled ? next : undefined;
-    if (!schedule.enabled) return { ...current, enabled: false };
-    return sameSchedule(current, next) ? undefined : next;
+    if (effectiveSchedule === undefined) {
+      // There is no rule to follow: a new site asks for the global one, and
+      // an existing site keeps the rule it has.
+      if (mode === 'create') return schedule.enabled ? next : null;
+      return undefined;
+    }
+    if (sameSchedule(effectiveSchedule, next)) {
+      // The site already follows this rule, so nothing is sent.
+      return mode === 'create' ? null : undefined;
+    }
+    return next;
   };
 
   const needsAuthorization = mode === 'create' || scopePayload() !== undefined || schedulePayload() !== undefined;

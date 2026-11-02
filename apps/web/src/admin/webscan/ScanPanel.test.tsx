@@ -234,4 +234,142 @@ describe('the scan panel of the website scan', () => {
       await screen.findByText('Your platform admin rights are gone, so this area is not available.'),
     ).toBeTruthy();
   });
+
+  it('offers every site of a long list in the picker', async () => {
+    const all = Array.from({ length: 150 }, (_, index) => ({
+      ...siteFixture,
+      id: `site-${index + 1}`,
+      hostname: `site-${index + 1}.example.com`,
+    }));
+    const calls = installFetch((call) => {
+      const path = call.url.split('?')[0] ?? '';
+      if (call.method === 'GET' && path.endsWith('/sites')) {
+        const query = new URL(call.url, 'http://localhost').searchParams;
+        const offset = Number(query.get('offset') ?? '0');
+        const limit = Number(query.get('limit') ?? '0');
+        return jsonResponse({
+          sites: all.slice(offset, offset + limit),
+          total: all.length,
+          limit,
+          offset,
+        });
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderScanPanel();
+
+    const select = await screen.findByLabelText('Site');
+    // The placeholder and every site of the list.
+    expect(within(select).getAllByRole('option')).toHaveLength(151);
+
+    // The site of the second page is one of them.
+    await user.selectOptions(select, 'site-101');
+    await waitFor(() =>
+      expect(calls.some((call) => call.url.includes('/sites/site-101/scans'))).toBe(true),
+    );
+
+    const siteCalls = calls.filter((call) => call.url.startsWith('/api/admin/web-scan/sites?'));
+    expect(siteCalls).toHaveLength(2);
+    expect(siteCalls[0]?.url).toContain('offset=0');
+    expect(siteCalls[1]?.url).toContain('offset=100');
+  });
+
+  it('asks for the sites of the picker once when the list fits in one page', async () => {
+    const calls = installFetch(answerWithFixtures);
+    renderScanPanel();
+
+    // The picker is shown when the sites are all there.
+    await screen.findByLabelText('Site');
+    expect(calls.filter((call) => call.url.startsWith('/api/admin/web-scan/sites?'))).toHaveLength(1);
+  });
+
+  it('keeps the pager when the page of the history is empty', async () => {
+    installFetch((call) => {
+      const path = call.url.split('?')[0] ?? '';
+      if (call.method === 'GET' && path.endsWith('/scans')) {
+        const offset = Number(
+          new URL(call.url, 'http://localhost').searchParams.get('offset') ?? '0',
+        );
+        const scans =
+          offset === 0
+            ? Array.from({ length: 20 }, (_, index) => ({ ...scanFixture, id: `scan-${index}` }))
+            : [];
+        return jsonResponse({ scans, limit: 20, offset });
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderScanPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+    await screen.findByRole('table');
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    // The page is empty, so there is no next page any more.
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true),
+    );
+    // The way back to the pages before it is still there.
+    const previous = screen.getByRole('button', { name: 'Previous' }) as HTMLButtonElement;
+    expect(previous.disabled).toBe(false);
+    expect(screen.queryByText('This site has no scan yet.')).toBeNull();
+
+    await user.click(previous);
+    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(21));
+  });
+
+  it('shows the error state when the state of the scan cannot be read', async () => {
+    installFetch((call) => {
+      const path = call.url.split('?')[0] ?? '';
+      if (call.method === 'GET' && path.includes('/scans/')) {
+        return jsonResponse({ error: { code: 'broken', message: 'boom' } }, 500);
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderScanPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+    await user.click(await screen.findByRole('button', { name: `Open the scan: ${scanFixture.id}` }));
+
+    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+  });
+
+  it('shows the error state when the exceptions of the site cannot be read', async () => {
+    installFetch((call) => {
+      const path = call.url.split('?')[0] ?? '';
+      if (call.method === 'GET' && path.endsWith('/exceptions')) {
+        return jsonResponse({ error: { code: 'broken', message: 'boom' } }, 500);
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderScanPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+    await user.click(await screen.findByRole('button', { name: `Open the scan: ${scanFixture.id}` }));
+
+    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+  });
+
+  it('shows the permission-lost state when the report cannot be downloaded', async () => {
+    installFetch((call) => {
+      if (call.url.includes('/export')) {
+        return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderScanPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+    await user.click(await screen.findByRole('button', { name: `Open the scan: ${scanFixture.id}` }));
+    await user.click(await screen.findByRole('button', { name: 'Download the HTML report' }));
+
+    expect(
+      await screen.findByText('Your platform admin rights are gone, so this area is not available.'),
+    ).toBeTruthy();
+  });
 });

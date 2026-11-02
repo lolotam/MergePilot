@@ -220,4 +220,61 @@ describe('the global policy of the website scan', () => {
 
     expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
   });
+
+  it('keeps the unsaved edits of the other fields when the kill switch is flipped', async () => {
+    const calls = installFetch((call) =>
+      call.method === 'GET'
+        ? jsonResponse(settingsFixture)
+        : jsonResponse({ ...settingsFixture, paused: true }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    const input = await screen.findByLabelText('Requests per scan');
+    fireEvent.change(input, { target: { value: '800' } });
+    await user.click(screen.getByRole('switch', { name: 'Pause all scans' }));
+
+    await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true));
+    // The edit of the limit is still in the form.
+    expect((screen.getByLabelText('Requests per scan') as HTMLInputElement).value).toBe('800');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      const patches = calls.filter((call) => call.method === 'PATCH');
+      expect(patches[patches.length - 1]?.body).toEqual({ limits: { maxRequests: 800 } });
+    });
+  });
+
+  it('shows the permission-lost state when the save of the policy is refused', async () => {
+    installFetch((call) => {
+      if (call.method === 'GET') return jsonResponse(settingsFixture);
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    const input = await screen.findByLabelText('Requests per scan');
+    fireEvent.change(input, { target: { value: '800' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(
+      await screen.findByText('Your platform admin rights are gone, so this area is not available.'),
+    ).toBeTruthy();
+  });
+
+  it('shows the permission-lost state when the kill switch is refused', async () => {
+    installFetch((call) => {
+      if (call.method === 'GET') return jsonResponse(settingsFixture);
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPanel />);
+
+    await user.click(await screen.findByRole('switch', { name: 'Pause all scans' }));
+
+    expect(
+      await screen.findByText('Your platform admin rights are gone, so this area is not available.'),
+    ).toBeTruthy();
+  });
 });

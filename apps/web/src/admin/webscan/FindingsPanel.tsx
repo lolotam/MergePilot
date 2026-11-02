@@ -5,6 +5,7 @@ import { useI18n } from '../../i18n/context.js';
 import { groupOccurrences } from './findings.js';
 import { CoverageSummary } from './CoverageSummary.js';
 import { FindingsGroupCard } from './FindingsGroupCard.js';
+import { isPermissionLost } from './hooks.js';
 import { EmptyState } from './states.js';
 
 /**
@@ -19,12 +20,20 @@ export interface FindingsPanelProps {
   detail: WebScanScanDetail;
   /** The resolutions of the site, so an excepted finding shows its end date. */
   exceptions: WebScanExceptionDto[];
+  /**
+   * Reports a refused export to the area.
+   *
+   * The export is a request of the area like any other: a 404 means the
+   * session lost its admin rights, and the area says so instead of showing a
+   * report that could not be downloaded.
+   */
+  onPermissionLost?: (error: unknown) => void;
 }
 
 /** The formats of the report the server renders. */
 const EXPORT_FORMATS = ['html', 'json'] as const;
 
-export function FindingsPanel({ detail, exceptions }: FindingsPanelProps) {
+export function FindingsPanel({ detail, exceptions, onPermissionLost }: FindingsPanelProps) {
   const { t } = useI18n();
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
@@ -46,7 +55,11 @@ export function FindingsPanel({ detail, exceptions }: FindingsPanelProps) {
       if (!saveBlob(filename, blob)) {
         setExportError(t('webscanExportFailed'));
       }
-    } catch {
+    } catch (error) {
+      if (isPermissionLost(error)) {
+        onPermissionLost?.(error);
+        return;
+      }
       setExportError(t('webscanExportFailed'));
     } finally {
       setExporting(null);

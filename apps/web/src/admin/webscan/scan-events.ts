@@ -9,8 +9,9 @@ import { webScanScanKey } from './hooks.js';
  * The stream is the same shape as the live run updates: the browser's
  * EventSource reconnects by itself and the session cookie authenticates the
  * stream. The counters of an event are the live view of the scan, never its
- * result: the panel refetches the state of the scan on every open and on every
- * error, so a missed event can never leave a stale number on the page.
+ * result: the panel refetches the state of the scan whenever the status of
+ * the stream changes and on every open and on every error, so a missed event
+ * can never leave a stale number on the page.
  */
 
 /** The counters of one progress event. */
@@ -53,8 +54,8 @@ export function toScanProgress(value: unknown): ScanProgress | undefined {
  * Listens to the progress of one scan while the panel is mounted.
  *
  * The panel gives the live counters to `onProgress` and reads the durable
- * state from its own query, which is refetched whenever the stream opens or
- * drops.
+ * state from its own query, which is refetched whenever the status of the
+ * stream changes and whenever the stream opens or drops.
  */
 export function useScanEvents(
   scanId: string | undefined,
@@ -71,8 +72,15 @@ export function useScanEvents(
     if (!scanId || typeof EventSource === 'undefined') return undefined;
 
     const source = new EventSource(scanEventsUrl(scanId), { withCredentials: true });
+    // The status the stream reported last: a status that changed is a state
+    // the server owns now, so the panel asks for it again.
+    let lastStatus: WebScanScanStatus | undefined;
     const refetch = () => {
       void queryClient.invalidateQueries({ queryKey: webScanScanKey(scanId) });
+    };
+    const refetchState = () => {
+      refetch();
+      void queryClient.invalidateQueries({ queryKey: ['webscan', 'scans'] });
     };
     const onScan = (message: Event) => {
       let parsed: unknown;
@@ -82,7 +90,13 @@ export function useScanEvents(
         return;
       }
       const progress = toScanProgress(parsed);
-      if (progress) progressRef.current(progress);
+      if (!progress) return;
+      progressRef.current(progress);
+      // A plain progress event of the same status carries no new state: the
+      // scan is still the one the panel shows.
+      if (progress.status === lastStatus) return;
+      lastStatus = progress.status;
+      refetchState();
     };
 
     source.addEventListener('scan', onScan as EventListener);

@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../admin-test-utils.js';
 import { SitesPanel } from './SitesPanel.js';
-import { installFetch, jsonResponse, settingsFixture, sitesPageFixture } from './webscan-test-utils.js';
+import {
+  installFetch,
+  jsonResponse,
+  settingsFixture,
+  siteFixture,
+  siteWithScheduleFixture,
+  sitesPageFixture,
+} from './webscan-test-utils.js';
 
 const originalFetch = global.fetch;
 
@@ -144,6 +151,37 @@ describe('the sites of the website scan', () => {
     expect(within(secondSchedule).getByText('Set for this site')).toBeTruthy();
   });
 
+  it('edits the site that was opened last, not the one that was open before', async () => {
+    const calls = installFetch((call) => {
+      if (call.url.startsWith('/api/admin/web-scan/settings')) return jsonResponse(settingsFixture);
+      if (call.method === 'PATCH') return jsonResponse(siteWithScheduleFixture);
+      if (call.method === 'GET') return jsonResponse(sitesPageFixture);
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SitesPanel />);
+
+    await user.click(await screen.findByRole('button', { name: 'Edit: example.com' }));
+    expect((screen.getByLabelText('Hostname') as HTMLInputElement).value).toBe('example.com');
+
+    // The second edit opens while the form of the first site is still open.
+    await user.click(screen.getByRole('button', { name: 'Edit: scheduled.example.com' }));
+    expect((screen.getByLabelText('Hostname') as HTMLInputElement).value).toBe('scheduled.example.com');
+
+    // The schedule of the second site is the one that is saved.
+    fireEvent.change(screen.getByLabelText('Hour'), { target: { value: '5' } });
+    await user.click(screen.getByLabelText('I own this site or have explicit permission to test it'));
+    await user.click(screen.getByRole('button', { name: 'Save the site' }));
+
+    await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true));
+    const patch = calls.find((call) => call.method === 'PATCH');
+    expect(patch?.url).toBe(`/api/admin/web-scan/sites/${siteWithScheduleFixture.id}`);
+    expect(patch?.body).toEqual({
+      schedule: { frequency: 'daily', hour: 5, minute: 30, enabled: true },
+      authorize: true,
+    });
+  });
+
   it('removes a site only after the confirmation', async () => {
     const calls = answerWithFixtures();
     const user = userEvent.setup();
@@ -158,5 +196,146 @@ describe('the sites of the website scan', () => {
     await waitFor(() => expect(calls.some((call) => call.method === 'DELETE')).toBe(true));
     const removal = calls.find((call) => call.method === 'DELETE');
     expect(removal?.url).toBe('/api/admin/web-scan/sites/11111111-1111-4111-8111-111111111111');
+  });
+
+  it('shows the rule the site inherits and lets the administrator switch it off', async () => {
+    const calls = installFetch((call) => {
+      if (call.url.startsWith('/api/admin/web-scan/settings')) {
+        return jsonResponse({
+          ...settingsFixture,
+          defaultSchedule: { ...settingsFixture.defaultSchedule, enabled: true },
+        });
+      }
+      if (call.method === 'PATCH') return jsonResponse(siteFixture);
+      if (call.method === 'GET') return jsonResponse(sitesPageFixture);
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SitesPanel />);
+
+    await user.click(await screen.findByRole('button', { name: 'Edit: example.com' }));
+    const form = screen.getByRole('form', { name: 'Edit the site' });
+    const schedule = within(form).getByRole('group', { name: 'Schedule' });
+    // The rule the site inherits is in force, so the switch is on.
+    const toggle = within(schedule).getByRole('switch', { name: 'The schedule is on' });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+
+    // Switching it off gives the site a rule of its own that is off.
+    await user.click(toggle);
+    await user.click(
+      within(form).getByLabelText('I own this site or have explicit permission to test it'),
+    );
+    await user.click(within(form).getByRole('button', { name: 'Save the site' }));
+
+    await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true));
+    const patch = calls.find((call) => call.method === 'PATCH');
+    const body = patch?.body as { schedule?: { enabled?: boolean } };
+    expect(body.schedule?.enabled).toBe(false);
+  });
+
+  it('sends no rule when the administrator does not touch the inherited one', async () => {
+    const calls = installFetch((call) => {
+      if (call.url.startsWith('/api/admin/web-scan/settings')) {
+        return jsonResponse({
+          ...settingsFixture,
+          defaultSchedule: { ...settingsFixture.defaultSchedule, enabled: true },
+        });
+      }
+      if (call.method === 'GET') return jsonResponse(sitesPageFixture);
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SitesPanel />);
+
+    await user.click(await screen.findByRole('button', { name: 'Edit: example.com' }));
+    await user.click(screen.getByRole('button', { name: 'Save the site' }));
+
+    // Nothing changed, so no request carries a rule at all.
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Edit the site' })).toBeNull());
+    const patches = calls.filter((call) => call.method === 'PATCH');
+    expect(patches).toHaveLength(0);
+  });
+
+  it('shows the error state when the global policy cannot be read', async () => {
+    installFetch((call) =>
+      call.url.startsWith('/api/admin/web-scan/settings')
+        ? jsonResponse({ error: { code: 'broken', message: 'boom' } }, 500)
+        : jsonResponse(sitesPageFixture),
+    );
+    renderWithProviders(<SitesPanel />);
+
+    // The policy decides the rule every site inherits, so the list waits for
+    // it instead of showing rules that do not exist.
+    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+    expect(screen.queryByText('example.com')).toBeNull();
+  });
+
+  it('shows the permission-lost state when the save of the site is refused', async () => {
+    installFetch((call) => {
+      if (call.url.startsWith('/api/admin/web-scan/settings')) return jsonResponse(settingsFixture);
+      if (call.method === 'PATCH') {
+        return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+      }
+      if (call.method === 'GET') return jsonResponse(sitesPageFixture);
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SitesPanel />);
+
+    await user.click(await screen.findByRole('button', { name: 'Edit: example.com' }));
+    const form = screen.getByRole('form', { name: 'Edit the site' });
+    fireEvent.change(within(form).getByLabelText('Hour'), { target: { value: '5' } });
+    await user.click(
+      within(form).getByLabelText('I own this site or have explicit permission to test it'),
+    );
+    await user.click(within(form).getByRole('button', { name: 'Save the site' }));
+
+    expect(
+      await screen.findByText('Your platform admin rights are gone, so this area is not available.'),
+    ).toBeTruthy();
+  });
+
+  it('keeps the dialog of the removal open when the removal fails', async () => {
+    installFetch((call) => {
+      if (call.url.startsWith('/api/admin/web-scan/settings')) return jsonResponse(settingsFixture);
+      if (call.method === 'DELETE') {
+        return jsonResponse({ error: { code: 'broken', message: 'boom' } }, 500);
+      }
+      if (call.method === 'GET') return jsonResponse(sitesPageFixture);
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SitesPanel />);
+
+    await user.click(await screen.findByRole('button', { name: 'Remove: example.com' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    // The site is still there: the dialog stays open and says what happened.
+    expect(await within(dialog).findByRole('alert')).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('closes the dialog of the removal and asks for the list again', async () => {
+    const calls = installFetch((call) => {
+      if (call.url.startsWith('/api/admin/web-scan/settings')) return jsonResponse(settingsFixture);
+      if (call.method === 'DELETE') return jsonResponse(siteFixture);
+      if (call.method === 'GET') return jsonResponse(sitesPageFixture);
+      return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SitesPanel />);
+
+    await user.click(await screen.findByRole('button', { name: 'Remove: example.com' }));
+    const dialog = await screen.findByRole('dialog');
+    const before = calls.filter((call) => call.method === 'GET' && call.url.includes('/sites?')).length;
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.method === 'GET' && call.url.includes('/sites?')).length,
+      ).toBeGreaterThan(before),
+    );
   });
 });

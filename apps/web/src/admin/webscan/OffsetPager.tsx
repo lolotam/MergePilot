@@ -7,6 +7,9 @@ import { useI18n } from '../../i18n/context.js';
  * whether a last page follows. (The audit log carries a total and uses the
  * shared total-aware pager.) It uses the size of the page
  * instead: a page that is not full is the last one.
+ *
+ * A page that is empty but not the first one keeps the pager: it is the way
+ * back to the pages before it, and the administrator reached it by paging.
  */
 export interface OffsetPagerProps {
   offset: number;
@@ -18,7 +21,8 @@ export interface OffsetPagerProps {
 
 export function OffsetPager({ offset, limit, count, onChange }: OffsetPagerProps) {
   const { t } = useI18n();
-  if (count === 0) return null;
+  // There is nothing to page through.
+  if (count === 0 && offset === 0) return null;
   const from = offset + 1;
   const to = offset + count;
   const button =
@@ -26,7 +30,8 @@ export function OffsetPager({ offset, limit, count, onChange }: OffsetPagerProps
 
   return (
     <div className="flex items-center justify-between gap-3 p-4 border-t border-ink-200 dark:border-ink-800 text-xs text-ink-500 dark:text-ink-400">
-      <span>{t('webscanPageRange', { from, to })}</span>
+      {/* An empty page has no rows to range over. */}
+      <span>{count > 0 ? t('webscanPageRange', { from, to }) : ''}</span>
       <div className="flex gap-2">
         <button
           type="button"

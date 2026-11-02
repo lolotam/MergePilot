@@ -22,6 +22,7 @@ import {
   useWebScanUpdateSettingsMutation,
 } from './hooks.js';
 import { effectiveLimits } from './limits.js';
+import { useWebScanRights } from './rights.js';
 import {
   buildSettingsPatch,
   toSettingsDraft,
@@ -50,6 +51,7 @@ export function SettingsPanel() {
   const { t } = useI18n();
   const { showToast } = useToast();
   const { data, isLoading, isError, error } = useWebScanSettingsQuery();
+  const rights = useWebScanRights();
   const update = useWebScanUpdateSettingsMutation();
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -57,9 +59,13 @@ export function SettingsPanel() {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (data) setDraft(toSettingsDraft(data));
-  }, [data]);
+    // The draft is the work of the administrator: it is built once from the
+    // server, and an answer of the server never overwrites the edits that
+    // are not saved yet.
+    if (data && draft === null) setDraft(toSettingsDraft(data));
+  }, [data, draft]);
 
+  if (rights.lost) return <PermissionLostState />;
   if (isLoading) return <LoadingState />;
   if (isError) return isPermissionLost(error) ? <PermissionLostState /> : <ErrorState />;
   if (failed) return <ErrorState />;
@@ -72,7 +78,10 @@ export function SettingsPanel() {
       { paused },
       {
         onError: (err: Error) => {
-          setDraft(toSettingsDraft(data));
+          if (rights.report(err)) return;
+          // Only the pause goes back to the state of the server: the other
+          // edits of the administrator stay in the form.
+          setDraft((current) => (current === null ? current : { ...current, paused: data.paused }));
           setMessage(err.message);
         },
       },
@@ -89,6 +98,7 @@ export function SettingsPanel() {
     update.mutate(patch, {
       onSuccess: () => showToast(t('webscanSettingsSaved'), 'success'),
       onError: (err: Error) => {
+        if (rights.report(err)) return;
         if (!needsAboveDefaultConfirmation(err)) {
           setMessage(err.message);
           return;
@@ -122,6 +132,7 @@ export function SettingsPanel() {
           showToast(t('webscanSettingsSaved'), 'success');
         },
         onError: (err: Error) => {
+          if (rights.report(err)) return;
           setPending(null);
           setMessage(err.message);
         },

@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useToast } from '../../components/Toast.js';
 import { useI18n } from '../../i18n/context.js';
 import { FindingsPanel } from './FindingsPanel.js';
@@ -6,6 +6,7 @@ import { ScanHistory } from './ScanHistory.js';
 import { ScanStatus } from './ScanStatus.js';
 import { SiteSelect } from './SiteSelect.js';
 import {
+  WEB_SCAN_SCANS_PAGE_SIZE,
   isConclusiveRefusal,
   isPermissionLost,
   useWebScanEnqueueMutation,
@@ -15,6 +16,7 @@ import {
   useWebScanSiteOptionsQuery,
   useWebScanStopMutation,
 } from './hooks.js';
+import { useWebScanRights } from './rights.js';
 import { useScanEvents, type ScanProgress } from './scan-events.js';
 import { newScanIdempotencyKey } from './scan-intent.js';
 import { useWebScanSelection } from './selection.js';
@@ -27,11 +29,15 @@ import { EmptyState, ErrorState, LoadingState, PermissionLostState } from './sta
  * the ownership every time, and it carries an idempotency key that belongs to
  * the start intent. A retry of a request the server never accepted reuses the
  * key, so the server replays its scan instead of queueing a second one.
+ *
+ * The confirmation and the key belong to one site: another site is another
+ * target, so they are dropped when the site changes.
  */
 export function ScanPanel() {
   const { t } = useI18n();
   const { showToast } = useToast();
   const { siteId, setSiteId } = useWebScanSelection();
+  const rights = useWebScanRights();
   const authorizationId = useId();
   const sites = useWebScanSiteOptionsQuery();
   const [offset, setOffset] = useState(0);
@@ -39,7 +45,6 @@ export function ScanPanel() {
   const [scanId, setScanId] = useState<string | undefined>(undefined);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [lostRights, setLostRights] = useState(false);
   const intentKey = useRef<string | null>(null);
   const enqueue = useWebScanEnqueueMutation();
   const stop = useWebScanStopMutation();
@@ -48,20 +53,38 @@ export function ScanPanel() {
   const exceptions = useWebScanExceptionsQuery(scan.data?.scan.siteId);
   useScanEvents(scanId, setProgress);
 
+  // The site the panel works on right now: the answer of a request that
+  // belongs to another site is never installed.
+  const currentSiteId = useRef(siteId);
+  currentSiteId.current = siteId;
+
+  // Another site is another target: the confirmation of one site never
+  // authorizes another one, the key of one intent never starts another one,
+  // and the scan of the previous site is never shown under the new one.
+  const resetTarget = () => {
+    setAuthorized(false);
+    intentKey.current = null;
+    setScanId(undefined);
+    setProgress(null);
+  };
+
+  useEffect(() => {
+    resetTarget();
+  }, [siteId]);
+
   // A 404 of the area means the session lost its platform-admin rights.
   const lost = [sites.error, history.error, scan.error, exceptions.error].some((error) =>
     isPermissionLost(error),
   );
-  if (lost || lostRights) return <PermissionLostState />;
+  if (lost || rights.lost) return <PermissionLostState />;
   if (sites.isError) return <ErrorState />;
   if (sites.isLoading) return <LoadingState />;
 
   const selectSite = (nextSiteId: string) => {
     setSiteId(nextSiteId);
-    setScanId(undefined);
-    setProgress(null);
     setOffset(0);
     setMessage(null);
+    resetTarget();
   };
 
   const start = () => {
@@ -77,16 +100,17 @@ export function ScanPanel() {
       { siteId, body: { idempotencyKey: key, authorize: true } },
       {
         onSuccess: (result) => {
+          // The administrator moved to another site while the request was on
+          // its way: the answer belongs to the site they left, so it is
+          // dropped instead of opening the scan of that site here.
+          if (currentSiteId.current !== siteId) return;
           intentKey.current = null;
           setScanId(result.scan.id);
           setProgress(null);
           showToast(t('webscanScanStarted'), 'success');
         },
         onError: (error: Error) => {
-          if (isPermissionLost(error)) {
-            setLostRights(true);
-            return;
-          }
+          if (rights.report(error)) return;
           // A refusal is conclusive: the next start is a new intent.
           if (isConclusiveRefusal(error)) intentKey.current = null;
           setMessage(t('webscanScanStartFailed'));
@@ -100,10 +124,7 @@ export function ScanPanel() {
     setMessage(null);
     stop.mutate(scanId, {
       onError: (error: Error) => {
-        if (isPermissionLost(error)) {
-          setLostRights(true);
-          return;
-        }
+        if (rights.report(error)) return;
         setMessage(t('webscanScanStopFailed'));
       },
     });
@@ -120,7 +141,14 @@ export function ScanPanel() {
         <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-0.5">{t('webscanScansDesc')}</p>
       </header>
 
-      <SiteSelect sites={sites.data?.sites ?? []} value={siteId} onChange={selectSite} />
+      <SiteSelect
+        sites={sites.data?.sites ?? []}
+        value={siteId}
+        onChange={selectSite}
+        // The site of a request that is on its way may not change: the answer
+        // of that request would belong to a site the panel no longer shows.
+        disabled={enqueue.isPending}
+      />
 
       {siteId === undefined ? (
         <EmptyState>
@@ -168,16 +196,30 @@ export function ScanPanel() {
         </p>
       )}
 
-      {scan.data && (
-        <>
-          <ScanStatus
-            scan={scan.data.scan}
-            progress={progress}
-            isStopping={stop.isPending}
-            onStop={stopScan}
-          />
-          <FindingsPanel detail={scan.data} exceptions={exceptions.data?.exceptions ?? []} />
-        </>
+      {scan.isError ? (
+        <ErrorState />
+      ) : (
+        scan.data && (
+          <>
+            <ScanStatus
+              scan={scan.data.scan}
+              progress={progress}
+              isStopping={stop.isPending}
+              onStop={stopScan}
+            />
+            {exceptions.isError ? (
+              <ErrorState />
+            ) : (
+              <FindingsPanel
+                detail={scan.data}
+                exceptions={exceptions.data?.exceptions ?? []}
+                onPermissionLost={(error) => {
+                  rights.report(error);
+                }}
+              />
+            )}
+          </>
+        )
       )}
 
       {siteId !== undefined && (
@@ -189,12 +231,14 @@ export function ScanPanel() {
             <ErrorState />
           ) : history.isLoading ? (
             <LoadingState />
-          ) : scans.length === 0 ? (
+          ) : scans.length === 0 && offset === 0 ? (
             <EmptyState>{t('webscanEmptyScans')}</EmptyState>
           ) : (
+            // A page that is empty but not the first one still shows the
+            // history: the pager is the way back to the pages before it.
             <ScanHistory
               scans={scans}
-              limit={history.data?.limit ?? scans.length}
+              limit={history.data?.limit ?? WEB_SCAN_SCANS_PAGE_SIZE}
               offset={offset}
               selectedScanId={scanId}
               onChangeOffset={setOffset}

@@ -76,4 +76,27 @@ describe('the audit log of the website scan', () => {
     expect(screen.queryAllByRole('button')).toEqual([]);
     expect(screen.queryByRole('textbox')).toBeNull();
   });
+
+  it('tries a failed request again and gives up after two tries', async () => {
+    const calls = installFetch(() =>
+      jsonResponse({ error: { code: 'broken', message: 'boom' } }, 500),
+    );
+    renderWithProviders(<AuditPanel />);
+
+    await waitFor(() => expect(calls.length).toBe(3), { timeout: 3000 });
+    // The panel gives up: the request is not tried a fourth time.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(calls.length).toBe(3);
+  });
+
+  it('never tries the 404 of a session that lost its admin rights again', async () => {
+    const calls = installFetch(() =>
+      jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404),
+    );
+    renderWithProviders(<AuditPanel />);
+
+    expect(await screen.findByText('Your platform admin rights are gone, so this area is not available.')).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(calls.length).toBe(1);
+  });
 });

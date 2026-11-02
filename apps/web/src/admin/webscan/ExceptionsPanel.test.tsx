@@ -35,7 +35,7 @@ function answerWithFixtures(call: RecordedCall): Response {
   if (call.method === 'GET' && path.endsWith('/exceptions')) return jsonResponse(exceptionsPageFixture);
   if (call.method === 'GET' && path.includes('/scans/')) return jsonResponse(scanDetailFixture);
   if (call.method === 'GET' && path.endsWith('/sites')) {
-    return jsonResponse({ ...sitesPageFixture, sites: [siteWithScanFixture] });
+    return jsonResponse({ ...sitesPageFixture, sites: [siteWithScanFixture], total: 1 });
   }
   return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
 }
@@ -131,5 +131,94 @@ describe('the exceptions of the website scan', () => {
     expect(removal?.url).toBe(
       `/api/admin/web-scan/sites/${siteFixture.id}/exceptions/${exceptionFixture.id}`,
     );
+  });
+
+  it('shows the error state when the ledger of the site cannot be read', async () => {
+    installFetch((call) => {
+      const path = call.url.split('?')[0] ?? '';
+      if (call.method === 'GET' && path.includes('/scans/')) {
+        return jsonResponse({ error: { code: 'broken', message: 'boom' } }, 500);
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderExceptionsPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+
+    // The ledger is the list of the findings that can be resolved: a failed
+    // request is not an empty ledger.
+    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+  });
+
+  it('keeps the dialog of the revocation open when the revocation fails', async () => {
+    installFetch((call) => {
+      const path = call.url.split('?')[0] ?? '';
+      if (call.method === 'DELETE' && path.includes('/exceptions/')) {
+        return jsonResponse({ error: { code: 'broken', message: 'boom' } }, 500);
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderExceptionsPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+    await user.click(await screen.findByRole('button', { name: `Revoke: ${exceptionFixture.id}` }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke' }));
+
+    // The exception is still in force: the dialog stays open and says so.
+    expect(await within(dialog).findByRole('alert')).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('shows the error state when the exceptions of the site cannot be read', async () => {
+    installFetch((call) => {
+      const path = call.url.split('?')[0] ?? '';
+      if (call.method === 'GET' && path.endsWith('/exceptions')) {
+        return jsonResponse({ error: { code: 'broken', message: 'boom' } }, 500);
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderExceptionsPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+
+    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+  });
+
+  it('shows the permission-lost state when the revocation is refused', async () => {
+    installFetch((call) => {
+      const path = call.url.split('?')[0] ?? '';
+      if (call.method === 'DELETE' && path.includes('/exceptions/')) {
+        return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
+      }
+      return answerWithFixtures(call);
+    });
+    const user = userEvent.setup();
+    renderExceptionsPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+    await user.click(await screen.findByRole('button', { name: `Revoke: ${exceptionFixture.id}` }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke' }));
+
+    expect(
+      await screen.findByText('Your platform admin rights are gone, so this area is not available.'),
+    ).toBeTruthy();
+  });
+
+  it('closes the dialog of the revocation when the exception is revoked', async () => {
+    installFetch(answerWithFixtures);
+    const user = userEvent.setup();
+    renderExceptionsPanel();
+
+    await user.selectOptions(await screen.findByLabelText('Site'), siteFixture.id);
+    await user.click(await screen.findByRole('button', { name: `Revoke: ${exceptionFixture.id}` }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

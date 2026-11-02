@@ -15,6 +15,7 @@ import {
   useWebScanSiteOptionsQuery,
 } from './hooks.js';
 import { EXCEPTION_CATEGORY_KEYS, EXCEPTION_KIND_KEYS } from './labels.js';
+import { useWebScanRights } from './rights.js';
 import { useWebScanSelection } from './selection.js';
 import { EmptyState, ErrorState, LoadingState, PermissionLostState } from './states.js';
 
@@ -28,6 +29,7 @@ import { EmptyState, ErrorState, LoadingState, PermissionLostState } from './sta
 export function ExceptionsPanel() {
   const { t, language } = useI18n();
   const { siteId, setSiteId } = useWebScanSelection();
+  const rights = useWebScanRights();
   const sites = useWebScanSiteOptionsQuery();
   const exceptions = useWebScanExceptionsQuery(siteId);
   const create = useWebScanCreateExceptionMutation();
@@ -35,7 +37,7 @@ export function ExceptionsPanel() {
   const [formOpen, setFormOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [removal, setRemoval] = useState<WebScanExceptionDto | null>(null);
-  const [lostRights, setLostRights] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   const site = sites.data?.sites.find((entry) => entry.id === siteId);
   // The ledger of the site is the list of the findings that can be resolved.
@@ -47,7 +49,7 @@ export function ExceptionsPanel() {
   const lost = [sites.error, exceptions.error, ledger.error].some((error) =>
     isPermissionLost(error),
   );
-  if (lost || lostRights) return <PermissionLostState />;
+  if (lost || rights.lost) return <PermissionLostState />;
   if (sites.isError) return <ErrorState />;
   if (sites.isLoading) return <LoadingState />;
 
@@ -56,6 +58,7 @@ export function ExceptionsPanel() {
     setFormOpen(false);
     setFormError(null);
     setRemoval(null);
+    setRevokeError(null);
   };
 
   const save = (body: WebScanCreateExceptionRequest) => {
@@ -66,11 +69,30 @@ export function ExceptionsPanel() {
       {
         onSuccess: () => setFormOpen(false),
         onError: (error: Error) => {
-          if (isPermissionLost(error)) {
-            setLostRights(true);
-            return;
-          }
+          if (rights.report(error)) return;
           setFormError(t('webscanExceptionCreateFailed'));
+        },
+      },
+    );
+  };
+
+  /**
+   * Revokes the exception the administrator confirmed.
+   *
+   * The dialog stays open when the revocation fails: the exception is still
+   * in force, and the administrator has to see that nothing happened.
+   */
+  const revokeException = () => {
+    if (!removal || !siteId) return;
+    const target = removal;
+    setRevokeError(null);
+    revoke.mutate(
+      { siteId, exceptionId: target.id },
+      {
+        onSuccess: () => setRemoval(null),
+        onError: (error: Error) => {
+          if (rights.report(error)) return;
+          setRevokeError(t('webscanExceptionRevokeFailed'));
         },
       },
     );
@@ -100,7 +122,11 @@ export function ExceptionsPanel() {
         </EmptyState>
       ) : (
         <>
-          {formOpen ? (
+          {ledger.isError ? (
+            // The ledger of the site is the list of the findings that can be
+            // resolved: a failed request is not an empty ledger.
+            <ErrorState />
+          ) : formOpen ? (
             <ExceptionForm
               occurrences={outstanding}
               isPending={create.isPending}
@@ -179,7 +205,10 @@ export function ExceptionsPanel() {
                             <button
                               type="button"
                               aria-label={`${t('webscanExceptionRevoke')}: ${exception.id}`}
-                              onClick={() => setRemoval(exception)}
+                              onClick={() => {
+                                setRevokeError(null);
+                                setRemoval(exception);
+                              }}
                               className="px-3 py-1.5 text-xs font-semibold rounded-full border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
                             >
                               {t('webscanExceptionRevoke')}
@@ -202,21 +231,18 @@ export function ExceptionsPanel() {
         description={t('webscanExceptionRevokeDesc')}
         confirmLabel={t('webscanExceptionRevoke')}
         isPending={revoke.isPending}
-        onClose={() => setRemoval(null)}
-        onConfirm={() => {
-          if (!removal || !siteId) return;
-          const target = removal;
-          revoke.mutate(
-            { siteId, exceptionId: target.id },
-            {
-              onError: (error: Error) => {
-                if (isPermissionLost(error)) setLostRights(true);
-              },
-              onSettled: () => setRemoval(null),
-            },
-          );
+        onClose={() => {
+          setRevokeError(null);
+          setRemoval(null);
         }}
-      />
+        onConfirm={revokeException}
+      >
+        {revokeError && (
+          <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+            {revokeError}
+          </p>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }
