@@ -148,6 +148,62 @@ describe('the release of the slot of a resolved episode', () => {
   });
 
 
+  it('keeps an episode whose replacement of a missing issue was requested', () => {
+    const seeded = runAlertScenario(
+      [
+        {
+          trigger: 'manual',
+          at: day(1),
+          occurrences: Array.from({ length: MAX_ALERT_EPISODES_PER_SITE }, (_value, index) =>
+            group(index, { severity: 'high', validation: 'Confirmed' }),
+          ),
+        },
+      ],
+      { thresholds: EVERY_GROUP },
+    );
+    const template = seeded.episodes[0];
+    if (template === undefined) throw new Error('the seed holds no episode');
+    const withIssue = seeded.episodes.slice(1).map((episode) => ({
+      ...episode,
+      issueState: 'open' as const,
+      issueRequested: true,
+    }));
+    // The issue was confirmed missing and its replacement requested; nothing is reported
+    // about it since, so the replacement may exist. Its key sorts first among equals.
+    const replacing = {
+      ...template,
+      episodeKey: 'a-replacement-requested',
+      issueState: 'missing' as const,
+      issueRequested: true,
+    };
+    const withoutIssue = {
+      ...template,
+      episodeKey: 'z-without-issue',
+      issueKey: issueKeyOf(MAX_ALERT_EPISODES_PER_SITE),
+      issueState: 'none' as const,
+      issueRequested: false,
+    };
+
+    const evaluation = evaluateAlertEpisodes({
+      trigger: 'manual',
+      now: day(2),
+      siteId: SITE_ID,
+      dashboardBaseUrl: DASHBOARD_BASE_URL,
+      thresholds: { ...THRESHOLDS, ...EVERY_GROUP },
+      episodes: [replacing, ...withIssue, withoutIssue],
+      occurrences: Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 1 }, (_value, index) =>
+        group(index, { severity: 'high', validation: 'Confirmed' }),
+      ),
+      exceptions: [],
+      issueStates: withIssue.map((episode) => ({ episodeKey: episode.episodeKey, state: 'open' as const })),
+    });
+
+    const keptKeys = new Set(evaluation.episodes.map((episode) => episode.episodeKey));
+    expect(evaluation.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    expect(keptKeys.has('a-replacement-requested')).toBe(true);
+    expect(keptKeys.has('z-without-issue')).toBe(false);
+  });
+
   it.each([
     { trigger: 'manual', label: 'never requested', requested: false, observed: undefined },
     { trigger: 'scheduled', label: 'never requested', requested: false, observed: undefined },

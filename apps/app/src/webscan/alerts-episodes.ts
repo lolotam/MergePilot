@@ -285,8 +285,7 @@ function evictionRank(candidate: AlertEpisodeCandidate): number {
   if (episode.resolved === true) return isSettled(episode) ? 1 : 2;
   const hasIssue =
     candidate.hasIssue ??
-    (episode.issueState !== 'missing' &&
-      (episode.issueRequested === true || (episode.issueState ?? 'none') !== 'none'));
+    (episode.issueRequested === true || (episode.issueState ?? 'none') !== 'none');
   return hasIssue ? 3 : 0;
 }
 

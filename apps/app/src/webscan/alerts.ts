@@ -137,11 +137,10 @@ export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluat
       // prospective open-issue targets no issue yet: it must not outrank an episode that
       // has a real issue behind it when an over-bound state is capped.
       pending: entry.result.actions.some((action) => action.kind !== 'open-issue'),
-      // A confirmed missing issue is no issue behind the episode, even if one was requested.
-      hasIssue:
-        (entry.result.episode.issueState ?? 'none') !== 'missing' &&
-        (context.episodesByIssueKey.get(entry.result.episode.issueKey)?.issueRequested === true ||
-          (entry.result.episode.issueState ?? 'none') !== 'none'),
+      hasIssue: hasIssueBehind(
+        entry.result.episode,
+        context.episodesByIssueKey.get(entry.result.episode.issueKey),
+      ),
     })),
   );
   const admittedKeys = new Set(admitted.map((episode) => episode.episodeKey));
@@ -243,6 +242,25 @@ function withholdOpenIssue(context: AlertContext, result: IssueKeyResult): Issue
     episode,
     actions: result.actions.filter((action) => action.kind !== 'open-issue'),
   };
+}
+
+/**
+ * Whether an issue is really behind an episode, for the cap of an over-bound state.
+ *
+ * An issue that was requested earlier, or that the caller observed, is behind it. A
+ * confirmed missing issue is not, unless the replacement was requested after the
+ * confirmation (the stored state was already missing and a request was recorded): that
+ * replacement may exist. An issue this evaluation only proposes to open does not count.
+ */
+function hasIssueBehind(
+  episode: WebScanAlertEpisode,
+  previous: WebScanAlertEpisode | undefined,
+): boolean {
+  const state = episode.issueState ?? 'none';
+  if (state === 'missing') {
+    return previous?.issueState === 'missing' && previous.issueRequested === true;
+  }
+  return previous?.issueRequested === true || state !== 'none';
 }
 
 /** Resolves the input of one evaluation. */
