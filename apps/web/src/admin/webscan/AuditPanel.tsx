@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { useI18n } from '../../i18n/context.js';
 import { formatDateTime } from '../format.js';
-import { TableCard, tbodyClass, tdClass, thClass, theadClass } from '../ui.js';
-import { useWebScanAuditQuery, WEB_SCAN_AUDIT_PAGE_SIZE } from './hooks.js';
-import { OffsetPager } from './OffsetPager.js';
+import { Pager, TableCard, tbodyClass, tdClass, thClass, theadClass } from '../ui.js';
+import { useWebScanAuditQuery } from './hooks.js';
 import { EmptyState, ErrorState, LoadingState, PermissionLostState } from './states.js';
 import { isPermissionLost } from './hooks.js';
 
@@ -37,16 +36,7 @@ export function AuditPanel() {
       {entries.length === 0 ? (
         <EmptyState>{t('webscanEmptyAudit')}</EmptyState>
       ) : (
-        <TableCard
-          footer={
-            <OffsetPager
-              offset={offset}
-              limit={audit.data?.limit ?? WEB_SCAN_AUDIT_PAGE_SIZE}
-              count={entries.length}
-              onChange={setOffset}
-            />
-          }
-        >
+        <TableCard footer={<Pager page={audit.data} onChange={setOffset} />}>
           <table className="w-full text-start text-xs">
             <thead className={theadClass}>
               <tr>

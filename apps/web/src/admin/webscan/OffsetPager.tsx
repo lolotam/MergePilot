@@ -3,8 +3,9 @@ import { useI18n } from '../../i18n/context.js';
 /**
  * The pager of a list the server counts without a total.
  *
- * The scan history and the audit log answer with a page and no total, so the
- * pager cannot know whether a last page follows. It uses the size of the page
+ * The scan history answers with a page and no total, so the pager cannot know
+ * whether a last page follows. (The audit log carries a total and uses the
+ * shared total-aware pager.) It uses the size of the page
  * instead: a page that is not full is the last one.
  */
 export interface OffsetPagerProps {

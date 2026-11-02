@@ -22,7 +22,7 @@ function answerWithFixtures(call: RecordedCall): Response {
   const path = call.url.split('?')[0] ?? '';
   if (call.method === 'GET' && path.endsWith('/audit')) {
     const offset = Number(new URL(call.url, 'http://local').searchParams.get('offset') ?? 0);
-    if (offset > 0) return jsonResponse({ audit: [], limit: 25, offset });
+    if (offset > 0) return jsonResponse({ audit: [], total: 1, limit: 25, offset });
     return jsonResponse(auditPageFixture);
   }
   return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
@@ -38,7 +38,7 @@ describe('the audit log of the website scan', () => {
     expect(screen.getByText(`site · ${siteFixture.id}`)).toBeTruthy();
   });
 
-  it('pages through the log without a total', async () => {
+  it('pages through the log with the total the server counts', async () => {
     const calls = installFetch((call) => {
       const path = call.url.split('?')[0] ?? '';
       if (call.method === 'GET' && path.endsWith('/audit')) {
@@ -47,7 +47,7 @@ describe('the audit log of the website scan', () => {
           ...auditPageFixture.audit[0]!,
           id: `entry-${offset}-${index}`,
         }));
-        return jsonResponse({ audit: entries, limit: 25, offset });
+        return jsonResponse({ audit: entries, total: 27, limit: 25, offset });
       }
       return jsonResponse({ error: { code: 'not_found', message: 'Not found' } }, 404);
     });
@@ -61,7 +61,7 @@ describe('the audit log of the website scan', () => {
     await waitFor(() =>
       expect(calls.some((call) => call.url.includes('offset=25'))).toBe(true),
     );
-    // The last page is not full, so there is nothing after it.
+    // The page reaches the total of 27, so there is nothing after it.
     await waitFor(() =>
       expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true),
     );
@@ -72,8 +72,8 @@ describe('the audit log of the website scan', () => {
     renderWithProviders(<AuditPanel />);
 
     await screen.findByText('scan.started');
-    const buttons = screen.getAllByRole('button').map((button) => button.textContent);
-    expect(buttons).toEqual(['Previous', 'Next']);
+    // The whole log fits one page, so the panel has no control at all.
+    expect(screen.queryAllByRole('button')).toEqual([]);
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 });

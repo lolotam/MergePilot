@@ -254,6 +254,7 @@ export const auditPageFixture: WebScanAuditPage = {
       createdAt: '2026-11-01T10:00:00.000Z',
     },
   ],
+  total: 1,
   limit: 25,
   offset: 0,
 };
