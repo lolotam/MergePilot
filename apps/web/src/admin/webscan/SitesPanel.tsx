@@ -128,8 +128,12 @@ export function SitesPanel() {
   // to the page before it, so the pager never disappears under an empty page.
   useEffect(() => {
     if (isLoading || isError) return;
-    if (sites.length === 0 && offset > 0) setOffset(Math.max(offset - limit, 0));
-  }, [isLoading, isError, sites.length, offset, limit]);
+    // Only the answer of the page that is asked for counts: while a new page loads, the
+    // previous answer stays on screen and says nothing about the page after it.
+    if (data?.offset === offset && sites.length === 0 && offset > 0) {
+      setOffset(Math.max(offset - limit, 0));
+    }
+  }, [data?.offset, isLoading, isError, sites.length, offset, limit]);
 
   let body;
   if (isLoading) body = <LoadingState />;

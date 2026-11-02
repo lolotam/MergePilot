@@ -98,6 +98,12 @@ const KNOWN_LIMIT_FIELDS = new Set<string>(WEB_SCAN_LIMIT_ROWS.map((row) => row.
 /**
  * Whether a value is the whole effective limits of the server.
  *
+ * The refusal is checked by its shape alone: every limit field is there and
+ * every one of them is a number. The bounds are never checked, because the
+ * table of the dashboard is its own copy of the documented one and the server
+ * is the authority of the values it sends: a copy that drifted from it must
+ * never refuse a confirmation the server itself built.
+ *
  * A refusal that carries no limits is not a confirmation: the panel shows its
  * own error instead of a dialog of values nobody can check.
  */
@@ -106,13 +112,7 @@ function isEffectiveLimits(value: unknown): value is WebScanLimits {
   const limits = value as Record<string, unknown>;
   return (Object.keys(WEB_SCAN_LIMIT_SPECS) as (keyof WebScanLimits)[]).every((field) => {
     const number = limits[field];
-    const spec = WEB_SCAN_LIMIT_SPECS[field];
-    return (
-      typeof number === 'number' &&
-      Number.isInteger(number) &&
-      number >= spec.min &&
-      number <= spec.max
-    );
+    return typeof number === 'number' && Number.isFinite(number);
   });
 }
 

@@ -19,7 +19,7 @@ export interface SettingsDraft {
   alertsEnabled: boolean;
   limits: WebScanLimits;
   checks: WebScanChecks;
-  defaultSchedule: WebScanSchedule;
+  defaultSchedule: ScheduleDraft;
   retentionDays: number;
   contact: string;
   alertMinSeverity: WebScanSettingsDto['alertMinSeverity'];
@@ -39,6 +39,14 @@ export interface ScheduleDraft {
   enabled: boolean;
   /** The day the rule of every two weeks counts from, when it has one. */
   anchorDate: string | undefined;
+  /**
+   * The weekday the anchor falls on.
+   *
+   * The server refuses an anchor that does not fall on the weekday it is sent
+   * with, so the draft remembers the weekday of its anchor: the anchor travels
+   * with the rule as long as the rule keeps that weekday.
+   */
+  anchorWeekday: number | undefined;
 }
 
 export function toSettingsDraft(settings: WebScanSettingsDto): SettingsDraft {
@@ -47,7 +55,7 @@ export function toSettingsDraft(settings: WebScanSettingsDto): SettingsDraft {
     alertsEnabled: settings.alertsEnabled,
     limits: { ...settings.limits },
     checks: { ...settings.checks },
-    defaultSchedule: { ...settings.defaultSchedule },
+    defaultSchedule: toScheduleDraft(settings.defaultSchedule),
     retentionDays: settings.retentionDays,
     contact: settings.contact,
     alertMinSeverity: settings.alertMinSeverity,
@@ -55,6 +63,13 @@ export function toSettingsDraft(settings: WebScanSettingsDto): SettingsDraft {
   };
 }
 
+/**
+ * The rule as the form holds it, with the anchor it came with.
+ *
+ * The anchor of a rule of every two weeks and the weekday it falls on are
+ * taken together: the server keeps them in agreement, so the weekday of the
+ * stored rule is the weekday of its anchor.
+ */
 export function toScheduleDraft(schedule: WebScanSchedule): ScheduleDraft {
   return {
     frequency: schedule.frequency,
@@ -64,6 +79,7 @@ export function toScheduleDraft(schedule: WebScanSchedule): ScheduleDraft {
     minute: schedule.minute,
     enabled: schedule.enabled,
     anchorDate: schedule.anchorDate,
+    anchorWeekday: schedule.anchorDate === undefined ? undefined : schedule.weekday,
   };
 }
 
@@ -73,7 +89,11 @@ export function toScheduleDraft(schedule: WebScanSchedule): ScheduleDraft {
  *
  * The anchor day of a rule of every two weeks travels with the rule: a rule
  * that loses it counts its weeks from another day, so the weeks it runs in
- * move. A rule of another frequency has no anchor, so it never carries one.
+ * move. It travels only while the rule keeps the weekday of the anchor,
+ * because the server refuses an anchor that falls on another day; a rule that
+ * moved to another weekday is sent without one, so the server anchors it on
+ * the weekday that was asked for. A rule of another frequency has no anchor,
+ * so it never carries one.
  */
 export function toSchedule(draft: ScheduleDraft): WebScanSchedule {
   const base = {
@@ -83,9 +103,13 @@ export function toSchedule(draft: ScheduleDraft): WebScanSchedule {
     enabled: draft.enabled,
   };
   if (draft.frequency === 'biweekly') {
-    return draft.anchorDate === undefined
+    const anchor =
+      draft.anchorDate !== undefined && draft.anchorWeekday === draft.weekday
+        ? draft.anchorDate
+        : undefined;
+    return anchor === undefined
       ? { ...base, weekday: draft.weekday }
-      : { ...base, weekday: draft.weekday, anchorDate: draft.anchorDate };
+      : { ...base, weekday: draft.weekday, anchorDate: anchor };
   }
   if (draft.frequency === 'weekly') {
     return { ...base, weekday: draft.weekday };
@@ -148,8 +172,9 @@ export function buildSettingsPatch(
   const checks = changedChecks(base.checks, draft.checks);
   if (checks !== undefined) patch.checks = checks;
 
-  if (!sameSchedule(base.defaultSchedule, draft.defaultSchedule)) {
-    patch.defaultSchedule = draft.defaultSchedule;
+  const schedule = toSchedule(draft.defaultSchedule);
+  if (!sameSchedule(base.defaultSchedule, schedule)) {
+    patch.defaultSchedule = schedule;
   }
 
   if (draft.retentionDays !== base.retentionDays) patch.retentionDays = draft.retentionDays;
@@ -222,9 +247,16 @@ export function rebaseDraft(
     // another administrator is not told apart from an edit of the
     // administrator: the local rule wins. That is the documented limitation of
     // the rule as one unit.
-    defaultSchedule: sameSchedule(before.defaultSchedule, draft.defaultSchedule)
-      ? after.defaultSchedule
-      : draft.defaultSchedule,
+    //
+    // A draft that already says what the server says (the administrator's own
+    // edit after it was saved, or the same rule saved by another administrator)
+    // also follows the server: the server value carries the anchor it assigned,
+    // so a later edit of only the hour does not send a rule without its anchor.
+    defaultSchedule:
+      sameSchedule(toSchedule(before.defaultSchedule), toSchedule(draft.defaultSchedule)) ||
+      sameSchedule(toSchedule(draft.defaultSchedule), toSchedule(after.defaultSchedule))
+        ? after.defaultSchedule
+        : draft.defaultSchedule,
     retentionDays: pick('retentionDays'),
     contact: pick('contact'),
     alertMinSeverity: pick('alertMinSeverity'),

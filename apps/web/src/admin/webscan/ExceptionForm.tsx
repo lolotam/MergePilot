@@ -174,9 +174,15 @@ export function ExceptionForm({
           rows={3}
           value={reason}
           onChange={(event) => {
-            setReason(event.target.value);
-            // The administrator fixed the field: its error is gone.
-            setErrors((current) => ({ ...current, reason: undefined }));
+            const value = event.target.value;
+            setReason(value);
+            // The administrator fixed the field: its error is gone. A value of
+            // spaces only is not a fix: the submission refuses it as well, so
+            // the error stays where it is.
+            setErrors((current) => ({
+              ...current,
+              reason: value.trim() === '' ? current.reason : undefined,
+            }));
           }}
           aria-required="true"
           aria-invalid={errors.reason === undefined ? undefined : true}

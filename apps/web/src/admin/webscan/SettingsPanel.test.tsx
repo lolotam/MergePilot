@@ -210,7 +210,7 @@ describe('the global policy of the website scan', () => {
     ).toBeTruthy();
   });
 
-  it('shows the server error when the refusal carries no effective limits', async () => {
+  it('keeps the panel and its draft when the refusal carries no effective limits', async () => {
     installFetch((call) => {
       if (call.method === 'GET') return jsonResponse(settingsFixture);
       return jsonResponse(
@@ -232,11 +232,14 @@ describe('the global policy of the website scan', () => {
     fireEvent.change(input, { target: { value: '800' } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+    // The panel stays on the screen with the draft of the administrator.
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The settings were not saved');
+    expect((screen.getByLabelText('Requests per scan') as HTMLInputElement).value).toBe('800');
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('shows the server error when the refusal carries no confirmation', async () => {
+  it('keeps the panel and its draft when the refusal carries no confirmation', async () => {
     installFetch((call) => {
       if (call.method === 'GET') return jsonResponse(settingsFixture);
       return jsonResponse(
@@ -251,7 +254,9 @@ describe('the global policy of the website scan', () => {
     fireEvent.change(input, { target: { value: '800' } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(await screen.findByText('Could not load the data. Please try again.')).toBeTruthy();
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The settings were not saved');
+    expect((screen.getByLabelText('Requests per scan') as HTMLInputElement).value).toBe('800');
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 

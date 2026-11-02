@@ -66,7 +66,6 @@ export function SettingsPanel() {
   const baselineRef = useRef<WebScanSettingsDto | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
-  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     // The draft is the work of the administrator. A newer answer of the server never
@@ -92,8 +91,7 @@ export function SettingsPanel() {
   if (rights.lost) return <PermissionLostState />;
   if (isLoading) return <LoadingState />;
   if (isError) return isPermissionLost(error) ? <PermissionLostState /> : <ErrorState />;
-  if (failed) return <ErrorState />;
-  if (!data || !draft || !baseline) return <LoadingState />;
+  if (!draft || !baseline) return <LoadingState />;
 
   const togglePaused = (paused: boolean) => {
     setDraft({ ...draft, paused });
@@ -137,7 +135,10 @@ export function SettingsPanel() {
         // fields that are above their default.
         const confirmation = aboveDefaultConfirmation(err);
         if (!confirmation) {
-          setFailed(true);
+          // The refusal carries no confirmation the panel can build: the
+          // values the server would store are unknown, so the panel says so
+          // and keeps the draft of the administrator on the screen.
+          setMessage(t('webscanSettingsSaveFailed', { message: err.message }));
           return;
         }
         // The values of the dialog are the ones of the server: they are the
@@ -207,7 +208,10 @@ export function SettingsPanel() {
         onChange={(defaultSchedule) => setDraft({ ...draft, defaultSchedule })}
       />
       <AlertsCard draft={draft} onChange={setDraft} />
-      <ApprovedInstallationsCard installations={data.approvedInstallations} />
+      {/* Every value the server owns is read from the baseline, never from the
+          last answer of the query: an answer that was already on its way when
+          the baseline was installed is older than it and must not replace it. */}
+      <ApprovedInstallationsCard installations={baseline.approvedInstallations} />
 
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -228,7 +232,7 @@ export function SettingsPanel() {
       <AboveDefaultDialog
         isOpen={pending !== null}
         fields={pending?.fields ?? []}
-        limits={pending?.effective ?? data.limits}
+        limits={pending?.effective ?? baseline.limits}
         isPending={update.isPending}
         onConfirm={confirmAboveDefault}
         onClose={() => setPending(null)}

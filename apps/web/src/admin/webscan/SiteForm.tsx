@@ -103,6 +103,7 @@ export function SiteForm({
           minute: 0,
           enabled: false,
           anchorDate: undefined,
+          anchorWeekday: undefined,
         };
   });
   const [authorized, setAuthorized] = useState(false);

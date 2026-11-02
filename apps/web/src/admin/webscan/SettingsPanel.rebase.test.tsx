@@ -108,8 +108,15 @@ describe('the draft of the global policy and the answers of the server', () => {
     const input = await screen.findByLabelText('Requests per scan');
     fireEvent.change(input, { target: { value: '800' } });
 
-    // Another administrator raises another limit.
-    server = { ...server, limits: { ...server.limits, maxPages: 150 }, updatedAt: NEWER };
+    // Another administrator raises another limit and changes the bindings.
+    server = {
+      ...server,
+      limits: { ...server.limits, maxPages: 150 },
+      approvedInstallations: [
+        { adminUserId: 'u-newer', installationId: 103, githubAccountId: 77 },
+      ],
+      updatedAt: NEWER,
+    };
     await refetch();
     await waitFor(() => {
       expect((screen.getByLabelText('Crawled pages') as HTMLInputElement).value).toBe('150');
@@ -125,13 +132,18 @@ describe('the draft of the global policy and the answers of the server', () => {
       updatedAt: STALE,
     };
     await refetch();
-    // The late answer reached the panel.
+    // The late answer reached the panel: it was asked for and it was answered.
     await waitFor(() => {
-      expect(screen.getByText('u-other')).toBeTruthy();
+      expect(calls.filter((call) => call.method === 'GET').length).toBe(3);
     });
 
     // The limit of the other administrator stays in the form.
     expect((screen.getByLabelText('Crawled pages') as HTMLInputElement).value).toBe('150');
+
+    // The bindings of the newer answer stay in the card: the late answer is
+    // older than the baseline and never replaces what the server owns.
+    expect(screen.getByText('u-newer')).toBeTruthy();
+    expect(screen.queryByText('u-other')).toBeNull();
 
     // The save of the limit never takes the limit of the other administrator back.
     await user.click(screen.getByRole('button', { name: 'Save' }));
