@@ -5,8 +5,9 @@ import { createWebScanAdminApp, type WebScanAdminHarness } from './webscan.fixtu
 /**
  * The pages of the audit log (ADR-0052 section 10).
  *
- * The route asks the store for the page it needs, so a deep offset returns the
- * rows of that page and the total of the log stays the number of its rows.
+ * The route asks the store for the page it needs and the total of the log in one
+ * call, so a deep offset returns the rows of that page and the total stays the
+ * number of the rows of the same log.
  */
 
 describe('the audit log route (Task 8B)', () => {
@@ -89,11 +90,42 @@ describe('the audit log route (Task 8B)', () => {
 
   it('lets the store read the page instead of reading it and slicing it', async () => {
     await createSite('a.example.com');
-    const listAudit = vi.spyOn(h.store, 'listAudit');
+    const listAuditPage = vi.spyOn(h.store, 'listAuditPage');
 
     await page('?limit=2&offset=4');
 
     // The offset reaches the store as it was asked for.
-    expect(listAudit).toHaveBeenCalledWith({ limit: 2, offset: 4 });
+    expect(listAuditPage).toHaveBeenCalledWith({ limit: 2, offset: 4 });
+  });
+
+  it('reads the page and the total of the log in one call', async () => {
+    await createSite('a.example.com');
+    const listAuditPage = vi.spyOn(h.store, 'listAuditPage');
+    const listAudit = vi.spyOn(h.store, 'listAudit');
+    const countAudit = vi.spyOn(h.store, 'countAudit');
+
+    const response = await page('?limit=1&offset=0');
+
+    expect(response.statusCode).toBe(200);
+    // The page and the total come from one snapshot of the log, so the route never
+    // reads the log twice.
+    expect(listAuditPage).toHaveBeenCalledTimes(1);
+    expect(listAudit).not.toHaveBeenCalled();
+    expect(countAudit).not.toHaveBeenCalled();
+  });
+
+  it('never answers a page that holds more rows than the log has', async () => {
+    for (const hostname of ['a.example.com', 'b.example.com', 'c.example.com']) {
+      await createSite(hostname);
+    }
+
+    const first = await page('?limit=2&offset=0');
+    const beyond = await page('?limit=2&offset=100');
+
+    // The page of the log and its total describe the same log.
+    expect(first.json().audit.length).toBeLessThanOrEqual(first.json().total);
+    // An offset past the end of the log is an empty page that still knows the total.
+    expect(beyond.json().audit).toEqual([]);
+    expect(beyond.json().total).toBe(6);
   });
 });

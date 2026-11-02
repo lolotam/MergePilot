@@ -281,6 +281,50 @@ describe('the pages of the audit log', () => {
     }
   });
 
+  it('reads the page and its total from one call', async () => {
+    const { db, store } = await fixture();
+    try {
+      for (const id of IDS) await writeRow(db, id);
+
+      const page = await store.listAuditPage({ limit: 2, offset: 0 });
+
+      // The page holds the newest rows, in the order of the log.
+      expect(page.entries.map((row) => row.id)).toEqual([IDS[4], IDS[3]]);
+      // The total is the number of rows of the whole log.
+      expect(page.total).toBe(IDS.length);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('never lets a page hold more rows than the log has', async () => {
+    const { db, store } = await fixture();
+    try {
+      for (const id of IDS) await writeRow(db, id);
+
+      // A small first page of a log that holds more rows than it reads.
+      const page = await store.listAuditPage({ limit: 2, offset: 0 });
+      expect(page.entries.length).toBe(2);
+      expect(page.entries.length).toBeLessThanOrEqual(page.total);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('reports the total of the log for a page that is past its end', async () => {
+    const { db, store } = await fixture();
+    try {
+      for (const id of IDS) await writeRow(db, id);
+
+      // An empty page is still a page of the log, so it still knows its total.
+      const beyond = await store.listAuditPage({ limit: 10, offset: 50 });
+      expect(beyond.entries).toEqual([]);
+      expect(beyond.total).toBe(IDS.length);
+    } finally {
+      await db.close();
+    }
+  });
+
   it('orders the rows by their moment', async () => {
     const { db, store } = await fixture();
     try {

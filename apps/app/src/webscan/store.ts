@@ -143,6 +143,19 @@ export interface EnqueueWebScanResult {
   replayed: boolean;
 }
 
+/**
+ * One page of the audit log and the number of rows the log holds.
+ *
+ * The page and the total come from one snapshot of the log, so they always
+ * describe the same version of it.
+ */
+export interface WebScanAuditPage {
+  /** The rows of the page, newest first. */
+  entries: WebScanAuditEntry[];
+  /** The number of rows the log holds. */
+  total: number;
+}
+
 /** The outcome of an administrator stop: either the stop wrote, or it stayed out. */
 export interface StopWebScanResult {
   scan: WebScanScan;
@@ -273,9 +286,11 @@ export interface WebScanStore {
    * Cancels a queued or running scan on an administrator request.
    *
    * A queued scan becomes terminal right away; a running scan is marked stopped and keeps
-   * its attempt id, so the worker no longer owns it and stops before its next request. The
-   * cancelled attempt's terminal write changes neither the state nor the results; it may
-   * add its request, page and duration counters once. The stop state and its audit row are
+   * its attempt id until the cancelled attempt reports its counters once, so the worker
+   * no longer owns it and stops before its next request. The cancelled attempt's terminal
+   * write changes neither the state nor the results; it may add its request, page and
+   * duration counters once, and that write clears the attempt id, so the attempt can
+   * never write the counters a second time. The stop state and its audit row are
    * written in one transaction. A scan that already has a terminal state is returned
    * unchanged and nothing is written.
    */
@@ -331,6 +346,20 @@ export interface WebScanStore {
    * to know how many rows there are.
    */
   countAudit(options?: { targetType?: string; targetId?: string }): Promise<number>;
+  /**
+   * One page of the audit log and the number of rows the log holds.
+   *
+   * The page and the total are read from one snapshot of the log, so a row that is
+   * appended between two reads can never make the page and the total disagree: a
+   * page never holds more rows than the log has.
+   */
+  listAuditPage(options?: {
+    limit?: number;
+    /** How many rows to skip. The newest rows come first. */
+    offset?: number;
+    targetType?: string;
+    targetId?: string;
+  }): Promise<WebScanAuditPage>;
   /**
    * One audit row by its id.
    *

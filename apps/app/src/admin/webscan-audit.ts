@@ -19,8 +19,9 @@ import {
  * route only reads. Entries come back newest first, one page of `limit`/`offset`
  * at a time. The page itself is read by the store, so a deep offset skips the
  * rows before it in the database instead of reading them and throwing them away.
- * The total is a count of its own, so the page never depends on how many rows
- * the log really holds.
+ * The store reads the page and the total from one snapshot of the log, so a row
+ * that is appended while the page is read can never make the page and the total
+ * describe two versions of the log.
  */
 
 /** Builds one response entry from named fields; the sanitized before/after pass verbatim. */
@@ -49,14 +50,15 @@ export function registerWebScanAuditRoutes(
     const page = WebScanPageQuerySchema.safeParse(request.query ?? {});
     if (!page.success) return sendWebScanValidationError(reply, page.error);
 
-    // The store reads exactly the page that was asked for and counts the log
-    // beside it, so the rows never leave the store in another shape.
-    const [fetched, total] = await Promise.all([
-      store.listAudit({ limit: page.data.limit, offset: page.data.offset }),
-      store.countAudit(),
-    ]);
+    // The store reads the page that was asked for and counts the log beside it in
+    // one snapshot, so the rows and the total never describe two versions of the
+    // log.
+    const { entries, total } = await store.listAuditPage({
+      limit: page.data.limit,
+      offset: page.data.offset,
+    });
     return reply.status(200).send({
-      audit: fetched.map(toWebScanAuditDto),
+      audit: entries.map(toWebScanAuditDto),
       total,
       limit: page.data.limit,
       offset: page.data.offset,

@@ -5,6 +5,7 @@ import { webScanExceptions, webScanOccurrences } from '../db/schema.js';
 import { appendAudit, WEB_SCAN_MAINTENANCE_ACTOR } from './pg-audit.js';
 import { toWebScanException, type ExceptionRow } from './pg-rows.js';
 import {
+  WebScanConflictError,
   WebScanNotFoundError,
   type CreateWebScanExceptionInput,
 } from './store.js';
@@ -199,6 +200,11 @@ export async function revokeException(
     const current = rows[0];
     if (current === undefined) {
       throw new WebScanNotFoundError('The web scan exception');
+    }
+    // The row is locked now, so a revocation that won a race is visible: a revoked
+    // resolution stays revoked and nothing is rewritten or audited a second time.
+    if (current.revokedAt !== null) {
+      throw new WebScanConflictError('The web scan exception is already revoked');
     }
 
     const now = new Date();

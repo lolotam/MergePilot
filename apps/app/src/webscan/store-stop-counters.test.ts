@@ -8,7 +8,9 @@ import { PgWebScanWorkerStore } from './worker-store-persistence.js';
  * A running scan keeps its attempt id when the administrator stops it, so the
  * attempt that made the requests may still record how many it made. It may change
  * nothing else: the terminal state, the results and the audit stay as the
- * administrator left them, and only the first write of the counters counts.
+ * administrator left them, and only the first write of the counters counts. That
+ * first write clears the attempt id in the same update, so a later delivery of the
+ * same outcome is fenced and changes nothing.
  */
 
 const ISSUE_KEY = 'headers|headers/strict-transport-security|example.com';
@@ -95,6 +97,10 @@ describe('the counters of a cancelled scan', () => {
       expect(after?.finishedAt).toEqual(finishedAt);
       expect(after?.coverageSummary).toBeNull();
 
+      // The first write of the counters cleared the attempt id, so the attempt can
+      // never write them a second time.
+      expect(after?.attemptId).toBeNull();
+
       // No finding, no ledger transition and no retained coverage of the cancelled
       // attempt reached the site.
       const findings = await db.client.query<{ count: number }>(
@@ -108,8 +114,10 @@ describe('the counters of a cancelled scan', () => {
       expect(siteAfter?.lastCoverageScanId).toBeNull();
       expect(siteAfter?.lastScanAt).toBeNull();
 
-      // The write of the counters wrote no audit row of its own.
+      // The write of the counters wrote no audit row of its own: the log of the scan
+      // holds the enqueue, the claim and the stop, and nothing else.
       const audits = await store.listAudit({ targetType: 'scan', targetId: queued.scan.id });
+      expect(audits).toHaveLength(3);
       expect(audits.filter((row) => row.action === 'scan.stop')).toHaveLength(1);
       expect(audits.some((row) => row.action === 'scan.finish')).toBe(false);
       expect(audits.some((row) => row.action === 'scan.complete')).toBe(false);
@@ -151,20 +159,93 @@ describe('the counters of a cancelled scan', () => {
         }),
       ).toBe('already_terminal');
 
-      // The second write of the same attempt changes nothing.
+      // The first write cleared the attempt id, so the attempt no longer owns the row.
+      const owned = await store.getScan(queued.scan.id);
+      expect(owned?.attemptId).toBeNull();
+
+      // The second write of the same attempt is fenced and changes nothing.
       expect(
         await worker.recordScanOutcomeAttempt('worker:attempt-twice', {
           ...outcome,
-          requests: 99,
-          pages: 42,
-          durationMs: 9999,
+          requests: 9,
+          pages: 9,
+          durationMs: 9,
         }),
-      ).toBe('already_terminal');
+      ).toBe('fenced');
 
       const after = await store.getScan(queued.scan.id);
       expect(after?.requests).toBe(7);
       expect(after?.pages).toBe(3);
       expect(after?.durationMs).toBe(1200);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('keeps the counters of a cancelled scan whose first write reported none', async () => {
+    const { db, store } = await fixture();
+    try {
+      await unpause(store);
+      const site = await registeredSite(store);
+      const queued = await store.enqueueManualScan('admin-1', {
+        siteId: site.id,
+        idempotencyKey: 'stop-counters-zero',
+      });
+      const worker = new PgWebScanWorkerStore(db.db);
+      const attempt = { scanId: queued.scan.id, attemptId: 'attempt-zero' };
+      await worker.claimScan({ ...attempt, now: new Date() });
+      await store.stopScan('admin-1', queued.scan.id);
+
+      const outcome = {
+        ...attempt,
+        siteId: site.id,
+        now: new Date(),
+        status: 'stopped' as const,
+        stopReason: 'attempt_lost' as const,
+        findings: [],
+        coverage: [],
+        updates: [],
+      };
+
+      // The cancelled attempt made no request, so its counters are the empty ones.
+      expect(
+        await worker.recordScanOutcomeAttempt('worker:attempt-zero', {
+          ...outcome,
+          requests: 0,
+          pages: 0,
+          durationMs: 0,
+        }),
+      ).toBe('already_terminal');
+
+      // A later delivery of the same outcome is fenced: the attempt id is gone.
+      expect(
+        await worker.recordScanOutcomeAttempt('worker:attempt-zero', {
+          ...outcome,
+          requests: 7,
+          pages: 3,
+          durationMs: 1200,
+        }),
+      ).toBe('fenced');
+
+      // Another attempt cannot write the counters either.
+      expect(
+        await worker.recordScanOutcomeAttempt('worker:attempt-foreign', {
+          ...outcome,
+          attemptId: 'attempt-foreign',
+          requests: 7,
+          pages: 3,
+          durationMs: 1200,
+        }),
+      ).toBe('fenced');
+
+      // The row keeps the counters of the first write.
+      const after = await store.getScan(queued.scan.id);
+      expect(after?.status).toBe('stopped');
+      expect(after?.stopReason).toBe('cancelled');
+      expect(after?.requests).toBe(0);
+      expect(after?.pages).toBe(0);
+      expect(after?.durationMs).toBe(0);
+      expect(after?.attemptId).toBeNull();
     } finally {
       await db.close();
     }

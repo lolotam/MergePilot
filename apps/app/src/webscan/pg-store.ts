@@ -4,7 +4,7 @@ import type { AppDb } from '../db/pg-store.js';
 import { webScanSites } from '../db/schema.js';
 import { WEBSCAN_IDENTITY_PURPOSE, type ScopedSecretVault } from '../vault/scoped-secrets.js';
 import type { ScannerEnvelopeStore, ScannerIdentityEnvelope } from '../vault/rotate.js';
-import { countAudit, listAudit, readAuditEntry } from './pg-audit.js';
+import { countAudit, listAudit, listAuditPage, readAuditEntry } from './pg-audit.js';
 import { listAlerts, setSiteAlertEpisodes, upsertAlert } from './pg-alerts.js';
 import {
   createException,
@@ -39,6 +39,7 @@ import type {
   StopWebScanResult,
   UpdateWebScanSiteInput,
   UpsertWebScanAlertInput,
+  WebScanAuditPage,
   WebScanStore,
   WebScanSettingsPatch,
 } from './store.js';
@@ -219,6 +220,15 @@ export class PgWebScanStore implements WebScanStore, ScannerEnvelopeStore {
 
   async countAudit(options?: { targetType?: string; targetId?: string }): Promise<number> {
     return countAudit(this.db, options);
+  }
+
+  async listAuditPage(options?: {
+    limit?: number;
+    offset?: number;
+    targetType?: string;
+    targetId?: string;
+  }): Promise<WebScanAuditPage> {
+    return listAuditPage(this.db, options);
   }
 
   async getAuditEntry(auditId: string): Promise<WebScanAuditEntry | null> {

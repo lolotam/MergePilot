@@ -242,9 +242,12 @@ export class PgWebScanWorkerStore implements WebScanWorkerStore {
       // ran it, so that attempt may still add the counters it made. Nothing else of
       // its outcome is written: the terminal state, the stop reason, the finished
       // moment, the findings, the coverage and the ledger stay as the administrator
-      // left them, and no audit row is written. The conditional update is the
-      // "first write wins" rule: the counters are only written while they are still
-      // the empty ones of the stop.
+      // left them, and no audit row is written.
+      // The conditional update is the "first write wins" rule: the first write of the
+      // counters clears the attempt id in the same update, so the attempt that owns
+      // the scan cannot write the counters a second time. A later delivery of the
+      // same outcome finds the row without its attempt id and is fenced, so it
+      // changes nothing and reports nothing that was not written.
       if (scan.status === 'stopped' && scan.stopReason === 'cancelled') {
         await tx
           .update(webScans)
@@ -252,6 +255,7 @@ export class PgWebScanWorkerStore implements WebScanWorkerStore {
             requests: input.requests,
             pages: input.pages,
             durationMs: input.durationMs,
+            attemptId: null,
           })
           .where(
             and(
@@ -259,9 +263,6 @@ export class PgWebScanWorkerStore implements WebScanWorkerStore {
               eq(webScans.attemptId, input.attemptId),
               eq(webScans.status, 'stopped'),
               eq(webScans.stopReason, 'cancelled'),
-              eq(webScans.requests, 0),
-              eq(webScans.pages, 0),
-              eq(webScans.durationMs, 0),
             ),
           );
         return 'already_terminal';
