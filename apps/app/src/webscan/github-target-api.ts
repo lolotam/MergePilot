@@ -217,17 +217,27 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
       // so it is reused. The wrapper only remembers the status of the reply, so
       // a failure can be classified like every other one.
       let lastStatus: number | undefined;
+      let timedOut = false;
       const trackingFetch: typeof fetch = async (input, init) => {
-        const response = await fetchFn(input, init);
-        lastStatus = response.status;
-        return response;
+        try {
+          // The shared listing sets no deadline of its own: every page of it gets
+          // the same timeout as every other call, so a hanging GitHub is a refusal.
+          const response = await fetchFn(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+          lastStatus = response.status;
+          return response;
+        } catch (error) {
+          const name = error instanceof Error ? error.name : '';
+          timedOut = name === 'TimeoutError' || name === 'AbortError';
+          throw error;
+        }
       };
       try {
         return await listUserInstallations(userToken, trackingFetch);
       } catch {
-        throw new GitHubTargetApiError(
-          lastStatus === undefined ? 'network' : statusOf(lastStatus),
-        );
+        if (lastStatus === undefined) {
+          throw new GitHubTargetApiError(timedOut ? 'timeout' : 'network');
+        }
+        throw new GitHubTargetApiError(statusOf(lastStatus));
       }
     },
 

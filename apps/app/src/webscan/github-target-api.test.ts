@@ -195,6 +195,31 @@ describe('the production GitHub boundary of the alert target', () => {
     }
   });
 
+  it('gives up on a GitHub that hangs while the installations are listed', async () => {
+    let signalSeen = false;
+    const api = createGitHubTargetApi({
+      appId: '12345',
+      privateKey: PRIVATE_KEY,
+      timeoutMs: 20,
+      // A GitHub that never answers: only the deadline of the request ends the call.
+      fetchFn: ((_input: unknown, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          signalSeen = init?.signal instanceof AbortSignal;
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        })) as unknown as typeof fetch,
+    });
+    let caught: unknown = null;
+    try {
+      await api.listUserInstallations(HOSTILE_TOKEN);
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(signalSeen).toBe(true);
+    expect(caught).toBeInstanceOf(GitHubTargetApiError);
+    expect((caught as GitHubTargetApiError).status).toBe('timeout');
+    expect(String(caught)).not.toContain(HOSTILE_TOKEN);
+  });
+
   it('tells a timeout and a network error apart', async () => {
     const timeout = createGitHubTargetApi({
       appId: '12345',
