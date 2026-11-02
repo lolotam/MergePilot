@@ -4,8 +4,13 @@ import type { AppTx } from '../db/workspace-lock.js';
 import { WEB_SCAN_SETTINGS_ID, webScanSettings } from '../db/schema.js';
 import { appendAudit } from './pg-audit.js';
 import { parseSchedule } from './schedule.js';
-import { WebScanConflictError, type WebScanSettingsPatch } from './store.js';
-import type { WebScanSettings } from './types.js';
+import {
+  WebScanConflictError,
+  WebScanNotFoundError,
+  WEB_SCAN_MAX_APPROVED_INSTALLATIONS,
+  type WebScanSettingsPatch,
+} from './store.js';
+import type { WebScanApprovedInstallation, WebScanSettings } from './types.js';
 
 /**
  * The global settings of the scanner (ADR-0052 section 5).
@@ -109,7 +114,9 @@ export async function updateScanSettings(
         alertMinValidation: patch.alertMinValidation ?? before.alertMinValidation,
         checks: patch.checks ?? before.checks,
         defaultSchedule,
-        approvedInstallations: patch.approvedInstallations ?? before.approvedInstallations,
+        // The approved-installation list has its own audited writes: only an
+        // approval that GitHub proved may change it.
+        approvedInstallations: before.approvedInstallations,
         updatedAt: new Date(),
         updatedBy: actor,
       })
@@ -146,4 +153,104 @@ export async function lockSettingsRow(tx: AppTx): Promise<ScanSettingsRow> {
     throw new Error('The web scan settings row is missing');
   }
   return row;
+}
+
+/**
+ * Writes an approved installation and its audit row in one transaction.
+ *
+ * The row is locked first, so two approvals of the same moment are applied one
+ * after the other. The entry of one administrator and installation is written
+ * once: approving the same installation again replaces the old entry instead of
+ * growing the list, and the list never grows past its bound.
+ */
+export async function approveScanInstallation(
+  db: AppDb,
+  actor: string,
+  entry: WebScanApprovedInstallation,
+): Promise<WebScanSettings> {
+  return db.transaction(async (tx) => {
+    const before = await lockSettingsRow(tx);
+    const current = toWebScanSettings(before);
+    const list = before.approvedInstallations;
+    const known = list.some(
+      (row) =>
+        row.adminUserId === entry.adminUserId && row.installationId === entry.installationId,
+    );
+    if (!known && list.length >= WEB_SCAN_MAX_APPROVED_INSTALLATIONS) {
+      throw new WebScanConflictError('The list of approved installations is full');
+    }
+    const next = known
+      ? list.map((row) =>
+          row.adminUserId === entry.adminUserId && row.installationId === entry.installationId
+            ? entry
+            : row,
+        )
+      : [...list, entry];
+
+    const updated = await tx
+      .update(webScanSettings)
+      .set({ approvedInstallations: next, updatedAt: new Date(), updatedBy: actor })
+      .where(eq(webScanSettings.id, WEB_SCAN_SETTINGS_ID))
+      .returning();
+    const row = updated[0];
+    if (row === undefined) {
+      throw new Error('The web scan settings row was not written');
+    }
+
+    await appendAudit(tx, {
+      actor,
+      action: 'settings.approve_installation',
+      targetType: 'settings',
+      targetId: WEB_SCAN_SETTINGS_ID,
+      before: current,
+      after: toWebScanSettings(row),
+    });
+
+    return toWebScanSettings(row);
+  });
+}
+
+/**
+ * Removes an approved installation and writes its audit row in one transaction.
+ *
+ * An approval that is not there is a miss: the caller asked to remove something
+ * the settings do not hold, and nothing is written.
+ */
+export async function revokeScanInstallationApproval(
+  db: AppDb,
+  actor: string,
+  adminUserId: string,
+  installationId: number,
+): Promise<WebScanSettings> {
+  return db.transaction(async (tx) => {
+    const before = await lockSettingsRow(tx);
+    const current = toWebScanSettings(before);
+    const next = before.approvedInstallations.filter(
+      (row) => !(row.adminUserId === adminUserId && row.installationId === installationId),
+    );
+    if (next.length === before.approvedInstallations.length) {
+      throw new WebScanNotFoundError('The approved installation');
+    }
+
+    const updated = await tx
+      .update(webScanSettings)
+      .set({ approvedInstallations: next, updatedAt: new Date(), updatedBy: actor })
+      .where(eq(webScanSettings.id, WEB_SCAN_SETTINGS_ID))
+      .returning();
+    const row = updated[0];
+    if (row === undefined) {
+      throw new Error('The web scan settings row was not written');
+    }
+
+    await appendAudit(tx, {
+      actor,
+      action: 'settings.revoke_installation',
+      targetType: 'settings',
+      targetId: WEB_SCAN_SETTINGS_ID,
+      before: current,
+      after: toWebScanSettings(row),
+    });
+
+    return toWebScanSettings(row);
+  });
 }

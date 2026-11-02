@@ -1,13 +1,33 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
-import { listUserInstallationIds, getUserGitHubAccessToken } from './github-installations.js';
+import { listUserInstallationIds, listUserInstallations, getUserGitHubAccessToken } from './github-installations.js';
 import * as schema from './schema.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 describe('github installations listing', () => {
   const secretToken = 'ghu_super_secret_github_token_123456';
+
+  it('reports the numeric account id GitHub gives', async () => {
+    const fakeFetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          total_count: 1,
+          installations: [
+            { id: 101, account: { id: 401, login: 'acme', type: 'Organization' } },
+            { id: 102, account: { login: 'someone' } },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    const installations = await listUserInstallations(secretToken, fakeFetch);
+    expect(installations[0]).toMatchObject({ id: 101, accountId: 401, accountLogin: 'acme' });
+    // An installation without an account id reports none instead of guessing one.
+    expect(installations[1]).toMatchObject({ id: 102, accountId: null });
+  });
 
   it('lists installation ids from a single page', async () => {
     const fakeFetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

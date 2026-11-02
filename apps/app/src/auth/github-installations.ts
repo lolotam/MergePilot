@@ -25,6 +25,14 @@ function sanitizeMessage(message: string, secret: string): string {
 export interface UserInstallation {
   id: number;
   accountLogin: string;
+  /**
+   * The numeric id of the account the installation belongs to, as GitHub reports it.
+   *
+   * It is null when GitHub does not report one. The account id is what the
+   * scanner proves a repository owner against, so it is never guessed from the
+   * login.
+   */
+  accountId: number | null;
   accountType: 'User' | 'Organization';
   repositorySelection: 'all' | 'selected';
   suspended: boolean;
@@ -92,7 +100,7 @@ export async function listUserInstallations(
       total_count?: number;
       installations?: Array<{
         id: number;
-        account?: { login?: string; type?: string } | null;
+        account?: { id?: number; login?: string; type?: string } | null;
         repository_selection?: string;
         suspended_at?: string | null;
       }>;
@@ -104,6 +112,7 @@ export async function listUserInstallations(
           installations.push({
             id: inst.id,
             accountLogin: inst.account?.login ?? '',
+            accountId: typeof inst.account?.id === 'number' ? inst.account.id : null,
             accountType: inst.account?.type === 'Organization' ? 'Organization' : 'User',
             repositorySelection: inst.repository_selection === 'all' ? 'all' : 'selected',
             suspended: Boolean(inst.suspended_at),

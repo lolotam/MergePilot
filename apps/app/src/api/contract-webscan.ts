@@ -18,6 +18,7 @@ export const WebScanErrorCodeSchema = z.enum([
   'authorization_required',
   'invalid_request',
   'confirmation_required',
+  'target_refused',
   'too_many_streams',
   'live_updates_unavailable',
 ]);
@@ -239,9 +240,10 @@ export type WebScanApprovedInstallation = z.infer<typeof WebScanApprovedInstalla
  * an audit row for a request that asked for nothing. The confirmation alone is not a
  * change either: it only confirms the values of the patch that carries it.
  *
- * The approved-installation list is read-only here: ADR-0052 section 8 requires
- * every binding to be verified against GitHub before it is saved, and the
- * verifying endpoint arrives with Task 10. Until it exists, a body that carries
+ * The approved-installation list is not written here: ADR-0052 section 8 requires
+ * every binding to be verified against GitHub before it is saved, so it has its
+ * own endpoints (`POST` and `DELETE
+ * /api/admin/web-scan/settings/approved-installations`). A body that carries
  * `approvedInstallations` is refused as an unknown key and nothing is written.
  */
 export const WebScanSettingsPatchSchema = z
