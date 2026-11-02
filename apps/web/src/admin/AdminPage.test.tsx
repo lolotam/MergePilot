@@ -54,6 +54,14 @@ describe('AdminPage', () => {
     expect(adminApi.getOverview).not.toHaveBeenCalled();
   });
 
+  it('hides the website scan tab from a user who is not a platform admin', async () => {
+    mockMe(false);
+    renderWithProviders(<AdminPage />);
+
+    expect(await screen.findByText('home page')).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Website Scan' })).toBeNull();
+  });
+
   it('waits for /api/me before deciding', () => {
     mockMe(false, true);
     renderWithProviders(<AdminPage />);
@@ -61,7 +69,7 @@ describe('AdminPage', () => {
     expect(screen.getByText('Loading...')).toBeTruthy();
   });
 
-  it('renders the four tabs and overview stat cards for a platform admin', async () => {
+  it('renders the five tabs and overview stat cards for a platform admin', async () => {
     mockMe(true);
     renderWithProviders(<AdminPage />);
 
@@ -71,6 +79,7 @@ describe('AdminPage', () => {
       'Users',
       'Workspaces',
       'Review Runs',
+      'Website Scan',
     ]);
     expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
 

@@ -6,6 +6,7 @@ export const enAdmin = {
   tabUsers: 'Users',
   tabWorkspaces: 'Workspaces',
   tabRuns: 'Review Runs',
+  tabWebScan: 'Website Scan',
   statTotalUsers: 'Total Users',
   statTotalWorkspaces: 'Total Workspaces',
   statInstallations: 'GitHub Installations',

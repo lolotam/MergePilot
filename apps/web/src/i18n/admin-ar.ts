@@ -6,6 +6,7 @@ export const arAdmin = {
   tabUsers: 'المستخدمون',
   tabWorkspaces: 'مساحات العمل',
   tabRuns: 'المراجعات',
+  tabWebScan: 'فحص المواقع',
   statTotalUsers: 'إجمالي المستخدمين',
   statTotalWorkspaces: 'إجمالي مساحات العمل',
   statInstallations: 'تثبيتات GitHub',

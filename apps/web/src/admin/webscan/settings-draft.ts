@@ -1,0 +1,265 @@
+import type {
+  WebScanChecks,
+  WebScanLimits,
+  WebScanLimitsPatch,
+  WebScanSchedule,
+  WebScanSettingsDto,
+  WebScanSettingsPatchRequest,
+} from '@mergepilot/app/contract';
+
+/**
+ * The editable shape of the global policy (ADR-0052 section 5).
+ *
+ * The dashboard never edits the stored row directly: it keeps a draft, and it
+ * sends only the fields that changed, so two administrators editing different
+ * settings do not overwrite each other.
+ */
+export interface SettingsDraft {
+  paused: boolean;
+  alertsEnabled: boolean;
+  limits: WebScanLimits;
+  checks: WebScanChecks;
+  defaultSchedule: ScheduleDraft;
+  retentionDays: number;
+  contact: string;
+  alertMinSeverity: WebScanSettingsDto['alertMinSeverity'];
+  alertMinValidation: WebScanSettingsDto['alertMinValidation'];
+}
+
+/** The frequency of a schedule, as the contract names it. */
+export type ScheduleFrequency = WebScanSchedule['frequency'];
+
+/** The schedule as the form holds it: every field, the irrelevant ones included. */
+export interface ScheduleDraft {
+  frequency: ScheduleFrequency;
+  weekday: number;
+  dayOfMonth: number;
+  hour: number;
+  minute: number;
+  enabled: boolean;
+  /** The day the rule of every two weeks counts from, when it has one. */
+  anchorDate: string | undefined;
+  /**
+   * The weekday the anchor falls on.
+   *
+   * The server refuses an anchor that does not fall on the weekday it is sent
+   * with, so the draft remembers the weekday of its anchor: the anchor travels
+   * with the rule as long as the rule keeps that weekday.
+   */
+  anchorWeekday: number | undefined;
+}
+
+export function toSettingsDraft(settings: WebScanSettingsDto): SettingsDraft {
+  return {
+    paused: settings.paused,
+    alertsEnabled: settings.alertsEnabled,
+    limits: { ...settings.limits },
+    checks: { ...settings.checks },
+    defaultSchedule: toScheduleDraft(settings.defaultSchedule),
+    retentionDays: settings.retentionDays,
+    contact: settings.contact,
+    alertMinSeverity: settings.alertMinSeverity,
+    alertMinValidation: settings.alertMinValidation,
+  };
+}
+
+/**
+ * The rule as the form holds it, with the anchor it came with.
+ *
+ * The anchor of a rule of every two weeks and the weekday it falls on are
+ * taken together: the server keeps them in agreement, so the weekday of the
+ * stored rule is the weekday of its anchor.
+ */
+export function toScheduleDraft(schedule: WebScanSchedule): ScheduleDraft {
+  return {
+    frequency: schedule.frequency,
+    weekday: schedule.weekday ?? 0,
+    dayOfMonth: schedule.dayOfMonth ?? 1,
+    hour: schedule.hour,
+    minute: schedule.minute,
+    enabled: schedule.enabled,
+    anchorDate: schedule.anchorDate,
+    anchorWeekday: schedule.anchorDate === undefined ? undefined : schedule.weekday,
+  };
+}
+
+/**
+ * The schedule as the API takes it: the frequency decides which day field is
+ * required, and the irrelevant ones are left out.
+ *
+ * The anchor day of a rule of every two weeks travels with the rule: a rule
+ * that loses it counts its weeks from another day, so the weeks it runs in
+ * move. It travels only while the rule keeps the weekday of the anchor,
+ * because the server refuses an anchor that falls on another day; a rule that
+ * moved to another weekday is sent without one, so the server anchors it on
+ * the weekday that was asked for. A rule of another frequency has no anchor,
+ * so it never carries one.
+ */
+export function toSchedule(draft: ScheduleDraft): WebScanSchedule {
+  const base = {
+    frequency: draft.frequency,
+    hour: draft.hour,
+    minute: draft.minute,
+    enabled: draft.enabled,
+  };
+  if (draft.frequency === 'biweekly') {
+    const anchor =
+      draft.anchorDate !== undefined && draft.anchorWeekday === draft.weekday
+        ? draft.anchorDate
+        : undefined;
+    return anchor === undefined
+      ? { ...base, weekday: draft.weekday }
+      : { ...base, weekday: draft.weekday, anchorDate: anchor };
+  }
+  if (draft.frequency === 'weekly') {
+    return { ...base, weekday: draft.weekday };
+  }
+  if (draft.frequency === 'monthly') {
+    return { ...base, dayOfMonth: draft.dayOfMonth };
+  }
+  return base;
+}
+
+function changedLimits(base: WebScanLimits, draft: WebScanLimits): WebScanLimitsPatch | undefined {
+  const patch: WebScanLimitsPatch = {};
+  if (draft.maxRequests !== base.maxRequests) patch.maxRequests = draft.maxRequests;
+  if (draft.maxPages !== base.maxPages) patch.maxPages = draft.maxPages;
+  if (draft.maxActiveLinks !== base.maxActiveLinks) patch.maxActiveLinks = draft.maxActiveLinks;
+  if (draft.requestsPerSecond !== base.requestsPerSecond) {
+    patch.requestsPerSecond = draft.requestsPerSecond;
+  }
+  if (draft.requestTimeoutMs !== base.requestTimeoutMs) patch.requestTimeoutMs = draft.requestTimeoutMs;
+  if (draft.maxResponseBytes !== base.maxResponseBytes) patch.maxResponseBytes = draft.maxResponseBytes;
+  if (draft.totalTimeoutMs !== base.totalTimeoutMs) patch.totalTimeoutMs = draft.totalTimeoutMs;
+  return Object.keys(patch).length > 0 ? patch : undefined;
+}
+
+function changedChecks(base: WebScanChecks, draft: WebScanChecks): WebScanChecks | undefined {
+  const same =
+    base.headers === draft.headers &&
+    base.cookies === draft.cookies &&
+    base.transport === draft.transport &&
+    base.disclosure === draft.disclosure &&
+    base.files === draft.files &&
+    base.active === draft.active;
+  return same ? undefined : { ...draft };
+}
+
+/** Whether two schedules mean the same rule. */
+export function sameSchedule(a: WebScanSchedule, b: WebScanSchedule): boolean {
+  return (
+    a.frequency === b.frequency &&
+    (a.weekday ?? null) === (b.weekday ?? null) &&
+    (a.dayOfMonth ?? null) === (b.dayOfMonth ?? null) &&
+    a.hour === b.hour &&
+    a.minute === b.minute &&
+    a.enabled === b.enabled
+  );
+}
+
+/** The patch of the fields the administrator changed, and nothing else. */
+export function buildSettingsPatch(
+  base: WebScanSettingsDto,
+  draft: SettingsDraft,
+): WebScanSettingsPatchRequest {
+  const patch: WebScanSettingsPatchRequest = {};
+  if (draft.paused !== base.paused) patch.paused = draft.paused;
+  if (draft.alertsEnabled !== base.alertsEnabled) patch.alertsEnabled = draft.alertsEnabled;
+
+  const limits = changedLimits(base.limits, draft.limits);
+  if (limits !== undefined) patch.limits = limits;
+
+  const checks = changedChecks(base.checks, draft.checks);
+  if (checks !== undefined) patch.checks = checks;
+
+  const schedule = toSchedule(draft.defaultSchedule);
+  if (!sameSchedule(base.defaultSchedule, schedule)) {
+    patch.defaultSchedule = schedule;
+  }
+
+  if (draft.retentionDays !== base.retentionDays) patch.retentionDays = draft.retentionDays;
+  if (draft.contact !== base.contact) patch.contact = draft.contact;
+  if (draft.alertMinSeverity !== base.alertMinSeverity) patch.alertMinSeverity = draft.alertMinSeverity;
+  if (draft.alertMinValidation !== base.alertMinValidation) {
+    patch.alertMinValidation = draft.alertMinValidation;
+  }
+  return patch;
+}
+
+/** True when the administrator did not touch a value since the baseline it came from. */
+function untouched<T>(baseline: T, draft: T): boolean {
+  return JSON.stringify(baseline) === JSON.stringify(draft);
+}
+
+/**
+ * Whether an answer of the server is older than the baseline it would replace.
+ *
+ * The server stamps the row with the moment it was written, so a reply that
+ * was already on its way when the baseline was installed is told apart from a
+ * newer one. A stamp that cannot be read is never treated as older: the answer
+ * is used as it is.
+ */
+export function isOlderSettings(answer: WebScanSettingsDto, baseline: WebScanSettingsDto): boolean {
+  const answerAt = Date.parse(answer.updatedAt);
+  const baselineAt = Date.parse(baseline.updatedAt);
+  if (!Number.isFinite(answerAt) || !Number.isFinite(baselineAt)) return false;
+  return answerAt < baselineAt;
+}
+
+/** Merges one record field by field: an edited field stays, an untouched one follows the server. */
+function mergeRecord<T extends object>(baseline: T, draft: T, server: T): T {
+  const merged: T = { ...server };
+  for (const key of Object.keys(server) as Array<keyof T>) {
+    merged[key] = untouched(baseline[key], draft[key]) ? server[key] : draft[key];
+  }
+  return merged;
+}
+
+/**
+ * Moves a draft onto a newer answer of the server.
+ *
+ * What the administrator edited stays as it is; everything else follows the
+ * server, so a change another administrator (or another tab) made, the kill
+ * switch above all, is never silently reverted by an unrelated save.
+ */
+export function rebaseDraft(
+  baseline: WebScanSettingsDto,
+  draft: SettingsDraft,
+  server: WebScanSettingsDto,
+): SettingsDraft {
+  const before = toSettingsDraft(baseline);
+  const after = toSettingsDraft(server);
+  const pick = <K extends 'paused' | 'alertsEnabled' | 'retentionDays' | 'contact' | 'alertMinSeverity' | 'alertMinValidation'>(
+    key: K,
+  ): SettingsDraft[K] => (untouched(before[key], draft[key]) ? after[key] : draft[key]);
+  return {
+    paused: pick('paused'),
+    alertsEnabled: pick('alertsEnabled'),
+    limits: mergeRecord(before.limits, draft.limits, after.limits),
+    checks: mergeRecord(before.checks, draft.checks, after.checks),
+    // The schedule is compared as the rule it is and not as text: the form
+    // rebuilds it through `toSchedule`, which writes the keys in another order
+    // and leaves the irrelevant ones out, so two schedules of the same rule
+    // would never be equal as text. The rule that was put back as it was
+    // therefore follows the server like any other untouched field.
+    //
+    // The rule is saved as one whole rule, so a change of one of its fields by
+    // another administrator is not told apart from an edit of the
+    // administrator: the local rule wins. That is the documented limitation of
+    // the rule as one unit.
+    //
+    // A draft that already says what the server says (the administrator's own
+    // edit after it was saved, or the same rule saved by another administrator)
+    // also follows the server: the server value carries the anchor it assigned,
+    // so a later edit of only the hour does not send a rule without its anchor.
+    defaultSchedule:
+      sameSchedule(toSchedule(before.defaultSchedule), toSchedule(draft.defaultSchedule)) ||
+      sameSchedule(toSchedule(draft.defaultSchedule), toSchedule(after.defaultSchedule))
+        ? after.defaultSchedule
+        : draft.defaultSchedule,
+    retentionDays: pick('retentionDays'),
+    contact: pick('contact'),
+    alertMinSeverity: pick('alertMinSeverity'),
+    alertMinValidation: pick('alertMinValidation'),
+  };
+}
