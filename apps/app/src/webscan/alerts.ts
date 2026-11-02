@@ -137,9 +137,11 @@ export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluat
       // prospective open-issue targets no issue yet: it must not outrank an episode that
       // has a real issue behind it when an over-bound state is capped.
       pending: entry.result.actions.some((action) => action.kind !== 'open-issue'),
+      // A confirmed missing issue is no issue behind the episode, even if one was requested.
       hasIssue:
-        context.episodesByIssueKey.get(entry.result.episode.issueKey)?.issueRequested === true ||
-        (entry.result.episode.issueState ?? 'none') !== 'none',
+        (entry.result.episode.issueState ?? 'none') !== 'missing' &&
+        (context.episodesByIssueKey.get(entry.result.episode.issueKey)?.issueRequested === true ||
+          (entry.result.episode.issueState ?? 'none') !== 'none'),
     })),
   );
   const admittedKeys = new Set(admitted.map((episode) => episode.episodeKey));

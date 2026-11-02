@@ -148,9 +148,14 @@ describe('the release of the slot of a resolved episode', () => {
   });
 
 
-  it.each(['manual', 'scheduled'] as const)(
-    'drops an episode without an issue before an unresolved one that has an issue (%s scan)',
-    (trigger) => {
+  it.each([
+    { trigger: 'manual', label: 'never requested', requested: false, observed: undefined },
+    { trigger: 'scheduled', label: 'never requested', requested: false, observed: undefined },
+    { trigger: 'manual', label: 'confirmed missing', requested: true, observed: 'missing' },
+    { trigger: 'scheduled', label: 'confirmed missing', requested: true, observed: 'missing' },
+  ] as const)(
+    'drops an episode without an issue before an unresolved one that has an issue ($label, $trigger scan)',
+    ({ trigger, requested, observed }) => {
     const seeded = runAlertScenario(
       [
         {
@@ -176,7 +181,7 @@ describe('the release of the slot of a resolved episode', () => {
       episodeKey: 'episode-without-issue',
       issueKey: issueKeyOf(MAX_ALERT_EPISODES_PER_SITE),
       issueState: 'none' as const,
-      issueRequested: false,
+      issueRequested: requested,
     };
 
     // On a scheduled scan the episode without an issue is offered an open-issue: a request for
@@ -192,7 +197,13 @@ describe('the release of the slot of a resolved episode', () => {
         group(index, { severity: 'high', validation: 'Confirmed' }),
       ),
       exceptions: [],
-      issueStates: withIssue.map((episode) => ({ episodeKey: episode.episodeKey, state: 'open' as const })),
+      issueStates: [
+        ...withIssue.map((episode) => ({ episodeKey: episode.episodeKey, state: 'open' as const })),
+        // A confirmed missing issue is no issue behind the episode, even if one was requested.
+        ...(observed === undefined
+          ? []
+          : [{ episodeKey: withoutIssue.episodeKey, state: observed }]),
+      ],
     });
 
     const keptKeys = new Set(evaluation.episodes.map((episode) => episode.episodeKey));
