@@ -1,6 +1,6 @@
 import type { GroupOccurrence, IssueGroup } from '@mergepilot/webscan';
 import {
-  capEpisodes,
+  admitEpisodes,
   compareCodeUnits,
   episodeKey,
   episodeOf,
@@ -54,6 +54,9 @@ import type { WebScanAlertEpisode, WebScanException } from './types.js';
  * - A manual scan updates the state and never consumes an unnotified episode.
  * - An unknown state of the issue is never closed, never open and never
  *   advances the notification of the episode.
+ * - The bounded episode state of a site is a budget of slots: an episode that
+ *   the site already carries keeps its slot, and a new episode is admitted
+ *   only while a slot is free.
  * - A confirmed missing issue keeps the episode eligible and is replaced by
  *   exactly one issue with the same deterministic marker.
  * - A "fixed" comment is reserved for a group whose members were all proven
@@ -87,6 +90,11 @@ interface IssueKeyResult {
  * The returned episode state is the state to persist on the site row, bounded
  * and ordered by the issue key. The returned actions are the writes the
  * delivery layer has to perform; a manual scan never produces one.
+ *
+ * The bound is a budget of slots: the episodes the site already carries keep
+ * their slot, and a new episode is admitted only while a slot is free. A new
+ * episode that the admission refuses produces no action either, so the issue
+ * of an episode whose state was never kept is never opened.
  */
 export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluation {
   if (!input.thresholds.alertsEnabled) {
@@ -102,10 +110,23 @@ export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluat
     }
   }
 
-  const episodes = capEpisodes(results.map((result) => result.episode));
+  const evaluated = results.map((result) => ({
+    result,
+    existing: context.episodesByIssueKey.has(result.episode.issueKey),
+  }));
+  const episodes = admitEpisodes(
+    evaluated.map((entry) => ({ episode: entry.result.episode, existing: entry.existing })),
+  );
+  const admitted = new Set(episodes.map((episode) => episode.episodeKey));
+
   const actions: AlertAction[] = [];
-  for (const result of results) {
-    actions.push(...result.actions);
+  for (const entry of evaluated) {
+    // A new candidate that the admission refused leaves no action behind: its
+    // group is offered again on a later scan, when a slot frees up.
+    if (!entry.existing && !admitted.has(entry.result.episode.episodeKey)) {
+      continue;
+    }
+    actions.push(...entry.result.actions);
   }
   return { episodes, actions };
 }
@@ -160,14 +181,20 @@ function evaluateIssueKey(
     return startEpisode(context, issueKey, 0, level, members, eligible);
   }
 
-  const recurred = existing.resolved === true && eligible.length > 0;
-  if (recurred || (eligible.length > 0 && levelRose(existing, level))) {
-    const generation = (existing.generation ?? 0) + 1;
-    const inherited = highestLevel(level, levelOfEpisode(existing));
-    return startEpisode(context, issueKey, generation, inherited, members, eligible);
+  const effective = effectiveIssueState(context, existing);
+  // An unknown state of the issue is never closed and never open, so it never
+  // starts a new episode: the issue of the episode may still exist, and the
+  // episode continues, visibly unknown, until the state of the issue is known.
+  if (effective !== 'unknown') {
+    const recurred = existing.resolved === true && eligible.length > 0;
+    if (recurred || (eligible.length > 0 && levelRose(existing, level))) {
+      const generation = (existing.generation ?? 0) + 1;
+      const inherited = highestLevel(level, levelOfEpisode(existing));
+      return startEpisode(context, issueKey, generation, inherited, members, eligible);
+    }
   }
 
-  return continueEpisode(context, existing, members, eligible, resolution);
+  return continueEpisode(context, existing, members, eligible, resolution, effective);
 }
 
 /**
@@ -213,8 +240,8 @@ function continueEpisode(
   members: readonly GroupOccurrence[],
   eligible: readonly GroupOccurrence[],
   resolution: AlertResolution | undefined,
+  effective: AlertIssueState,
 ): IssueKeyResult {
-  const effective = effectiveIssueState(context, existing);
   const noIssue = effective === 'none' || effective === 'missing';
   const suppressed =
     existing.issueRequested === true && existing.issueState === effective && noIssue;

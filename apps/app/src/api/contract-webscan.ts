@@ -302,13 +302,30 @@ export const WebScanCoverageEntrySchema = z.strictObject({
 });
 export type WebScanCoverageEntryDto = z.infer<typeof WebScanCoverageEntrySchema>;
 
-/** One alert episode of a site: bounded state, keyed by issue. */
+/**
+ * One alert episode of a site: bounded state, keyed by issue.
+ *
+ * The fields below `lastChangedAt` are the state the alert engine added later:
+ * the observed state of the issue, the request of a delivery, the resolution
+ * and the level the episode started at. They are optional and additive: an
+ * episode that was written before they existed keeps its old meaning, and an
+ * absent field stays absent in the response instead of naming a state the
+ * episode never had.
+ */
 export const WebScanAlertEpisodeSchema = z.strictObject({
   episodeKey: z.string(),
   issueKey: z.string(),
   state: z.enum(['open', 'closed']),
   occurrenceKeys: z.array(z.string()),
   lastChangedAt: z.string(),
+  issueState: z.enum(['none', 'open', 'closed', 'unknown', 'missing']).optional(),
+  issueRequested: z.boolean().optional(),
+  resolved: z.boolean().optional(),
+  outcome: z.enum(['fixed', 'resolved-by-exception']).optional(),
+  severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
+  validation: z.enum(['Confirmed', 'Likely', 'Indicator', 'Informational']).optional(),
+  generation: z.number().int().min(1).optional(),
+  createdAt: z.string().optional(),
 });
 
 /** GET /api/admin/web-scan/sites — the schemas of the sites live in their own module. */

@@ -21,14 +21,16 @@ import type { WebScanApprovedInstallation, WebScanRepositoryBinding } from './ty
  * nothing is written and no credential is ever returned.
  */
 
-/** True when the failure means the target is definitely gone. */
+/**
+ * True when the failure means the target is definitely gone.
+ *
+ * Only a definite 404 of the App's own record of the installation and a
+ * repository that does not exist are such a failure. A loss of access is not a
+ * deletion: the installation and the repository may still be there for the
+ * account, and the access can come back.
+ */
 export function isLostWebScanTargetReason(reason: WebScanGitHubTargetReason): boolean {
-  return (
-    reason === 'installation_lost' ||
-    reason === 'repository_not_found' ||
-    reason === 'installation_not_accessible' ||
-    reason === 'no_user_access'
-  );
+  return reason === 'installation_lost' || reason === 'repository_not_found';
 }
 
 /**
@@ -202,8 +204,10 @@ export async function verifyRepositoryTarget(
       input.approved.installationId,
     );
   } catch (error) {
+    // The App has its own record of the installation, so a 404 of the listing
+    // is a loss of the access of the administrator and not a deletion.
     if (failureOf(error) === 'not_found') {
-      return { ok: false, reason: 'installation_lost' };
+      return { ok: false, reason: 'installation_not_accessible' };
     }
     return { ok: false, reason: 'unverifiable' };
   }
@@ -286,7 +290,10 @@ export async function revalidateBinding(
     return { ok: false, reason: 'unverifiable' };
   }
   const own = installations.find((row) => row.id === input.binding.installationId);
-  if (own === undefined) return { ok: false, reason: 'installation_lost' };
+  // The installation is not in the own list of the administrator. That proves
+  // that the administrator lost the access to it, never that the installation
+  // of the App is gone: the access can come back.
+  if (own === undefined) return { ok: false, reason: 'installation_not_accessible' };
   if (own.suspended) return { ok: false, reason: 'installation_suspended' };
 
   let record: GitHubTargetInstallation;
@@ -311,8 +318,10 @@ export async function revalidateBinding(
       input.binding.installationId,
     );
   } catch (error) {
+    // The App has its own record of the installation, so a 404 of the listing
+    // is a loss of the access of the administrator and not a deletion.
     if (failureOf(error) === 'not_found') {
-      return { ok: false, reason: 'installation_lost' };
+      return { ok: false, reason: 'installation_not_accessible' };
     }
     return { ok: false, reason: 'unverifiable' };
   }

@@ -13,6 +13,15 @@ import { createGitHubTargetApi } from './github-target-api.js';
 /** A token-shaped value that is built at run time and must never leak. */
 const HOSTILE_TOKEN = ['gh', 'p', '_', 'hostile', 'token', 'value'].join('');
 
+/** The access token of an installation, built at run time. */
+const INSTALLATION_TOKEN = ['gh', 's', '_', 'installation', 'token', 'value'].join('');
+
+/** A key the App cannot sign with, built at run time. */
+const UNUSABLE_KEY = ['not', 'a', 'signing', 'key'].join('-');
+
+/** The url of the second page of the listing of the installations. */
+const SECOND_PAGE = 'https://api.github.com/user/installations?per_page=100&page=2';
+
 /** A private key of the App, generated at run time. */
 function aPrivateKey(): string {
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -118,7 +127,7 @@ describe('the production GitHub boundary of the alert target', () => {
 
   it('reads a repository with the token of the installation', async () => {
     const { api, fetchFn } = apiWith({
-      '/app/installations/101/access_tokens': { status: 201, body: { token: 'installation-token' } },
+      '/app/installations/101/access_tokens': { status: 201, body: { token: INSTALLATION_TOKEN } },
       '/repos/acme/demo': {
         status: 200,
         body: { id: 7, name: 'demo', private: true, visibility: 'private', owner: { id: 401, login: 'acme' } },
@@ -258,7 +267,7 @@ describe('the production GitHub boundary of the alert target', () => {
   it('refuses a private key it cannot sign with', async () => {
     const api = createGitHubTargetApi({
       appId: '12345',
-      privateKey: 'not-a-key',
+      privateKey: UNUSABLE_KEY,
       fetchFn: (async () => new Response('{}', { status: 200 })) as unknown as typeof fetch,
     });
     let caught: unknown = null;
@@ -269,5 +278,127 @@ describe('the production GitHub boundary of the alert target', () => {
     }
     expect(caught).toBeInstanceOf(GitHubTargetApiError);
     expect((caught as GitHubTargetApiError).status).toBe('network');
+  });
+
+  it('calls a broken body of the repositories a network failure', async () => {
+    const fetchFn = vi.fn(
+      async () =>
+        new Response('this is not json', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    const api = createGitHubTargetApi({
+      appId: '12345',
+      privateKey: PRIVATE_KEY,
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    let caught: unknown = null;
+    try {
+      await api.listInstallationRepositories(HOSTILE_TOKEN, 101);
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(GitHubTargetApiError);
+    expect(caught).not.toBeInstanceOf(SyntaxError);
+    expect((caught as GitHubTargetApiError).status).toBe('network');
+  });
+});
+
+describe('the pages of the listing of the installations', () => {
+  /** The api under test, with a transport that answers by the url of the call. */
+  function apiWithPages(fetchFn: typeof fetch, timeoutMs: number) {
+    return createGitHubTargetApi({
+      appId: '12345',
+      privateKey: PRIVATE_KEY,
+      fetchFn,
+      timeoutMs,
+    });
+  }
+
+  /** The reply of a first page that names a second one. */
+  function firstPage(): Response {
+    return new Response(JSON.stringify({ total_count: 0, installations: [] }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        Link: `<${SECOND_PAGE}>; rel="next"`,
+      },
+    });
+  }
+
+  it('gives up on a later page that hangs past the deadline', async () => {
+    const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('page=2')) {
+        // A second page that never answers: only the deadline of the request
+        // ends the call.
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init?.signal?.reason));
+        });
+      }
+      return firstPage();
+    });
+    const api = apiWithPages(fetchFn as unknown as typeof fetch, 20);
+
+    let caught: unknown = null;
+    try {
+      await api.listUserInstallations(HOSTILE_TOKEN);
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(GitHubTargetApiError);
+    expect((caught as GitHubTargetApiError).status).toBe('timeout');
+    // The first page answered: the failure is the failure of the second one.
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('calls a later page with a broken body a network failure', async () => {
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('page=2')) {
+        return new Response('this is not json', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return firstPage();
+    });
+    const api = apiWithPages(fetchFn as unknown as typeof fetch, 1_000);
+
+    let caught: unknown = null;
+    try {
+      await api.listUserInstallations(HOSTILE_TOKEN);
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(GitHubTargetApiError);
+    expect((caught as GitHubTargetApiError).status).toBe('network');
+    // The first page answered: the failure is the failure of the second one.
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('tells a refusal of a later page from a broken one', async () => {
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('page=2')) {
+        return new Response(JSON.stringify({ message: 'forbidden' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return firstPage();
+    });
+    const api = apiWithPages(fetchFn as unknown as typeof fetch, 1_000);
+
+    let caught: unknown = null;
+    try {
+      await api.listUserInstallations(HOSTILE_TOKEN);
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(GitHubTargetApiError);
+    expect((caught as GitHubTargetApiError).status).toBe('forbidden');
   });
 });

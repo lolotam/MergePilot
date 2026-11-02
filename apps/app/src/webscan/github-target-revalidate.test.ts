@@ -69,10 +69,37 @@ describe('the revalidation of a stored binding', () => {
     }
   });
 
+  it('tells a lost access from a lost target', async () => {
+    // The administrator lost the access to the installation: it is not in their
+    // own list anymore, while the App still has its own record of it.
+    const api = happyApi();
+    api.installations = [];
+    expect(await revalidate(api)).toEqual({
+      ok: false,
+      reason: 'installation_not_accessible',
+    });
+    expect(isLostWebScanTargetReason('installation_not_accessible')).toBe(false);
+    expect(api.installation).toBeDefined();
+    expect(api.calls).toEqual(['listUserInstallations']);
+  });
+
+  it('tells a listing of the repositories that is gone from a lost target', async () => {
+    // The App has its own record of the installation, so a 404 of the listing
+    // is a loss of the access of the administrator and not a deletion.
+    const api = happyApi();
+    api.failures = { listInstallationRepositories: 'not_found' };
+    expect(await revalidate(api)).toEqual({
+      ok: false,
+      reason: 'installation_not_accessible',
+    });
+    expect(isLostWebScanTargetReason('installation_not_accessible')).toBe(false);
+  });
+
   it('refuses a repository that the installation cannot see anymore', async () => {
     const api = happyApi();
     api.failures = { getRepository: 'not_found' };
     expect(await revalidate(api)).toEqual({ ok: false, reason: 'repository_not_found' });
+    expect(isLostWebScanTargetReason('repository_not_found')).toBe(true);
   });
 
   it('refuses an administrator who is no longer a platform administrator', async () => {
@@ -115,6 +142,7 @@ describe('the revalidation of a stored binding', () => {
     const api = happyApi();
     api.visible = [];
     expect(await revalidate(api)).toEqual({ ok: false, reason: 'no_user_access' });
+    expect(isLostWebScanTargetReason('no_user_access')).toBe(false);
   });
 });
 

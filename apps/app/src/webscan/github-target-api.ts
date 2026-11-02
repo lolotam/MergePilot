@@ -219,6 +219,10 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
       let lastStatus: number | undefined;
       let timedOut = false;
       const trackingFetch: typeof fetch = async (input, init) => {
+        // Every page starts from a clean slate: the status of an earlier page
+        // never classifies the failure of a later one.
+        lastStatus = undefined;
+        timedOut = false;
         try {
           // The shared listing sets no deadline of its own: every page of it gets
           // the same timeout as every other call, so a hanging GitHub is a refusal.
@@ -226,7 +230,7 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
           lastStatus = response.status;
           return response;
         } catch (error) {
-          const name = error instanceof Error ? error.name : '';
+          const name = errorName(error);
           timedOut = name === 'TimeoutError' || name === 'AbortError';
           throw error;
         }
@@ -234,8 +238,16 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
       try {
         return await listUserInstallations(userToken, trackingFetch);
       } catch {
-        if (lastStatus === undefined) {
-          throw new GitHubTargetApiError(timedOut ? 'timeout' : 'network');
+        // A timeout is a timeout, whatever an earlier page of the listing
+        // answered.
+        if (timedOut) {
+          throw new GitHubTargetApiError('timeout');
+        }
+        // No status at all is a transport failure, and a status of a successful
+        // reply that failed afterwards (a truncated body) is a broken answer:
+        // neither of them is a refusal of GitHub.
+        if (lastStatus === undefined || (lastStatus >= 200 && lastStatus < 300)) {
+          throw new GitHubTargetApiError('network');
         }
         throw new GitHubTargetApiError(statusOf(lastStatus));
       }
@@ -267,7 +279,14 @@ export function createGitHubTargetApi(options: GitHubTargetApiOptions): GitHubTa
         if (!response.ok) {
           throw new GitHubTargetApiError(statusOf(response.status));
         }
-        const payload = (await response.json()) as RepositoryListPayload;
+        let payload: RepositoryListPayload;
+        try {
+          payload = (await response.json()) as RepositoryListPayload;
+        } catch {
+          // A body that is not JSON is a broken answer, never a raw failure:
+          // the call of the api throws the class of the failure and nothing else.
+          throw new GitHubTargetApiError('network');
+        }
         for (const repository of payload.repositories ?? []) {
           repositories.push(toRepository(repository));
         }

@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { WEB_SCAN_GITHUB_TARGET_REASONS } from '../webscan/github-target-reasons.js';
+import {
+  WEB_SCAN_GITHUB_TARGET_REASONS,
+  WEB_SCAN_TARGET_REFUSAL_REASONS,
+} from '../webscan/github-target-reasons.js';
 
 /**
  * The REST contract of the private target of an alert (ADR-0052 section 8).
@@ -46,6 +49,10 @@ export type WebScanGitHubRepositoryName = z.infer<typeof WebScanGitHubRepository
  * The request carries the owner and the name only. The ids of the repository,
  * of the installation and of the account are the server's answer: they come
  * from GitHub, never from the request (ADR-0052 section 8).
+ *
+ * The dashboard sends `{ owner, name }` and nothing else: it displays the
+ * stored binding and never writes an id, and every id of the binding is
+ * derived server-side from GitHub.
  */
 export const WebScanRepositoryRequestSchema = z.strictObject({
   owner: WebScanGitHubOwnerSchema,
@@ -83,11 +90,21 @@ export type WebScanInstallationIdParam = z.infer<typeof WebScanInstallationIdPar
 export const WebScanTargetReasonSchema = z.enum([...WEB_SCAN_GITHUB_TARGET_REASONS]);
 export type WebScanTargetReason = z.infer<typeof WebScanTargetReasonSchema>;
 
+/**
+ * The bounded reasons a target request can be refused with.
+ *
+ * They hold every verdict of GitHub and the refusal of the request itself:
+ * `not_site_owner` is not a verdict of GitHub, it is the answer to a request
+ * that tries to bind the repository of a site without owning it.
+ */
+export const WebScanTargetRefusalReasonSchema = z.enum([...WEB_SCAN_TARGET_REFUSAL_REASONS]);
+export type WebScanTargetRefusalReason = z.infer<typeof WebScanTargetRefusalReasonSchema>;
+
 /** The body of a refused target: the bounded reason and a fixed safe message. */
 export const WebScanTargetRefusedBodySchema = z.strictObject({
   error: z.strictObject({
     code: z.literal('target_refused'),
-    reason: WebScanTargetReasonSchema,
+    reason: WebScanTargetRefusalReasonSchema,
     message: z.string(),
   }),
 });

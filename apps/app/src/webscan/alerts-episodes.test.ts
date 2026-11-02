@@ -3,9 +3,10 @@ import { evaluateAlertEpisodes } from './alerts.js';
 import {
   MAX_ALERT_EPISODES_PER_SITE,
   MAX_ALERT_EPISODE_OCCURRENCES,
-  capEpisodes,
+  admitEpisodes,
   episodeEvictionOrder,
   mergeOccurrenceKeys,
+  type AlertEpisodeCandidate,
 } from './alerts-episodes.js';
 import {
   DASHBOARD_BASE_URL,
@@ -39,19 +40,28 @@ function episode(overrides: Partial<WebScanAlertEpisode> = {}): WebScanAlertEpis
   };
 }
 
+/** One candidate that the state of the site already carries. */
+function carried(episode: WebScanAlertEpisode): AlertEpisodeCandidate {
+  return { episode, existing: true };
+}
+
 describe('the bounded episode state of the website scanner', () => {
   it('keeps at most the bounded number of episodes of a site', () => {
-    const episodes = Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 5 }, (_value, index) =>
-      episode({
-        episodeKey: `ep-${index}`,
-        issueKey: `headers:missing-hsts:host-${index}.test`,
-        lastChangedAt: new Date(NOW.getTime() + index * 1000).toISOString(),
-      }),
+    const candidates = Array.from(
+      { length: MAX_ALERT_EPISODES_PER_SITE + 5 },
+      (_value, index) =>
+        carried(
+          episode({
+            episodeKey: `ep-${index}`,
+            issueKey: `headers:missing-hsts:host-${index}.test`,
+            lastChangedAt: new Date(NOW.getTime() + index * 1000).toISOString(),
+          }),
+        ),
     );
 
-    const capped = capEpisodes(episodes);
+    const admitted = admitEpisodes(candidates);
 
-    expect(capped).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    expect(admitted).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
   });
 
   it('keeps at most the bounded number of episodes when the site grows past the bound', () => {
@@ -104,31 +114,35 @@ describe('the bounded episode state of the website scanner', () => {
   });
 
   it('drops the oldest episode when the site grows past the bound', () => {
-    const episodes = Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 1 }, (_value, index) =>
-      episode({
-        episodeKey: `ep-${index}`,
-        issueKey: `issue-${index}`,
-        lastChangedAt: new Date(NOW.getTime() + index * 1000).toISOString(),
-      }),
+    const candidates = Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 1 }, (_value, index) =>
+      carried(
+        episode({
+          episodeKey: `ep-${index}`,
+          issueKey: `issue-${index}`,
+          lastChangedAt: new Date(NOW.getTime() + index * 1000).toISOString(),
+        }),
+      ),
     );
 
-    const capped = capEpisodes(episodes);
+    const admitted = admitEpisodes(candidates);
 
-    expect(capped).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
-    expect(capped.map((entry) => entry.issueKey)).not.toContain('issue-0');
+    expect(admitted).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    expect(admitted.map((entry) => entry.issueKey)).not.toContain('issue-0');
   });
 
   it('evicts the same episodes every time, whatever the order of the input', () => {
-    const episodes = Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 4 }, (_value, index) =>
-      episode({
-        episodeKey: `ep-${index}`,
-        issueKey: `issue-${index}`,
-        lastChangedAt: new Date(NOW.getTime() + index * 1000).toISOString(),
-      }),
+    const candidates = Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 4 }, (_value, index) =>
+      carried(
+        episode({
+          episodeKey: `ep-${index}`,
+          issueKey: `issue-${index}`,
+          lastChangedAt: new Date(NOW.getTime() + index * 1000).toISOString(),
+        }),
+      ),
     );
 
-    const first = capEpisodes(episodes);
-    const second = capEpisodes([...episodes].reverse());
+    const first = admitEpisodes(candidates);
+    const second = admitEpisodes([...candidates].reverse());
 
     expect(second).toEqual(first);
   });

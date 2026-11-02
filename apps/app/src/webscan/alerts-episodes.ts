@@ -11,7 +11,27 @@ import type { WebScanAlertEpisode } from './types.js';
  * a second issue.
  */
 
-/** The maximum number of episodes one site keeps. */
+/**
+ * The maximum number of episodes one site keeps.
+ *
+ * The bound is a budget of slots, and the engine admits episodes into it
+ * instead of evicting them after the evaluation:
+ *
+ * - An episode that the state of the site already carries keeps its slot. It
+ *   is never evicted for a new one, so the state of an unresolved group never
+ *   rotates: the group keeps its episode, and the episode keeps the issue it
+ *   already opened.
+ * - A new episode is admitted only while a slot is free.
+ * - The new candidates compete for the free slots in a deterministic order:
+ *   the strongest severity first, then the strongest validation, then the
+ *   issue key in the order of its code units.
+ * - A new candidate that is not admitted leaves no episode and no action
+ *   behind. Its group is offered again on a later scan, when a slot frees up.
+ * - A resolved episode releases its slot for a candidate that waits for it: the
+ *   group is done with it, and the slot belongs to a group that still needs an
+ *   operator. A resolved episode whose issue is still unknown keeps its slot,
+ *   because its delivery could not be established.
+ */
 export const MAX_ALERT_EPISODES_PER_SITE = 50;
 
 /** The maximum number of occurrence keys one episode keeps. */
@@ -157,28 +177,128 @@ export function episodeEvictionOrder(
   return compareCodeUnits(left.episodeKey, right.episodeKey);
 }
 
+/** One candidate episode of an evaluation. */
+export interface AlertEpisodeCandidate {
+  /** The episode the evaluation produced for the issue key. */
+  episode: WebScanAlertEpisode;
+  /**
+   * Whether the issue key already carried an episode in the state of the site.
+   *
+   * An existing episode keeps its slot; a new one has to be admitted.
+   */
+  existing: boolean;
+}
+
 /**
- * The bounded episode state of a site.
+ * Admits the candidate episodes of one evaluation into the bound.
  *
- * The episodes are ordered by their issue key, so the persisted state never
- * depends on the order of the evaluation, and the episodes that do not fit the
- * bound are evicted with a deterministic rule.
+ * The returned episodes are the state to persist on the site row, ordered by
+ * their issue key, so the persisted state never depends on the order of the
+ * evaluation. A new candidate that the admission refuses leaves no episode and
+ * no action behind: the group it belongs to is offered again on a later scan,
+ * when a slot frees up.
  */
-export function capEpisodes(episodes: readonly WebScanAlertEpisode[]): WebScanAlertEpisode[] {
-  const ordered = [...episodes].sort((left, right) =>
-    compareCodeUnits(left.issueKey, right.issueKey),
-  );
-  if (ordered.length <= MAX_ALERT_EPISODES_PER_SITE) {
-    return ordered;
+export function admitEpisodes(
+  candidates: readonly AlertEpisodeCandidate[],
+): WebScanAlertEpisode[] {
+  const existing = candidates.filter((candidate) => candidate.existing);
+  const waiting = candidates
+    .filter((candidate) => !candidate.existing)
+    .sort((left, right) => compareAdmissionOrder(left.episode, right.episode));
+
+  const kept = capCandidates(existing);
+  const admitted: AlertEpisodeCandidate[] = [];
+  for (const candidate of waiting) {
+    if (kept.length + admitted.length < MAX_ALERT_EPISODES_PER_SITE) {
+      admitted.push(candidate);
+      continue;
+    }
+    // The budget is full: a resolved episode releases its slot for the
+    // candidate that waits for it.
+    const released = releasedIndex(kept);
+    if (released < 0) {
+      break;
+    }
+    kept.splice(released, 1);
+    admitted.push(candidate);
   }
-  const evictedCount = ordered.length - MAX_ALERT_EPISODES_PER_SITE;
-  const kept = new Set(
-    [...ordered]
-      .sort(episodeEvictionOrder)
-      .slice(evictedCount)
-      .map((episode) => episode.episodeKey),
+
+  return [...kept, ...admitted]
+    .map((candidate) => candidate.episode)
+    .sort((left, right) => compareCodeUnits(left.issueKey, right.issueKey));
+}
+
+/**
+ * Drops the candidates that do not fit the bound.
+ *
+ * A state that was written before the bound changed can hold more episodes
+ * than the bound allows, so the excess is dropped with the eviction order: a
+ * resolved episode before an unresolved one, so the eviction never drops the
+ * state of a group that still needs an operator.
+ */
+function capCandidates(
+  candidates: readonly AlertEpisodeCandidate[],
+): AlertEpisodeCandidate[] {
+  if (candidates.length <= MAX_ALERT_EPISODES_PER_SITE) {
+    return [...candidates];
+  }
+  const evicted = new Set(
+    [...candidates]
+      .sort((left, right) => episodeEvictionOrder(left.episode, right.episode))
+      .slice(0, candidates.length - MAX_ALERT_EPISODES_PER_SITE)
+      .map((candidate) => candidate.episode.episodeKey),
   );
-  return ordered.filter((episode) => kept.has(episode.episodeKey));
+  return candidates.filter((candidate) => !evicted.has(candidate.episode.episodeKey));
+}
+
+/**
+ * The index of the resolved episode that the eviction order releases first.
+ *
+ * The oldest resolved episode goes first, and the key of the episode breaks a
+ * tie, so the release never depends on the order of the evaluation.
+ *
+ * A resolved episode whose issue is still unknown keeps its slot: the
+ * delivery could not be established, so the episode stays visibly unknown for
+ * the operator instead of making room for another group.
+ */
+function releasedIndex(candidates: readonly AlertEpisodeCandidate[]): number {
+  let index = -1;
+  let chosen: WebScanAlertEpisode | undefined;
+  for (let position = 0; position < candidates.length; position += 1) {
+    const episode = candidates[position]?.episode;
+    if (episode === undefined || episode.resolved !== true || episode.issueState === 'unknown') {
+      continue;
+    }
+    if (chosen === undefined || episodeEvictionOrder(episode, chosen) < 0) {
+      chosen = episode;
+      index = position;
+    }
+  }
+  return index;
+}
+
+/**
+ * The order the new candidates compete in.
+ *
+ * The strongest severity comes first, then the strongest validation, and the
+ * issue key breaks the tie in the order of its code units, so the admission
+ * never depends on the order of the evaluation.
+ */
+function compareAdmissionOrder(
+  left: WebScanAlertEpisode,
+  right: WebScanAlertEpisode,
+): number {
+  const bySeverity = severityRank(left.severity ?? 'info') - severityRank(right.severity ?? 'info');
+  if (bySeverity !== 0) {
+    return bySeverity;
+  }
+  const byValidation =
+    validationRank(left.validation ?? 'Informational') -
+    validationRank(right.validation ?? 'Informational');
+  if (byValidation !== 0) {
+    return byValidation;
+  }
+  return compareCodeUnits(left.issueKey, right.issueKey);
 }
 
 /** Whether two episodes carry the same state, apart from their change stamp. */

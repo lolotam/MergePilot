@@ -15,7 +15,7 @@ import {
   WebScanNotFoundError,
   WebScanPausedError,
 } from '../webscan/store.js';
-import type { WebScanGitHubTargetReason } from '../webscan/github-target-reasons.js';
+import type { WebScanTargetRefusalReason } from '../webscan/github-target-reasons.js';
 
 /**
  * The shared HTTP helpers of the website security scanner (ADR-0052).
@@ -128,7 +128,7 @@ export function parseWebScanParam(
  * The message names the reason and nothing else: no value of GitHub, no error
  * body, no credential and no repository name.
  */
-const TARGET_REFUSAL_MESSAGES: Record<WebScanGitHubTargetReason, string> = {
+const TARGET_REFUSAL_MESSAGES: Record<WebScanTargetRefusalReason, string> = {
   no_github_account: 'The administrator has no linked GitHub account',
   installation_not_accessible: 'The installation is not accessible to the administrator',
   installation_suspended: 'The installation is suspended',
@@ -143,6 +143,7 @@ const TARGET_REFUSAL_MESSAGES: Record<WebScanGitHubTargetReason, string> = {
   admin_not_authorized: 'The administrator is no longer a platform administrator',
   github_unavailable: 'GitHub is not available',
   unverifiable: 'The target could not be verified',
+  not_site_owner: 'Only the owner of the site can bind its repository',
 };
 
 /**
@@ -153,7 +154,7 @@ const TARGET_REFUSAL_MESSAGES: Record<WebScanGitHubTargetReason, string> = {
  */
 export function sendWebScanTargetRefused(
   reply: FastifyReply,
-  reason: WebScanGitHubTargetReason,
+  reason: WebScanTargetRefusalReason,
 ): FastifyReply {
   const body: WebScanTargetRefusedBody = {
     error: { code: 'target_refused', reason, message: TARGET_REFUSAL_MESSAGES[reason] },

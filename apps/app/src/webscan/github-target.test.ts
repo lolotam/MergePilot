@@ -158,6 +158,18 @@ describe('the repository of a site', () => {
     expect(result).toEqual({ ok: false, reason: 'no_user_access' });
   });
 
+  it('refuses a listing of the repositories that the administrator cannot reach', async () => {
+    // The App has its own record of the installation, so a 404 of the listing
+    // is a loss of the access of the administrator and not a deletion.
+    const api = happyApi();
+    api.failures = { listInstallationRepositories: 'not_found' };
+    const result = await verifyRepositoryTarget(
+      { adminUserId: ADMIN, owner: 'acme', name: 'demo', approved: APPROVED },
+      deps(api),
+    );
+    expect(result).toEqual({ ok: false, reason: 'installation_not_accessible' });
+  });
+
   it('refuses a name that names another repository than the one the installation sees', async () => {
     const api = happyApi();
     api.repository = aRepository({ id: 8 });
