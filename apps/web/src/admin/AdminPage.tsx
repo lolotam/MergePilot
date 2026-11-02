@@ -7,12 +7,14 @@ import { OverviewTab } from './OverviewTab.js';
 import { RunsTab } from './RunsTab.js';
 import { UsersTab } from './UsersTab.js';
 import { WorkspacesTab } from './WorkspacesTab.js';
+import { WebScanTab } from './webscan/WebScanTab.js';
 
 const TABS = [
   { id: 'overview', label: 'tabOverview', Panel: OverviewTab },
   { id: 'users', label: 'tabUsers', Panel: UsersTab },
   { id: 'workspaces', label: 'tabWorkspaces', Panel: WorkspacesTab },
   { id: 'runs', label: 'tabRuns', Panel: RunsTab },
+  { id: 'webscan', label: 'tabWebScan', Panel: WebScanTab },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
