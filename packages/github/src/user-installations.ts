@@ -70,14 +70,10 @@ export async function listUserInstallations(
           'User-Agent': 'MergePilot',
         },
       });
-    } catch (err) {
-      if (err instanceof Error && accessToken && err.message.includes(accessToken)) {
-        err.message = err.message.replaceAll(accessToken, '[REDACTED]');
-      }
-      const origMsg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to fetch user installations: ${sanitizeMessage(origMsg, accessToken)}`, {
-        cause: err,
-      });
+    } catch {
+      // Transport errors may carry credentials in stacks, causes or custom fields.
+      // Keep none of the thrown value, and do not invoke its accessors or toString.
+      throw new Error('Failed to fetch user installations');
     }
 
     if (!response.ok) {
