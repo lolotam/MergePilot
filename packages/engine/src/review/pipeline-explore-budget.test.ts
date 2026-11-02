@@ -207,7 +207,8 @@ it.each(['call', 'read'] as const)('bounds slow exploration %s to one window and
       files: Array.from({ length: 6 }, (_, i) => ({ path: `src/file${i}.ts`, status: 'modified', patch: bigPatch(200), changes: 201 })),
       explore: { reader: { ...fakeReader(), readFile: () => slow === 'read' ? new Promise(() => {}) : Promise.resolve('evidence') } },
     }, { maxPromptTokens: 6300, batchTokens: 2000, callTimeoutMs: 630000, totalTimeoutMs: 1200000, explore: { maxRounds: 3 } }));
-    await vi.advanceTimersByTimeAsync(300000);
+    // The window is one 630 s call capped to leave one call for the answer: 1200 - 630 = 570 s.
+    await vi.advanceTimersByTimeAsync(570000);
     const result = await pending;
     const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
     expect(answers).toHaveLength(6);
@@ -215,7 +216,7 @@ it.each(['call', 'read'] as const)('bounds slow exploration %s to one window and
     expect(result.exploration?.rounds).toBeGreaterThan(0);
     expect(result.exploration?.skipped).toBeUndefined();
     expect(attempts).toBeLessThanOrEqual(3);
-    expect(Date.now()).toBe(300000);
+    expect(Date.now()).toBe(570000);
     // The existing per-call wrapper can retain its timer when a backend ignores abort.
     // The outer exploration timeout still returns every answer at the window boundary.
   } finally {

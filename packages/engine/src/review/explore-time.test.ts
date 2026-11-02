@@ -32,3 +32,14 @@ it('anchors the share once to the remaining deadline and never renews it across 
   now += 100000;
   expect(budget.remainingExplorationMs(deadline)).toBe(0);
 });
+
+// 2026-11-02: Waleed_Bot (600 s calls, 1200 s review) skipped exploration in every review,
+// because its first round could never finish inside a 300 s window.
+it.each([
+  { callTimeoutMs: 300000, window: 300000 },
+  { callTimeoutMs: 600000, window: 600000 },
+  { callTimeoutMs: 900000, window: 300000 },
+])('gives a $callTimeoutMs ms call a $window ms window of a 1200 s review', ({ callTimeoutMs, window }) => {
+  const deadline = new ReviewDeadline(1200000, () => 0);
+  expect(new ExploreBudget(exploreLimits({})).remainingExplorationMs(deadline, callTimeoutMs)).toBe(window);
+});

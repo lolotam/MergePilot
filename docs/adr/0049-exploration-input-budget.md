@@ -33,3 +33,13 @@ Exploring before every batch needs a time bound, but reserving the worst-case ca
 - The 20% share balances space for evidence with diff/context coverage; it is a policy choice to measure, not a claim of an optimal ratio.
 - Deterministic fake-model tests cover full patches, split parts, overflowing results, shared reads/usage, input caps and path disclosure. The under-3% target requires a production traffic comparison after approval and release; this implementation does not deploy or change the running timeout experiment.
 - B22, A2 and B3/B7 remain outside this decision. Nothing executes repository code and no shell-specific dependency enters the engine.
+
+## Amendment (2026-11-02): the window holds at least one call
+
+**Observed after release (G29–G30, 2026-11-01 11:23 UTC to 2026-11-02, 50 annotated panel runs):** the other three bots, on 300 s calls, went from about 11% skipped exploration to none. Waleed_Bot, on 600 s calls (ADR-0048), skipped it in all 50 runs with `exploration time share used up` and zero rounds. Its first exploration call was cut at the 300 s window boundary every time, so the review spent up to 300 s and gained nothing. The argument in the Context applies in reverse here: a maximum call timeout is not a latency estimate, and a window shorter than the bot's own call timeout cuts off a slow model's first round.
+
+**Change:** when the window is anchored, it is `max(remaining × EXPLORATION_TIME_SHARE, min(callTimeoutMs, remaining − callTimeoutMs))`. It is never shorter than one call, as long as one more call still fits after it. With 300 s calls and a fresh 1200 s deadline the window stays 300 s, so default bots are unchanged. With 600 s calls it becomes 600 s and leaves 600 s, one full call, for the answers. A call timeout of half the remaining time or more falls back to the 25% share. The 75% guarantee in Decision 2 therefore holds only when `callTimeoutMs` is at most 25% of the remaining time. Otherwise the time outside the window is at least one call timeout. A slow bot's large PR can answer fewer batches before `totalTimeoutMs`; those stay disclosed as `time limit reached`.
+
+**Measure:** Waleed_Bot's skip rate should drop from 100%, and its partial-run rate should not rise above the G29–G30 figure. An exploration call that needs more than 600 s still skips.
+
+The owner's choice is س64 in `docs/decisions.ar.md`.

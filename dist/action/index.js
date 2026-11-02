@@ -142309,9 +142309,15 @@ var ExploreBudget = class {
     return this.#rounds;
   }
   /** One wall-clock window from the first review exploration, shared across batches.
-   * Time between batches counts too, so the window can never be renewed. */
-  remainingExplorationMs(deadline) {
-    this.#timeReserveMs ??= deadline.remainingMs * (1 - EXPLORATION_TIME_SHARE);
+   * Time between batches counts too, so the window can never be renewed. The window is never
+   * shorter than one call while one more call still fits after it: a window shorter than the
+   * call timeout cuts off a slow model's first round every time (ADR-0049 amendment). */
+  remainingExplorationMs(deadline, callTimeoutMs = 0) {
+    if (this.#timeReserveMs === void 0) {
+      const remaining = deadline.remainingMs;
+      const window2 = Math.max(remaining * EXPLORATION_TIME_SHARE, Math.min(callTimeoutMs, remaining - callTimeoutMs));
+      this.#timeReserveMs = remaining - window2;
+    }
     return Math.max(0, deadline.remainingMs - this.#timeReserveMs);
   }
   /** Attempts include failed calls, so a failing provider cannot multiply work per batch. */
@@ -142433,7 +142439,7 @@ async function runExploration(opts) {
   for (const entry of opts.shownEntries ?? [])
     shown2.add(entryKey(entry));
   let usage;
-  const remainingTime = opts.purpose === "review" ? () => budget.remainingExplorationMs(opts.deadline) : void 0;
+  const remainingTime = opts.purpose === "review" ? () => budget.remainingExplorationMs(opts.deadline, opts.roundTimeoutMs) : void 0;
   for (let round = 1; round <= opts.rounds; round++) {
     if (opts.purpose === "review" && budget.reviewAttempts >= opts.limits.maxRounds)
       break;
