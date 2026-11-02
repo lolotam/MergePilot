@@ -204,6 +204,67 @@ describe('the release of the slot of a resolved episode', () => {
     expect(keptKeys.has('z-without-issue')).toBe(false);
   });
 
+  it('drops an episode whose requested replacement was reported missing in this scan', () => {
+    const seeded = runAlertScenario(
+      [
+        {
+          trigger: 'manual',
+          at: day(1),
+          occurrences: Array.from({ length: MAX_ALERT_EPISODES_PER_SITE }, (_value, index) =>
+            group(index, { severity: 'high', validation: 'Confirmed' }),
+          ),
+        },
+      ],
+      { thresholds: EVERY_GROUP },
+    );
+    const template = seeded.episodes[0];
+    if (template === undefined) throw new Error('the seed holds no episode');
+    const withIssue = seeded.episodes.slice(1).map((episode) => ({
+      ...episode,
+      issueState: 'open' as const,
+      issueRequested: true,
+    }));
+    // Stored as missing with a replacement requested; the caller now reports it missing too.
+    // Its key sorts last among equals, so only the rank (not the tie-break) can drop it first.
+    const replacing = {
+      ...template,
+      episodeKey: 'z-replacement-requested',
+      issueState: 'missing' as const,
+      issueRequested: true,
+    };
+    const other = {
+      ...template,
+      episodeKey: 'a-other',
+      issueKey: issueKeyOf(MAX_ALERT_EPISODES_PER_SITE),
+      issueState: 'open' as const,
+      issueRequested: true,
+    };
+
+    const evaluation = evaluateAlertEpisodes({
+      trigger: 'manual',
+      now: day(2),
+      siteId: SITE_ID,
+      dashboardBaseUrl: DASHBOARD_BASE_URL,
+      thresholds: { ...THRESHOLDS, ...EVERY_GROUP },
+      episodes: [replacing, ...withIssue, other],
+      occurrences: Array.from({ length: MAX_ALERT_EPISODES_PER_SITE + 1 }, (_value, index) =>
+        group(index, { severity: 'high', validation: 'Confirmed' }),
+      ),
+      exceptions: [],
+      issueStates: [
+        ...withIssue.map((episode) => ({ episodeKey: episode.episodeKey, state: 'open' as const })),
+        { episodeKey: other.episodeKey, state: 'open' as const },
+        { episodeKey: replacing.episodeKey, state: 'missing' as const },
+      ],
+    });
+
+    const keptKeys = new Set(evaluation.episodes.map((episode) => episode.episodeKey));
+    expect(evaluation.episodes).toHaveLength(MAX_ALERT_EPISODES_PER_SITE);
+    // Nothing exists behind it anymore, so it goes first and every real issue stays.
+    expect(keptKeys.has('z-replacement-requested')).toBe(false);
+    expect(keptKeys.has('a-other')).toBe(true);
+  });
+
   it.each([
     { trigger: 'manual', label: 'never requested', requested: false, observed: undefined },
     { trigger: 'scheduled', label: 'never requested', requested: false, observed: undefined },

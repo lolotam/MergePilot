@@ -140,6 +140,7 @@ export function evaluateAlertEpisodes(input: AlertEvaluationInput): AlertEvaluat
       hasIssue: hasIssueBehind(
         entry.result.episode,
         context.episodesByIssueKey.get(entry.result.episode.issueKey),
+        context.observations.get(entry.result.episode.episodeKey),
       ),
     })),
   );
@@ -250,14 +251,19 @@ function withholdOpenIssue(context: AlertContext, result: IssueKeyResult): Issue
  * An issue that was requested earlier, or that the caller observed, is behind it. A
  * confirmed missing issue is not, unless the replacement was requested after the
  * confirmation (the stored state was already missing and a request was recorded): that
- * replacement may exist. An issue this evaluation only proposes to open does not count.
+ * replacement may exist, until the caller reports it missing too. An issue this
+ * evaluation only proposes to open does not count.
  */
 function hasIssueBehind(
   episode: WebScanAlertEpisode,
   previous: WebScanAlertEpisode | undefined,
+  observed: AlertIssueState | undefined,
 ): boolean {
   const state = episode.issueState ?? 'none';
   if (state === 'missing') {
+    // The caller reported the issue missing in this very scan: nothing exists behind the
+    // episode, whether it is the original issue or the replacement.
+    if (observed === 'missing') return false;
     return previous?.issueState === 'missing' && previous.issueRequested === true;
   }
   return previous?.issueRequested === true || state !== 'none';
