@@ -22,7 +22,8 @@ function fixture(approved = true) {
   const manifest = built.value;
   const policy = { reference: digest('fake-owner-assertion'), bots: identity.bots.map((bot) => ({
     runId: bot.originalRunId, limits: { attempts: 3, input: 300, output: 150, costMicros: 30 },
-    resource: { reference: digest('fake-resource-assertion'), provider: bot.provider, model: bot.model, maxInput: 100, maxOutput: 50 } })) };
+    resource: { reference: digest('fake-resource-assertion'), provider: bot.provider, model: bot.model,
+      maxInput: 100, maxOutput: 50, maxCostMicros: 10 } })) };
   const state = accepted(createCompletionBudget(manifest, 10000, approved ? policy : undefined));
   const request = (snapshot: CompletionBudget, id = 'attempt-1'): AttemptReservation => ({
     current: identity, expectedRevision: snapshot.revision, nowMs: 1000, id,
@@ -91,7 +92,7 @@ describe('offline completion lifetime budgets: fake assertions, zero real calls/
     const f = fixture();
     const request = f.request(f.state);
     const once = accepted(reserveCompletionAttempt(f.state, f.manifest, request));
-    expect(reserveCompletionAttempt(once, f.manifest, request)).toEqual({ ok: true, value: once });
+    expect(reserveCompletionAttempt(once, f.manifest, request)).toEqual({ ok: true, value: once, reservation: 'replayed' });
     expect(reserveCompletionAttempt(once, f.manifest, { ...request, output: 49 }))
       .toEqual({ ok: false, reason: 'conflicting_attempt' });
     expect(reserveCompletionAttempt(once, f.manifest, { ...request, id: 'another' }))
@@ -121,5 +122,82 @@ describe('offline completion lifetime budgets: fake assertions, zero real calls/
     const malformed = structuredClone(f.policy);
     malformed.bots[0]!.limits.input = -1;
     expect(createCompletionBudget(f.manifest, 10000, malformed)).toEqual({ ok: false, reason: 'invalid_budget' });
+  });
+  it('distinguishes new bookkeeping from an immutable reserved replay', () => {
+    const f = fixture();
+    const created = reserveCompletionAttempt(f.state, f.manifest, f.request(f.state));
+    expect(created).toMatchObject({ ok: true, reservation: 'created' });
+    const state = accepted(created);
+    expect(reserveCompletionAttempt(state, f.manifest, f.request(state)))
+      .toEqual({ ok: true, value: state, reservation: 'replayed' });
+    expect(state.bots[0]!.used).toEqual({ attempts: 1, input: 100, output: 50, costMicros: 10 });
+  });
+  it.each(['not_dispatched', 'dispatched', 'unknown', 'settled'] as const)('refuses reservation replay after %s', (status) => {
+    const f = fixture();
+    let state = accepted(reserveCompletionAttempt(f.state, f.manifest, f.request(f.state)));
+    if (status === 'not_dispatched') state = accepted(recordCompletionAttempt(state, {
+      id: 'release', attemptId: 'attempt-1', fence: 7, expectedRevision: state.revision,
+      kind: 'not_dispatched', provenNeverDispatched: true }));
+    else {
+      state = f.record(state, 'dispatched');
+      if (status !== 'dispatched') state = f.record(state, 'unknown');
+      if (status === 'settled') state = f.record(state, 'settled');
+    }
+    const before = structuredClone(state);
+    expect(reserveCompletionAttempt(state, f.manifest, f.request(state))).toEqual({ ok: false, reason: 'invalid_transition' });
+    expect(state).toEqual(before);
+  });
+  it.each([{ input: 99 }, { output: 49 }, { costMicros: 9 }])('refuses a charge below its asserted worst case %j', (change) => {
+    const f = fixture();
+    expect(reserveCompletionAttempt(f.state, f.manifest, { ...f.request(f.state), ...change }))
+      .toEqual({ ok: false, reason: 'provider_resource_unproven' });
+  });
+  it('rejects forged released state without retained legal proof/history', () => {
+    const f = fixture();
+    const state = accepted(reserveCompletionAttempt(f.state, f.manifest, f.request(f.state)));
+    state.attempts[0]!.status = 'not_dispatched';
+    state.bots[0]!.used = { attempts: 1, input: 0, output: 0, costMicros: 0 };
+    expect(reserveCompletionAttempt(state, f.manifest, f.request(state, 'new')))
+      .toEqual({ ok: false, reason: 'invalid_budget' });
+  });
+  it('retains release proof and rejects semantic collisions across attempts or proof values', () => {
+    const f = fixture();
+    let state = accepted(reserveCompletionAttempt(f.state, f.manifest, f.request(f.state)));
+    state = accepted(reserveCompletionAttempt(state, f.manifest, f.request(state, 'attempt-2')));
+    const event = { id: 'global-event', attemptId: 'attempt-1', fence: 7,
+      expectedRevision: state.revision, kind: 'not_dispatched' as const, provenNeverDispatched: true };
+    const released = accepted(recordCompletionAttempt(state, event));
+    expect(released.attempts[0]!.events[0]).toMatchObject({ attemptId: 'attempt-1', fence: 7, provenNeverDispatched: true });
+    expect(recordCompletionAttempt(released, { ...event, expectedRevision: released.revision, attemptId: 'attempt-2' }))
+      .toEqual({ ok: false, reason: 'conflicting_attempt' });
+    expect(recordCompletionAttempt(released, { ...event, provenNeverDispatched: false }))
+      .toEqual({ ok: false, reason: 'conflicting_attempt' });
+    Object.assign(released.attempts[0]!.events[0]!, { provenNeverDispatched: false });
+    expect(reserveCompletionAttempt(released, f.manifest, f.request(released, 'new')))
+      .toEqual({ ok: false, reason: 'invalid_budget' });
+  });
+  it('rejects restored global event collisions, wrong revision and changed charge ceilings', () => {
+    const f = fixture();
+    let state = accepted(reserveCompletionAttempt(f.state, f.manifest, f.request(f.state)));
+    state = accepted(reserveCompletionAttempt(state, f.manifest, f.request(state, 'attempt-2')));
+    state = f.record(f.record(state, 'dispatched'), 'dispatched', 'attempt-2');
+    const duplicate = structuredClone(state);
+    duplicate.attempts[1]!.events[0]!.id = duplicate.attempts[0]!.events[0]!.id;
+    const wrongRevision = { ...state, revision: state.revision - 1 };
+    const wrongCharge = structuredClone(state);
+    wrongCharge.bots[0]!.resource!.maxOutput = 49;
+    for (const corrupt of [duplicate, wrongRevision, wrongCharge]) {
+      expect(reserveCompletionAttempt(corrupt, f.manifest, f.request(corrupt, 'new')))
+        .toEqual({ ok: false, reason: 'invalid_budget' });
+    }
+  });
+  it('never infers a zero charge from missing, negative or unknown cost ceilings', () => {
+    const f = fixture();
+    for (const maxCostMicros of [undefined, -1, Number.NaN]) {
+      const state = structuredClone(f.state);
+      Object.assign(state.bots[0]!.resource!, { maxCostMicros });
+      expect(reserveCompletionAttempt(state, f.manifest, f.request(state)))
+        .toEqual({ ok: false, reason: 'provider_resource_unproven' });
+    }
   });
 });

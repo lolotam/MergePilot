@@ -92,4 +92,55 @@ describe('offline per-original-bot coverage bookkeeping, never authenticated rev
     const corrupt = { ...f.empty, acknowledgments: [f.synthesis(0), f.ack(0, 0), f.ack(0, 1)] };
     expect(completionAddendumStatus(f.manifest, corrupt, f.identity)).toMatchObject({ status: 'partial', reasons: ['invalid_ack'] });
   });
+  it('rejects duplicate event IDs in an otherwise fully covered restored snapshot', () => {
+    const f = fixture();
+    let state = f.empty;
+    for (let bot = 0; bot < 4; bot++) {
+      for (const chunk of f.manifest.chunks) state = f.apply(state, f.ack(bot, chunk.id));
+      state = f.apply(state, f.synthesis(bot));
+    }
+    const corrupt = { ...state, acknowledgments: state.acknowledgments.map((ack) => ({ ...ack, eventId: 'same-event' })) };
+    expect(completionAddendumStatus(f.manifest, corrupt, f.identity)).toMatchObject({ status: 'partial', reasons: ['invalid_ack'] });
+    expect(applyCoverageAcknowledgment(f.manifest, corrupt, f.identity, f.ack(0, 0)))
+      .toEqual({ ok: false, reason: 'invalid_ack' });
+  });
+  it('retains different conflict fingerprints once and never advances on exact conflict replay', () => {
+    const f = fixture();
+    const once = f.apply(f.empty, f.ack(0, 0));
+    const bad = { ...f.ack(0, 0), sha256: digest('wrong') };
+    const conflict = f.apply(once, bad);
+    expect(f.apply(conflict, bad)).toBe(conflict);
+    const different = f.apply(conflict, { ...bad, material: 'unknown' });
+    expect(different.conflicts).toHaveLength(2);
+    expect(different.revision).toBe(conflict.revision + 1);
+    expect(different.acknowledgments).toEqual(once.acknowledgments);
+    const restored: CompletionCoverage = JSON.parse(JSON.stringify(different));
+    expect(f.apply(restored, bad)).toBe(restored);
+    expect(completionAddendumStatus(f.manifest, restored, f.identity)).toMatchObject({ status: 'partial', reasons: ['conflicting_ack'] });
+  });
+  it('refuses incoherent restored revision/conflict envelopes instead of inventing history', () => {
+    const f = fixture();
+    const once = f.apply(f.empty, f.ack(0, 0));
+    for (const state of [{ ...once, revision: 0 }, { ...once, revision: Number.NaN }]) {
+      expect(completionAddendumStatus(f.manifest, state, f.identity).status).toBe('partial');
+      expect(applyCoverageAcknowledgment(f.manifest, state, f.identity, f.ack(0, 1)))
+        .toEqual({ ok: false, reason: 'invalid_ack' });
+    }
+  });
+  it('keeps exact replay possible at the shared event bound but refuses a new conflict without dropping history', () => {
+    const f = fixture();
+    const once = f.apply(f.empty, f.ack(0, 0));
+    const bad = { ...f.ack(0, 0), sha256: digest('wrong') };
+    const conflict = f.apply(once, bad);
+    const first = conflict.conflicts[0]!;
+    const full: CompletionCoverage = { ...conflict, revision: 8192,
+      conflicts: [first, ...Array.from({ length: 8190 }, (_, index) => ({ ...first, hash: digest(`bounded-${index}`) }))] };
+    expect(f.apply(full, bad)).toBe(full);
+    expect(applyCoverageAcknowledgment(f.manifest, full, f.identity, { ...bad, sha256: digest('new conflict') }))
+      .toEqual({ ok: false, reason: 'input_too_large' });
+    expect(full.conflicts).toHaveLength(8191);
+    expect(completionAddendumStatus(f.manifest, full, f.identity).status).toBe('partial');
+    const duplicate = { ...conflict, revision: 3, conflicts: [first, first] };
+    expect(completionAddendumStatus(f.manifest, duplicate, f.identity).reasons).toContain('invalid_ack');
+  });
 });
