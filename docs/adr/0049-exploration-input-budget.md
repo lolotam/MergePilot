@@ -41,11 +41,11 @@ Exploring before every batch needs a time bound, but reserving the worst-case ca
 **Change:** when the window is anchored, it is `max(remaining × EXPLORATION_TIME_SHARE, min(callTimeoutMs, remaining − callTimeoutMs))`. With `remaining` the time left when the window is anchored and `call` the call timeout, there are four cases:
 
 - `call` at most 25% of `remaining`: the window is the 25% share, as before. With 300 s calls and a fresh 1200 s deadline it stays 300 s. When less time remains, a 300 s bot can get more than its share: with 900 s remaining its window is 300 s, not 225 s.
-- `call` from 25% to 50% of `remaining`: the window is one full call, and at least one more call fits after it.
-- `call` from 50% to 75% of `remaining`: the window is `remaining − call`, shorter than one call, so that one full call stays reserved for the answers. 630 s calls with 1200 s remaining get a 570 s window.
-- `call` at 75% of `remaining` or more: the window falls back to the 25% share, and less than one call is left outside it.
+- `call` over 25% and up to 50% of `remaining`: the window is one full call, and at least one more call fits after it.
+- `call` over 50% and under 75% of `remaining`: the window is `remaining − call`, shorter than one call, so that one full call stays reserved for the answers. 630 s calls with 1200 s remaining get a 570 s window.
+- `call` at 75% of `remaining` or more: the window falls back to the 25% share, and at most one call is left outside it.
 
-So the window holds one full call only while `call` is at most half of `remaining`, and the time outside the window is at least one call timeout only while `call` is at most 75% of `remaining`. The 75% guarantee in Decision 2 holds only in the first case. Answers get the reserve in preference to exploration.
+So the window holds one full call only while `call` is at most half of `remaining`, and the time outside the window is at least one call timeout only while `call` is at most 75% of `remaining`. The 75% guarantee in Decision 2 holds in the first and last cases, where the window is the 25% share, and not in the two middle ones. Answers get the reserve in preference to exploration.
 
 A 600 s call with a 1200 s `totalTimeoutMs` sits exactly on the 50% edge. Exploration is anchored after file classification and prompt planning, so `remaining` is a little under 1200 s and the window is a little under 600 s: 580 s after 20 s of setup. An exploration call slower than that window is still cut off. A setting that needs a full 600 s exploration call should give `totalTimeoutMs` some slack above twice the call timeout. A slow bot's large PR can answer fewer batches before `totalTimeoutMs`; those stay disclosed as `time limit reached`.
 
