@@ -3,16 +3,21 @@ import rateLimit from '@fastify/rate-limit';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { registerAdminApi } from '../admin/index.js';
 import { registerAuthRoutes } from '../auth/index.js';
+import type { Auth } from '../auth/auth.js';
 import { buildServices, type AppServices } from '../bootstrap/services.js';
 import { loadAppConfig, type AppConfig } from '../core/config.js';
 import { createLogger } from '../core/logger.js';
 import { MemoryRunEventBus } from '../core/run-events.js';
 import { withRunEvents } from '../core/run-events-store.js';
 import type { AppStore, ReviewQueue } from '../core/types.js';
+import { getUserGitHubAccount } from '../api/helpers.js';
 import { createServer, type ServerProbes } from './create-server.js';
 import { registerStatic } from './static.js';
 import { isEntryPoint } from '../core/entry-point.js';
 import { RedisWebScanEventBus, type WebScanEventBus } from '../webscan/events.js';
+import { createGitHubTargetApi, isSignablePrivateKey } from '@mergepilot/github';
+import type { WebScanGitHubVerifier } from '../webscan/github-target.js';
+import { createGitHubTargetVerifier } from '../webscan/github-target-verify.js';
 import { PgWebScanStore } from '../webscan/pg-store.js';
 import type { WebScanStore } from '../webscan/store.js';
 
@@ -36,6 +41,49 @@ export interface ServerInstance {
 export interface WebScanServerRuntime {
   store: WebScanStore;
   events: WebScanEventBus;
+  /**
+   * The GitHub boundary of the alert target (ADR-0052 section 8).
+   *
+   * It is absent when the GitHub App is not configured, and a request that
+   * needs a proof from GitHub is then refused.
+   */
+  github?: WebScanGitHubVerifier | undefined;
+}
+
+/**
+ * Builds the verifier of the alert target (ADR-0052 section 8).
+ *
+ * The App needs its id and its private key, and the token of the administrator
+ * is read from their own GitHub account. A deployment without a GitHub App has
+ * no verifier, and a request that needs one is refused instead of guessed.
+ */
+function createWebScanGitHubVerifier(
+  config: AppConfig,
+  auth: Auth,
+  log: Pick<FastifyBaseLogger, 'warn'>,
+): WebScanGitHubVerifier | undefined {
+  const appId = config.github.appId.trim();
+  const privateKey = config.github.privateKey.trim();
+  if (appId === '' || privateKey === '') return undefined;
+  // A key that cannot sign is a configuration error: no verifier, so a request that needs
+  // GitHub is refused as unavailable instead of failing every check as "unverifiable".
+  if (!isSignablePrivateKey(privateKey)) {
+    // The operator has to see why the verifier is missing; the key itself is never logged.
+    log.warn(
+      { event: 'webscan.github' },
+      'The GitHub App private key cannot sign (an RSA PEM is required): the web scan alert target stays unavailable',
+    );
+    return undefined;
+  }
+
+  const api = createGitHubTargetApi({ appId, privateKey });
+  const readUserToken = async (userId: string): Promise<string | null> => {
+    // The token is a credential: it is used for the GitHub call and never
+    // reaches a log, an error or a response.
+    const account = await getUserGitHubAccount(auth, userId);
+    return account.linked ? account.accessToken : null;
+  };
+  return createGitHubTargetVerifier({ api, readUserToken });
 }
 
 export type DashboardApiRegistrar = (
@@ -133,6 +181,7 @@ export async function createMainServer(options?: MainOptions): Promise<ServerIns
             serverLog.warn({ event: 'webscan.events', errorName }, 'The web scan event bus failed');
           },
         }),
+        github: createWebScanGitHubVerifier(config, services.auth, serverLog),
       };
     } catch (err) {
       serverLog.warn(

@@ -9,6 +9,7 @@ import {
   WebScanScopeInputSchema,
   WebScanScopeSchema,
 } from './contract-webscan.js';
+import { WebScanRepositoryRequestSchema } from './contract-webscan-target.js';
 
 /**
  * The REST contract of the sites of the platform-admin website security scan
@@ -58,6 +59,10 @@ export type WebScanSiteDto = z.infer<typeof WebScanSiteDtoSchema>;
  * a base URL of another host would point the scanner at a host the site list does
  * not hold, and a port would point it at another service of the same host. A path
  * is allowed, because the scanner may start from a path inside the site.
+ *
+ * The repository of the site is named, not bound: the body carries the owner and
+ * the name only, and the server asks GitHub for the ids of the repository, of the
+ * installation and of the account before it stores them (ADR-0052 section 8).
  */
 export const WebScanCreateSiteSchema = z
   .strictObject({
@@ -65,7 +70,7 @@ export const WebScanCreateSiteSchema = z
     baseUrl: WebScanBaseUrlSchema,
     scope: WebScanScopeInputSchema,
     schedule: WebScanScheduleSchema.nullable().optional(),
-    repository: WebScanRepositorySchema.nullable().optional(),
+    repository: WebScanRepositoryRequestSchema.nullable().optional(),
     authorize: z.literal(true, {
       message: 'A registration needs an explicit authorization confirmation',
     }),
@@ -108,12 +113,16 @@ export type WebScanCreateSiteRequest = z.infer<typeof WebScanCreateSiteSchema>;
  * A patch that carries no change is refused: it would write a change and an audit
  * row for a request that asked for nothing. The confirmation alone is not a change
  * either: it only confirms the change that carries it.
+ *
+ * The repository is named, not bound: a null unlinks the site, an absent one
+ * leaves the binding alone, and a named one is resolved by the server against
+ * GitHub before it is stored.
  */
 export const WebScanUpdateSiteSchema = z
   .strictObject({
     scope: WebScanScopeInputSchema.optional(),
     schedule: WebScanScheduleSchema.optional(),
-    repository: WebScanRepositorySchema.nullable().optional(),
+    repository: WebScanRepositoryRequestSchema.nullable().optional(),
     authorize: z.boolean().optional(),
   })
   .refine(

@@ -148,3 +148,6 @@ export {
 } from './consensus.js';
 export { renderPanelSummary, type PanelBotRow, type PanelSummaryInput } from './panel-summary.js';
 export { botFindingsFates, type BotFindingsFate, type PanelClusterOutcome } from './panel-findings-fate.js';
+export * from './user-installations.js';
+export * from './target-types.js';
+export * from './target-api.js';

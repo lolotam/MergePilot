@@ -28,7 +28,12 @@ import {
   stopScan,
 } from './pg-scans.js';
 import { createSite, listSites, readSite, readSiteByHostname, removeSite, updateSite } from './pg-sites.js';
-import { readScanSettings, updateScanSettings } from './pg-settings.js';
+import {
+  approveScanInstallation,
+  readScanSettings,
+  revokeScanInstallationApproval,
+  updateScanSettings,
+} from './pg-settings.js';
 import type {
   CreateWebScanExceptionInput,
   CreateWebScanSiteInput,
@@ -46,6 +51,7 @@ import type {
 import type {
   WebScanAlert,
   WebScanAlertEpisode,
+  WebScanApprovedInstallation,
   WebScanAuditEntry,
   WebScanException,
   WebScanOccurrence,
@@ -78,6 +84,21 @@ export class PgWebScanStore implements WebScanStore, ScannerEnvelopeStore {
 
   async updateSettings(actor: string, patch: WebScanSettingsPatch): Promise<WebScanSettings> {
     return updateScanSettings(this.db, actor, patch);
+  }
+
+  async approveInstallation(
+    actor: string,
+    entry: WebScanApprovedInstallation,
+  ): Promise<WebScanSettings> {
+    return approveScanInstallation(this.db, actor, entry);
+  }
+
+  async revokeInstallationApproval(
+    actor: string,
+    adminUserId: string,
+    installationId: number,
+  ): Promise<WebScanSettings> {
+    return revokeScanInstallationApproval(this.db, actor, adminUserId, installationId);
   }
 
   // -- The sites ------------------------------------------------------------

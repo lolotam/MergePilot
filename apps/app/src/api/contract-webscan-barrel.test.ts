@@ -17,4 +17,10 @@ describe('the public contract barrel', () => {
     expect(contract.WebScanSettingsPatchSchema).toBeDefined();
     expect(contract.WebScanScanDetailSchema).toBeDefined();
   });
+
+  it('exposes the schemas of the private target that live in their own module', () => {
+    expect(contract.WebScanRepositoryRequestSchema).toBeDefined();
+    expect(contract.WebScanApprovedInstallationRequestSchema).toBeDefined();
+    expect(contract.WebScanTargetRefusedBodySchema).toBeDefined();
+  });
 });

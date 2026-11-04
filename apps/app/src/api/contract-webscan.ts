@@ -18,6 +18,7 @@ export const WebScanErrorCodeSchema = z.enum([
   'authorization_required',
   'invalid_request',
   'confirmation_required',
+  'target_refused',
   'too_many_streams',
   'live_updates_unavailable',
 ]);
@@ -192,6 +193,12 @@ export type WebScanLimitField = z.infer<typeof WebScanLimitFieldSchema>;
  * that are above their default. The administrator confirms those fields, and
  * the dashboard re-sends the same patch with `limitConfirmation: { digest }`.
  *
+ * `effectiveLimits` is the whole effective limits the digest was computed
+ * from: the stored row with the submitted fields on top. The dashboard shows
+ * those exact values in the confirmation, so it never confirms a digest of a
+ * set of values other than the one it shows (the row of the server may have
+ * moved since the dashboard read it).
+ *
  * This is the body of the above-default confirmation only. The other
  * `confirmation_required` answers (the site scope and schedule one) carry no
  * digest, so they keep the plain `WebScanErrorBodySchema` shape.
@@ -202,6 +209,7 @@ export const WebScanConfirmationRequiredBodySchema = z.strictObject({
     message: z.string(),
     digest: WebScanDigestSchema,
     fieldsAboveDefault: z.array(WebScanLimitFieldSchema),
+    effectiveLimits: WebScanLimitsSchema,
   }),
 });
 export type WebScanConfirmationRequiredBody = z.infer<
@@ -239,9 +247,10 @@ export type WebScanApprovedInstallation = z.infer<typeof WebScanApprovedInstalla
  * an audit row for a request that asked for nothing. The confirmation alone is not a
  * change either: it only confirms the values of the patch that carries it.
  *
- * The approved-installation list is read-only here: ADR-0052 section 8 requires
- * every binding to be verified against GitHub before it is saved, and the
- * verifying endpoint arrives with Task 10. Until it exists, a body that carries
+ * The approved-installation list is not written here: ADR-0052 section 8 requires
+ * every binding to be verified against GitHub before it is saved, so it has its
+ * own endpoints (`POST` and `DELETE
+ * /api/admin/web-scan/settings/approved-installations`). A body that carries
  * `approvedInstallations` is refused as an unknown key and nothing is written.
  */
 export const WebScanSettingsPatchSchema = z
@@ -300,13 +309,30 @@ export const WebScanCoverageEntrySchema = z.strictObject({
 });
 export type WebScanCoverageEntryDto = z.infer<typeof WebScanCoverageEntrySchema>;
 
-/** One alert episode of a site: bounded state, keyed by issue. */
+/**
+ * One alert episode of a site: bounded state, keyed by issue.
+ *
+ * The fields below `lastChangedAt` are the state the alert engine added later:
+ * the observed state of the issue, the request of a delivery, the resolution
+ * and the level the episode started at. They are optional and additive: an
+ * episode that was written before they existed keeps its old meaning, and an
+ * absent field stays absent in the response instead of naming a state the
+ * episode never had.
+ */
 export const WebScanAlertEpisodeSchema = z.strictObject({
   episodeKey: z.string(),
   issueKey: z.string(),
   state: z.enum(['open', 'closed']),
   occurrenceKeys: z.array(z.string()),
   lastChangedAt: z.string(),
+  issueState: z.enum(['none', 'open', 'closed', 'unknown', 'missing']).optional(),
+  issueRequested: z.boolean().optional(),
+  resolved: z.boolean().optional(),
+  outcome: z.enum(['fixed', 'resolved-by-exception']).optional(),
+  severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
+  validation: z.enum(['Confirmed', 'Likely', 'Indicator', 'Informational']).optional(),
+  generation: z.number().int().min(0).optional(),
+  createdAt: z.string().optional(),
 });
 
 /** GET /api/admin/web-scan/sites — the schemas of the sites live in their own module. */

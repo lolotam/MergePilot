@@ -9,6 +9,7 @@ import type { AppConfig } from '../core/config.js';
 import { PurposeScopedVault } from '../vault/scoped-secrets.js';
 import { MemoryWebScanEventBus } from '../webscan/events.js';
 import type { WebScanEventBus } from '../webscan/events.js';
+import type { WebScanGitHubVerifier } from '../webscan/github-target.js';
 import { PgWebScanStore } from '../webscan/pg-store.js';
 import { registerAdminApi } from './routes.js';
 import {
@@ -68,6 +69,13 @@ export interface WebScanHarnessOptions {
    * the only way to reach that branch without a broken Redis.
    */
   failingEvents?: boolean | undefined;
+  /**
+   * The GitHub boundary of the alert target (ADR-0052 section 8).
+   *
+   * Without it a request that needs a proof from GitHub is refused, so the tests
+   * that do not exercise the verification see that refusal.
+   */
+  github?: WebScanGitHubVerifier | undefined;
 }
 
 /** Builds the admin app with the scanner over a fresh seeded database. */
@@ -100,7 +108,7 @@ export async function createWebScanAdminApp(
     auth,
     db: handle.db,
     config,
-    webScan: { store, events: bus, streams: options.streams },
+    webScan: { store, events: bus, streams: options.streams, github: options.github },
   });
   await seedAdminFixtures(handle.db);
   await seedExtraCallers(handle.db);

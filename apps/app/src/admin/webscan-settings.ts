@@ -28,9 +28,12 @@ import { definedFields, toStoreLimits } from './webscan-params.js';
  * above-default confirmation are enforced here, before anything is written, so
  * a rejected change leaves neither a settings change nor an audit row behind.
  *
- * The approved-installation list is read-only on this route: ADR-0052 section 8
- * requires every binding to be verified against GitHub before it is saved, and
- * the verifying endpoint arrives with Task 10.
+ * The approved-installation list is not written on this route: ADR-0052 section 8
+ * requires every binding to be verified against GitHub before it is saved, so it
+ * has its own endpoints (`POST` and `DELETE
+ * /api/admin/web-scan/settings/approved-installations`), which verify the
+ * installation with GitHub before they write anything. A body that carries
+ * `approvedInstallations` is refused here as an unknown key.
  */
 
 /** Builds the response from named fields; a store object is never spread. */
@@ -124,13 +127,14 @@ export function registerWebScanSettingsRoutes(
         : body.limitConfirmation?.digest === limitsConfirmationDigest(effective);
       if (!confirmed) {
         // The dashboard cannot compute the digest itself, so the answer carries
-        // it: the digest of the effective limits and the fields above their
-        // default. The administrator confirms, and the same patch is re-sent
-        // with that digest.
+        // it: the digest of the effective limits, the fields above their
+        // default and the effective limits themselves. The administrator
+        // confirms, and the same patch is re-sent with that digest.
         return sendWebScanConfirmationRequired(
           reply,
           limitsConfirmationDigest(effective),
           limitsAboveDefault(effective),
+          effective,
         );
       }
     }

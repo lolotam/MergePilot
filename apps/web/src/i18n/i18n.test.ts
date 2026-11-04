@@ -30,6 +30,16 @@ describe('i18n keys and parity', () => {
     }
   });
 
+  it('registers the website scan dictionary in both languages', () => {
+    const arKeys = Object.keys(ar).filter((key) => key.startsWith('webscan'));
+    const enKeys = Object.keys(en).filter((key) => key.startsWith('webscan'));
+
+    expect(arKeys.length).toBeGreaterThan(50);
+    expect(enKeys).toEqual(arKeys);
+    expect(ar.webscanSubNavLabel.length).toBeGreaterThan(0);
+    expect(en.webscanSubNavLabel.length).toBeGreaterThan(0);
+  });
+
   it('sets RTL attribute for Arabic and LTR for English on documentElement', () => {
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       React.createElement(I18nProvider, { initialLanguage: 'ar' }, children)

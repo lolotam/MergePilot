@@ -24,16 +24,13 @@ describe('the web scan settings', () => {
       const updated = await store.updateSettings('admin-1', {
         paused: false,
         contact: 'security@example.com',
-        approvedInstallations: [
-          { adminUserId: 'admin-1', installationId: 42, githubAccountId: 7 },
-        ],
       });
 
       expect(updated.paused).toBe(false);
       expect(updated.contact).toBe('security@example.com');
-      expect(updated.approvedInstallations).toEqual([
-        { adminUserId: 'admin-1', installationId: 42, githubAccountId: 7 },
-      ]);
+      // The approved-installation list has its own audited write, so a settings
+      // change never touches it.
+      expect(updated.approvedInstallations).toEqual([]);
 
       const audit = await store.listAudit({ targetType: 'settings' });
       expect(audit).toHaveLength(1);

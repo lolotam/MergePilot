@@ -267,6 +267,43 @@ describe('web-scan settings routes (Task 8A)', () => {
     expect(audit.json().audit.length).toBe(0);
   });
 
+  it('answers a missing confirmation with the effective limits the digest was computed from', async () => {
+    const res = await patchSettings({ limits: { maxRequests: 2000 } });
+    expect(res.statusCode).toBe(422);
+
+    const body = WebScanConfirmationRequiredBodySchema.parse(res.json());
+    // The effective limits are the stored row with the submitted fields on top:
+    // the values the digest was computed from, and the ones the dashboard shows.
+    expect(body.error.effectiveLimits).toEqual({ ...DEFAULT_SCAN_LIMITS, maxRequests: 2000 });
+    expect(body.error.digest).toBe(limitsConfirmationDigest(body.error.effectiveLimits));
+    expect(body.error.fieldsAboveDefault).toEqual(['maxRequests']);
+
+    const settings = await getSettings();
+    expect(settings.json().limits.maxRequests).toBe(500);
+    const audit = await getAudit();
+    expect(audit.json().audit.length).toBe(0);
+  });
+
+  it('answers a missing confirmation with the effective limits of the current row', async () => {
+    // The row of another administrator holds a limit of its own: the effective
+    // limits of the answer are the ones of the row, not the ones of the
+    // defaults.
+    const stored = await patchSettings({ limits: { maxPages: 80 } });
+    expect(stored.statusCode).toBe(200);
+
+    const res = await patchSettings({ limits: { maxRequests: 2000 } });
+    expect(res.statusCode).toBe(422);
+
+    const body = WebScanConfirmationRequiredBodySchema.parse(res.json());
+    expect(body.error.effectiveLimits).toEqual({
+      ...DEFAULT_SCAN_LIMITS,
+      maxPages: 80,
+      maxRequests: 2000,
+    });
+    expect(body.error.digest).toBe(limitsConfirmationDigest(body.error.effectiveLimits));
+    expect(body.error.fieldsAboveDefault).toEqual(['maxRequests']);
+  });
+
   it('confirms the same patch with the digest of the answer and audits it once', async () => {
     const refused = await patchSettings({ limits: { maxRequests: 2000 } });
     expect(refused.statusCode).toBe(422);
