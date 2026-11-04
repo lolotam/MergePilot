@@ -38,8 +38,17 @@ Exploring before every batch needs a time bound, but reserving the worst-case ca
 
 **Observed after release (G29–G30, 2026-11-01 11:23 UTC to 2026-11-02, 50 annotated panel runs):** the other three bots, on 300 s calls, went from about 11% skipped exploration to none. Waleed_Bot, on 600 s calls (ADR-0048), skipped it in all 50 runs with `exploration time share used up` and zero rounds. Its first exploration call was cut at the 300 s window boundary every time, so the review spent up to 300 s and gained nothing. The argument in the Context applies in reverse here: a maximum call timeout is not a latency estimate, and a window shorter than the bot's own call timeout cuts off a slow model's first round.
 
-**Change:** when the window is anchored, it is `max(remaining × EXPLORATION_TIME_SHARE, min(callTimeoutMs, remaining − callTimeoutMs))`. It is never shorter than one call, as long as one more call still fits after it. With 300 s calls and a fresh 1200 s deadline the window stays 300 s, so default bots are unchanged. With 600 s calls it becomes 600 s and leaves 600 s, one full call, for the answers. A call timeout of half the remaining time or more falls back to the 25% share. The 75% guarantee in Decision 2 therefore holds only when `callTimeoutMs` is at most 25% of the remaining time. Otherwise the time outside the window is at least one call timeout. A slow bot's large PR can answer fewer batches before `totalTimeoutMs`; those stay disclosed as `time limit reached`.
+**Change:** when the window is anchored, it is `max(remaining × EXPLORATION_TIME_SHARE, min(callTimeoutMs, remaining − callTimeoutMs))`. With `remaining` the time left when the window is anchored and `call` the call timeout, there are four cases:
 
-**Measure:** Waleed_Bot's skip rate should drop from 100%, and its partial-run rate should not rise above the G29–G30 figure. An exploration call that needs more than 600 s still skips.
+- `call` at most 25% of `remaining`: the window is the 25% share, as before. With 300 s calls and a fresh 1200 s deadline it stays 300 s. When less time remains, a 300 s bot can get more than its share: with 900 s remaining its window is 300 s, not 225 s.
+- `call` from 25% to 50% of `remaining`: the window is one full call, and at least one more call fits after it.
+- `call` from 50% to 75% of `remaining`: the window is `remaining − call`, shorter than one call, so that one full call stays reserved for the answers. 630 s calls with 1200 s remaining get a 570 s window.
+- `call` at 75% of `remaining` or more: the window falls back to the 25% share, and less than one call is left outside it.
+
+So the window holds one full call only while `call` is at most half of `remaining`, and the time outside the window is at least one call timeout only while `call` is at most 75% of `remaining`. The 75% guarantee in Decision 2 holds only in the first case. Answers get the reserve in preference to exploration.
+
+A 600 s call with a 1200 s `totalTimeoutMs` sits exactly on the 50% edge. Exploration is anchored after file classification and prompt planning, so `remaining` is a little under 1200 s and the window is a little under 600 s: 580 s after 20 s of setup. An exploration call slower than that window is still cut off. A setting that needs a full 600 s exploration call should give `totalTimeoutMs` some slack above twice the call timeout. A slow bot's large PR can answer fewer batches before `totalTimeoutMs`; those stay disclosed as `time limit reached`.
+
+**Measure:** Waleed_Bot's skip rate should drop from 100%, and its partial-run rate should not rise above the G29–G30 figure. An exploration call slower than its window still skips.
 
 The owner's choice is س64 in `docs/decisions.ar.md`.

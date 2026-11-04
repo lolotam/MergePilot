@@ -35,11 +35,18 @@ it('anchors the share once to the remaining deadline and never renews it across 
 
 // 2026-11-02: Waleed_Bot (600 s calls, 1200 s review) skipped exploration in every review,
 // because its first round could never finish inside a 300 s window.
+// setupMs is review time spent before exploration starts (classification, planning).
+// Past half the remaining time, one full call stays reserved for the answers instead.
 it.each([
-  { callTimeoutMs: 300000, window: 300000 },
-  { callTimeoutMs: 600000, window: 600000 },
-  { callTimeoutMs: 900000, window: 300000 },
-])('gives a $callTimeoutMs ms call a $window ms window of a 1200 s review', ({ callTimeoutMs, window }) => {
-  const deadline = new ReviewDeadline(1200000, () => 0);
+  { callTimeoutMs: 300000, setupMs: 0, window: 300000 },
+  { callTimeoutMs: 600000, setupMs: 0, window: 600000 },
+  { callTimeoutMs: 600000, setupMs: 20000, window: 580000 },
+  { callTimeoutMs: 630000, setupMs: 0, window: 570000 },
+  { callTimeoutMs: 900000, setupMs: 0, window: 300000 },
+  { callTimeoutMs: 300000, setupMs: 300000, window: 300000 },
+])('gives a $callTimeoutMs ms call a $window ms window after $setupMs ms of a 1200 s review', ({ callTimeoutMs, setupMs, window }) => {
+  let now = 0;
+  const deadline = new ReviewDeadline(1200000, () => now);
+  now = setupMs;
   expect(new ExploreBudget(exploreLimits({})).remainingExplorationMs(deadline, callTimeoutMs)).toBe(window);
 });

@@ -244,6 +244,33 @@ it.each([600000, 300000])('explores a single pass with callTimeoutMs=%s and stil
   }
 });
 
+// 2026-11-02: under the old 300 s window, Waleed_Bot's slow exploration round never finished.
+it('keeps a 400 s exploration round of a 600 s bot and sends its evidence to the answer', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(0);
+    const requests: ReviewModelRequest[] = [];
+    const model: ReviewModel = { label: 'fake:slow', generate: async (request) => {
+      requests.push(request);
+      if (!request.system.includes('EXPLORATION (round')) return { text: makeAnswerJson([]), finishReason: 'stop' };
+      await new Promise((resolve) => setTimeout(resolve, 400000));
+      return { text: READ_GUARD, finishReason: 'stop' };
+    } };
+    const pending = runReview(input(model, { explore: { reader: fakeReader({ 'src/guard.ts': 'evidence' }) } }, {
+      callTimeoutMs: 600000, totalTimeoutMs: 1200000, explore: { maxRounds: 1 },
+    }));
+    await vi.advanceTimersByTimeAsync(400000);
+    const result = await pending;
+    const answer = requests.find((r) => !r.system.includes('EXPLORATION (round'));
+    expect(answer?.user).toContain('evidence');
+    expect(result).toMatchObject({ status: 'completed', exploration: { rounds: 1 } });
+    expect(result.exploration?.skipped).toBeUndefined();
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
 it('explores six default-timeout batches within the shared maxRounds', async () => {
   vi.useFakeTimers();
   try {
