@@ -207,7 +207,8 @@ it.each(['call', 'read'] as const)('bounds slow exploration %s to one window and
       files: Array.from({ length: 6 }, (_, i) => ({ path: `src/file${i}.ts`, status: 'modified', patch: bigPatch(200), changes: 201 })),
       explore: { reader: { ...fakeReader(), readFile: () => slow === 'read' ? new Promise(() => {}) : Promise.resolve('evidence') } },
     }, { maxPromptTokens: 6300, batchTokens: 2000, callTimeoutMs: 630000, totalTimeoutMs: 1200000, explore: { maxRounds: 3 } }));
-    await vi.advanceTimersByTimeAsync(300000);
+    // The window is one 630 s call capped to leave one call for the answer: 1200 - 630 = 570 s.
+    await vi.advanceTimersByTimeAsync(570000);
     const result = await pending;
     const answers = requests.filter((r) => !r.system.includes('EXPLORATION (round'));
     expect(answers).toHaveLength(6);
@@ -215,7 +216,7 @@ it.each(['call', 'read'] as const)('bounds slow exploration %s to one window and
     expect(result.exploration?.rounds).toBeGreaterThan(0);
     expect(result.exploration?.skipped).toBeUndefined();
     expect(attempts).toBeLessThanOrEqual(3);
-    expect(Date.now()).toBe(300000);
+    expect(Date.now()).toBe(570000);
     // The existing per-call wrapper can retain its timer when a backend ignores abort.
     // The outer exploration timeout still returns every answer at the window boundary.
   } finally {
@@ -235,6 +236,33 @@ it.each([600000, 300000])('explores a single pass with callTimeoutMs=%s and stil
     expect(requests).toHaveLength(2);
     expect(requests[0]!.system).toContain('EXPLORATION (round');
     expect(requests[1]!.system).not.toContain('EXPLORATION (round');
+    expect(result).toMatchObject({ status: 'completed', exploration: { rounds: 1 } });
+    expect(result.exploration?.skipped).toBeUndefined();
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
+// 2026-11-02: under the old 300 s window, Waleed_Bot's slow exploration round never finished.
+it('keeps a 400 s exploration round of a 600 s bot and sends its evidence to the answer', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(0);
+    const requests: ReviewModelRequest[] = [];
+    const model: ReviewModel = { label: 'fake:slow', generate: async (request) => {
+      requests.push(request);
+      if (!request.system.includes('EXPLORATION (round')) return { text: makeAnswerJson([]), finishReason: 'stop' };
+      await new Promise((resolve) => setTimeout(resolve, 400000));
+      return { text: READ_GUARD, finishReason: 'stop' };
+    } };
+    const pending = runReview(input(model, { explore: { reader: fakeReader({ 'src/guard.ts': 'evidence' }) } }, {
+      callTimeoutMs: 600000, totalTimeoutMs: 1200000, explore: { maxRounds: 1 },
+    }));
+    await vi.advanceTimersByTimeAsync(400000);
+    const result = await pending;
+    const answer = requests.find((r) => !r.system.includes('EXPLORATION (round'));
+    expect(answer?.user).toContain('evidence');
     expect(result).toMatchObject({ status: 'completed', exploration: { rounds: 1 } });
     expect(result.exploration?.skipped).toBeUndefined();
   } finally {
