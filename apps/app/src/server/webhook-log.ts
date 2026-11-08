@@ -1,3 +1,4 @@
+import { reviewCorrelation } from '../core/review-correlation.js';
 import type { WebhookResult } from '../webhooks/handle.js';
 
 export function firstHeader(value: string | string[] | undefined): string {
@@ -9,10 +10,12 @@ export function webhookPayloadFields(payload: unknown): {
   action: string | null;
   repo: string | null;
   pr: number | null;
+  pullNumber: number | null;
+  headSha: string | null;
 } {
   const obj = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {};
   const repository = obj.repository as { full_name?: unknown } | undefined;
-  const pullRequest = obj.pull_request as { number?: unknown } | undefined;
+  const pullRequest = obj.pull_request as { number?: unknown; head?: { sha?: unknown } } | undefined;
   // An issue_comment on a PR carries the PR number as `issue.number` (with `issue.pull_request` set).
   const issue = obj.issue as { number?: unknown; pull_request?: unknown } | undefined;
   const prNumber =
@@ -25,6 +28,8 @@ export function webhookPayloadFields(payload: unknown): {
     action: typeof obj.action === 'string' ? obj.action : null,
     repo: typeof repository?.full_name === 'string' ? repository.full_name : null,
     pr: prNumber,
+    pullNumber: prNumber,
+    headSha: typeof pullRequest?.head?.sha === 'string' && /^[a-f0-9]{40}$/i.test(pullRequest.head.sha) ? pullRequest.head.sha : null,
   };
 }
 
@@ -42,9 +47,9 @@ const INSTALLATION_EVENTS = {
 export function webhookOutcomeFields(result: WebhookResult): Record<string, string | number> {
   switch (result.status) {
     case 'enqueued':
-      return { outcome: 'queued' };
+      return { outcome: 'queued', ...reviewCorrelation(result.job) };
     case 'command_queued':
-      return { outcome: 'queued', command: result.job.command };
+      return { outcome: 'queued', command: result.job.command, jobId: result.job.deliveryId, repo: result.job.repoFullName, pullNumber: result.job.pullNumber };
     case 'duplicate':
       return { outcome: 'duplicate' };
     case 'ignored':

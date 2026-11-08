@@ -25,7 +25,7 @@ describe('processReviewJob — reviewer panel orchestration', () => {
     expect(h.created[0]?.body).toContain(`<!-- mergepilot:review head=${HEAD} config=${hashOf('anthropic', 'main-model')} -->`);
     expect(h.created[0]?.comments?.[0]?.body).not.toContain('mergepilot:bot=');
     expect([...h.events('panel.start'), ...h.events('panel.bot.done'), ...h.events('panel.publish')]).toEqual([]);
-    expect(h.events('job.end')[0]).not.toHaveProperty('botSlot');
+    expect(h.events('job.end')[0]).toHaveProperty('botSlot', 1);
   });
 
   it('runs 3 bots in parallel; each records its own run and publishes with its own marker and header', async () => {

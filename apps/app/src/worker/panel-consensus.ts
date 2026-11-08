@@ -1,3 +1,4 @@
+import { reviewCorrelation } from '../core/review-correlation.js';
 import {
   describeAnsweredBy,
   hasJudgeUse,
@@ -53,7 +54,7 @@ export async function publishConsensus(
     return pending && pending.finish.status === 'completed' && rr?.status === 'completed' ? [{ br, pending, rr }] : [];
   });
   if (completed.length === 0) {
-    logger.info({ event: 'panel.publish', jobId: job.deliveryId, mode: 'consensus', findings: 0 }, 'Reviewer panel: no bot completed; nothing published');
+    logger.info({ event: 'panel.publish', ...reviewCorrelation(job), mode: 'consensus', publicationStatus: 'not-attempted', findings: 0 }, 'Reviewer panel: no bot completed; nothing published');
     return { reviewUrl: null };
   }
 
@@ -191,7 +192,7 @@ export async function publishConsensus(
   });
   ctx.deps.log?.(`Review panel publication outcome: ${publish.status}`);
   const findings = inline.length + capped.kept.filter((c) => c.kind === 'summaryOnly').length;
-  logger.info({ event: 'panel.publish', jobId: job.deliveryId, mode: 'consensus', findings }, `Reviewer panel published ${findings} findings`);
+  logger.info({ event: 'panel.publish', ...reviewCorrelation(job), mode: 'consensus', runId: holder.br.run.id, botSlot: holder.br.bot.slot, publicationStatus: publish.status, findings }, `Reviewer panel publication outcome: ${publish.status}`);
   return { reviewUrl: reviewUrlOf(publish, capture.url(), { owner: ctx.owner, repo: ctx.repo, pullNumber: job.pullNumber }) };
 }
 

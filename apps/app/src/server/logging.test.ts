@@ -1,3 +1,4 @@
+import { webhookPayloadFields } from './webhook-log.js';
 import { createHmac } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -325,5 +326,18 @@ describe('Server structured logging', () => {
 
     const ignoredLog = lines.find((l) => l.outcome === 'ignored');
     expect(ignoredLog).toBeDefined();
+  });
+});
+
+
+describe('webhook correlation allowlist', () => {
+  it('keeps a full SHA and excludes arbitrary payload values', () => {
+    const headSha = 'd36008fa7be673a267ec2a6ea90ffd57813635b2';
+    expect(webhookPayloadFields({ action: 'opened', repository: { full_name: 'acme/repo' },
+      pull_request: { number: 905, head: { sha: headSha }, body: 'private prompt' }, token: 'private token',
+    })).toEqual({ action: 'opened', repo: 'acme/repo', pr: 905, pullNumber: 905, headSha });
+  });
+  it.each([null, 1, [], 'raw secret', { pull_request: { head: { sha: 'raw secret' } } }])('handles malformed payload %j', (payload) => {
+    expect(webhookPayloadFields(payload)).toEqual({ action: null, repo: null, pr: null, pullNumber: null, headSha: null });
   });
 });

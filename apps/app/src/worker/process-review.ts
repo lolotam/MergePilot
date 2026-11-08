@@ -1,3 +1,4 @@
+import { reviewCorrelation } from '../core/review-correlation.js';
 import { processBudgetAdmission } from './budget-admission.js';
 import {
   listPullRequestFiles,
@@ -48,7 +49,7 @@ export async function processReviewJob(
   const startTime = performance.now();
   const logSkip = (reason: string, message: string, fields: Record<string, unknown> = {}): void => {
     deps.log?.(message);
-    logger.info({ event: 'job.skipped', jobId: job.deliveryId, reason, ...fields }, message);
+    logger.info({ event: 'job.skipped', ...reviewCorrelation(job), reason, ...fields }, message);
   };
 
   const installation = await deps.store.getInstallation(job.installationId);
@@ -88,7 +89,7 @@ export async function processReviewJob(
       costUsd: null,
       detail: 'workspace not configured',
     });
-    logSkip('workspace not configured', `Skipping job ${job.deliveryId}: workspace ${workspaceId} not configured`, { runId: run.id, workspaceId });
+    logSkip('workspace not configured', `Skipping job ${job.deliveryId}: workspace ${workspaceId} not configured`, { runId: run.id, botSlot: MAIN_BOT_SLOT, workspaceId });
     return { status: 'skipped', detail: 'workspace not configured' };
   }
 
@@ -105,7 +106,7 @@ export async function processReviewJob(
   const mainTimeoutKey = consensusMode ? panelTimeoutKeyOf(bots) : undefined;
   if (panelActive) {
     logger.info(
-      { event: 'panel.start', jobId: job.deliveryId, bots: bots.map((b) => b.slot), mode },
+      { event: 'panel.start', ...reviewCorrelation(job), bots: bots.map((b) => b.slot), mode },
       `Reviewer panel of ${bots.length} bots started (${mode})`,
     );
   }
@@ -121,7 +122,7 @@ export async function processReviewJob(
   }
   for (const slot of started.duplicates) {
     const bot = slot === MAIN_BOT_SLOT ? '' : ` (bot ${slot})`;
-    logSkip(DUPLICATE, `Skipping job ${job.deliveryId}${bot}: a run for this head is already active`, slot === MAIN_BOT_SLOT ? {} : { botSlot: slot });
+    logSkip(DUPLICATE, `Skipping job ${job.deliveryId}${bot}: a run for this head is already active`, { botSlot: slot });
   }
   const runs = started.running;
   const main = runs.find((br) => br.bot.slot === MAIN_BOT_SLOT);
@@ -142,8 +143,8 @@ export async function processReviewJob(
   let releaseBudget: (() => void) | undefined;
   try {
     logger.info({
-      event: 'job.start', jobId: job.deliveryId, runId: lead.run.id, workspace: workspaceId,
-      repo: job.repoFullName, pullNumber: job.pullNumber, headSha: job.headSha.slice(0, 7),
+      event: 'job.start', ...reviewCorrelation(job), runId: lead.run.id, workspace: workspaceId,
+      repo: job.repoFullName, pullNumber: job.pullNumber, headSha: job.headSha, botSlot: lead.bot.slot,
     }, `Review job ${job.deliveryId} started for ${job.repoFullName}#${job.pullNumber}`);
 
     let ctx: PanelContext;
@@ -207,7 +208,7 @@ async function sharedSteps(
   // Pause stops automatic reviews only: an explicit `@mergepilot review` still runs.
   if (!job.force && (await pausedWithNotice(client, pauseParams))) {
     await closeRuns(base, runs, PAUSED_DETAIL);
-    logSkip('paused', `Skipping job ${job.deliveryId}: ${PAUSED_DETAIL}`, { runId: lead.run.id });
+    logSkip('paused', `Skipping job ${job.deliveryId}: ${PAUSED_DETAIL}`, { runId: lead.run.id, botSlot: lead.bot.slot });
     return { result: { status: 'skipped', detail: PAUSED_DETAIL } };
   }
   const prRecord = pr as unknown as { title?: string; body?: string | null; additions?: number; deletions?: number };
@@ -314,7 +315,7 @@ async function sharedSteps(
         });
         br.stopHeartbeat();
       }
-      logSkip(BUDGET_REACHED, `Monthly budget reached for workspace ${workspaceId}; skipping`, { runId: lead.run.id, workspaceId });
+      logSkip(BUDGET_REACHED, `Monthly budget reached for workspace ${workspaceId}; skipping`, { runId: lead.run.id, botSlot: lead.bot.slot, workspaceId });
       return { result: { status: 'skipped', detail: BUDGET_REACHED } };
     }
   }
