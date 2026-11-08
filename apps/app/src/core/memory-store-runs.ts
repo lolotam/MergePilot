@@ -155,6 +155,7 @@ export function memoryListLatestFailedRuns(
 export async function memoryRecordReviewProgress(store: MemoryRunTables, workspaceId: string, id: string, attemptId: string, progress: import('./types.js').ReviewProgress): Promise<void> {
     store.assertLive(workspaceId);
     const run = store.runs.get(id);
-    if (!run || run.workspaceId !== workspaceId || run.attemptId !== attemptId || run.status !== 'running' || run.reviewProgress) return;
+    if (!run || run.workspaceId !== workspaceId || run.attemptId !== attemptId || run.reviewProgress) return;
+    if (run.status !== 'running' && !(run.status === 'failed' && run.detail === 'interrupted')) return;
     store.runs.set(id, { ...run, reviewProgress: { ...progress } });
 }

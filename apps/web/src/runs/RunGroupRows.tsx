@@ -91,7 +91,7 @@ function ClickableRow(props: { label: string; className: string; onActivate: () 
   return (
     <tr
       tabIndex={0}
-      role="button"
+      role="row"
       aria-label={props.label}
       data-testid={props.testId}
       onClick={props.onActivate}

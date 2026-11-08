@@ -18,6 +18,7 @@ it('opens main details independently of expansion, selection, retry and nested k
   ]);
   render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><I18nProvider initialLanguage="en"><table><tbody><RunGroupRows group={group} number={1} color={repoColor(group.repoFullName)} shortRepo expanded onToggle={onToggle} onOpenRun={onOpenRun} onSelect={onSelect} onRetry={onRetry} selected={new Set()} canDelete isMember={false} retryingId={undefined} /></tbody></table></I18nProvider></MemoryRouter></QueryClientProvider>);
   const parent = screen.getByTestId('run-group-row');
+  expect(parent.getAttribute('role')).toBe('row');
   expect(screen.getAllByText('Main')).toHaveLength(1);
   expect(screen.getAllByTestId('run-sub-row')).toHaveLength(1);
   const details = within(parent).getByRole('button', { name: 'Open review details for Main' });

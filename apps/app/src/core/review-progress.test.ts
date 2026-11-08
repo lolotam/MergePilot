@@ -5,6 +5,24 @@ import { createTestDb } from '../db/test-db.js';
 
 for (const kind of ['memory', 'postgres'] as const) {
   describe(`${kind} review progress`, { timeout: 30000 }, () => {
+    it('accepts a live attempt after a stale sweep but rejects terminal and duplicate writes', async () => {
+      const pg = kind === 'postgres' ? await createTestDb(undefined, { workspaces: ['ws'] }) : null;
+      const store = pg?.store ?? new MemoryStore();
+      try {
+        const run = await store.createReviewRun({ workspaceId: 'ws', jobId: 'job', installationId: 1, repoFullName: 'a/b', pullNumber: 1, headSha: 'sha', status: 'running', costUsd: null, detail: null });
+        await store.failStaleRuns(new Date(Date.now() + 10000));
+        expect((await store.getReviewRun('ws', run.id))?.detail).toBe('interrupted');
+        const progress = { status: 'completed' as const, finishedAt: new Date().toISOString() };
+        await store.recordReviewProgress('ws', run.id, run.attemptId!, progress);
+        expect((await store.getReviewRun('ws', run.id))?.reviewProgress).toEqual(progress);
+        await store.recordReviewProgress('ws', run.id, run.attemptId!, { ...progress, status: 'failed' });
+        expect((await store.getReviewRun('ws', run.id))?.reviewProgress).toEqual(progress);
+        const retry = await store.createReviewRun({ workspaceId: 'ws', jobId: 'retry', installationId: 1, repoFullName: 'a/b', pullNumber: 1, headSha: 'sha', status: 'running', costUsd: null, detail: null });
+        await store.finishReviewRun('ws', retry.id, { status: 'failed', costUsd: null, detail: 'publisher failed' });
+        await store.recordReviewProgress('ws', retry.id, retry.attemptId!, progress);
+        expect((await store.getReviewRun('ws', retry.id))?.reviewProgress).toBeNull();
+      } finally { await pg?.close(); }
+    });
     it('preserves active uniqueness and usage, resets retries and rejects stale/cross-workspace writes', async () => {
       const pg = kind === 'postgres' ? await createTestDb(undefined, { workspaces: ['ws', 'other'] }) : null;
       const store = pg?.store ?? new MemoryStore();

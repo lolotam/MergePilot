@@ -1,9 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
 import { panelSetup } from './panel.fixtures.js';
 import { processReviewJob } from './process-review.js';
+import { WorkspaceDeletedError } from '../core/types.js';
 
 for (const panelMode of ['separate', 'consensus'] as const) {
   describe(`${panelMode} progress`, () => {
+    it('publishes despite an auxiliary progress failure without logging the raw error', async () => {
+      const h = await panelSetup({ settings: { panelMode }, bots: [{ slot: 2 }] });
+      vi.spyOn(h.deps.store, 'recordReviewProgress').mockRejectedValue(new Error('secret-database-url'));
+      const warnings = vi.spyOn(h.deps.logger!, 'warn');
+      await processReviewJob(h.job, h.deps);
+      expect((await h.runs()).every((run) => run.status === 'completed')).toBe(true);
+      expect(h.created.length).toBeGreaterThan(0);
+      expect(warnings).toHaveBeenCalled();
+      expect(JSON.stringify(warnings.mock.calls)).not.toContain('secret-database-url');
+    });
+
+    it('still prevents publication when the progress write reports workspace deletion', async () => {
+      const h = await panelSetup({ settings: { panelMode }, bots: [{ slot: 2 }] });
+      vi.spyOn(h.deps.store, 'recordReviewProgress').mockRejectedValue(new WorkspaceDeletedError('ws-panel'));
+      await processReviewJob(h.job, h.deps);
+      expect(h.created).toHaveLength(0);
+      expect((await h.runs()).every((run) => run.status === 'skipped')).toBe(true);
+    });
     it('completes a fast bot before a slow sibling and retains completion when publication fails', async () => {
       const h = await panelSetup({ settings: { panelMode }, bots: [{ slot: 2 }] });
       let release!: () => void;

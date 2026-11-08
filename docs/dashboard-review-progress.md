@@ -6,8 +6,10 @@ Expanding a PR represents the main bot in the parent row and each other record o
 
 ## Persistence and rollout proposal
 
-Migration `0020_review_progress.sql` adds nullable `attempt_id`, `review_started_at` and `review_progress` columns. Dedicated metadata avoids provisional findings or invented usage in final result payloads. Every create/reuse generates a fresh UUID and resets review progress, including retry timers. Progress writes compare workspace, run id, attempt UUID, running status and absent prior progress atomically. Finalization preserves the review outcome when publication fails. Historical rows without progress use the existing status/timestamps.
+Migration `0020_review_progress.sql` adds nullable `attempt_id`, `review_started_at` and `review_progress` columns. Dedicated metadata avoids provisional findings or invented usage in final result payloads. Every create/reuse generates a fresh UUID and resets review progress, including retry timers. Progress writes compare workspace, run id, attempt UUID, eligible lifecycle state (running or interrupted by the stale sweep) and absent prior progress atomically. Finalization preserves the review outcome when publication fails. Historical rows without progress use the existing status/timestamps.
 
 Apply the additive migration before starting the new web/worker version. Existing workers ignore the columns; new workers need them. No data backfill or destructive changes. Rollback the application without dropping columns; do not erase progress. Production migration and deployment require their own approval. This task only executes migrations inside disposable local PGlite tests.
 
-Detailed production proposal: [Migration safety and rollback](review-progress-migration-safety.md).
+Old-worker retries are not supported after progress exists. Drain old consumers before enabling new ones; on rollback keep old consumers stopped until a compatible forward fix. Preserve the columns and progress data.
+
+Architecture: [ADR-0054](adr/0054-dashboard-review-progress.md). Detailed production proposal: [Migration safety and rollback](review-progress-migration-safety.md).

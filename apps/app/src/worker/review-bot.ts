@@ -197,7 +197,15 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     };
 
     const onReviewed = async (status: 'completed' | 'failed' | 'skipped') => {
-      if (br.run.attemptId) await deps.store.recordReviewProgress(workspaceId, br.run.id, br.run.attemptId, { status, finishedAt: new Date().toISOString() });
+      if (!br.run.attemptId) return;
+      try {
+        await deps.store.recordReviewProgress(workspaceId, br.run.id, br.run.attemptId, { status, finishedAt: new Date().toISOString() });
+      } catch (error) {
+        if (error instanceof WorkspaceDeletedError) throw error;
+        // Auxiliary dashboard metadata must not suppress a completed review's publication.
+        // Log identifiers only: database errors can contain credentials or connection URLs.
+        logger.warn({ event: 'review.progress_write_failed', workspaceId, runId: br.run.id }, 'Could not persist bot review progress');
+      }
     };
     if (consensus) {
       const outcome = reviewOnlyOutcome(

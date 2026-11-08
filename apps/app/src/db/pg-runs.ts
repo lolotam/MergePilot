@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import {
   ActiveRunExistsError,
   REUSABLE_RUN_STATUSES,
@@ -289,7 +289,8 @@ export async function recordPgReviewProgress(db: AppDb, workspaceId: string, id:
     await withLiveWorkspace(db, workspaceId, async (tx) => {
       await tx.update(reviewRuns).set({ reviewProgress: progress }).where(and(
         eq(reviewRuns.workspaceId, workspaceId), eq(reviewRuns.id, id),
-        eq(reviewRuns.attemptId, attemptId), eq(reviewRuns.status, 'running'),
+        eq(reviewRuns.attemptId, attemptId),
+        or(eq(reviewRuns.status, 'running'), and(eq(reviewRuns.status, 'failed'), eq(reviewRuns.detail, 'interrupted'))),
         sql`${reviewRuns.reviewProgress} IS NULL`,
       ));
     });
