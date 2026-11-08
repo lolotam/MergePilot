@@ -33,7 +33,7 @@ describe('RunsPage grouped by PR', () => {
     const bots = [2, 1, 3, 4].map((botSlot) => makeRun({ id: `bot-${botSlot}`, botSlot, botName: `Bot ${botSlot}`, headSha: 'current' }));
     bots.push(makeRun({ id: 'historical', botSlot: 1, botName: 'Earlier main', headSha: 'previous' }));
     renderRunsPage({ groups: [makeGroup(bots)] });
-    fireEvent.keyDown(screen.getByTestId('run-group-row'), { key: 'Enter' });
+    fireEvent.click(within(screen.getByTestId('run-group-row')).getByRole('button', { expanded: false }));
     expect(screen.getAllByTestId('run-sub-row')).toHaveLength(4);
     expect(within(screen.getByTestId('run-group-row')).getByText('Bot 1')).toBeDefined();
     expect(screen.getAllByText('Bot 1')).toHaveLength(1);
@@ -42,7 +42,7 @@ describe('RunsPage grouped by PR', () => {
 
   it('keeps every record visible when the filtered group has no main bot', () => {
     renderRunsPage({ groups: [makeGroup([makeRun({ id: 'extra-2', botSlot: 2, botName: 'Extra two' }), makeRun({ id: 'extra-3', botSlot: 3, botName: 'Extra three' })])] });
-    fireEvent.keyDown(screen.getByTestId('run-group-row'), { key: ' ' });
+    fireEvent.click(within(screen.getByTestId('run-group-row')).getByRole('button', { expanded: false }));
     expect(screen.getAllByTestId('run-sub-row')).toHaveLength(1);
     expect(screen.getAllByText('Extra two')).toHaveLength(1);
     expect(screen.getAllByText('Extra three')).toHaveLength(1);

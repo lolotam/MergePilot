@@ -87,21 +87,27 @@ function rowClass(color: RepoColor, selected: boolean): string {
   return `${color.strip} ${selected ? 'bg-brand-100/70 dark:bg-brand-900/40' : color.tint} hover:bg-ink-100/70 dark:hover:bg-ink-800/60 transition-colors cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500`;
 }
 
+function RunDetailsButton({ run, onOpenRun }: { run: ReviewRun; onOpenRun: (id: string) => void }) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      aria-label={t('openRunDetails', { name: run.botName ?? run.headSha.slice(0, 7) })}
+      onClick={(e) => { e.stopPropagation(); onOpenRun(run.id); }}
+      className="text-brand-700 dark:text-brand-300 hover:underline"
+    >
+      {t('runDetailCol')}
+    </button>
+  );
+}
+
 function ClickableRow(props: { label: string; className: string; onActivate: () => void; children: ReactNode; testId: string }) {
   return (
     <tr
-      tabIndex={0}
       role="row"
       aria-label={props.label}
       data-testid={props.testId}
       onClick={props.onActivate}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          props.onActivate();
-        }
-      }}
       className={props.className}
     >
       {props.children}
@@ -145,16 +151,7 @@ export function RunGroupRows({ group, number, color, shortRepo, expanded, onTogg
           <RepoChip repo={group.repoFullName} color={color} short={shortRepo} />
           <div className="flex items-center gap-1.5">
             <PrLink run={latest} />
-            {multi && expanded ? (
-              <button
-                type="button"
-                aria-label={t('openRunDetails', { name: latest.botName ?? latest.headSha.slice(0, 7) })}
-                onClick={(e) => { e.stopPropagation(); ctx.onOpenRun(latest.id); }}
-                className="text-brand-700 dark:text-brand-300 hover:underline"
-              >
-                {t('runDetailCol')}
-              </button>
-            ) : null}
+            {!multi || expanded ? <RunDetailsButton run={latest} onOpenRun={ctx.onOpenRun} /> : null}
             {multi ? (
               <span
                 className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-300"
@@ -234,6 +231,7 @@ export function RunGroupRows({ group, number, color, shortRepo, expanded, onTogg
                 <span className="inline-flex items-center gap-1.5 font-mono text-ink-500 dark:text-ink-400" dir="ltr">
                   <CornerDownLeft className="w-3 h-3 rtl:-scale-x-100" aria-hidden="true" />
                   {run.headSha.slice(0, 7)}
+                  <RunDetailsButton run={run} onOpenRun={ctx.onOpenRun} />
                 </span>
               </td>
               <RunDetailCells run={run} ctx={ctx} showBot={showsRunBot(run, group.runs)} />

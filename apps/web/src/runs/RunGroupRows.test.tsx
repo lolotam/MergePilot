@@ -19,6 +19,7 @@ it('opens main details independently of expansion, selection, retry and nested k
   render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><I18nProvider initialLanguage="en"><table><tbody><RunGroupRows group={group} number={1} color={repoColor(group.repoFullName)} shortRepo expanded onToggle={onToggle} onOpenRun={onOpenRun} onSelect={onSelect} onRetry={onRetry} selected={new Set()} canDelete isMember={false} retryingId={undefined} /></tbody></table></I18nProvider></MemoryRouter></QueryClientProvider>);
   const parent = screen.getByTestId('run-group-row');
   expect(parent.getAttribute('role')).toBe('row');
+  expect(parent.hasAttribute('tabindex')).toBe(false);
   expect(screen.getAllByText('Main')).toHaveLength(1);
   expect(screen.getAllByTestId('run-sub-row')).toHaveLength(1);
   const details = within(parent).getByRole('button', { name: 'Open review details for Main' });
@@ -45,6 +46,29 @@ it('opens main details independently of expansion, selection, retry and nested k
   fireEvent.click(collapse);
   expect(onToggle).toHaveBeenCalledTimes(1);
   fireEvent.keyDown(parent, { key: 'Enter' });
-  expect(onToggle).toHaveBeenCalledTimes(2);
+  expect(onToggle).toHaveBeenCalledTimes(1);
   expect(onOpenRun).toHaveBeenCalledTimes(1);
+  const extraRow = screen.getByTestId('run-sub-row');
+  expect(extraRow.hasAttribute('tabindex')).toBe(false);
+  const extraDetails = within(extraRow).getByRole('button', { name: 'Open review details for Extra' });
+  extraDetails.focus();
+  expect(document.activeElement).toBe(extraDetails);
+  expect(fireEvent.keyDown(extraDetails, { key: 'Enter' })).toBe(true);
+  fireEvent.click(extraDetails);
+  expect(onOpenRun).toHaveBeenLastCalledWith('extra');
+  expect(onToggle).toHaveBeenCalledTimes(1);
+});
+
+it('exposes native details navigation for a single run without a focusable row', () => {
+  const onOpenRun = vi.fn();
+  const group = makeGroup([makeRun({ id: 'single', botName: 'Single' })]);
+  render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><I18nProvider initialLanguage="en"><table><tbody><RunGroupRows group={group} number={1} color={repoColor(group.repoFullName)} shortRepo expanded={false} onToggle={vi.fn()} onOpenRun={onOpenRun} onSelect={vi.fn()} onRetry={vi.fn()} selected={new Set()} canDelete isMember={false} retryingId={undefined} /></tbody></table></I18nProvider></MemoryRouter></QueryClientProvider>);
+  const row = screen.getByTestId('run-row');
+  expect(row.hasAttribute('tabindex')).toBe(false);
+  const details = within(row).getByRole('button', { name: 'Open review details for Single' });
+  details.focus();
+  expect(document.activeElement).toBe(details);
+  expect(fireEvent.keyDown(details, { key: ' ' })).toBe(true);
+  fireEvent.click(details);
+  expect(onOpenRun).toHaveBeenCalledExactlyOnceWith('single');
 });

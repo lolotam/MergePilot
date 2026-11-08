@@ -10,6 +10,8 @@ The initial implementation passed typecheck, lint, build and 124 targeted tests 
 
 After review fixes, typecheck, lint, build and 32 targeted tests across six files passed. These cover stale recovery, auxiliary persistence failure, workspace deletion, navigation and main-row uniqueness. Exact-head CI and external reviews must cover the final pushed commit before merge. Existing Vite chunk-size advisory remains.
 
+A subsequent accessibility review replaced focusable row activation with native details controls for single, main and sub-run rows. All 59 tests across nine dashboard files passed; source and test files match the validation snapshot. Keyboard focus follows native controls while row clicks remain a pointer convenience.
+
 ## Remaining gates
 
 - Verify exact-head required checks and reviews, resolve confirmed findings and coordinate merge order.
