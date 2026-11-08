@@ -16,7 +16,7 @@ function useNow(active: boolean): number {
   return now;
 }
 
-type DurationRun = Pick<ReviewRun, 'status' | 'createdAt' | 'finishedAt' | 'durationMs'>;
+type DurationRun = Pick<ReviewRun, 'status' | 'createdAt' | 'finishedAt' | 'durationMs' | 'reviewProgress' | 'reviewStartedAt'>;
 
 /**
  * A run's duration. A queued or running run shows a live elapsed timer (ticking only while this
@@ -24,11 +24,11 @@ type DurationRun = Pick<ReviewRun, 'status' | 'createdAt' | 'finishedAt' | 'dura
  */
 export function RunDuration({ run }: { run: DurationRun }) {
   const { t, language } = useI18n();
-  const active = isActiveRun(run);
+  const active = isActiveRun(run) && !run.reviewProgress;
   const now = useNow(active);
 
   if (!active) {
-    return <span>{formatDurationMs(runDurationMs(run), language, t)}</span>;
+    return <span>{formatDurationMs(run.reviewProgress ? elapsedMs(run.reviewStartedAt ?? run.createdAt, Date.parse(run.reviewProgress.finishedAt)) : runDurationMs(run), language, t)}</span>;
   }
   return (
     <span
@@ -37,7 +37,7 @@ export function RunDuration({ run }: { run: DurationRun }) {
       className="inline-flex items-center gap-1.5 text-brand-700 dark:text-brand-300"
     >
       <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" aria-hidden="true" />
-      <span>{formatDurationMs(elapsedMs(run.createdAt, now), language, t)}</span>
+      <span>{formatDurationMs(elapsedMs(run.reviewStartedAt ?? run.createdAt, now), language, t)}</span>
     </span>
   );
 }

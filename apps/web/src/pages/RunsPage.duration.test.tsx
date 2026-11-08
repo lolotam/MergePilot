@@ -21,6 +21,19 @@ describe('RunsPage duration column', () => {
     vi.useRealTimers();
   });
 
+
+  it('freezes review time while publication is pending, retaining active polling status', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(new Date(Date.parse(CREATED) + 120_000));
+    renderRunsPage({ groups: [makeGroup([makeRun({ status: 'running', createdAt: CREATED, finishedAt: null, durationMs: null, reviewProgress: { status: 'completed', finishedAt: new Date(Date.parse(CREATED) + 45_000).toISOString() } })])] });
+    expect(durationCells()).toEqual(['45s']);
+    expect(screen.getByText('Completed')).toBeDefined();
+    expect(screen.getByText('Finishing / publishing')).toBeDefined();
+    expect(screen.queryByTestId('run-duration-live')).toBeNull();
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(durationCells()).toEqual(['45s']);
+  });
+
   it('sits after Tokens out and before Cost, and sorts on the server by `duration`', () => {
     renderRunsPage({ groups: [makeGroup([makeRun({ durationMs: 45_000 })])] });
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
@@ -56,7 +69,8 @@ describe('RunsPage duration column', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show the runs of acme/backend#7' }));
     const subs = screen.getAllByTestId('run-sub-row').map((r) => within(r).getByTestId('run-duration').textContent);
-    expect(subs).toEqual(['30s', '10m 00s']);
+    expect(subs).toEqual(['10m 00s']);
+    expect(within(screen.getByTestId('run-group-row')).getByTestId('run-duration').textContent).toBe('30s');
   });
 
   it('a running or queued row shows a live timer that ticks every second', () => {

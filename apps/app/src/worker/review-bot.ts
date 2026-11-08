@@ -196,11 +196,15 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       ...(br.bot.skill ? { skill: { name: br.bot.skill.name, content: br.bot.skill.content } } : {}),
     };
 
+    const onReviewed = async (status: 'completed' | 'failed' | 'skipped') => {
+      if (br.run.attemptId) await deps.store.recordReviewProgress(workspaceId, br.run.id, br.run.attemptId, { status, finishedAt: new Date().toISOString() });
+    };
     if (consensus) {
       const outcome = reviewOnlyOutcome(
         await runBotReview({ ...params, prFiles: consensus.prFiles, selection: consensus.selection }),
         { knownSecrets, judge: judgeSetup.judge },
       );
+      await onReviewed(outcome.outcome === 'skipped-budget' ? 'skipped' : outcome.outcome);
       await cursorWrites.flush();
       const record = await recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, recordPricing);
       if (outcome.fallback) {
@@ -211,6 +215,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     }
 
     const reviewResult = await executeReview({
+      onReviewed,
       ...params,
       // A lone bot shows its identity line only to name its skill (ADR-0034).
       ...(ctx.panelActive || br.bot.skill

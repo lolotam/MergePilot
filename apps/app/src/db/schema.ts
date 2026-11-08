@@ -207,6 +207,9 @@ export const reviewRuns = pgTable(
     effort: text('effort'),
     fallbackFrom: text('fallback_from'),
     findingsCount: integer('findings_count'),
+    attemptId: text('attempt_id'),
+    reviewStartedAt: timestamp('review_started_at', { withTimezone: true }),
+    reviewProgress: jsonb('review_progress'),
     result: jsonb('result'),
     reviewUrl: text('review_url'),
     /** Migration 0009: the reviewer-panel bot (1 = main) and its name when the run was created. */

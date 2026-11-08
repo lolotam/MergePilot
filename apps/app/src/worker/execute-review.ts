@@ -23,6 +23,7 @@ import { DEFAULT_PUBLISHER_LOGIN, runBotReview, type BotReviewParams } from './b
 export interface ExecuteReviewParams extends BotReviewParams {
   /** The reviewer-panel bot shown at the top of the summary (ADR-0017); none for a lone main bot. */
   identity?: BotIdentity | undefined;
+  onReviewed?: (status: 'completed' | 'failed' | 'skipped') => Promise<void>;
 }
 
 export interface ExecuteReviewOutcome {
@@ -101,6 +102,7 @@ export async function executeReview(
 
   const run = await runBotReview(params);
   if (run.kind === 'nothing-new') {
+    await params.onReviewed?.('skipped');
     return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL, publish: { status: 'skipped-no-changes' } };
   }
   const { reviewResult, scope } = run;
@@ -231,6 +233,7 @@ export async function executeReview(
     });
   }
 
+  await params.onReviewed?.(outcome === 'skipped-budget' ? 'skipped' : outcome);
   const capture = capturingReviewUrl(client);
 
   log?.(`Publishing review as ${publisherLogin}...`);

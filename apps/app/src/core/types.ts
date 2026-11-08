@@ -285,7 +285,15 @@ export interface ApiEquivalentRunRow {
   fallbackFromMethod: string | null;
 }
 
+export interface ReviewProgress {
+  status: 'completed' | 'failed' | 'skipped';
+  finishedAt: string;
+}
+
 export interface ReviewRun {
+  attemptId?: string | null;
+  reviewStartedAt?: Date | null;
+  reviewProgress?: ReviewProgress | null;
   id: string;
   workspaceId: string;
   installationId: number;
@@ -439,6 +447,7 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
    */
   createReviewRun(run: NewReviewRun): Promise<ReviewRun>;
   /** Refreshes the heartbeat of a queued/running run; finished runs are left untouched. */
+  recordReviewProgress(workspaceId: string, id: string, attemptId: string, progress: ReviewProgress): Promise<void>;
   touchReviewRun(workspaceId: string, id: string): Promise<void>;
   /**
    * Records the run's outcome. A finished status (completed/failed/skipped) also adds the run's

@@ -1,5 +1,9 @@
 // Runs table (grouped by PR), bulk delete, retention and repository colors (K3).
 export const enRuns = {
+  openRunDetails: 'Open review details for {name}',
+  publicationPending: 'Finishing / publishing',
+  publicationFailed: 'Run failed',
+  publicationFinished: 'Run finished',
   runNumberCol: '#',
   runTokensInCol: 'Tokens in',
   runTokensOutCol: 'Tokens out',

@@ -56,9 +56,10 @@ function PrLink({ run }: { run: Pick<ReviewRun, 'repoFullName' | 'pullNumber'> }
  * the bot chip (an extra bot's run, or a PR reviewed by several bots; ADR-0017).
  */
 function RunDetailCells({ run, ctx, showBot }: { run: ReviewRun; ctx: RunRowsContext; showBot: boolean }) {
+  const { t } = useI18n();
   return (
     <>
-      <td className={td}><RunStatusBadge status={run.status} /></td>
+      <td className={td}><RunStatusBadge status={run.reviewProgress?.status ?? run.status} />{run.reviewProgress ? <div>{t(run.status === 'running' ? 'publicationPending' : run.status === 'failed' ? 'publicationFailed' : 'publicationFinished')}</div> : null}</td>
       <td className={td}>
         <div className="flex flex-col items-start gap-1">
           <RunProviderBadge provider={run.provider} />
@@ -95,6 +96,7 @@ function ClickableRow(props: { label: string; className: string; onActivate: () 
       data-testid={props.testId}
       onClick={props.onActivate}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           props.onActivate();
@@ -109,7 +111,8 @@ function ClickableRow(props: { label: string; className: string; onActivate: () 
 
 export function RunGroupRows({ group, number, color, shortRepo, expanded, onToggle, ...ctx }: RunGroupRowsProps) {
   const { t, dir } = useI18n();
-  const latest = group.runs[0];
+  const newest = group.runs[0];
+  const latest = (expanded ? group.runs.find((r) => r.headSha === newest?.headSha && (!newest?.jobId || r.jobId === newest.jobId) && r.botSlot === 1) : undefined) ?? newest;
   if (!latest) return null;
   const pr = `${group.repoFullName}#${group.pullNumber}`;
   const deletableIds = group.runs.filter(isDeletable).map((r) => r.id);
@@ -142,6 +145,16 @@ export function RunGroupRows({ group, number, color, shortRepo, expanded, onTogg
           <RepoChip repo={group.repoFullName} color={color} short={shortRepo} />
           <div className="flex items-center gap-1.5">
             <PrLink run={latest} />
+            {multi && expanded ? (
+              <button
+                type="button"
+                aria-label={t('openRunDetails', { name: latest.botName ?? latest.headSha.slice(0, 7) })}
+                onClick={(e) => { e.stopPropagation(); ctx.onOpenRun(latest.id); }}
+                className="text-brand-700 dark:text-brand-300 hover:underline"
+              >
+                {t('runDetailCol')}
+              </button>
+            ) : null}
             {multi ? (
               <span
                 className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-300"
@@ -187,7 +200,8 @@ export function RunGroupRows({ group, number, color, shortRepo, expanded, onTogg
       <ClickableRow testId="run-group-row" label={pr} className={rowClass(color, allSelected)} onActivate={onToggle}>
         {lead(String(number), deletableIds, allSelected, selectedCount > 0, t('selectPrRuns', { pr }))}
         {prCell}
-        <td className={td}><RunStatusBadge status={latest.status} /></td>
+        {expanded ? <RunDetailCells run={latest} ctx={ctx} showBot={showsRunBot(latest, group.runs)} /> : <>
+        <td className={td}><RunStatusBadge status={group.runs.some((r) => r.status === 'running') ? 'running' : group.runs.some((r) => r.status === 'queued') ? 'queued' : latest.status} />{group.runs.some((r) => r.status === 'running' && r.reviewProgress) ? <div>{t('publicationPending')}</div> : null}</td>
         <td className={td}>
           <div className="flex flex-col items-start gap-1">
             <RunProviderBadge provider={latest.provider} />
@@ -204,9 +218,10 @@ export function RunGroupRows({ group, number, color, shortRepo, expanded, onTogg
         <td className={`${td} font-mono font-semibold text-ink-900 dark:text-ink-100 whitespace-nowrap`}><RunCostCell costUsd={group.costUsd} apiEquivalentUsd={group.apiEquivalentUsd} /></td>
         <td className={`${td} text-ink-500 dark:text-ink-400 whitespace-nowrap`}><RunDate value={latest.createdAt} /></td>
         <td className={`${td} text-center text-ink-300 dark:text-ink-600`}>—</td>
+        </>}
       </ClickableRow>
       {expanded
-        ? group.runs.map((run, i) => (
+        ? group.runs.filter((r) => r.id !== latest.id).map((run, i) => (
             <ClickableRow
               key={run.id}
               testId="run-sub-row"

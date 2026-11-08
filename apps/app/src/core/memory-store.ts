@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { DEFAULT_WORKSPACE_MAX_FINDINGS, InstallationAlreadyLinkedError, type SaveSettingsOptions, SettingsChangedError, WorkspaceDeletedError } from './types.js';
 import { memoryActiveRun, memoryApiEquivalentRows, memoryRunRepos } from './memory-run-queries.js';
 import {
-  memoryCreateReviewRun,
+  memoryCreateReviewRun, memoryRecordReviewProgress,
   memoryFailStaleRuns,
   memoryFinishReviewRun,
   memoryListLatestFailedRuns,
@@ -345,6 +345,10 @@ export class MemoryStore implements AppStore {
 
   async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {
     return memoryCreateReviewRun(this.runTables(), run);
+  }
+
+  async recordReviewProgress(workspaceId: string, id: string, attemptId: string, progress: import('./types.js').ReviewProgress): Promise<void> {
+    return memoryRecordReviewProgress(this.runTables(), workspaceId, id, attemptId, progress);
   }
 
   async touchReviewRun(workspaceId: string, id: string): Promise<void> {

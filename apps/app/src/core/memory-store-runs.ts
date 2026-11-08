@@ -25,6 +25,9 @@ export function memoryCreateReviewRun(store: MemoryRunTables, run: NewReviewRun)
   store.assertLive(run.workspaceId);
   const now = new Date();
   const starting = {
+    attemptId: randomUUID(),
+    reviewStartedAt: now,
+    reviewProgress: null,
     finishedAt: null,
     updatedAt: now,
     costUsd: run.costUsd ?? null,
@@ -147,4 +150,11 @@ export function memoryListLatestFailedRuns(
   options?: LatestFailedRunsOptions,
 ): ReviewRun[] {
   return selectLatestFailedRuns(store.runs.values(), workspaceId, options);
+}
+
+export async function memoryRecordReviewProgress(store: MemoryRunTables, workspaceId: string, id: string, attemptId: string, progress: import('./types.js').ReviewProgress): Promise<void> {
+    store.assertLive(workspaceId);
+    const run = store.runs.get(id);
+    if (!run || run.workspaceId !== workspaceId || run.attemptId !== attemptId || run.status !== 'running' || run.reviewProgress) return;
+    store.runs.set(id, { ...run, reviewProgress: { ...progress } });
 }
