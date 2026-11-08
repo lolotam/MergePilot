@@ -1,3 +1,4 @@
+import { recordPgReviewProgress } from './pg-runs.js';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { InstallationAlreadyLinkedError, type SaveSettingsOptions } from '../core/types.js';
 import { deleteWorkspaceInTx, lockCredential, withLiveWorkspace } from './workspace-lock.js';
@@ -327,6 +328,10 @@ export class PgStore implements AppStore {
 
   async createReviewRun(run: NewReviewRun): Promise<ReviewRun> {
     return createPgReviewRun(this.db, run);
+  }
+
+  async recordReviewProgress(workspaceId: string, id: string, attemptId: string, progress: import('../core/types.js').ReviewProgress): Promise<void> {
+    return recordPgReviewProgress(this.db, workspaceId, id, attemptId, progress);
   }
 
   async touchReviewRun(workspaceId: string, id: string): Promise<void> {

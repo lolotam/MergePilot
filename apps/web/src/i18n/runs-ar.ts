@@ -2,6 +2,10 @@ import type { enRuns } from './runs-en.js';
 
 // Runs table (grouped by PR), bulk delete, retention and repository colors (K3).
 export const arRuns: Record<keyof typeof enRuns, string> = {
+  openRunDetails: '\u0627\u0641\u062a\u062d \u062a\u0641\u0627\u0635\u064a\u0644 \u0645\u0631\u0627\u062c\u0639\u0629 {name}',
+  publicationPending: '\u062c\u0627\u0631\u064a \u0627\u0644\u062a\u062c\u0647\u064a\u0632 \u0648\u0627\u0644\u0646\u0634\u0631',
+  publicationFailed: '\u0641\u0634\u0644 \u0627\u0644\u062a\u0634\u063a\u064a\u0644',
+  publicationFinished: '\u0627\u0646\u062a\u0647\u0649 \u0627\u0644\u062a\u0634\u063a\u064a\u0644',
   runNumberCol: '#',
   runTokensInCol: 'توكنات داخلة',
   runTokensOutCol: 'توكنات خارجة',

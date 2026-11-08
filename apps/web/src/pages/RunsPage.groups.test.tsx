@@ -28,6 +28,26 @@ describe('RunsPage grouped by PR', () => {
     vi.mocked(client.fetchApi).mockResolvedValue({});
   });
 
+
+  it('represents main once, retains historical same-slot runs', () => {
+    const bots = [2, 1, 3, 4].map((botSlot) => makeRun({ id: `bot-${botSlot}`, botSlot, botName: `Bot ${botSlot}`, headSha: 'current' }));
+    bots.push(makeRun({ id: 'historical', botSlot: 1, botName: 'Earlier main', headSha: 'previous' }));
+    renderRunsPage({ groups: [makeGroup(bots)] });
+    fireEvent.click(within(screen.getByTestId('run-group-row')).getByRole('button', { expanded: false }));
+    expect(screen.getAllByTestId('run-sub-row')).toHaveLength(4);
+    expect(within(screen.getByTestId('run-group-row')).getByText('Bot 1')).toBeDefined();
+    expect(screen.getAllByText('Bot 1')).toHaveLength(1);
+    expect(screen.getByText('Earlier main')).toBeDefined();
+  });
+
+  it('keeps every record visible when the filtered group has no main bot', () => {
+    renderRunsPage({ groups: [makeGroup([makeRun({ id: 'extra-2', botSlot: 2, botName: 'Extra two' }), makeRun({ id: 'extra-3', botSlot: 3, botName: 'Extra three' })])] });
+    fireEvent.click(within(screen.getByTestId('run-group-row')).getByRole('button', { expanded: false }));
+    expect(screen.getAllByTestId('run-sub-row')).toHaveLength(1);
+    expect(screen.getAllByText('Extra two')).toHaveLength(1);
+    expect(screen.getAllByText('Extra three')).toHaveLength(1);
+  });
+
   it('numbers rows continuously across pages and puts #, selection and PR first', () => {
     renderRunsPage({ url: '/w/ws-1/runs?offset=25', groups: [backendPr7(), webPr3()], total: 27 });
     expect(cellTexts(rows()[0]!)[0]).toBe('26');
@@ -45,11 +65,12 @@ describe('RunsPage grouped by PR', () => {
 
     fireEvent.click(expander);
     const subRows = screen.getAllByTestId('run-sub-row');
-    expect(subRows).toHaveLength(3);
+    expect(subRows).toHaveLength(2);
+    expect(within(screen.getByTestId('run-group-row')).getByText('Running')).toBeDefined();
     expect(cellTexts(subRows[0]!)[0]).toBe('1.1');
     expect(screen.getByRole('button', { name: 'Hide the runs of acme/backend#7' }).getAttribute('aria-expanded')).toBe('true');
 
-    fireEvent.click(subRows[1]!);
+    fireEvent.click(subRows[0]!);
     expect(mockNavigate).toHaveBeenCalledWith('/w/ws-1/runs/b7-2');
 
     // Clicking the parent row toggles it too (and does not navigate).
@@ -77,7 +98,7 @@ describe('RunsPage grouped by PR', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show the runs of acme/backend#7' }));
     const subBoxes = screen.getAllByTestId('run-sub-row').map((r) => within(r).getByRole('checkbox'));
-    expect((subBoxes[0] as HTMLInputElement).disabled).toBe(true); // running: never deleted
+    expect((subBoxes[0] as HTMLInputElement).disabled).toBe(false); // Completed run; the active main run is represented by the parent.
     fireEvent.click(subBoxes[1]!);
     expect(screen.getByRole('button', { name: 'Delete selected (1)' })).toBeDefined();
 
@@ -200,7 +221,7 @@ describe('RunsPage grouped by PR', () => {
     expect(cellTexts(rows()[0]!)).toContain('$0.0000≈ $0.0300');
 
     fireEvent.click(screen.getByRole('button', { name: 'Show the runs of acme/backend#11' }));
-    expect(cellTexts(screen.getAllByTestId('run-sub-row')[0]!)).toContain('$0.0000≈ $0.0200');
+    expect(cellTexts(screen.getAllByTestId('run-sub-row')[0]!)).toContain('$0.0000≈ $0.0100');
   });
 
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import {
   ActiveRunExistsError,
   REUSABLE_RUN_STATUSES,
@@ -19,6 +19,9 @@ import { withLiveWorkspace } from './workspace-lock.js';
 export function mapReviewRunRow(row: typeof reviewRuns.$inferSelect): ReviewRun {
   return {
     id: row.id,
+    attemptId: row.attemptId ?? null,
+    reviewStartedAt: row.reviewStartedAt ? new Date(row.reviewStartedAt) : null,
+    reviewProgress: (row.reviewProgress as ReviewRun['reviewProgress']) ?? null,
     workspaceId: row.workspaceId,
     jobId: row.jobId ?? null,
     installationId: Number(row.installationId),
@@ -105,6 +108,9 @@ export async function touchPgReviewRun(db: AppDb, workspaceId: string, id: strin
 /** Columns a new run (or a retry reusing a queued/running/failed run of the same job) starts with. */
 function startingValues(run: NewReviewRun, now: Date) {
   return {
+    attemptId: randomUUID(),
+    reviewStartedAt: now,
+    reviewProgress: null,
     headSha: run.headSha,
     status: run.status,
     costUsd: run.costUsd !== null ? String(run.costUsd) : null,
@@ -234,6 +240,9 @@ export async function listPgLatestFailedRuns(
   const ranked = db
     .select({
       id: reviewRuns.id,
+      attemptId: reviewRuns.attemptId,
+      reviewStartedAt: reviewRuns.reviewStartedAt,
+      reviewProgress: reviewRuns.reviewProgress,
       workspaceId: reviewRuns.workspaceId,
       jobId: reviewRuns.jobId,
       installationId: reviewRuns.installationId,
@@ -274,4 +283,15 @@ export async function listPgLatestFailedRuns(
     .limit(limit);
 
   return rows.map((r) => mapReviewRunRow(r as typeof reviewRuns.$inferSelect));
+}
+
+export async function recordPgReviewProgress(db: AppDb, workspaceId: string, id: string, attemptId: string, progress: import('../core/types.js').ReviewProgress): Promise<void> {
+    await withLiveWorkspace(db, workspaceId, async (tx) => {
+      await tx.update(reviewRuns).set({ reviewProgress: progress }).where(and(
+        eq(reviewRuns.workspaceId, workspaceId), eq(reviewRuns.id, id),
+        eq(reviewRuns.attemptId, attemptId),
+        or(eq(reviewRuns.status, 'running'), and(eq(reviewRuns.status, 'failed'), eq(reviewRuns.detail, 'interrupted'))),
+        sql`${reviewRuns.reviewProgress} IS NULL`,
+      ));
+    });
 }

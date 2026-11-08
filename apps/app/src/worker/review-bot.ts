@@ -196,11 +196,23 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       ...(br.bot.skill ? { skill: { name: br.bot.skill.name, content: br.bot.skill.content } } : {}),
     };
 
+    const onReviewed = async (status: 'completed' | 'failed' | 'skipped') => {
+      if (!br.run.attemptId) return;
+      try {
+        await deps.store.recordReviewProgress(workspaceId, br.run.id, br.run.attemptId, { status, finishedAt: new Date().toISOString() });
+      } catch (error) {
+        if (error instanceof WorkspaceDeletedError) throw error;
+        // Auxiliary dashboard metadata must not suppress a completed review's publication.
+        // Log identifiers only: database errors can contain credentials or connection URLs.
+        logger.warn({ event: 'review.progress_write_failed', workspaceId, runId: br.run.id }, 'Could not persist bot review progress');
+      }
+    };
     if (consensus) {
       const outcome = reviewOnlyOutcome(
         await runBotReview({ ...params, prFiles: consensus.prFiles, selection: consensus.selection }),
         { knownSecrets, judge: judgeSetup.judge },
       );
+      await onReviewed(outcome.outcome === 'skipped-budget' ? 'skipped' : outcome.outcome);
       await cursorWrites.flush();
       const record = await recordOf(ctx, br, choice, outcome, judgeSetup, credStore.getKnownSecrets(), skippedNote, recordPricing);
       if (outcome.fallback) {
@@ -211,6 +223,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     }
 
     const reviewResult = await executeReview({
+      onReviewed,
       ...params,
       // A lone bot shows its identity line only to name its skill (ADR-0034).
       ...(ctx.panelActive || br.bot.skill
