@@ -5,6 +5,10 @@ export function firstHeader(value: string | string[] | undefined): string {
   return (Array.isArray(value) ? value[0] : value) ?? '';
 }
 
+function validHeadSha(value: unknown): string | null {
+  return typeof value === 'string' && /^[a-f0-9]{40}$/i.test(value) ? value : null;
+}
+
 /** Non-secret identifiers from a webhook payload: action, repository and PR number. */
 export function webhookPayloadFields(payload: unknown): {
   action: string | null;
@@ -29,7 +33,7 @@ export function webhookPayloadFields(payload: unknown): {
     repo: typeof repository?.full_name === 'string' ? repository.full_name : null,
     pr: prNumber,
     pullNumber: prNumber,
-    headSha: typeof pullRequest?.head?.sha === 'string' && /^[a-f0-9]{40}$/i.test(pullRequest.head.sha) ? pullRequest.head.sha : null,
+    headSha: validHeadSha(pullRequest?.head?.sha),
   };
 }
 
@@ -44,10 +48,10 @@ const INSTALLATION_EVENTS = {
  * The outcome of one webhook delivery plus its domain detail, so a single log line
  * describes it (no separate domain-event line for the same delivery).
  */
-export function webhookOutcomeFields(result: WebhookResult): Record<string, string | number> {
+export function webhookOutcomeFields(result: WebhookResult): Record<string, string | number | null> {
   switch (result.status) {
     case 'enqueued':
-      return { outcome: 'queued', ...reviewCorrelation(result.job) };
+      return { outcome: 'queued', ...reviewCorrelation(result.job), headSha: validHeadSha(result.job.headSha) };
     case 'command_queued':
       return { outcome: 'queued', command: result.job.command, jobId: result.job.deliveryId, repo: result.job.repoFullName, pullNumber: result.job.pullNumber };
     case 'duplicate':

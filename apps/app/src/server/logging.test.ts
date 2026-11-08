@@ -1,4 +1,4 @@
-import { webhookPayloadFields } from './webhook-log.js';
+import { webhookOutcomeFields, webhookPayloadFields } from './webhook-log.js';
 import { createHmac } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -331,6 +331,16 @@ describe('Server structured logging', () => {
 
 
 describe('webhook correlation allowlist', () => {
+  it.each(['h1', 'g'.repeat(40), 'a'.repeat(39), 'a'.repeat(41)])('keeps invalid queued SHA %s null after merging outcome fields', (headSha) => {
+    const payload = { pull_request: { number: 905, head: { sha: headSha } } };
+    const job: ReviewJob = { deliveryId: 'delivery-905', installationId: 1, repoFullName: 'acme/repo', pullNumber: 905, headSha, baseSha: 'b'.repeat(40) };
+    expect({ ...webhookPayloadFields(payload), ...webhookOutcomeFields({ status: 'enqueued', job }) }).toMatchObject({ outcome: 'queued', headSha: null });
+  });
+  it('retains a valid full SHA in queued outcome fields', () => {
+    const headSha = 'AB'.repeat(20);
+    const job: ReviewJob = { deliveryId: 'delivery-905', installationId: 1, repoFullName: 'acme/repo', pullNumber: 905, headSha, baseSha: 'b'.repeat(40) };
+    expect(webhookOutcomeFields({ status: 'enqueued', job })).toMatchObject({ outcome: 'queued', headSha });
+  });
   it('keeps a full SHA and excludes arbitrary payload values', () => {
     const headSha = 'd36008fa7be673a267ec2a6ea90ffd57813635b2';
     expect(webhookPayloadFields({ action: 'opened', repository: { full_name: 'acme/repo' },
