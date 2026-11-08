@@ -72,7 +72,10 @@ describe('handleWebhook — issue_comment pause/resume commands', () => {
         language,
       },
     ]);
-    expect(webhookOutcomeFields(result)).toEqual({ outcome: 'queued', command: 'review' });
+    expect(webhookOutcomeFields(result)).toEqual({
+      outcome: 'queued', command: 'review', jobId: `d-${delivery}`,
+      repo: 'test-org/repo-1', pullNumber: 42,
+    });
   });
 
   it('ignores a quoted `@mergepilot review` (as in MergePilot\'s own notes) and look-alike words', async () => {
@@ -100,8 +103,13 @@ describe('handleWebhook — issue_comment pause/resume commands', () => {
       },
     ]);
     expect(queue.jobs).toHaveLength(0);
-    expect(webhookOutcomeFields(result)).toEqual({ outcome: 'queued', command: 'pause' });
-    expect(webhookPayloadFields(payload)).toEqual({ action: 'created', repo: 'test-org/repo-1', pr: 42 });
+    expect(webhookOutcomeFields(result)).toEqual({
+      outcome: 'queued', command: 'pause', jobId: `d-${delivery}`,
+      repo: 'test-org/repo-1', pullNumber: 42,
+    });
+    expect(webhookPayloadFields(payload)).toEqual({
+      action: 'created', repo: 'test-org/repo-1', pr: 42, pullNumber: 42, headSha: null,
+    });
   });
 
   it('queues Arabic aliases with an Arabic reply language', async () => {
