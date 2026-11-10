@@ -299,6 +299,19 @@ describe('the two-phase release', () => {
     expect(logs).toContain('plan: the compose file changed beyond the image pins, so this release runs in one phase (the site waits for the worker drain)');
   });
 
+  it('releases in one phase when the operator asks, never starting the previous worker', async () => {
+    const { cfg, ports, commits, deployments, logs } = setup();
+    const outcome = await runRelease({ ...cfg, singlePhase: true }, ports);
+    expect(outcome).toMatchObject({ kind: 'deployed' });
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.message.split('\n')[0]).toBe(`chore(release): deploy ${NEW.slice(0, 7)}`);
+    expect(commits[0]?.content).toContain(`x-image: &image ${NEW_REF}`);
+    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${NEW_REF}`);
+    // The only deploy carries the new worker: the old worker image is never deployed.
+    expect(deployments).toEqual([{ title: `release ${NEW.slice(0, 7)}`, web: NEW_REF, worker: NEW_REF }]);
+    expect(logs).toContain('plan: the operator asked for one phase, so web and worker move together and the previous worker is never started');
+  });
+
   it('dry run plans both phases and changes nothing', async () => {
     const { cfg, ports, github, dokploy } = setup();
     const outcome = await runRelease({ ...cfg, live: false }, ports);

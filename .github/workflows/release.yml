@@ -15,6 +15,11 @@ on:
         description: Full commit SHA on main to (re)evaluate for release
         required: true
         type: string
+      single_phase:
+        description: Move web and worker together in one phase (the previous worker is never started)
+        required: false
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -55,6 +60,8 @@ jobs:
       - name: Release
         env:
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha || inputs.sha }}
+          # Only a manual run can ask for one phase; automatic runs have no inputs.
+          RELEASE_SINGLE_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.single_phase && 'true' || 'false' }}
           GITHUB_TOKEN: ${{ github.token }}
           MERGEPILOT_AUTO_RELEASE: ${{ vars.MERGEPILOT_AUTO_RELEASE }}
           RELEASE_BRANCH: ${{ vars.RELEASE_BRANCH || 'production' }}
