@@ -117,11 +117,13 @@ describe('Worker structured logging', () => {
     expect(startLine?.workspace).toBe(workspaceId);
     expect(startLine?.repo).toBe(repoFullName);
     expect(startLine?.pullNumber).toBe(pullNumber);
-    expect(startLine?.headSha).toBe(headSha.slice(0, 7));
+    expect(startLine?.headSha).toBe(headSha);
+    expect(startLine?.botSlot).toBe(1);
 
     // 2. Verify job end log line
     const endLine = lines.find((l) => l.event === 'job.end');
     expect(endLine).toBeDefined();
+    expect(endLine).toMatchObject({ repo: repoFullName, pullNumber, headSha, jobId: deliveryId, runId: startLine?.runId, botSlot: 1 });
     expect(endLine?.status).toBe('completed');
     expect(endLine?.provider).toBe('anthropic');
     expect(endLine?.model).toBe('claude-3-5-sonnet');
@@ -245,6 +247,7 @@ describe('Worker structured logging', () => {
     expect(failLine).toBeDefined();
     expect(failLine?.level).toBe(50); // error level
     expect(failLine?.jobId).toBe(deliveryId);
+    expect(failLine).toMatchObject({ repo: repoFullName, pullNumber, headSha, botSlot: 1 });
     expect(failLine?.message).not.toContain(fakeKey);
     expect(failLine?.message).toContain('[REDACTED:anthropic]');
   });
@@ -273,6 +276,8 @@ describe('Worker structured logging', () => {
     expect(skipLine).toBeDefined();
     expect(skipLine?.jobId).toBe('del-unknown-inst');
     expect(skipLine?.reason).toContain('unknown installation');
+    expect(skipLine).toMatchObject({ repo: repoFullName, pullNumber, headSha });
+    expect(skipLine).not.toHaveProperty('runId');
   });
 
   it('logs heartbeat failures at warn level', async () => {

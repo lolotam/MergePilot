@@ -1,3 +1,4 @@
+import { reviewCorrelation } from '../core/review-correlation.js';
 import type { Logger } from 'pino';
 import {
   ActiveRunExistsError,
@@ -117,7 +118,7 @@ export async function startBotRuns(ctx: StartContext, bots: PanelBot[]): Promise
         if (bot.slot !== MAIN_BOT_SLOT && !(await deps.store.getCredential(workspaceId, bot.provider))) {
           const run = await deps.store.createReviewRun(newRun(bot, initial));
           await deps.store.finishReviewRun(workspaceId, run.id, { status: 'skipped', costUsd: null, detail: NO_KEY_DETAIL, ...initial, findingsCount: 0 });
-          logger.info({ event: 'panel.bot.done', jobId: job.deliveryId, slot: bot.slot, status: 'skipped', ms: 0 }, `Bot ${bot.slot} skipped: ${NO_KEY_DETAIL}`);
+          logger.info({ event: 'panel.bot.done', ...reviewCorrelation(job), runId: run.id, botSlot: bot.slot, slot: bot.slot, status: 'skipped', ms: 0 }, `Bot ${bot.slot} skipped: ${NO_KEY_DETAIL}`);
           started.noKey.push(bot);
           continue;
         }
@@ -177,7 +178,7 @@ export async function runPanel(ctx: PanelContext, runs: BotRun[], noKey: PanelBo
       const outcome = await runBot(ctx, br, files);
       if (ctx.panelActive) {
         ctx.logger.info(
-          { event: 'panel.bot.done', jobId: ctx.job.deliveryId, slot: br.bot.slot, status: outcome.result.status, ms: Math.round(performance.now() - br.startedAt) },
+          { event: 'panel.bot.done', ...reviewCorrelation(ctx.job), runId: br.run.id, botSlot: br.bot.slot, slot: br.bot.slot, status: outcome.result.status, ms: Math.round(performance.now() - br.startedAt) },
           `Bot ${br.bot.slot} finished with status ${outcome.result.status}`,
         );
       }
@@ -221,7 +222,7 @@ export async function runPanel(ctx: PanelContext, runs: BotRun[], noKey: PanelBo
   }
   if (ctx.panelActive && !consensus) {
     const findings = outcomes.reduce((n, o) => n + (o.findings ?? 0), 0);
-    ctx.logger.info({ event: 'panel.publish', jobId: ctx.job.deliveryId, mode: 'separate', findings }, 'Reviewer panel published separately');
+    ctx.logger.info({ event: 'panel.publish', ...reviewCorrelation(ctx.job), mode: 'separate', runs: runs.map((br) => ({ runId: br.run.id, botSlot: br.bot.slot, status: outcomes.find((o) => o.slot === br.bot.slot)?.result.status })), findings }, 'Reviewer panel separate publication processing finished');
   }
   return new Map(outcomes.map((o) => [o.slot, o.result]));
 }

@@ -1,3 +1,4 @@
+import { reviewCorrelation } from '../core/review-correlation.js';
 import { createReviewModel, LlmFailure, redactSecrets, type ApiProviderId, type ReviewModel, type Secret } from '@mergepilot/engine';
 import {
   MAIN_BOT_SLOT,
@@ -156,7 +157,7 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     const apiPrice = await apiEquivalentPrice(deps.store, settings, model, choice, configuredPricing).catch((error: unknown) => {
       // Display only: a price lookup that fails leaves the run without an equivalent, never failed.
       logger.warn(
-        { event: 'review.api_equivalent_failed', jobId: job.deliveryId, runId: br.run.id, error: error instanceof Error ? error.name : 'unknown' },
+        { event: 'review.api_equivalent_failed', ...reviewCorrelation(job), runId: br.run.id, error: error instanceof Error ? error.name : 'unknown' },
         'Could not price the API-equivalent; the run shows none',
       );
       return undefined;
@@ -260,8 +261,8 @@ export async function finishBotRun(
   br.stopHeartbeat();
   const usage = runResult && runResult.status !== 'skipped-budget' ? runResult.usage : undefined;
   ctx.logger.info({
-    event: 'job.end', jobId: ctx.job.deliveryId, runId: br.run.id, status: finish.status,
-    ...(ctx.panelActive ? { botSlot: br.bot.slot } : {}),
+    event: 'job.end', ...reviewCorrelation(ctx.job), runId: br.run.id, status: finish.status,
+    botSlot: br.bot.slot,
     provider: finish.provider, model: finish.model, fallbackFrom: finish.fallbackFrom ?? null,
     // A method fallback (ADR-0027), on failed runs too: the two methods and the failure kind, never a secret.
     ...(runResult && runResult.status !== 'skipped-budget' && runResult.fallbackFromMethod
@@ -273,16 +274,16 @@ export async function finishBotRun(
   if (runResult?.status === 'failed' && runResult.answerAttempts) {
     // What the model said instead of the JSON: logs only, never the dashboard or the PR.
     ctx.logger.warn({
-      event: 'review.unusable-answer', jobId: ctx.job.deliveryId, runId: br.run.id,
-      ...(ctx.panelActive ? { botSlot: br.bot.slot } : {}),
+      event: 'review.unusable-answer', ...reviewCorrelation(ctx.job), runId: br.run.id,
+      botSlot: br.bot.slot,
       provider: finish.provider, model: finish.model, attempts: runResult.answerAttempts,
     }, `Review job ${ctx.job.deliveryId}: the model answered without the JSON asked for`);
   }
   if (runResult?.status === 'completed' && runResult.answerAttempts) {
     // A summary without the findings list, even after the reminder (ADR-0011): logs only.
     ctx.logger.warn({
-      event: 'review.findings-list-missing', jobId: ctx.job.deliveryId, runId: br.run.id,
-      ...(ctx.panelActive ? { botSlot: br.bot.slot } : {}),
+      event: 'review.findings-list-missing', ...reviewCorrelation(ctx.job), runId: br.run.id,
+      botSlot: br.bot.slot,
       provider: finish.provider, model: finish.model, attempts: runResult.answerAttempts,
     }, `Review job ${ctx.job.deliveryId}: the model answered without a findings list`);
   }
@@ -304,7 +305,7 @@ export async function failBotRun(
     if (error instanceof WorkspaceDeletedError) {
       const message = `Review job ${job.deliveryId} skipped: workspace ${workspaceId} was deleted`;
       deps.log?.(message);
-      logger.info({ event: 'job.skipped', jobId: job.deliveryId, reason: WORKSPACE_DELETED, workspaceId }, message);
+      logger.info({ event: 'job.skipped', ...reviewCorrelation(job), runId: br.run.id, botSlot: br.bot.slot, reason: WORKSPACE_DELETED, workspaceId }, message);
       await deps.store.finishReviewRun(workspaceId, br.run.id, { status: 'skipped', costUsd: null, detail: WORKSPACE_DELETED });
       return { status: 'skipped', detail: WORKSPACE_DELETED };
     }
@@ -315,8 +316,8 @@ export async function failBotRun(
 
     deps.log?.(`Review job ${job.deliveryId} failed: ${redactedDetail}`);
     logger.error({
-      event: 'job.failed', jobId: job.deliveryId, runId: br.run.id,
-      workspace: workspaceId, failureCode, message: redactedDetail,
+      event: 'job.failed', ...reviewCorrelation(job), runId: br.run.id,
+      botSlot: br.bot.slot, workspace: workspaceId, failureCode, message: redactedDetail,
     }, `Review job ${job.deliveryId} failed: ${redactedDetail}`);
 
     await deps.store.finishReviewRun(workspaceId, br.run.id, {

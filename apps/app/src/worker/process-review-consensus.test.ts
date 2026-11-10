@@ -48,6 +48,10 @@ describe('processReviewJob — consensus mode', () => {
     ]);
     expect(runs.every((r) => r.result?.usage?.inputTokens)).toBe(true);
     expect(h.events('panel.publish')[0]).toMatchObject({ mode: 'consensus', findings: 1 });
+    expect(h.events('panel.publish')[0]).toMatchObject({ jobId: h.job.deliveryId, repo: h.job.repoFullName, pullNumber: h.job.pullNumber, headSha: HEAD, runId: runs[0]!.id, botSlot: 1 });
+    for (const run of runs) {
+      expect(h.events('job.end').find((e) => e.runId === run.id)).toMatchObject({ botSlot: run.botSlot, headSha: HEAD });
+    }
     expect(h.events('panel.start')[0]).toMatchObject({ mode: 'consensus', bots: [1, 2, 3] });
   });
 
@@ -106,7 +110,7 @@ describe('processReviewJob — consensus mode', () => {
     expect(h.created).toHaveLength(0);
     const runs = await h.runs();
     expect(runs.map((r) => [r.botSlot, r.status, r.reviewUrl])).toEqual([[1, 'failed', null], [2, 'failed', null]]);
-    expect(h.events('panel.publish')[0]).toMatchObject({ mode: 'consensus', findings: 0 });
+    expect(h.events('panel.publish')[0]).toMatchObject({ mode: 'consensus', findings: 0, publicationStatus: 'not-attempted', headSha: HEAD });
   });
 
   it('asks the workspace judge whether differently worded findings are the same issue', async () => {
