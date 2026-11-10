@@ -48,6 +48,7 @@ async function main(): Promise<number> {
     deployTimeoutMs: minutes('DEPLOY_TIMEOUT_MINUTES', 35),
     verifyTimeoutMs: minutes('VERIFY_TIMEOUT_MINUTES', 10),
     intervalMs: 15_000,
+    singlePhase: process.env.RELEASE_SINGLE_PHASE?.trim() === 'true',
   };
   assertFitsJob(cfg, minutes('JOB_TIMEOUT_MINUTES', 120));
 

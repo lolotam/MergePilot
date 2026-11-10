@@ -58,6 +58,11 @@ export interface ReleaseConfig {
   deployTimeoutMs: number;
   verifyTimeoutMs: number;
   intervalMs: number;
+  /**
+   * Operator request (manual run only) to move web and worker together in one phase, so the
+   * worker the web phase would keep is never started, e.g. after it was stopped for a migration.
+   */
+  singlePhase?: boolean;
 }
 
 export interface ReleasePorts {
@@ -292,7 +297,7 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   // change beyond the pins may recreate the worker in that phase too: its drain then keeps the
   // new web from starting, the outage the two phases exist to prevent.
   const pinsOnly = sameExceptPins(candidateCompose, deployedCompose);
-  const twoPhases = workerPinned && pinsOnly;
+  const twoPhases = workerPinned && pinsOnly && !cfg.singlePhase;
 
   const repository = readPin(candidateCompose).repository;
   const image = await ports.registry.resolve(repository, sha);
@@ -316,6 +321,8 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   if (!twoPhases) {
     if (workerPinned && !pinsOnly) {
       log('plan: the compose file changed beyond the image pins, so this release runs in one phase (the site waits for the worker drain)');
+    } else if (workerPinned && cfg.singlePhase) {
+      log('plan: the operator asked for one phase, so web and worker move together and the previous worker is never started');
     }
     log(`plan: deploy ${imageRef} (replacing ${deployed.imageRef})`);
     if (!cfg.live) return { kind: 'planned', detail: `would deploy ${imageRef} over ${deployed.imageRef}` };

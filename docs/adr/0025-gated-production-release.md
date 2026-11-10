@@ -32,6 +32,10 @@ The release commits carry `Worker-Source-Commit` and `Worker-Image-Ref` (and the
 
 **Still true.** The worker drain itself is unchanged, and the new `web` serves next to the draining old worker for up to the grace period. Migrations run in the web phase, before the old worker stops, which was already the case. Dokploy's autoDeploy must stay off for `production` (rule 1): it was found on on 2026-10-20, which made every release commit start a second, duplicate deploy.
 
+## Amendment (2026-11-11): operator-requested single phase
+
+The web phase starts the worker on its current pin when no worker container runs. After the worker was stopped for migration 0020 (release hold #200), that would have started the previous worker against the migrated database. A manual run (`workflow_dispatch`) now takes a `single_phase` input. When it is `true`, the run writes both pins in one release commit and deploys once, so the previous worker image is never started. Verification, rollback and the migration rule are unchanged. Automatic runs (`workflow_run`) never set it. The owner chose this path on 2026-11-11 (decisions log, س66).
+
 ## Pending owner decisions (before activation)
 
 - Switch the Dokploy compose source branch from `main` to `production` with autoDeploy off (in one update, before anything is pushed to `production`), after bootstrapping `production`. The bootstrap commit is chosen by what its compose file **pins**, not by its own SHA: before the first release commit the release reads the deployed release from the `x-image` tag of the branch head (`currentDeployment`), and that release is the rollback target. It must be a `main` commit whose pin is the running image and an ancestor of every candidate. On 2026-10-15 that is `4991976334911c832ac8bb0eddec4585855267a2`, which pins the running `4c32dee68dcc08d4626995d755054c9bc3971cbc`; `4c32dee` itself pins `4915c26` and would make the release record and roll back to the wrong image.
