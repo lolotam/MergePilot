@@ -7,6 +7,7 @@ import {
   FALLBACK_EFFORTS,
   geminiThinkingConfig,
   openAIReasoningEffort,
+  openAIThinksByDefault,
   sentEffort,
   thinkingHeadroom,
 } from './effort.js';
@@ -108,6 +109,28 @@ describe('effortStopsThinking', () => {
 });
 
 describe('openAIReasoningEffort', () => {
+  it.each(['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6.1-terra'])(
+    'recognizes only documented GPT-6 model %s and its effort levels', (model) => {
+      expect(openAIThinksByDefault(model)).toBe(true);
+      for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+        expect(openAIReasoningEffort(model, ` ${effort.toUpperCase()} `)).toBe(effort);
+      }
+      for (const effort of ['off', 'minimal', 'turbo', '', undefined]) {
+        expect(openAIReasoningEffort(model, effort)).toBeUndefined();
+      }
+      expect(openAIReasoningEffort(model, 'none')).toBe(
+        ['gpt-6-sol', 'gpt-6-luna', 'gpt-6.1-terra'].includes(model) ? 'none' : undefined,
+      );
+    },
+  );
+
+  it.each(['gpt-6', 'gpt-6.2-sol', 'gpt-7', 'gpt-60', 'gpt-6.1-sol-chat-latest', 'gpt-6.1-sol-2099-01-01'])(
+    'does not infer native capabilities for unverified model %s', (model) => {
+      expect(openAIThinksByDefault(model)).toBe(false);
+      expect(openAIReasoningEffort(model, 'high')).toBeUndefined();
+    },
+  );
+
   it('sends only minimal|low|medium|high to reasoning models', () => {
     expect(openAIReasoningEffort('gpt-5', 'Medium')).toBe('medium');
     expect(openAIReasoningEffort('gpt-5-mini', 'minimal')).toBe('minimal');

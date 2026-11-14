@@ -83,6 +83,30 @@ describe('OpenAIAdapter', () => {
   });
 
   describe('cached tokens subtraction', () => {
+    it.each([undefined, null, { cached_tokens: 0, cache_write_tokens: 0 }])(
+      'keeps legacy input accounting for absent or zero cache fields %j', async (details) => {
+        const usage = { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60,
+          ...(details !== undefined ? { prompt_tokens_details: details } : {}) };
+        const adapter = new OpenAIAdapter({ apiKey: fakeKey, client: createFakeClient([makeChunk('OK', 'stop', usage)]) });
+        const result = await collectText(adapter.stream({ model: 'gpt-4o', maxOutputTokens: 100,
+          messages: [{ role: 'user', content: 'hi' }] }));
+        expect(result.usage).toEqual({ inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 });
+      },
+    );
+
+    it('conserves disjoint cache-write input buckets and counts completion reasoning once', async () => {
+      const usage = {
+        prompt_tokens: 12000, completion_tokens: 200, total_tokens: 12200,
+        prompt_tokens_details: { cached_tokens: 4000, cache_write_tokens: 7000 },
+        completion_tokens_details: { reasoning_tokens: 150 },
+      };
+      const adapter = new OpenAIAdapter({ apiKey: fakeKey, client: createFakeClient([makeChunk('OK', 'stop', usage)]) });
+      const result = await collectText(adapter.stream({ model: 'gpt-6.1-sol', maxOutputTokens: 100,
+        messages: [{ role: 'user', content: 'hi' }] }));
+      expect(result.usage).toEqual({ inputTokens: 1000, outputTokens: 200, cacheReadTokens: 4000, cacheWriteTokens: 7000 });
+      expect(result.usage.inputTokens + result.usage.cacheReadTokens + result.usage.cacheWriteTokens).toBe(12000);
+    });
+
     it('subtracts cached tokens from input tokens and records cacheReadTokens', async () => {
       const chunks = [
         makeChunk('test', 'stop', {

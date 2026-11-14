@@ -25,16 +25,22 @@ export function costUsd(usage: TokenUsage, pricing: ModelPricing): number {
 }
 
 /**
- * Calculates worst-case estimated cost in USD assuming all input tokens are uncached
- * and the model produces maxOutputTokens.
+ * Calculates worst-case estimated cost in USD using the highest configured input bucket
+ * rate and assuming the model produces maxOutputTokens. This bounds the supplied flat rates;
+ * it does not infer missing cache prices, service-tier or long-context premiums.
  * Returns an unrounded number.
  */
 export function estimateCostUsd(
   estimate: EstimateCostInput,
   pricing: ModelPricing,
 ): number {
+  const inputPerMTok = Math.max(
+    pricing.inputPerMTok,
+    pricing.cacheReadPerMTok ?? pricing.inputPerMTok,
+    pricing.cacheWritePerMTok ?? pricing.inputPerMTok,
+  );
   return (
-    (estimate.inputTokens * pricing.inputPerMTok +
+    (estimate.inputTokens * inputPerMTok +
       estimate.maxOutputTokens * pricing.outputPerMTok) /
     1_000_000
   );
