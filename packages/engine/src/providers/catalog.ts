@@ -5,7 +5,7 @@
  */
 import { type CatalogModel, sortUnique } from './catalog-types.js';
 import { listCompatibleModels } from './compatible/models.js';
-import { FALLBACK_EFFORTS } from './effort.js';
+import { FALLBACK_EFFORTS, openAIModelEfforts } from './effort.js';
 import { failureFromResponse, failureFromThrown, keyValue, type FetchLike, type KeyInput } from './http.js';
 import type { ApiProviderId } from './ids.js';
 import { providerEntry, resolveBaseUrl } from './registry.js';
@@ -110,7 +110,11 @@ async function listOpenAI(key: KeyInput, options: ListModelsOptions): Promise<Ca
     .map(record)
     .filter((m): m is Record<string, unknown> & { id: string } => typeof m.id === 'string')
     .filter((m) => OPENAI_CHAT.test(m.id) && !OPENAI_NOT_CHAT.test(m.id))
-    .map((m) => entry(m.id, m.id, OPENAI_REASONING.test(m.id) ? [...FALLBACK_EFFORTS.reasoning_effort] : [], undefined));
+    .map((m) => {
+      const efforts = openAIModelEfforts(m.id);
+      return entry(m.id, m.id, efforts ? ['off', ...efforts]
+        : OPENAI_REASONING.test(m.id) ? [...FALLBACK_EFFORTS.reasoning_effort] : [], undefined);
+    });
 }
 
 const GEMINI_NOT_CHAT = /embed|aqa|imagen|veo|tts|image-generation/i;

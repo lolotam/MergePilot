@@ -55,6 +55,18 @@ describe('listModels', () => {
   });
 
   describe('OpenAI', () => {
+    it('offers documented GPT-6 efforts without inferring unknown model capabilities', async () => {
+      const ids = ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6.1-terra', 'gpt-7', 'gpt-6.2-sol', 'gpt-6.1-sol-chat-latest'];
+      const { fetch } = mockFetch(jsonResponse({ data: ids.map((id) => ({ id })) }));
+      const models = await listModels('openai', KEY, { fetch });
+      for (const id of ids) {
+        const efforts = models.find((model) => model.id === id)?.efforts;
+        expect(efforts).toEqual(ids.slice(0, 5).includes(id)
+          ? ['off', ...(['gpt-6-sol', 'gpt-6-luna', 'gpt-6.1-terra'].includes(id) ? ['none'] : []), 'low', 'medium', 'high', 'xhigh', 'max']
+          : []);
+      }
+    });
+
     it('requests /v1/models with Bearer token, filters chat models and sets reasoning efforts', async () => {
       const body = {
         data: [
