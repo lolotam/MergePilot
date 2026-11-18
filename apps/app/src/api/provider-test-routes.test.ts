@@ -102,6 +102,29 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('glm-4-free');
   });
 
+  it.each([
+    { failure: 'INVALID_CREDENTIAL', code: 'auth', status: 'invalid' },
+    { failure: 'QUOTA', code: 'quota', status: 'quota-exhausted' },
+    { failure: 'RATE_LIMIT', code: 'rate-limit', status: undefined },
+  ] as const)('records only definitive OpenRouter catalog failures ($failure)', async ({ failure, code, status }) => {
+    const provider = 'openrouter';
+    const key = await h.credentials.appendProviderKey({
+      workspaceId: 'ws-1', provider, apiKey: keyFor('or'), userId: 'u-admin',
+    });
+    const previousTest = new Date('2026-01-01T00:00:00Z');
+    await h.credentials.recordKeyTest('ws-1', provider, key.id, 'valid', previousTest);
+    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: failure, provider, message: 'fixture failure' }));
+    const result = await test(provider, h.adminCookie(), { keyId: key.id });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ ok: false, code });
+    expect(result.json().quotaStatus).toBe(status);
+    expect(testConnection).not.toHaveBeenCalled();
+    const [stored] = await h.store.listProviderKeys('ws-1', provider);
+    expect(stored?.lastTestStatus).toBe(status ?? 'valid');
+    if (status) expect(stored?.lastTestedAt?.getTime()).toBeGreaterThan(previousTest.getTime());
+    else expect(stored?.lastTestedAt).toEqual(previousTest);
+  });
+
   it('never caches an unsaved key catalog, and skips a retired default the provider no longer lists', async () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model: 'x', reply: 'OK' });
     vi.mocked(listModels).mockResolvedValue([{ id: 'mimo-v2.6', name: 'MiMo v2.6', efforts: [] }]);

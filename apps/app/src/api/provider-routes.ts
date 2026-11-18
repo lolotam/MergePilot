@@ -133,6 +133,7 @@ export function testModelFor(
 ): string {
   const configured = configuredModelFor(settings, provider);
   if (configured) return configured;
+  if (provider === 'openrouter' && models?.length === 0) return '';
   const fallback = providerEntry(provider).defaultModel;
   if (models && models.length > 0) {
     const free = pickFreeModel(provider, models);
@@ -340,6 +341,11 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           : await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
       const { target } = result;
+      const recordOutcome = async (ok: boolean, code?: string) => {
+        const status = quotaStatusOf(ok, code);
+        if (!apiKey && keyId && status) await deps.credentials.recordKeyTest(workspaceId, provider, keyId, status, new Date());
+        return status;
+      };
 
       const settings = await deps.store.getSettings(workspaceId);
       let model = body.model?.trim() || configuredModelFor(settings, provider);
@@ -361,9 +367,11 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
             });
           }
           if (provider === 'openrouter' && error instanceof LlmFailure) {
+            const code = failureKind(error.code);
+            const quotaStatus = await recordOutcome(false, code);
             return reply.status(200).send({
-              ok: false, code: failureKind(error.code), message: 'Could not read the OpenRouter account catalog',
-              ms: Date.now() - catalogStart,
+              ok: false, code, message: 'Could not read the OpenRouter account catalog',
+              ms: Date.now() - catalogStart, ...(quotaStatus ? { quotaStatus } : {}),
             });
           }
           // Other providers can still use their registry default when model listing fails.
@@ -372,27 +380,19 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
             'Could not list models to pick a test model; using the registry default',
           );
         }
-        if (provider === 'openrouter' && models?.length === 0) {
-          return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
-        }
         model = testModelFor(settings, provider, models);
       }
       if (!model) return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
       const effort = body.effort?.trim();
 
       const start = Date.now();
-      const remember = async (status: KeyQuotaStatus | null): Promise<void> => {
-        if (!keyId || !status) return;
-        await deps.credentials.recordKeyTest(workspaceId, provider, keyId, status, new Date());
-      };
       try {
         const outcome = await testConnection(provider, target.apiKey, model, {
           ...engineOptions(target),
           timeoutMs: DASHBOARD_FETCH_LIMITS.timeoutMs,
           ...(effort ? { effort } : {}),
         });
-        const quotaStatus = quotaStatusOf(outcome.ok, outcome.ok ? undefined : outcome.code);
-        await remember(quotaStatus);
+        const quotaStatus = await recordOutcome(outcome.ok, outcome.ok ? undefined : outcome.code);
         if (outcome.ok) {
           request.log.info(
             {
