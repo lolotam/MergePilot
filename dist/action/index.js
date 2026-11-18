@@ -139444,6 +139444,7 @@ function responsesReasoningHeadroom(model2, reasoning) {
   return model2.reasoning && model2.thinkingLevelMap?.off === null ? DEFAULT_THINKING_HEADROOM : 0;
 }
 
+init_models3();
 var OPENAI_NOT_CHAT = /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|search|instruct|computer-use|sora|davinci|babbage/i;
 var CODEX_FAMILY = /^(gpt-(?:[5-9]|\d{2,})|codex-)/;
 function isSupplementaryId(id) {
@@ -139453,7 +139454,14 @@ function supplementaryModel(provider2, id) {
   if (provider2 !== "openai" || !isSupplementaryId(id))
     return void 0;
   const bundled = subscriptionProvider("openai").getModels();
-  const template = bundled.reduce((best, model2) => !best || model2.contextWindow > best.contextWindow ? model2 : best, void 0);
+  const rank = (model2) => [getSupportedThinkingLevels(model2).length, model2.contextWindow];
+  const template = bundled.reduce((best, model2) => {
+    if (!best)
+      return model2;
+    const [levels, window2] = rank(model2);
+    const [bestLevels, bestWindow] = rank(best);
+    return levels > bestLevels || levels === bestLevels && window2 > bestWindow ? model2 : best;
+  }, void 0);
   return template ? { ...template, id, name: id } : void 0;
 }
 
