@@ -131,12 +131,28 @@ describe('budget/cost', () => {
   });
 
   describe('estimateCostUsd', () => {
+    it.each([
+      [3.75, 0.3, 0.24894], [3.75, 5, 0.31144], [undefined, undefined, 0.21144], [1, 0.3, 0.21144],
+    ])('reserves the largest configured input bucket rate (write %s, read %s)', (write, read, expected) => {
+      const pricing = { inputPerMTok: 3, outputPerMTok: 15,
+        ...(write !== undefined ? { cacheWritePerMTok: write } : {}),
+        ...(read !== undefined ? { cacheReadPerMTok: read } : {}) };
+      const estimate = estimateCostUsd({ inputTokens: 50000, maxOutputTokens: 4096 }, pricing);
+      expect(estimate).toBe(expected);
+      for (const usage of [
+        { inputTokens: 50000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        { inputTokens: 0, cacheReadTokens: 50000, cacheWriteTokens: 0 },
+        { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 50000 },
+      ]) expect(estimate).toBeGreaterThanOrEqual(costUsd({ ...usage, outputTokens: 4096 }, pricing));
+    });
+
     it('calculates worst case cost assuming all input uncached and full output', () => {
       const pricing: ModelPricing = {
         inputPerMTok: 3.0,
         outputPerMTok: 15.0,
         cacheReadPerMTok: 0.3,
-        cacheWritePerMTok: 3.75,
+        // Uncached input is the worst case only when no cache bucket costs more.
+        cacheWritePerMTok: 3.0,
       };
       const estimate = {
         inputTokens: 50_000,

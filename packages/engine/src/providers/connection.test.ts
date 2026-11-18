@@ -38,6 +38,19 @@ describe('testConnection', () => {
   });
 
   describe('OpenAI', () => {
+    it.each([
+      ['gpt-6.1-sol', undefined, undefined, 8192], ['gpt-6.1-sol', 'high', 'high', 16384],
+      ['gpt-6.1-sol', 'max', 'max', 32000], ['gpt-6.1-sol', 'off', undefined, 8192],
+      ['gpt-6.1-sol', 'minimal', undefined, 8192], ['gpt-6-astra', 'none', undefined, 8192],
+      ['gpt-6-sol', 'none', 'none', 0], ['gpt-6-sol', 'off', undefined, 8192],
+    ] as const)('uses GPT-6 native effort and headroom for %s / %s', async (model, effort, sent, headroom) => {
+      const { fetch, calls } = mockFetch(jsonResponse({ choices: [{ message: { content: 'OK' } }] }));
+      const result = await testConnection('openai', KEY, model, { fetch, ...(effort !== undefined ? { effort } : {}) });
+      expect(result.ok).toBe(true);
+      expect(calls[0]?.body.reasoning_effort).toBe(sent);
+      expect(calls[0]?.body.max_completion_tokens).toBe(16 + headroom);
+    });
+
     it('sends chat completion with reasoning_effort and extracts reply', async () => {
       const { fetch, calls } = mockFetch(
         jsonResponse({

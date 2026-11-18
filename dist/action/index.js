@@ -137986,13 +137986,37 @@ function thinkingHeadroom(effort) {
   return THINKING_BUDGET_TOKENS[normalize(effort)] ?? 0;
 }
 var OPENAI_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
+var GPT6_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var GPT6_OPTIONAL_REASONING_EFFORTS = ["none", ...GPT6_EFFORTS];
+var OPENAI_MODEL_EFFORTS = /* @__PURE__ */ new Map([
+  ["gpt-6-astra", GPT6_EFFORTS],
+  ["gpt-6.1-sol", GPT6_EFFORTS],
+  ["gpt-6-sol", GPT6_OPTIONAL_REASONING_EFFORTS],
+  ["gpt-6-luna", GPT6_OPTIONAL_REASONING_EFFORTS],
+  ["gpt-6.1-terra", GPT6_OPTIONAL_REASONING_EFFORTS]
+]);
+function openAIModelEfforts(model) {
+  return OPENAI_MODEL_EFFORTS.get(model);
+}
 var OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
 function openAIThinksByDefault(model) {
-  return OPENAI_REASONING_MODEL.test(model);
+  return openAIModelEfforts(model) !== void 0 || OPENAI_REASONING_MODEL.test(model);
 }
 function openAIReasoningEffort(model, effort) {
   const value = normalize(effort);
+  const efforts = openAIModelEfforts(model);
+  if (efforts)
+    return efforts.includes(value) ? value : void 0;
   return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : void 0;
+}
+function openAIThinkingHeadroom(model, effort) {
+  const sent = openAIReasoningEffort(model, effort);
+  if (sent !== void 0)
+    return thinkingHeadroom(sent);
+  if (openAIModelEfforts(model) || effort === void 0) {
+    return openAIThinksByDefault(model) ? DEFAULT_THINKING_HEADROOM : 0;
+  }
+  return 0;
 }
 var MINIMAX_EFFORTS = Object.freeze({
   minimal: "low",
@@ -140691,7 +140715,8 @@ function costUsd(usage, pricing) {
   return (usage.inputTokens * pricing.inputPerMTok + usage.outputTokens * pricing.outputPerMTok + usage.cacheReadTokens * cacheReadPerMTok + usage.cacheWriteTokens * cacheWritePerMTok) / 1e6;
 }
 function estimateCostUsd(estimate, pricing) {
-  return (estimate.inputTokens * pricing.inputPerMTok + estimate.maxOutputTokens * pricing.outputPerMTok) / 1e6;
+  const inputPerMTok = Math.max(pricing.inputPerMTok, pricing.cacheReadPerMTok ?? pricing.inputPerMTok, pricing.cacheWritePerMTok ?? pricing.inputPerMTok);
+  return (estimate.inputTokens * inputPerMTok + estimate.maxOutputTokens * pricing.outputPerMTok) / 1e6;
 }
 
 var ZERO_USAGE = Object.freeze({
@@ -166912,12 +166937,7 @@ var OpenAIAdapter = class extends LlmAdapter {
     this.#client = options.client ?? new OpenAI2({ apiKey: options.apiKey.reveal(), maxRetries: 0 });
   }
   requestedOutputTokens(options) {
-    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
-    if (options.effort !== void 0) {
-      return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
-    }
-    const thinksByDefault = openAIThinksByDefault(options.model);
-    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
+    return options.maxOutputTokens + openAIThinkingHeadroom(options.model, options.effort);
   }
   async *stream(options) {
     if (options.signal?.aborted) {
@@ -166941,7 +166961,7 @@ var OpenAIAdapter = class extends LlmAdapter {
       stream_options: {
         include_usage: true
       },
-      ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
+      ...options.temperature !== void 0 && (!openAIModelEfforts(options.model) || reasoningEffort === "none") ? { temperature: options.temperature } : {},
       ...options.responseSchema ? {
         response_format: {
           type: "json_schema",
@@ -166981,11 +167001,12 @@ var OpenAIAdapter = class extends LlmAdapter {
         }
         if (chunk.usage) {
           const cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens ?? 0;
+          const cacheWriteTokens = chunk.usage.prompt_tokens_details?.cache_write_tokens ?? 0;
           finalUsageChunk = {
-            inputTokens: Math.max(0, chunk.usage.prompt_tokens - cachedTokens),
+            inputTokens: Math.max(0, chunk.usage.prompt_tokens - cachedTokens - cacheWriteTokens),
             outputTokens: chunk.usage.completion_tokens,
             cacheReadTokens: cachedTokens,
-            cacheWriteTokens: 0
+            cacheWriteTokens
           };
         }
       }

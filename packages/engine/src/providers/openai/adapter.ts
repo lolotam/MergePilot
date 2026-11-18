@@ -5,7 +5,7 @@ import { failureFromHttp, LlmFailure } from '../../llm/failure.js';
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../../llm/retry.js';
 import { ZERO_USAGE, type FinishReason, type GenerateOptions, type StreamChunk, type TokenUsage } from '../../llm/types.js';
 import { redactSecrets } from '../../security/redact.js';
-import { DEFAULT_THINKING_HEADROOM, openAIReasoningEffort, openAIThinksByDefault, thinkingHeadroom } from '../effort.js';
+import { openAIModelEfforts, openAIReasoningEffort, openAIThinkingHeadroom } from '../effort.js';
 import type { OpenAIAdapterOptions, OpenAILike } from './types.js';
 
 function extractHeaders(rawHeaders: unknown): Record<string, string | undefined> {
@@ -45,12 +45,7 @@ export class OpenAIAdapter extends LlmAdapter {
   }
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
-    const reasoningEffort = openAIReasoningEffort(options.model, options.effort);
-    if (options.effort !== undefined) {
-      return options.maxOutputTokens + (reasoningEffort ? thinkingHeadroom(reasoningEffort) : 0);
-    }
-    const thinksByDefault = openAIThinksByDefault(options.model);
-    return options.maxOutputTokens + (thinksByDefault ? DEFAULT_THINKING_HEADROOM : 0);
+    return options.maxOutputTokens + openAIThinkingHeadroom(options.model, options.effort);
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -79,7 +74,8 @@ export class OpenAIAdapter extends LlmAdapter {
       stream_options: {
         include_usage: true,
       },
-      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(options.temperature !== undefined && (!openAIModelEfforts(options.model) || reasoningEffort === 'none')
+        ? { temperature: options.temperature } : {}),
       ...(options.responseSchema
         ? {
             response_format: {
@@ -127,11 +123,12 @@ export class OpenAIAdapter extends LlmAdapter {
 
         if (chunk.usage) {
           const cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens ?? 0;
+          const cacheWriteTokens = chunk.usage.prompt_tokens_details?.cache_write_tokens ?? 0;
           finalUsageChunk = {
-            inputTokens: Math.max(0, chunk.usage.prompt_tokens - cachedTokens),
+            inputTokens: Math.max(0, chunk.usage.prompt_tokens - cachedTokens - cacheWriteTokens),
             outputTokens: chunk.usage.completion_tokens,
             cacheReadTokens: cachedTokens,
-            cacheWriteTokens: 0,
+            cacheWriteTokens,
           };
         }
       }

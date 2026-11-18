@@ -71,6 +71,24 @@ export function thinkingHeadroom(effort: string | undefined): number {
 /** Values the native OpenAI API documents for `reasoning_effort` on reasoning models. */
 const OPENAI_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
 
+/** Explicit API model capabilities, verified against OpenAI's model pages (2026-11-14).
+ * Do not infer support for future families, suffixes or snapshots from a version prefix.
+ */
+const GPT6_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const GPT6_OPTIONAL_REASONING_EFFORTS = ['none', ...GPT6_EFFORTS] as const;
+const OPENAI_MODEL_EFFORTS = new Map<string, readonly string[]>([
+  ['gpt-6-astra', GPT6_EFFORTS],
+  ['gpt-6.1-sol', GPT6_EFFORTS],
+  ['gpt-6-sol', GPT6_OPTIONAL_REASONING_EFFORTS],
+  ['gpt-6-luna', GPT6_OPTIONAL_REASONING_EFFORTS],
+  ['gpt-6.1-terra', GPT6_OPTIONAL_REASONING_EFFORTS],
+]);
+
+/** Documented GPT-6 API efforts; undefined keeps the existing legacy model policy. */
+export function openAIModelEfforts(model: string): readonly string[] | undefined {
+  return OPENAI_MODEL_EFFORTS.get(model);
+}
+
 /**
  * OpenAI reasoning models (o-series and GPT-5 family, except the `-chat` variants). Other models
  * (gpt-4o, gpt-4.1, chatgpt-*) reject `reasoning_effort`, so nothing is sent for them.
@@ -78,7 +96,7 @@ const OPENAI_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
 export const OPENAI_REASONING_MODEL = /^(?:o\d|gpt-5)(?![\w.-]*-chat)/;
 
 export function openAIThinksByDefault(model: string): boolean {
-  return OPENAI_REASONING_MODEL.test(model);
+  return openAIModelEfforts(model) !== undefined || OPENAI_REASONING_MODEL.test(model);
 }
 
 /**
@@ -87,7 +105,22 @@ export function openAIThinksByDefault(model: string): boolean {
  */
 export function openAIReasoningEffort(model: string, effort: string | undefined): string | undefined {
   const value = normalize(effort);
+  const efforts = openAIModelEfforts(model);
+  if (efforts) return efforts.includes(value) ? value : undefined;
   return OPENAI_REASONING_MODEL.test(model) && OPENAI_EFFORTS.has(value) ? value : undefined;
+}
+
+/** Native API headroom follows the effort actually sent. GPT-6 omissions (including `off`
+ * and unsupported efforts) retain default reasoning; only a supported `none` disables it.
+ * Keep the legacy adapter's explicit-effort sizing unchanged.
+ */
+export function openAIThinkingHeadroom(model: string, effort: string | undefined): number {
+  const sent = openAIReasoningEffort(model, effort);
+  if (sent !== undefined) return thinkingHeadroom(sent);
+  if (openAIModelEfforts(model) || effort === undefined) {
+    return openAIThinksByDefault(model) ? DEFAULT_THINKING_HEADROOM : 0;
+  }
+  return 0;
 }
 
 /**

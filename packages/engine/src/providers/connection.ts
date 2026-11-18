@@ -14,6 +14,8 @@ import {
   geminiThinksByDefault,
   isCompatibleReasoningModel,
   openAIReasoningEffort,
+  openAIModelEfforts,
+  openAIThinkingHeadroom,
   openAIThinksByDefault,
   sentEffort,
   thinkingHeadroom,
@@ -162,7 +164,9 @@ function plan(provider: ApiProviderId, key: KeyInput, model: string, options: Te
       body: {
         model,
         messages,
-        max_completion_tokens: MAX_OUTPUT_TOKENS + testHeadroom(effort, effort !== undefined, openAIThinksByDefault(model), 'reasoning_effort'),
+        max_completion_tokens: MAX_OUTPUT_TOKENS + (openAIModelEfforts(model)
+          ? openAIThinkingHeadroom(model, options.effort)
+          : testHeadroom(effort, effort !== undefined, openAIThinksByDefault(model), 'reasoning_effort')),
         ...(effort ? { reasoning_effort: effort } : {}),
       },
       reply: chatReply,
