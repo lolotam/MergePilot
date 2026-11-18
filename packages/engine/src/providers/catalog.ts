@@ -217,7 +217,8 @@ export async function listCodexModelsWithApiKey(
     options.signal?.throwIfAborted();
     // A fetch that aborts on its own is a cancellation too, not a listing failure to hide.
     // That includes a body read cut off after the headers, which reaches here as a raw AbortError.
-    if ((error instanceof LlmFailure && error.code === 'ABORTED') || (error instanceof Error && error.name === 'AbortError')) throw error;
+    if (error instanceof LlmFailure && error.code === 'ABORTED') throw error;
+    if (error instanceof Error && error.name === 'AbortError') throw failureFromThrown(error, 'openai', apiKey, options.signal);
     return { models: bundled, merged: false };
   }
 }
