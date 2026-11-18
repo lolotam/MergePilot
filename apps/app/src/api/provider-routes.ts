@@ -365,7 +365,9 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
               ok: false, code: 'network', message: 'Provider model catalog did not answer in time', ms: Date.now() - catalogStart,
             });
           }
-          if (accountCatalogRequired && !(slotFallback && error instanceof LlmFailure && error.code === 'SERVER')) {
+          // A key restricted from listing models can still run inference, so a configured model gets a real test.
+          const listingOnlyFailure = error instanceof LlmFailure && (error.code === 'SERVER' || error.code === 'INVALID_CREDENTIAL');
+          if (accountCatalogRequired && !(slotFallback && listingOnlyFailure)) {
             const code = error instanceof LlmFailure ? failureKind(error.code) : 'network';
             return reply.status(200).send({
               ok: false, code, message: 'Could not read the provider account catalog', ms: Date.now() - catalogStart,

@@ -165,7 +165,7 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), 'openai/explicit', expect.anything());
   });
 
-  it.each(['empty', 'server'] as const)('uses a configured OpenAI model for a slot if discovery is %s', async (discovery) => {
+  it.each(['empty', 'server', 'denied'] as const)('uses a configured OpenAI model for a slot if discovery is %s', async (discovery) => {
     const provider = 'openai';
     const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
     const model = 'gpt-5-mini';
@@ -175,7 +175,10 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     });
     expect(settings.statusCode).toBe(200);
     if (discovery === 'empty') vi.mocked(listModels).mockResolvedValueOnce([]);
-    else vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: 'SERVER', provider, message: 'fixture failure' }));
+    else {
+      const code = discovery === 'denied' ? 'INVALID_CREDENTIAL' : 'SERVER';
+      vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code, provider, message: 'fixture failure' }));
+    }
     vi.mocked(testConnection).mockResolvedValueOnce({ ok: true, ms: 1, model, reply: 'OK' });
     const response = await test(provider, h.adminCookie(), { keyId: slot.id });
     expect(response.json()).toMatchObject({ ok: true, model });
