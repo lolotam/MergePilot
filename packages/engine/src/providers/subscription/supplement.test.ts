@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Secret } from '../../credentials/secret.js';
 import { encodeSubscription } from '../../credentials/subscription.js';
 import { collectText } from '../../llm/collect.js';
-import { listCodexModelsWithApiKey } from '../catalog.js';
+import { listCodexModelsWithApiKey, listModels } from '../catalog.js';
 import { jsonResponse, mockFetch, textResponse } from '../fetch-mock.fixtures.js';
 import { SubscriptionAdapter, subscriptionModels } from './adapter.js';
 import { supplementaryModel, supplementCatalog } from './supplement.js';
@@ -81,7 +81,7 @@ describe('Codex models listed by the OpenAI API key', () => {
     const { fetch } = mockFetch(textResponse(`denied ${apiKey.reveal()}`, 401));
     const result = await listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch });
     expect(result.merged).toBe(false);
-    expect(result.models.map((entry) => entry.id)).toEqual(bundled.map((entry) => entry.id).sort((a, b) => a.localeCompare(b)));
+    expect(result.models).toEqual(await listModels('openai', subscriptionKey));
     expect(JSON.stringify(result)).not.toContain(apiKey.reveal());
   });
 
@@ -115,6 +115,18 @@ describe('Codex models listed by the OpenAI API key', () => {
     controller.abort(new DOMException('slow', 'TimeoutError'));
     await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch: async () => textResponse('x', 500), signal: controller.signal }))
       .rejects.toMatchObject({ code: 'TIMEOUT' });
+  });
+
+  it('lists GPT-6.2 Astra and Sol for a Codex sign-in without an API key, and nothing extra for Grok or Claude', async () => {
+    const codex = await listModels('openai', subscriptionKey);
+    for (const id of ['gpt-6.2-astra', 'gpt-6.2-sol']) {
+      const entry = codex.find((model) => model.id === id);
+      expect(entry?.efforts).toContain('off');
+      expect(entry?.contextWindow).toBeGreaterThan(0);
+    }
+    expect(codex.length).toBe(bundled.length + 2);
+    const grok = await listModels('xai', new Secret(encodeSubscription('xai', { type: 'oauth', access, refresh, expires: Date.now() + 3_600_000 })));
+    expect(grok.map((model) => model.id)).not.toContain('gpt-6.2-sol');
   });
 
   it('streams a call for an API-listed Codex id and sends that id, while an unknown Grok id still fails', async () => {
