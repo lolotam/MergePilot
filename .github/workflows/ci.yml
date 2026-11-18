@@ -34,7 +34,7 @@ jobs:
       - name: typecheck
         run: |
           /usr/bin/time -f 'cpu_user_seconds=%U cpu_system_seconds=%S max_rss_kib=%M elapsed_seconds=%e' pnpm typecheck
-          pnpm exec tsc --noEmit --target ES2023 --lib ES2023 --module NodeNext --types node --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck scripts/ci/gate.ts scripts/ci/inventory.ts scripts/ci/workflow.test.ts
+          pnpm exec tsc --noEmit --target ES2023 --lib ES2023 --module NodeNext --types node --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --erasableSyntaxOnly --skipLibCheck scripts/ci/gate.ts scripts/ci/inventory.ts scripts/ci/workflow.test.ts
       - name: lint
         run: /usr/bin/time -f 'cpu_user_seconds=%U cpu_system_seconds=%S max_rss_kib=%M elapsed_seconds=%e' pnpm lint
       - name: build

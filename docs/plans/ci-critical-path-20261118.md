@@ -57,7 +57,7 @@ Commands executed from the validation copy:
 | `pnpm --version` / `node --version` | 12.11.2 / v24.21.0 |
 | `pnpm install --frozen-lockfile --store-dir E:/Dev/pnpm-store` | Passed; 482 packages reused, no lockfile edit |
 | `pnpm typecheck` | Passed; workspace dist emitted before tests |
-| `pnpm exec tsc --noEmit --target ES2023 --lib ES2023 --module NodeNext --types node --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck scripts/ci/gate.ts scripts/ci/inventory.ts scripts/ci/workflow.test.ts` | Passed |
+| `pnpm exec tsc --noEmit --target ES2023 --lib ES2023 --module NodeNext --types node --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --erasableSyntaxOnly --skipLibCheck scripts/ci/gate.ts scripts/ci/inventory.ts scripts/ci/workflow.test.ts` | Passed |
 | `pnpm lint` | Passed |
 | `pnpm build` | Passed; existing Vite warning for chunks larger than 500 kB |
 | `pnpm exec vitest run scripts/ci/workflow.test.ts scripts/release/workflow.test.ts scripts/release/core.test.ts --maxWorkers=2` | 3 files, 95 tests passed |
@@ -65,6 +65,8 @@ Commands executed from the validation copy:
 | `git diff --check` (owned source worktree) | Passed |
 
 The saved [shard inventory](E:/Dev/Validation/mergepilot-ci-20261118/shard-inventory.json) records every project/file identity: backend 412, release/deployment/CI 8, web 76. The initial CLI-based inventory attempt failed on duplicates because Vitest's file-only CLI ignores sharding; it was corrected to invoke the execution sequencer and the validation then passed. The successful focused test command was repeated after that correction. No broad unit suite was run locally.
+
+PR review identified `.ts` relative imports in the new workflow test. The correction uses `.js` specifiers as required by AGENTS and removes the unnecessary `allowImportingTsExtensions` flag from the new CI-script typecheck. The pure CLI entries remain directly type-stripped under Node 22; they have no relative TypeScript imports. After correction, strict CI-script types, focused ESLint and the same 95 workflow/release tests passed again. This supersedes the initial source review on that import convention; it does not claim a new full-project or Linux run.
 
 No local Docker, native DB, production, model or provider calls are required. Full unit shard execution and Linux/GitHub orchestration timing remain PR-CI checks; local work is restricted to types, lint, build, focused workflow/release gates and complete shard discovery. Parent source review found no blocking issue in this bounded CI scope. The standalone PR publishes this patch and the minimal canonical-rule additions under the owner's standing instruction. Linux execution, complete shard outcomes and exact-head automated reviews remain CI/PR evidence. HOLD #204 prevents merge/release until separately resolved; this patch does not authorize a deployment or close that hold.
 

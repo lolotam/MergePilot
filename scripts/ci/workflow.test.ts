@@ -4,9 +4,9 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { describe, expect, it } from 'vitest';
-import { REQUIRED_CHECKS } from '../release/core.ts';
-import { assertSuccessfulNeeds } from './gate.ts';
-import { assertCompleteShards } from './inventory.ts';
+import { REQUIRED_CHECKS } from '../release/core.js';
+import { assertSuccessfulNeeds } from './gate.js';
+import { assertCompleteShards } from './inventory.js';
 
 const root = resolve(import.meta.dirname, '../..');
 // Reuse the engine's declared YAML dependency; no new root dependency or lockfile change.
