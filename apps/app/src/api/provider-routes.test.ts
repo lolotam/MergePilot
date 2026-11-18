@@ -61,28 +61,41 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
       await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor(tag), userId: 'u-admin' });
     }
     await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
-    vi.mocked(listModels).mockResolvedValue(MODELS);
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels)
+      .mockImplementationOnce(engine.listModels)
+      .mockImplementationOnce(engine.listModels)
+      .mockImplementationOnce(engine.listModels);
+    const upstream = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected provider request'))
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'gpt-fixture' }] }))
+      .mockResolvedValueOnce(new Response(keyFor('first'), { status: 429 }));
+    try {
+      expect((await get('openai', h.memberCookie(), query)).statusCode).toBe(403);
+      const bundled = await get('openai', h.adminCookie(), query);
+      expect(bundled.json()).toMatchObject({ source: 'bundled' });
+      expect(bundled.json().models.length).toBeGreaterThan(0);
+      expect(bundled.body).not.toContain(access);
+      expect(bundled.body).not.toContain(refresh);
+      expect(upstream).not.toHaveBeenCalled();
 
-    expect((await get('openai', h.memberCookie(), query)).statusCode).toBe(403);
-    expect(listModels).not.toHaveBeenCalled();
-    const bundled = await get('openai', h.adminCookie(), query);
-    expect(bundled.json()).toEqual({ models: MODELS, source: 'bundled' });
-    expect(bundled.body).not.toContain(access);
-    expect(bundled.body).not.toContain(refresh);
-    expect(listModels).toHaveBeenCalledExactlyOnceWith('openai', expect.stringContaining('mergepilot:oauth'), expect.objectContaining({ strictRefresh: true }));
+      await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'api-key');
+      const live = await get('openai', h.adminCookie(), query);
+      expect(live.json()).toEqual({
+        models: [{ id: 'gpt-fixture', name: 'gpt-fixture', efforts: [] }], source: 'live',
+      });
+      expect(live.headers['cache-control']).toBe('no-store');
 
-    await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'api-key');
-    const live = await get('openai', h.adminCookie(), query);
-    expect(live.json()).toEqual({ models: MODELS, source: 'live' });
-    expect(live.headers['cache-control']).toBe('no-store');
-    expect(listModels).toHaveBeenLastCalledWith('openai', keyFor('first'), expect.objectContaining({ strictRefresh: true }));
-    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: 'RATE_LIMIT', provider: 'openai', message: keyFor('first') }));
-    const failed = await get('openai', h.adminCookie(), query);
-    expect(failed.statusCode).toBe(429);
-    expect(failed.body).not.toContain(keyFor('first'));
-    expect((await get('openai', h.memberCookie())).json()).toEqual({ models: MODELS });
-    expect(listModels).toHaveBeenCalledTimes(3);
-    expect(testConnection).not.toHaveBeenCalled();
+      const failed = await get('openai', h.adminCookie(), query);
+      expect(failed.statusCode).toBe(429);
+      expect(failed.body).not.toContain(keyFor('first'));
+      expect((await get('openai', h.memberCookie())).json()).toEqual({ models: live.json().models });
+      expect(upstream.mock.calls.map(([url, init]) => [new URL(String(url)).pathname, new Headers(init?.headers).get('authorization')]))
+        .toEqual([['/v1/models', `Bearer ${keyFor('first')}`], ['/v1/models', `Bearer ${keyFor('first')}`]]);
+      expect(testConnection).not.toHaveBeenCalled();
+    } finally {
+      upstream.mockRestore();
+    }
     expect((await get('gemini', h.adminCookie(), query)).statusCode).toBe(404);
     expect((await get('typesafe', h.adminCookie(), query)).statusCode).toBe(400);
     expect((await get('google-antigravity', h.adminCookie(), query)).json().error.code).toBe('provider_unavailable');

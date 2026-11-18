@@ -17,7 +17,7 @@ import { DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
 import type { KeyQuotaStatus, WorkspaceSettings } from '../core/types.js';
 import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } from './contract.js';
 import { sendError } from './helpers.js';
-import { engineOptions, storedKeyById, storedTarget, unsavedTarget, type TargetResult } from './provider-target.js';
+import { engineOptions, storedKeyById, storedTarget, unsavedTarget, type ProviderTarget, type TargetResult } from './provider-target.js';
 import type { DashboardApiDeps } from './routes.js';
 
 /**
@@ -161,16 +161,20 @@ function sendTargetError(reply: FastifyReply, result: Exclude<TargetResult, { ok
   return sendError(reply, result.status, result.code, result.message);
 }
 
+interface CatalogRequest {
+  provider: ApiProviderId;
+  target: ProviderTarget;
+  signal: AbortSignal;
+  cacheKey?: string;
+  mode?: 'sync';
+}
+
 async function fetchModels(
   request: FastifyRequest,
   reply: FastifyReply,
-  provider: ApiProviderId,
-  result: Extract<TargetResult, { ok: true }>,
-  signal: AbortSignal,
-  cacheKey?: string,
-  sync = false,
+  { provider, target, signal, cacheKey, mode }: CatalogRequest,
 ): Promise<FastifyReply> {
-  const { target } = result;
+  const sync = mode === 'sync';
   const start = Date.now();
   try {
     const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal, ...(sync ? { strictRefresh: true } : {}) });
@@ -268,7 +272,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const signal = routeSignal(reply);
       const result = await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(request, reply, provider, result, signal, cacheKey, sync);
+      return fetchModels(request, reply, { provider, target: result.target, signal, cacheKey, ...(sync ? { mode: 'sync' } : {}) });
     },
   );
 
@@ -288,7 +292,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const signal = routeSignal(reply);
       const result = await unsavedTarget(deps, provider, body.data.apiKey, body.data.baseUrl, signal);
       if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(request, reply, provider, result, signal);
+      return fetchModels(request, reply, { provider, target: result.target, signal });
     },
   );
 
