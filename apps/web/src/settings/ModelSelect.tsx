@@ -29,7 +29,9 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
   const [manualChosen, setManualChosen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   // The follow-up refetch can succeed with the old list, which clears query.isError.
-  const [refreshFailed, setRefreshFailed] = useState(false);
+  // Tied to the catalog it failed against: another workspace, provider or newer catalog hides it.
+  const [failedRefresh, setFailedRefresh] = useState<{ scope: string; dataUpdatedAt: number } | null>(null);
+  const refreshFailed = failedRefresh?.scope === `${workspaceId}:${provider}` && failedRefresh.dataUpdatedAt === query.dataUpdatedAt;
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,7 +44,6 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
 
   useEffect(() => {
     setManualChosen(false);
-    setRefreshFailed(false);
     setSearch('');
   }, [provider]);
 
@@ -56,7 +57,7 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
 
   const refresh = async () => {
     setRefreshing(true);
-    setRefreshFailed(false);
+    setFailedRefresh(null);
     setManualChosen(false);
     try {
       const queryKey = modelsQueryKey(workspaceId, provider);
@@ -69,8 +70,8 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
       });
     } catch (error) {
       if (!isCancelledError(error)) {
-        setRefreshFailed(true);
-        await query.refetch();
+        const settled = await query.refetch();
+        setFailedRefresh({ scope: `${workspaceId}:${provider}`, dataUpdatedAt: settled.dataUpdatedAt });
       }
     } finally {
       setRefreshing(false);
