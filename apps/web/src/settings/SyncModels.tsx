@@ -21,7 +21,9 @@ function failureLabel(error: unknown): I18nKey {
   return 'syncModelsError';
 }
 
-export function SyncModels({ workspaceId, providers }: { workspaceId: string; providers: readonly KeyProvider[] }) {
+export function SyncModels({ workspaceId, providers, rosterUnavailable = false }: {
+  workspaceId: string; providers: readonly KeyProvider[]; rosterUnavailable?: boolean;
+}) {
   const { t, language } = useI18n();
   const label = useProviderLabel();
   const queryClient = useQueryClient();
@@ -56,7 +58,7 @@ export function SyncModels({ workspaceId, providers }: { workspaceId: string; pr
   }, [queryClient, stopSync, workspaceId]);
 
   const sync = async () => {
-    if (active.current || reviewProviders.length === 0) return;
+    if (rosterUnavailable || active.current || reviewProviders.length === 0) return;
     const controller = new AbortController();
     active.current = controller;
     setRunning(true);
@@ -104,7 +106,7 @@ export function SyncModels({ workspaceId, providers }: { workspaceId: string; pr
   return (
     <div className="mb-4 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={buttonClass} disabled={running || reviewProviders.length === 0} onClick={() => void sync()}>
+        <button type="button" className={buttonClass} disabled={rosterUnavailable || running || reviewProviders.length === 0} onClick={() => void sync()}>
           {t('syncModelsButton')}
         </button>
         {running && <button type="button" className={buttonClass} onClick={() => stopSync('cancelled')}>{t('syncModelsCancel')}</button>}

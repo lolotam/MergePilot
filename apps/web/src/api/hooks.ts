@@ -84,9 +84,9 @@ export function useSaveKeyMutation(workspaceId: string) {
       apiKeys && apiKeys.length > 0
         ? api.saveKeys(workspaceId, provider, apiKeys)
         : api.saveKey(workspaceId, provider, apiKey, baseUrl),
-    onSuccess: () => {
+    onSuccess: (_, { provider }) => {
       showToast(t('keySavedSuccess'), 'success');
-      void refreshCredentialQueries(queryClient, workspaceId);
+      void refreshCredentialQueries(queryClient, workspaceId, [provider]);
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] });
     },
     onError: (err: Error) => {
@@ -102,8 +102,8 @@ export function useSetProviderDefaultMethodMutation(workspaceId: string) {
   return useMutation({
     mutationFn: ({ provider, method }: { provider: KeyProvider; method: 'subscription' | 'api-key' }) =>
       api.setProviderDefaultMethod(workspaceId, provider, method),
-    onSuccess: () => {
-      void refreshCredentialQueries(queryClient, workspaceId);
+    onSuccess: (_, { provider }) => {
+      void refreshCredentialQueries(queryClient, workspaceId, [provider]);
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
@@ -117,8 +117,8 @@ export function useDisconnectSubscriptionMutation(workspaceId: string) {
   const { t } = useI18n();
   return useMutation({
     mutationFn: (provider: KeyProvider) => api.disconnectSubscription(workspaceId, provider),
-    onSuccess: () => {
-      void refreshCredentialQueries(queryClient, workspaceId);
+    onSuccess: (_, provider) => {
+      void refreshCredentialQueries(queryClient, workspaceId, [provider]);
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
@@ -133,9 +133,9 @@ export function useDeleteKeyMutation(workspaceId: string) {
 
   return useMutation({
     mutationFn: (provider: KeyProvider) => api.deleteKey(workspaceId, provider),
-    onSuccess: () => {
+    onSuccess: (_, provider) => {
       showToast(t('keyDeletedSuccess'), 'success');
-      void refreshCredentialQueries(queryClient, workspaceId);
+      void refreshCredentialQueries(queryClient, workspaceId, [provider]);
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] });
     },
     onError: (err: Error) => {

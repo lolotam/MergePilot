@@ -32,6 +32,7 @@ function fakeRequest(
   headers: Record<string, string>,
   body: string | Buffer[] | Readable | null,
   captured: Captured[],
+  includeResponseCause = true,
 ): RequestFn {
   return ((url: URL, options: Captured['options'], onResponse: (res: IncomingMessage) => void) => {
     const entry: Captured = { url, options, written: [] };
@@ -40,7 +41,7 @@ function fakeRequest(
     const destroy = (err?: Error) => {
       queueMicrotask(() => {
         req.emit('error', err ?? new Error('destroyed'));
-        if (body instanceof Readable) body.destroy(new Error('response reset', { cause: err }));
+        if (body instanceof Readable) body.destroy(new Error('response reset', includeResponseCause ? { cause: err } : undefined));
       });
       return req;
     };
@@ -128,10 +129,10 @@ describe('createSafeFetch (custom base URL, ADR-0010)', () => {
     await expect(pending).rejects.toMatchObject({ name: 'TimeoutError', message: 'no data from the server for 5 ms' });
   });
 
-  it('preserves the idle timeout when the response body stalls after headers', async () => {
+  it.each([true, false])('preserves an idle body timeout (response has cause: %s)', async (includeCause) => {
     const captured: Captured[] = [];
     const body = new Readable({ read() {} });
-    const guarded = createSafeFetch({ lookup: publicLookup, request: fakeRequest(200, {}, body, captured) });
+    const guarded = createSafeFetch({ lookup: publicLookup, request: fakeRequest(200, {}, body, captured, includeCause) });
     const response = await guarded('https://llm.example.com/v1/models');
     const pending = response.json();
     captured[0]?.idle?.();

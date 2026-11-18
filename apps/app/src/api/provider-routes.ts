@@ -121,18 +121,10 @@ export function configuredModelFor(settings: WorkspaceSettings | null, provider:
 }
 
 /**
- * The model a connection test uses when the request names none: the workspace's primary model,
- * then its heavy model, then its first fallback for this provider, then a free model from the
- * provider's models list (OpenRouter / OpenCode Zen), then the registry default.
- * A slot test uses its own catalog; it ignores workspace settings unless the caller supplies a model.
+ * With no explicit or workspace model, prefer a free catalog model, then the registry default
+ * when listed, then the first catalog model.
  */
-export function testModelFor(
-  settings: WorkspaceSettings | null,
-  provider: ApiProviderId,
-  models?: readonly CatalogModel[],
-): string {
-  const configured = configuredModelFor(settings, provider);
-  if (configured) return configured;
+function testModelFor(provider: ApiProviderId, models?: readonly CatalogModel[]): string {
   const fallback = providerEntry(provider).defaultModel;
   if (models && models.length > 0) {
     const free = pickFreeModel(provider, models);
@@ -342,7 +334,13 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const { target } = result;
       const recordOutcome = async (ok: boolean, code?: string) => {
         const status = quotaStatusOf(ok, code);
-        if (!apiKey && keyId && status) await deps.credentials.recordKeyTest(workspaceId, provider, keyId, status, new Date());
+        if (!keyId || !status) return status;
+        try {
+          return await deps.credentials.recordKeyTest(workspaceId, provider, keyId, status, new Date()) ? status : null;
+        } catch {
+          request.log.warn({ event: 'provider.key_test_status_write_failed', provider }, 'Could not save provider key test status');
+          return null;
+        }
         return status;
       };
 
@@ -380,7 +378,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
             'Could not list models to pick a test model; using the registry default',
           );
         }
-        model = accountCatalogRequired && !models?.length ? '' : testModelFor(settings, provider, models);
+        model = accountCatalogRequired && !models?.length ? '' : testModelFor(provider, models);
       }
       if (!model) return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
       const effort = body.effort?.trim();
@@ -405,7 +403,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
             },
             'Provider connection tested',
           );
-          return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model, quotaStatus });
+          return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model, ...(quotaStatus ? { quotaStatus } : {}) });
         }
         request.log.info(
           {

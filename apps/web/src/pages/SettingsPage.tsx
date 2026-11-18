@@ -38,7 +38,7 @@ export function SettingsPage() {
 
   const { data: meData } = useMeQuery();
   const { data: settingsData, isLoading: settingsLoading } = useSettingsQuery(workspaceId);
-  const { data: keysData, isLoading: keysLoading } = useKeysQuery(workspaceId);
+  const { data: keysData, isLoading: keysLoading, isFetching: keysFetching, isError: keysError } = useKeysQuery(workspaceId);
 
   const updateSettingsMutation = useUpdateSettingsMutation(workspaceId);
   const saveKeyMutation = useSaveKeyMutation(workspaceId);
@@ -145,7 +145,7 @@ export function SettingsPage() {
         </div>
 
         {currentWorkspace && !isMember && keysData && !keysLoading && (
-          <SyncModels key={workspaceId} workspaceId={workspaceId} providers={savedKeys ?? []} />
+          <SyncModels key={workspaceId} workspaceId={workspaceId} providers={savedKeys ?? []} rosterUnavailable={keysFetching || keysError} />
         )}
 
         {keysLoading ? (

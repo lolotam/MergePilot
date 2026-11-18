@@ -117,7 +117,7 @@ describe('Sync models', () => {
     function CredentialChange() {
       const client = useQueryClient();
       useQuery({ queryKey: ['workspaces', 'ws-1', 'keys'], queryFn: () => pendingKeys, initialData: { keys: [] } });
-      return <button type="button" onClick={() => void refreshCredentialQueries(client, 'ws-1')}>Change credentials</button>;
+      return <button type="button" onClick={() => void refreshCredentialQueries(client, 'ws-1', ['openai'])}>Change credentials</button>;
     }
     renderSettings(<>
       <CredentialChange />

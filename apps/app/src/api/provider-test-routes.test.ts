@@ -125,6 +125,19 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     else expect(stored?.lastTestedAt).toEqual(previousTest);
   });
 
+  it('returns the catalog failure when recording the stored key status fails', async () => {
+    const provider = 'openrouter';
+    const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
+    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: 'INVALID_CREDENTIAL', provider, message: 'fixture failure' }));
+    const write = vi.spyOn(h.credentials, 'recordKeyTest').mockRejectedValueOnce(new Error('fixture storage error'));
+    const response = await test(provider, h.adminCookie(), { keyId: slot.id });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: false, code: 'auth' });
+    expect(response.json()).not.toHaveProperty('quotaStatus');
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(testConnection).not.toHaveBeenCalled();
+  });
+
   it('selects from the tested slot catalog and still honors an explicit model', async () => {
     const provider = 'openrouter';
     const headers = { cookie: h.adminCookie() };

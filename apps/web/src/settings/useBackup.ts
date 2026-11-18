@@ -47,7 +47,7 @@ export function useRestoreBackup(workspaceId: string) {
     onSuccess: async (applied, vars) => {
       if (vars.dryRun) return;
       if (applied.sections.includes('credentials')) {
-        await refreshCredentialQueries(queryClient, workspaceId, true);
+        await refreshCredentialQueries(queryClient, workspaceId, applied.credentials.map(({ provider }) => provider), true);
       } else {
         const workspace = { queryKey: ['workspaces', workspaceId] };
         await queryClient.cancelQueries(workspace);

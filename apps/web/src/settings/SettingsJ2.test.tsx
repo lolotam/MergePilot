@@ -75,7 +75,7 @@ describe('J2 settings components', () => {
       .mockReturnValueOnce(pending).mockResolvedValueOnce(current);
     function ChangeCredential() {
       const client = useQueryClient();
-      return <button onClick={() => void refreshCredentialQueries(client, 'ws-1')}>Change credential</button>;
+      return <button onClick={() => void refreshCredentialQueries(client, 'ws-1', ['openai'])}>Change credential</button>;
     }
     renderSettings(<>
       <ChangeCredential />
@@ -89,6 +89,31 @@ describe('J2 settings components', () => {
     await act(async () => resolveRefresh({ models: [{ id: 'stale', name: 'Stale model', efforts: [] }] }));
     expect(screen.getByRole('option', { name: 'Current model' })).toBeDefined();
     expect(screen.queryByRole('option', { name: 'Stale model' })).toBeNull();
+  });
+
+  it('keeps the OpenAI catalog when only a judge credential changes', async () => {
+    function ChangeJudge() {
+      const client = useQueryClient();
+      return <button onClick={() => void refreshCredentialQueries(client, 'ws-1', ['typesafe'])}>Change judge</button>;
+    }
+    renderSettings(<>
+      <ChangeJudge />
+      <ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />
+    </>, 'en');
+    const picker = await screen.findByRole('button', { name: 'Model name' });
+    await waitFor(() => expect((picker as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole('button', { name: 'Change judge' }));
+    await user.click(picker);
+    expect(screen.getByRole('option', { name: 'Plain' })).toBeDefined();
+    expect(api.getModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks sync while the connected-provider roster is unavailable', async () => {
+    renderSettings(<SyncModels workspaceId="ws-1" providers={['openai']} rosterUnavailable />, 'en');
+    const sync = screen.getByRole<HTMLButtonElement>('button', { name: 'Sync all models' });
+    expect(sync.disabled).toBe(true);
+    await user.click(sync);
+    expect(api.syncModels).not.toHaveBeenCalled();
   });
 
   it('keeps synced options when an older individual refresh resolves afterward', async () => {

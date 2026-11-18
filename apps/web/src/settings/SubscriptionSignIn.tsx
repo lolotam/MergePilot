@@ -46,6 +46,8 @@ export function SubscriptionSignIn({ workspaceId, provider, onConnected }: {
   const connected = useRef(onConnected);
   connected.current = onConnected;
   const mounted = useRef(true);
+  const translate = useRef(t);
+  translate.current = t;
 
   useEffect(() => {
     mounted.current = true;
@@ -68,20 +70,20 @@ export function SubscriptionSignIn({ workspaceId, provider, onConnected }: {
           if (stopped) return;
           setLogin(saved);
           activeId.current = undefined;
-          await refreshCredentialQueries(cache, workspaceId, true);
-          if (!stopped) connected.current();
+          await refreshCredentialQueries(cache, workspaceId, [provider], true);
+          if (mounted.current && !stopped) connected.current();
           return;
         }
         setLogin(next);
         if (next.status === 'pending') timer = setTimeout(poll, 1000);
       } catch (cause) {
-        if (!stopped) setError(cause instanceof Error ? cause.message : t('error'));
+        if (!stopped) setError(cause instanceof Error ? cause.message : translate.current('error'));
       }
     };
     timer = setTimeout(poll, 500);
     return () => { stopped = true; clearTimeout(timer); };
     // Each poll owns its loop; setting a new snapshot must not spawn a second loop.
-  }, [login?.id, workspaceId, cache, t]);
+  }, [login?.id, workspaceId, cache, provider]);
 
   const start = async () => {
     setBusy(true); setError(''); setCode('');
