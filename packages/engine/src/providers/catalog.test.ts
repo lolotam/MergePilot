@@ -14,7 +14,9 @@ describe('listModels', () => {
     { provider: 'anthropic' as const, payload: { data: [{ id: 'claude-valid' }] } },
     { provider: 'anthropic' as const, payload: { data: [{ id: 'claude-valid' }], has_more: 'false' } },
     { provider: 'openai' as const, payload: { data: [{ id: ' ' }] } },
+    { provider: 'openai' as const, payload: { data: [{ id: ' gpt-example ' }] } },
     { provider: 'gemini' as const, payload: { models: [{ name: 'models/' }] } },
+    { provider: 'gemini' as const, payload: { models: [{ name: 'models/ gemini-example' }] } },
     { provider: 'openrouter' as const, payload: { data: [null] } },
     { provider: 'openrouter' as const, payload: { data: [{ id: 17 }] } },
   ])('strict $provider sync rejects malformed catalogs with a classified failure', async ({ provider, payload }) => {

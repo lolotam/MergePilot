@@ -24,7 +24,9 @@ export function sortUnique(models: readonly CatalogModel[]): CatalogModel[] {
 }
 
 export function validModelId(value: unknown): value is string {
-  return typeof value === 'string' && value.replace(/^models\//, '').trim().length > 0;
+  if (typeof value !== 'string') return false;
+  const id = value.replace(/^models\//, '');
+  return id.length > 0 && id === id.trim();
 }
 
 export function invalidCatalog(provider: string): LlmFailure {

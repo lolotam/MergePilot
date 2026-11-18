@@ -120,9 +120,9 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect(listModels).toHaveBeenCalledTimes(2);
   });
 
-  it('rejects a catalog returned after its stored key was replaced and preserves the new catalog', async () => {
+  it.each(['API mutation', 'shared-store mutation'])('rejects stale catalog responses after a %s', async (mutation) => {
     const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
-    vi.mocked(listModels).mockImplementationOnce(engine.listModels).mockImplementationOnce(engine.listModels);
+    vi.mocked(listModels).mockResolvedValueOnce(MODELS).mockImplementationOnce(engine.listModels).mockImplementationOnce(engine.listModels);
     const started = Promise.withResolvers<void>();
     const oldCatalog = Promise.withResolvers<Response>();
     const upstream = vi.spyOn(globalThis, 'fetch')
@@ -130,14 +130,20 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
       .mockImplementationOnce(() => { started.resolve(); return oldCatalog.promise; })
       .mockResolvedValueOnce(Response.json({ data: [{ id: 'claude-new-account' }], has_more: false }));
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'anthropic', apiKey: keyFor('old'), userId: 'u-admin' });
+    expect((await get('anthropic', h.memberCookie())).json()).toEqual({ models: MODELS });
     const pendingSync = get('anthropic', h.adminCookie(), '?sync=true').then((response) => response);
     try {
       await started.promise;
-      const changed = await h.app.inject({
-        method: 'PUT', url: '/api/workspaces/ws-1/keys/anthropic', headers: { cookie: h.adminCookie() },
-        payload: { apiKey: keyFor('new') },
-      });
-      expect(changed.statusCode).toBe(200);
+      if (mutation === 'API mutation') {
+        const changed = await h.app.inject({
+          method: 'PUT', url: '/api/workspaces/ws-1/keys/anthropic', headers: { cookie: h.adminCookie() },
+          payload: { apiKey: keyFor('new') },
+        });
+        expect(changed.statusCode).toBe(200);
+      } else {
+        // Another replica changes shared credentials without invalidating this web process.
+        await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'anthropic', apiKey: keyFor('new'), userId: 'u-admin' });
+      }
       const current = await get('anthropic', h.memberCookie());
       expect(current.json().models).toMatchObject([{ id: 'claude-new-account' }]);
       oldCatalog.resolve(Response.json({ data: [{ id: 'claude-old-account' }], has_more: false }));
@@ -163,6 +169,35 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     });
     expect(changed.statusCode).toBe(200);
     expect((await get('openai', h.memberCookie())).json().models).toMatchObject([{ id: 'second-model' }]);
+  });
+
+  it.each([
+    { newer: '?refresh=true', oldStatus: 200, expected: 'openai/older' },
+    { newer: '?sync=true', oldStatus: 409, expected: 'openai/newer' },
+  ])('gives a strict catalog priority with $newer in flight', async ({ newer, oldStatus, expected }) => {
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels).mockImplementationOnce(engine.listModels);
+    const started = Promise.withResolvers<void>();
+    const older = Promise.withResolvers<Response>();
+    const upstream = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected provider request'))
+      .mockImplementationOnce(() => { started.resolve(); return older.promise; })
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'openai/newer' }] }));
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openrouter', apiKey: keyFor('router'), userId: 'u-admin' });
+    const olderRequest = get('openrouter', h.adminCookie(), '?sync=true').then((response) => response);
+    try {
+      await started.promise;
+      expect((await get('openrouter', h.adminCookie(), newer)).statusCode).toBe(200);
+      older.resolve(Response.json({ data: [{ id: 'openai/older' }] }));
+      const response = await olderRequest;
+      expect(response.statusCode).toBe(oldStatus);
+      if (oldStatus === 409) expect(response.json().error.code).toBe('catalog_superseded');
+      expect((await get('openrouter', h.memberCookie())).json().models).toMatchObject([{ id: expected }]);
+    } finally {
+      older.resolve(Response.json({ data: [] }));
+      await olderRequest;
+      upstream.mockRestore();
+    }
   });
 
   it('answers 404 key_not_found without a stored key and 400 for an unknown provider', async () => {

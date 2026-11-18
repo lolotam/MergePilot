@@ -19,18 +19,15 @@ import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } fro
 import { sendError } from './helpers.js';
 import { engineOptions, storedKeyById, storedTarget, unsavedTarget, type ProviderTarget, type TargetResult } from './provider-target.js';
 import type { DashboardApiDeps } from './routes.js';
+import { beginCatalogRead, cachedCatalog, catalogCredentialRevision, resetCatalogCache } from './provider-catalog-cache.js';
+
+export { invalidateModelsCache } from './provider-catalog-cache.js';
 
 /**
  * Model catalog and connection-test routes (J2). A key typed into the "add key" dialog may be
  * sent here BEFORE it is saved: it is used for that one provider call only, never stored, never
  * logged, and every message that could carry it is redacted.
  */
-
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 1000;
-const modelsCache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
-
-const activeCatalogReads = new Map<string, { count: number; started: number; lastPublished: number }>();
 
 const RATE_WINDOW_MS = 60 * 1000;
 export const TEST_LIMIT = 10;
@@ -47,24 +44,7 @@ function quotaStatusOf(ok: boolean, code: string | undefined): KeyQuotaStatus | 
 /** Test helper: forget every cached model list and rate-limit bucket. */
 export function resetProviderTestRateLimits(): void {
   rateBuckets.clear();
-  modelsCache.clear();
-  activeCatalogReads.clear();
-}
-
-/** Drops a workspace's cached model list for one provider (its key changed or was removed). */
-export function invalidateModelsCache(workspaceId: string, provider: string): void {
-  const cacheKey = `${workspaceId}:${provider}`;
-  modelsCache.delete(cacheKey);
-  activeCatalogReads.delete(cacheKey);
-}
-
-function cacheModels(key: string, models: CatalogModel[]): void {
-  const now = Date.now();
-  if (modelsCache.size >= CACHE_MAX_ENTRIES) {
-    for (const [k, v] of modelsCache) if (v.expiresAt <= now) modelsCache.delete(k);
-    if (modelsCache.size >= CACHE_MAX_ENTRIES) modelsCache.clear();
-  }
-  modelsCache.set(key, { expiresAt: now + CACHE_TTL_MS, models });
+  resetCatalogCache();
 }
 
 export function allow(bucket: string, limit: number): boolean {
@@ -171,7 +151,7 @@ interface CatalogRequest {
   target: ProviderTarget;
   signal: AbortSignal;
   mode?: 'sync';
-  publish?: (models: CatalogModel[]) => boolean;
+  publish?: (models: CatalogModel[]) => Promise<{ models: CatalogModel[] } | 'catalog_credentials_changed' | 'catalog_superseded'>;
 }
 
 async function fetchModels(
@@ -182,10 +162,14 @@ async function fetchModels(
   const sync = mode === 'sync';
   const start = Date.now();
   try {
-    const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal, ...(sync ? { strictRefresh: true } : {}) });
+    let models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal, ...(sync ? { strictRefresh: true } : {}) });
     signal.throwIfAborted();
-    if (publish?.(models) === false) {
-      return sendError(reply, 409, 'catalog_credentials_changed', 'Provider credentials changed. Refresh the model catalog again.');
+    if (publish) {
+      const publication = await publish(models);
+      if (typeof publication === 'string') {
+        return sendError(reply, 409, publication, 'The catalog request is outdated. Refresh the model catalog again.');
+      }
+      models = publication.models;
     }
     const ms = Date.now() - start;
     request.log.info(
@@ -259,9 +243,10 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         return sendError(reply, 400, 'provider_unavailable', 'This server does not offer Google Antigravity');
       }
       const cacheKey = `${workspaceId}:${provider}`;
+      const revision = await catalogCredentialRevision(deps.store, workspaceId, provider);
       if (!sync && refresh !== 'true' && refresh !== '1') {
-        const cached = modelsCache.get(cacheKey);
-        if (cached && Date.now() < cached.expiresAt) {
+        const cached = cachedCatalog(cacheKey, revision);
+        if (cached) {
           request.log.info(
             {
               event: 'provider.models_listed',
@@ -276,30 +261,21 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           return reply.status(200).send({ models: cached.models });
         }
       }
-      const catalogReads = activeCatalogReads.get(cacheKey) ?? { count: 0, started: 0, lastPublished: 0 };
-      activeCatalogReads.set(cacheKey, catalogReads);
-      catalogReads.count++;
-      const readNumber = ++catalogReads.started;
-      const stillCurrent = () => activeCatalogReads.get(cacheKey) === catalogReads;
-      const publish = (models: CatalogModel[]) => {
-        if (!stillCurrent()) return false;
-        // A slower older request must not replace a catalog that has already been refreshed.
-        if (readNumber > catalogReads.lastPublished) {
-          cacheModels(cacheKey, models);
-          catalogReads.lastPublished = readNumber;
-        }
-        return true;
-      };
+      const read = beginCatalogRead(cacheKey, revision, sync ? 'sync' : 'ordinary');
       try {
         const signal = routeSignal(reply);
         const result = await storedTarget(deps, workspaceId, provider, signal);
         if (!result.ok) return sendTargetError(reply, result);
+        const publish: NonNullable<CatalogRequest['publish']> = async (models) => {
+          const current = await catalogCredentialRevision(deps.store, workspaceId, provider);
+          signal.throwIfAborted();
+          return current === revision ? read.publish(models) : 'catalog_credentials_changed';
+        };
         return await fetchModels(request, reply, {
           provider, target: result.target, signal, publish, ...(sync ? { mode: 'sync' } : {}),
         });
       } finally {
-        catalogReads.count--;
-        if (catalogReads.count === 0 && stillCurrent()) activeCatalogReads.delete(cacheKey);
+        read.finish();
       }
     },
   );
@@ -356,8 +332,8 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         // Only a test of the default credential can reuse its cached catalog.
         const cacheKey = apiKey || keyId ? undefined : `${workspaceId}:${provider}`;
         let models: CatalogModel[] | undefined;
-        const cached = cacheKey ? modelsCache.get(cacheKey) : undefined;
-        if (cached && Date.now() < cached.expiresAt) {
+        const cached = cacheKey ? cachedCatalog(cacheKey, await catalogCredentialRevision(deps.store, workspaceId, provider)) : undefined;
+        if (cached) {
           models = cached.models;
         } else {
           try {
