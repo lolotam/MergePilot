@@ -99,11 +99,13 @@ describe('Sync models', () => {
     page.rerender(<></>);
     await act(async () => unmounted.resolve(liveResponse()));
     expect(vi.mocked(api.syncModels).mock.calls.map(([, , signal]) => signal.aborted)).toEqual([true, true, true]);
-    page.rerender(<ModelSelect workspaceId="ws-1" provider="openai" id="picker" label="Model picker" value="claude-3-7-sonnet" onChange={vi.fn()} />);
-    await screen.findByText('Claude 3.7 Sonnet');
-    await user.click(screen.getByRole('button', { name: 'Model picker' }));
-    expect(screen.getByRole('option', { name: 'Claude 3.7 Sonnet' })).toBeDefined();
-    expect(screen.queryByRole('option', { name: 'New model' })).toBeNull();
+    for (const workspaceId of ['ws-1', 'ws-2']) {
+      page.rerender(<ModelSelect key={workspaceId} workspaceId={workspaceId} provider="openai" id="picker" label="Model picker" value="claude-3-7-sonnet" onChange={vi.fn()} />);
+      await screen.findByText('Claude 3.7 Sonnet');
+      await user.click(screen.getByRole('button', { name: 'Model picker' }));
+      expect(screen.getByRole('option', { name: 'Claude 3.7 Sonnet' })).toBeDefined();
+      expect(screen.queryByRole('option', { name: 'New model' })).toBeNull();
+    }
   });
 
   it('keeps the new picker options when an older sync finishes after credentials change', async () => {

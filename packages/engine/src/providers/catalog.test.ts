@@ -30,6 +30,14 @@ describe('listModels', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('strict OpenRouter refresh reads the authenticated account catalog', async () => {
+    const { fetch, calls } = mockFetch(jsonResponse({ data: [{ id: 'openai/gpt-account-model' }] }));
+    await expect(listModels('openrouter', KEY, { fetch, strictRefresh: true })).resolves.toMatchObject([{ id: 'openai/gpt-account-model' }]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('https://openrouter.ai/api/v1/models/user');
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe(`Bearer ${KEY.reveal()}`);
+  });
+
   it('strict refresh surfaces an authenticated gateway refusal without an anonymous retry', async () => {
     const { fetch, calls } = mockFetch(textResponse('denied', 401), jsonResponse({ data: [{ id: 'public-model' }] }));
     await expect(listModels('openrouter', KEY, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });

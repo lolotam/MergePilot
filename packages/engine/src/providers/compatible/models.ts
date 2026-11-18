@@ -95,7 +95,8 @@ export async function listCompatibleModels(
   apiKey: KeyInput,
   options: ListCompatibleOptions = {},
 ): Promise<CatalogModel[]> {
-  const url = `${resolveBaseUrl(provider, options.baseUrl)}/models`;
+  const path = provider === 'openrouter' && options.strictRefresh ? '/models/user' : '/models';
+  const url = `${resolveBaseUrl(provider, options.baseUrl)}${path}`;
   const doFetch = options.fetch ?? ((input, init) => fetch(input, init));
   const get = async (withKey: boolean): Promise<Response> => {
     try {
