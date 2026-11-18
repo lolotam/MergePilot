@@ -6,7 +6,7 @@ vi.mock('@mergepilot/engine', async (importOriginal) => {
   return { ...actual, listModels: vi.fn(actual.listModels), testConnection: vi.fn(actual.testConnection) };
 });
 
-const { listModels, testConnection } = await import('@mergepilot/engine');
+const { listModels, testConnection, LlmFailure } = await import('@mergepilot/engine');
 
 describe('connection test route (J2)', { timeout: 25000 }, () => {
   let h: ProviderHarness;
@@ -123,6 +123,17 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect((await test('openai', h.adminCookie())).statusCode).toBe(200);
     expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('test-account-model');
     expect((await getPicker()).json()).toEqual({ models: pickerModels });
+  });
+
+  it('returns a classified timeout without testing a model when listing times out', async () => {
+    await saveOpenAi();
+    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({
+      code: 'TIMEOUT', provider: 'openai', message: 'fixture timeout',
+    }));
+    const result = await test('openai', h.adminCookie());
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ ok: false, code: 'network', message: 'Provider model catalog did not answer in time' });
+    expect(testConnection).not.toHaveBeenCalled();
   });
 
   it('falls back to the registry default when listing models fails', async () => {

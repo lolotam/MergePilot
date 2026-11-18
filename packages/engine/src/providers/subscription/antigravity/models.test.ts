@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ANTIGRAVITY_MODELS_TTL_MS, listAntigravityModels, parseAvailableModels, resetAntigravityModelCache, staticAntigravityModels } from './models.js';
 
+import { jsonResponse, mockFetch, textResponse } from '../../fetch-mock.fixtures.js';
+
 const credential = { access: ['fake', 'access'].join('-'), projectId: 'project-1' };
 
 beforeEach(() => resetAntigravityModelCache());
@@ -66,4 +68,26 @@ describe('listAntigravityModels', () => {
     const other = { ...credential, projectId: 'project-2' };
     expect(await listAntigravityModels(other, { fetch: fetchMock, now: () => now })).toEqual(staticAntigravityModels());
   });
+});
+
+it('promotes a strict result to last good only after the caller accepts it', async () => {
+  const { fetch, calls } = mockFetch(
+    jsonResponse({ models: { 'gemini-3.1-pro': {} } }),
+    jsonResponse({ models: { 'models/gemini-3.8-flash': {} } }),
+    jsonResponse({ models: {} }),
+    () => textResponse('denied', 403),
+  );
+  const commits: Array<() => void> = [];
+  const options = { fetch, now: () => 100, strictRefresh: true, deferCacheWrite: (commit: () => void) => commits.push(commit) };
+  expect(await listAntigravityModels(credential, { fetch, now: options.now })).toMatchObject([{ id: 'gemini-3.1-pro' }]);
+  expect(await listAntigravityModels(credential, options)).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  expect(await listAntigravityModels(credential, { fetch, now: options.now })).toMatchObject([{ id: 'gemini-3.1-pro' }]);
+  expect(commits).toHaveLength(1);
+  commits[0]?.();
+  expect(await listAntigravityModels(credential, { fetch, now: options.now })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  expect(await listAntigravityModels(credential, options)).toEqual([]);
+  expect(commits).toHaveLength(1);
+  const expired = () => 100 + ANTIGRAVITY_MODELS_TTL_MS + 1;
+  expect(await listAntigravityModels(credential, { fetch, now: expired })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  expect(calls).toHaveLength(4);
 });

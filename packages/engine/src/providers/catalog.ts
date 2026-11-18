@@ -23,6 +23,7 @@ export interface ListModelsOptions {
   signal?: AbortSignal;
   /** Explicit sync bypasses inner caches and surfaces failed authenticated listings. */
   strictRefresh?: boolean;
+  deferAntigravityCacheWrite?: (commit: () => void) => void;
 }
 
 /** Pages followed at most, so a misbehaving API cannot loop forever. */
@@ -205,6 +206,7 @@ async function loadModelCatalog(provider: ApiProviderId, apiKey: KeyInput, optio
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.strictRefresh ? { strictRefresh: true } : {}),
+      ...(options.deferAntigravityCacheWrite ? { deferCacheWrite: options.deferAntigravityCacheWrite } : {}),
     });
   }
   if (subscription) return sortUnique(subscriptionModels(subscription.provider));

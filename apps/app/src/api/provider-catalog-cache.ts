@@ -49,6 +49,7 @@ export function beginCatalogRead(key: string, revision: string, mode: CatalogMod
   group.count++;
   const sequence = ++group.started;
   const initialSyncPublications = group.syncPublications;
+  const startedWithSync = mode === 'ordinary' && cachedCatalog(key, revision)?.mode === 'sync';
   return {
     publish(models: CatalogModel[]): Publication {
       if (active.get(key) !== group) return 'catalog_credentials_changed';
@@ -56,7 +57,7 @@ export function beginCatalogRead(key: string, revision: string, mode: CatalogMod
       // A general picker refresh must never replace a verified account catalog.
       if (mode === 'ordinary') {
         if (saved?.mode === 'sync') return { models: saved.models };
-        if (group.syncPublications !== initialSyncPublications) return 'catalog_superseded';
+        if (startedWithSync || group.syncPublications !== initialSyncPublications) return 'catalog_superseded';
       }
       const latest = mode === 'sync' ? group.lastSyncPublished : group.lastPublished;
       if (sequence < latest) return 'catalog_superseded';

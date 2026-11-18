@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, downloadBackup, type BackupSection, type ExportBackupBody } from '../api/client.js';
+import { refreshCredentialQueries } from '../api/credential-queries.js';
 import { useToast } from '../components/Toast.js';
 import { useI18n } from '../i18n/context.js';
 
@@ -43,11 +44,12 @@ export function useRestoreBackup(workspaceId: string) {
   const { t } = useI18n();
   return useMutation({
     mutationFn: (vars: RestoreVariables) => api.restoreBackup(workspaceId, vars),
-    onSuccess: async (_preview, vars) => {
+    onSuccess: async (applied, vars) => {
       if (vars.dryRun) return;
+      if (applied.sections.includes('credentials')) await refreshCredentialQueries(queryClient, workspaceId);
       showToast(t('backupRestored'), 'success');
       // Settings, bots and keys all live under this workspace's queries.
-      await queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] });
+      await queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] }, { cancelRefetch: false });
     },
   });
 }

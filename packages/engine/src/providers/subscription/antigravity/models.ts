@@ -99,6 +99,7 @@ export interface ListAntigravityOptions {
   signal?: AbortSignal;
   now?: () => number;
   strictRefresh?: boolean;
+  deferCacheWrite?: (commit: () => void) => void;
 }
 
 export async function listAntigravityModels(
@@ -118,8 +119,11 @@ export async function listAntigravityModels(
   }
   if (!models || (!options.strictRefresh && models.length === 0)) return lastGood.get(projectId) ?? staticAntigravityModels();
   options.signal?.throwIfAborted();
-  // A strict result is only eligible for the dashboard cache after its credential and ordering checks.
-  if (!options.strictRefresh && projectId && models.length > 0) remember(projectId, models, now);
+  if (projectId && models.length > 0) {
+    const accepted = models;
+    if (options.strictRefresh) options.deferCacheWrite?.(() => remember(projectId, accepted, (options.now ?? Date.now)()));
+    else if (cache.get(projectId) === cached) remember(projectId, accepted, now);
+  }
   return models;
 }
 

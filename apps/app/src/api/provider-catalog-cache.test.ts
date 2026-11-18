@@ -4,11 +4,12 @@ import { beginCatalogRead, resetCatalogCache } from './provider-catalog-cache.js
 const models = [{ id: 'fixture', name: 'Fixture', efforts: [] }];
 afterEach(resetCatalogCache);
 
-it('rejects an ordinary read that outlives publication and eviction of a strict result', () => {
+it.each([false, true])('rejects an ordinary read pending when a strict result is evicted (strict published first: %s)', (strictFirst) => {
   const strict = beginCatalogRead('workspace:provider', 'revision', 'sync');
-  const olderPicker = beginCatalogRead('workspace:provider', 'revision', 'ordinary');
+  const firstPicker = strictFirst ? undefined : beginCatalogRead('workspace:provider', 'revision', 'ordinary');
   expect(strict.publish(models)).toEqual({ models });
   strict.finish();
+  const olderPicker = firstPicker ?? beginCatalogRead('workspace:provider', 'revision', 'ordinary');
   for (let i = 0; i < 1000; i++) {
     const other = beginCatalogRead(`other-${i}:provider`, 'revision', 'ordinary');
     other.publish(models);

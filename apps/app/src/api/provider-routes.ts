@@ -152,7 +152,7 @@ interface CatalogRequest {
   target: ProviderTarget;
   signal: AbortSignal;
   mode?: 'sync';
-  publish?: (models: CatalogModel[]) => Promise<{ models: CatalogModel[] } | 'catalog_credentials_changed' | 'catalog_superseded'>;
+  publish?: (models: CatalogModel[], commit?: () => void) => Promise<{ models: CatalogModel[] } | 'catalog_credentials_changed' | 'catalog_superseded'>;
 }
 
 async function fetchModels(
@@ -163,10 +163,14 @@ async function fetchModels(
   const sync = mode === 'sync';
   const start = Date.now();
   try {
-    let models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal, ...(sync ? { strictRefresh: true } : {}) });
+    let commitCatalog: (() => void) | undefined;
+    let models = await listModels(provider, target.apiKey, {
+      ...engineOptions(target), signal,
+      ...(sync ? { strictRefresh: true, deferAntigravityCacheWrite: (commit) => { commitCatalog = commit; } } : {}),
+    });
     signal.throwIfAborted();
     if (publish) {
-      const publication = await publish(models);
+      const publication = await publish(models, commitCatalog);
       if (typeof publication === 'string') {
         return sendError(reply, 409, publication, 'The catalog request is outdated. Refresh the model catalog again.');
       }
@@ -272,10 +276,13 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           return sendError(reply, 409, 'catalog_credentials_changed', 'The catalog request is outdated. Refresh the model catalog again.');
         }
         signal.throwIfAborted();
-        const publish: NonNullable<CatalogRequest['publish']> = async (models) => {
+        const publish: NonNullable<CatalogRequest['publish']> = async (models, commit) => {
           const current = await catalogCredentialRevision(deps.store, workspaceId, provider);
           signal.throwIfAborted();
-          return current === revision ? read.publish(models) : 'catalog_credentials_changed';
+          if (current !== revision) return 'catalog_credentials_changed';
+          const publication = read.publish(models);
+          if (typeof publication !== 'string') commit?.();
+          return publication;
         };
         return await fetchModels(request, reply, {
           provider, target: result.target, signal, publish, ...(sync ? { mode: 'sync' } : {}),
@@ -336,11 +343,18 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       let model = body.model?.trim() || configuredModelFor(settings, provider);
       if (!model) {
         let models: CatalogModel[] | undefined;
+        const catalogStart = Date.now();
         try {
           // The test may have resolved a different key than the latest picker catalog.
           models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
+          signal.throwIfAborted();
         } catch (error: unknown) {
-          if (signal.aborted) throw error;
+          if (reply.raw.destroyed) return reply;
+          if (signal.aborted || (error instanceof LlmFailure && error.code === 'TIMEOUT')) {
+            return reply.status(200).send({
+              ok: false, code: 'network', message: 'Provider model catalog did not answer in time', ms: Date.now() - catalogStart,
+            });
+          }
           // Not fatal: the test still runs on the registry default, and the reply names that model.
           request.log.warn(
             { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
