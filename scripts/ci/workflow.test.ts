@@ -104,7 +104,7 @@ describe('CI workflow contract', () => {
     expect(workflow.concurrency).toEqual({ group: 'ci-${{ github.ref }}', 'cancel-in-progress': true });
     expect(REQUIRED_CHECKS).toContain('check');
     expect(jobs.check.name).toBe('check');
-    expect(jobs.check.if).toBe('${{ always() }}');
+    expect(jobs.check.if).toBe('${{ always() && !cancelled() }}');
     expect(jobs.check.needs?.slice().sort()).toEqual(Object.keys(jobs).filter((name) => name !== 'check').sort());
     expect(jobs.check.needs?.slice().sort()).toEqual(['static', 'unit']);
     const gate = jobs.check.steps.at(-1);
