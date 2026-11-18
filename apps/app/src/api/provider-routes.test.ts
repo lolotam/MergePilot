@@ -120,6 +120,38 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect(listModels).toHaveBeenCalledTimes(2);
   });
 
+  it('rejects a catalog returned after its stored key was replaced and preserves the new catalog', async () => {
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels).mockImplementationOnce(engine.listModels);
+    const started = Promise.withResolvers<void>();
+    const oldCatalog = Promise.withResolvers<Response>();
+    const upstream = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected provider request'))
+      .mockImplementationOnce(() => { started.resolve(); return oldCatalog.promise; })
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'claude-new-account' }] }));
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'anthropic', apiKey: keyFor('old'), userId: 'u-admin' });
+    const pendingSync = get('anthropic', h.adminCookie(), '?sync=true').then((response) => response);
+    try {
+      await started.promise;
+      const changed = await h.app.inject({
+        method: 'PUT', url: '/api/workspaces/ws-1/keys/anthropic', headers: { cookie: h.adminCookie() },
+        payload: { apiKey: keyFor('new') },
+      });
+      expect(changed.statusCode).toBe(200);
+      const current = await get('anthropic', h.memberCookie());
+      expect(current.json().models).toMatchObject([{ id: 'claude-new-account' }]);
+      oldCatalog.resolve(Response.json({ data: [{ id: 'claude-old-account' }] }));
+      const outdated = await pendingSync;
+      expect(outdated.statusCode).toBe(409);
+      expect(outdated.json().error.code).toBe('catalog_credentials_changed');
+      expect((await get('anthropic', h.memberCookie())).json()).toEqual(current.json());
+    } finally {
+      oldCatalog.resolve(Response.json({ data: [] }));
+      await pendingSync;
+      upstream.mockRestore();
+    }
+  });
+
   it('answers 404 key_not_found without a stored key and 400 for an unknown provider', async () => {
     expect((await get('openai', h.memberCookie())).json().error.code).toBe('key_not_found');
     expect((await get('claude-code', h.memberCookie())).statusCode).toBe(400);

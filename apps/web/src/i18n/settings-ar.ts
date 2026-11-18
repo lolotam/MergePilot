@@ -4,6 +4,7 @@ export const arSettings = {
   syncModelsEmpty: 'اربط مزوّد مراجعة لمزامنة قائمة نماذجه.',
   syncModelsQueued: 'في الانتظار',
   syncModelsLoading: 'جاري مزامنة القائمة…',
+  syncModelsCredentialsChanged: 'بيانات الدخول اتغيّرت. اعمل مزامنة تاني عشان تحدّث القائمة.',
   syncModelsCancelled: 'تم الإلغاء',
   syncModelsUnsupported: 'بيانات دخول للمُحكِّم فقط، مفيش قائمة نماذج للمراجعة.',
   syncModelsUnavailable: 'الخادم ده مش بيوفّر المزوّد ده.',

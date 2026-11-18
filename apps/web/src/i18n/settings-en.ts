@@ -4,6 +4,7 @@ export const enSettings = {
   syncModelsEmpty: 'Connect a review provider to sync its model catalog.',
   syncModelsQueued: 'Queued',
   syncModelsLoading: 'Syncing catalog…',
+  syncModelsCredentialsChanged: 'Credentials changed. Sync again to refresh this catalog.',
   syncModelsCancelled: 'Cancelled',
   syncModelsUnsupported: 'Judge-only credential. No review model catalog.',
   syncModelsUnavailable: 'This server does not offer this provider.',

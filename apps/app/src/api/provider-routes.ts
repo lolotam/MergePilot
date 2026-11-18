@@ -30,6 +30,8 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 1000;
 const modelsCache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
 
+const activeCatalogReads = new Map<string, { count: number }>();
+
 const RATE_WINDOW_MS = 60 * 1000;
 export const TEST_LIMIT = 10;
 const UNSAVED_MODELS_LIMIT = 20;
@@ -46,11 +48,14 @@ function quotaStatusOf(ok: boolean, code: string | undefined): KeyQuotaStatus | 
 export function resetProviderTestRateLimits(): void {
   rateBuckets.clear();
   modelsCache.clear();
+  activeCatalogReads.clear();
 }
 
 /** Drops a workspace's cached model list for one provider (its key changed or was removed). */
 export function invalidateModelsCache(workspaceId: string, provider: string): void {
-  modelsCache.delete(`${workspaceId}:${provider}`);
+  const cacheKey = `${workspaceId}:${provider}`;
+  modelsCache.delete(cacheKey);
+  activeCatalogReads.delete(cacheKey);
 }
 
 function cacheModels(key: string, models: CatalogModel[]): void {
@@ -167,18 +172,22 @@ interface CatalogRequest {
   signal: AbortSignal;
   cacheKey?: string;
   mode?: 'sync';
+  stillCurrent?: () => boolean;
 }
 
 async function fetchModels(
   request: FastifyRequest,
   reply: FastifyReply,
-  { provider, target, signal, cacheKey, mode }: CatalogRequest,
+  { provider, target, signal, cacheKey, mode, stillCurrent }: CatalogRequest,
 ): Promise<FastifyReply> {
   const sync = mode === 'sync';
   const start = Date.now();
   try {
     const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal, ...(sync ? { strictRefresh: true } : {}) });
     signal.throwIfAborted();
+    if (stillCurrent?.() === false) {
+      return sendError(reply, 409, 'catalog_credentials_changed', 'Provider credentials changed. Refresh the model catalog again.');
+    }
     const ms = Date.now() - start;
     if (cacheKey) cacheModels(cacheKey, models);
     request.log.info(
@@ -269,10 +278,21 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           return reply.status(200).send({ models: cached.models });
         }
       }
-      const signal = routeSignal(reply);
-      const result = await storedTarget(deps, workspaceId, provider, signal);
-      if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(request, reply, { provider, target: result.target, signal, cacheKey, ...(sync ? { mode: 'sync' } : {}) });
+      const catalogReads = activeCatalogReads.get(cacheKey) ?? { count: 0 };
+      activeCatalogReads.set(cacheKey, catalogReads);
+      catalogReads.count++;
+      const stillCurrent = () => activeCatalogReads.get(cacheKey) === catalogReads;
+      try {
+        const signal = routeSignal(reply);
+        const result = await storedTarget(deps, workspaceId, provider, signal);
+        if (!result.ok) return sendTargetError(reply, result);
+        return await fetchModels(request, reply, {
+          provider, target: result.target, signal, cacheKey, stillCurrent, ...(sync ? { mode: 'sync' } : {}),
+        });
+      } finally {
+        catalogReads.count--;
+        if (catalogReads.count === 0 && stillCurrent()) activeCatalogReads.delete(cacheKey);
+      }
     },
   );
 

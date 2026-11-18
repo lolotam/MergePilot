@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SettingsPage } from './SettingsPage.js';
 import { I18nProvider } from '../i18n/context.js';
 import { ToastProvider } from '../components/Toast.js';
@@ -103,6 +103,38 @@ describe('Sync models', () => {
     await screen.findByText('Claude 3.7 Sonnet');
     await user.click(screen.getByRole('button', { name: 'Model picker' }));
     expect(screen.getByRole('option', { name: 'Claude 3.7 Sonnet' })).toBeDefined();
+    expect(screen.queryByRole('option', { name: 'New model' })).toBeNull();
+  });
+
+  it('keeps the new picker options when an older sync finishes after credentials change', async () => {
+    const user = userEvent.setup();
+    const previousSync = pendingCatalog();
+    vi.mocked(api.syncModels).mockReturnValueOnce(previousSync.promise);
+    function CredentialChange() {
+      const client = useQueryClient();
+      const workspaceKey = ['workspaces', 'ws-1'];
+      const keysQuery = [...workspaceKey, 'keys'];
+      useQuery({ queryKey: keysQuery, queryFn: async () => ({ keys: [] }), initialData: { keys: [] } });
+      return <button type="button" onClick={() => {
+        void client.invalidateQueries({ queryKey: keysQuery });
+        void client.invalidateQueries({ queryKey: [...workspaceKey, 'providers'] });
+      }}>Change credentials</button>;
+    }
+    renderSettings(<>
+      <CredentialChange />
+      <SyncModels workspaceId="ws-1" providers={['openai']} />
+      <ModelSelect workspaceId="ws-1" provider="openai" id="picker" label="Model picker" value="" onChange={vi.fn()} />
+    </>, 'en');
+    const picker = screen.getByRole('button', { name: 'Model picker' }) as HTMLButtonElement;
+    await waitFor(() => expect(picker.disabled).toBe(false));
+    await user.click(screen.getByRole('button', { name: 'Sync all models' }));
+    vi.mocked(api.getModels).mockResolvedValueOnce({ models: [{ id: 'current-account', name: 'Current account model', efforts: [] }] });
+    await user.click(screen.getByRole('button', { name: 'Change credentials' }));
+    await act(async () => previousSync.resolve(liveResponse()));
+    expect(screen.getByText(/Credentials changed/)).toBeDefined();
+    expect(screen.queryByText(/Last live sync/)).toBeNull();
+    await user.click(picker);
+    expect(await screen.findByRole('option', { name: 'Current account model' })).toBeDefined();
     expect(screen.queryByRole('option', { name: 'New model' })).toBeNull();
   });
 
