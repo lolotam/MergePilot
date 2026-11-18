@@ -26,6 +26,19 @@ If Google asks you to verify the account, or reports it ineligible or suspended,
 
 Each workspace has one active credential per provider, except where ADR-0026 and ADR-0027 say otherwise. Gemini, OpenRouter and OpenCode Zen store an ordered list of up to 20 API keys (ADR-0026). OpenAI, Anthropic and xAI may keep a consumer subscription and up to 20 API keys together, with a stored default method (ADR-0027). Reviews start on the effective default; when both methods exist, quota or rate limit on the default may switch to the other method on the same provider and model (disclosed in the GitHub summary and run record). Primary, heavy-duty, configured fallbacks, and reviewer-panel bots build the same dual-method chain when both methods are connected. Switching methods does not automatically change the selected model; API and subscription model lists can differ.
 
+## Sync model catalogs
+
+Workspace admins and owners can choose **Sync all models** under **Settings → Provider credentials**.
+Each connected review provider is listed once using its effective default credential. Results distinguish
+live catalogs from the bundled OpenAI, Anthropic, and xAI subscription lists. Google Antigravity uses its
+existing model-list endpoint when available on the server. Typesafe is judge-only and has no review catalog.
+If a paginated catalog cannot finish within the request limits, sync reports an error and keeps the previous list.
+
+Successful results populate the workspace's model pickers. Failed requests leave the last known list
+available. The last live sync time is shown per provider while the workspace settings page stays open.
+Sync lists models without running inference or testing access. To use a returned model, select it and
+save the bot settings through the existing workspace controls.
+
 ## Storage and refresh
 
 Access tokens, refresh tokens, expiry, and provider-specific account data are stored together in a versioned envelope inside the existing vault-encrypted credential column. Dashboard responses expose only the authentication method and normal credential metadata. Individual token values are included in review redaction. No provider CLI or agent tools run in subscription mode.

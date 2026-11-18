@@ -1,4 +1,18 @@
 export const enSettings = {
+  syncModelsButton: 'Sync all models',
+  syncModelsCancel: 'Cancel sync',
+  syncModelsEmpty: 'Connect a review provider to sync its model catalog.',
+  syncModelsQueued: 'Queued',
+  syncModelsLoading: 'Syncing catalog…',
+  syncModelsCancelled: 'Cancelled',
+  syncModelsUnsupported: 'Judge-only credential. No review model catalog.',
+  syncModelsUnavailable: 'This server does not offer this provider.',
+  syncModelsCredentialError: 'Catalog sync failed. Check the default credential or sign in again.',
+  syncModelsRateError: 'Catalog sync failed. Check provider quota or retry later.',
+  syncModelsError: 'Catalog sync failed. Retry later or check the provider configuration.',
+  syncModelsLive: 'Live catalog · {count} models returned',
+  syncModelsBundled: 'Bundled catalog · {count} models · live listing unavailable for this sign-in method',
+  syncModelsLastSuccess: 'Last live sync this session: {time}',
   // New Providers (J2)
   providerOpenrouter: 'OpenRouter',
   providerVercelGateway: 'Vercel AI Gateway',

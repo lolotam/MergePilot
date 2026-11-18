@@ -7,7 +7,7 @@ vi.mock('@mergepilot/engine', async (importOriginal) => {
   return { ...actual, listModels: vi.fn(actual.listModels), testConnection: vi.fn(actual.testConnection) };
 });
 
-const { listModels } = await import('@mergepilot/engine');
+const { listModels, testConnection } = await import('@mergepilot/engine');
 const MODELS = [{ id: 'm-1', name: 'Model 1', efforts: ['low', 'high'] }];
 
 describe('model catalog routes (J2)', { timeout: 25000 }, () => {
@@ -16,7 +16,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    h = await createProviderHarness(customFetch);
+    h = await createProviderHarness(customFetch, undefined, (provider) => provider !== 'google-antigravity');
   }, 30000);
 
   afterEach(async () => {
@@ -50,6 +50,46 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect(res.json()).toEqual({ models: MODELS });
     expect(vi.mocked(listModels).mock.calls[0]?.[0]).toBe('vercel-gateway');
     expect(vi.mocked(listModels).mock.calls[0]?.[1]).toBe(keyFor('vg'));
+  });
+
+  it('syncs only the effective default method for admins and keeps the previous cached catalog on failure', async () => {
+    const query = '?refresh=true&sync=true';
+    const access = ['test', 'access'].join('-');
+    const refresh = ['test', 'refresh'].join('-');
+    await h.credentials.saveSubscription('ws-1', 'openai', { type: 'oauth', access, refresh, expires: Date.now() + 3_600_000 }, 'u-admin');
+    for (const tag of ['first', 'second']) {
+      await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor(tag), userId: 'u-admin' });
+    }
+    await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
+    vi.mocked(listModels).mockResolvedValue(MODELS);
+
+    expect((await get('openai', h.memberCookie(), query)).statusCode).toBe(403);
+    expect(listModels).not.toHaveBeenCalled();
+    const bundled = await get('openai', h.adminCookie(), query);
+    expect(bundled.json()).toEqual({ models: MODELS, source: 'bundled' });
+    expect(bundled.body).not.toContain(access);
+    expect(bundled.body).not.toContain(refresh);
+    expect(listModels).toHaveBeenCalledExactlyOnceWith('openai', expect.stringContaining('mergepilot:oauth'), expect.objectContaining({ strictRefresh: true }));
+
+    await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'api-key');
+    const live = await get('openai', h.adminCookie(), query);
+    expect(live.json()).toEqual({ models: MODELS, source: 'live' });
+    expect(live.headers['cache-control']).toBe('no-store');
+    expect(listModels).toHaveBeenLastCalledWith('openai', keyFor('first'), expect.objectContaining({ strictRefresh: true }));
+    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: 'RATE_LIMIT', provider: 'openai', message: keyFor('first') }));
+    const failed = await get('openai', h.adminCookie(), query);
+    expect(failed.statusCode).toBe(429);
+    expect(failed.body).not.toContain(keyFor('first'));
+    expect((await get('openai', h.memberCookie())).json()).toEqual({ models: MODELS });
+    expect(listModels).toHaveBeenCalledTimes(3);
+    expect(testConnection).not.toHaveBeenCalled();
+    expect((await get('gemini', h.adminCookie(), query)).statusCode).toBe(404);
+    expect((await get('typesafe', h.adminCookie(), query)).statusCode).toBe(400);
+    expect((await get('google-antigravity', h.adminCookie(), query)).json().error.code).toBe('provider_unavailable');
+    expect((await h.app.inject({
+      method: 'GET', url: `/api/workspaces/ws-other/providers/openai/models${query}`, headers: { cookie: h.adminCookie() },
+    })).statusCode).toBe(403);
+    expect(listModels).toHaveBeenCalledTimes(3);
   });
 
   it('drops the cached list when the key is replaced', async () => {

@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
+  decodeSubscription,
   failureKind,
+  isSubscriptionAvailable,
   listModels,
   LlmFailure,
   providerEntry,
@@ -166,11 +168,13 @@ async function fetchModels(
   result: Extract<TargetResult, { ok: true }>,
   signal: AbortSignal,
   cacheKey?: string,
+  sync = false,
 ): Promise<FastifyReply> {
   const { target } = result;
   const start = Date.now();
   try {
-    const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
+    const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal, ...(sync ? { strictRefresh: true } : {}) });
+    signal.throwIfAborted();
     const ms = Date.now() - start;
     if (cacheKey) cacheModels(cacheKey, models);
     request.log.info(
@@ -184,7 +188,9 @@ async function fetchModels(
       },
       'Provider models listed',
     );
-    return reply.status(200).send({ models });
+    const subscription = sync && decodeSubscription(target.apiKey, provider);
+    const source = subscription && subscription.provider !== 'google-antigravity' ? 'bundled' : 'live';
+    return reply.status(200).send({ models, ...(sync ? { source } : {}) });
   } catch (err) {
     const ms = Date.now() - start;
     if (err instanceof LlmFailure) {
@@ -201,7 +207,7 @@ async function fetchModels(
         },
         'Provider models listing failed',
       );
-      return sendError(reply, statusFor(kind), kind, redact(err.message, target.apiKey));
+      return sendError(reply, statusFor(kind), kind, sync ? 'Could not sync model catalog' : redact(err.message, target.apiKey));
     }
     const msg = err instanceof Error ? err.message : String(err);
     request.log.info(
@@ -216,22 +222,33 @@ async function fetchModels(
       },
       'Provider models listing failed',
     );
-    return sendError(reply, 502, 'models_fetch_failed', redact(msg, target.apiKey));
+    return sendError(reply, 502, 'models_fetch_failed', sync ? 'Could not sync model catalog' : redact(msg, target.apiKey));
   }
 }
 
+function isModelSync(request: FastifyRequest): boolean {
+  return (request.query as { sync?: string } | undefined)?.sync === 'true';
+}
+
 export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiDeps): void {
+  const readModels = requireRole('member', deps.auth);
+  const syncModels = requireRole('admin', deps.auth);
   // Model list with the workspace's stored key. Members may read it (it reveals no secret).
   app.get(
     '/api/workspaces/:workspaceId/providers/:provider/models',
-    { preHandler: [requireRole('member', deps.auth)] },
+    { preHandler: [(request, reply) => (isModelSync(request) ? syncModels : readModels)(request, reply)] },
     async (request, reply) => {
       const { workspaceId } = request.params as { workspaceId: string };
       const provider = parseProvider(request, reply);
       if (!provider) return reply;
       const { refresh } = (request.query ?? {}) as { refresh?: string };
+      const sync = isModelSync(request);
+      if (sync) reply.header('Cache-Control', 'no-store');
+      if (sync && provider === 'google-antigravity' && !(deps.subscriptionAvailable ?? isSubscriptionAvailable)(provider)) {
+        return sendError(reply, 400, 'provider_unavailable', 'This server does not offer Google Antigravity');
+      }
       const cacheKey = `${workspaceId}:${provider}`;
-      if (refresh !== 'true' && refresh !== '1') {
+      if (!sync && refresh !== 'true' && refresh !== '1') {
         const cached = modelsCache.get(cacheKey);
         if (cached && Date.now() < cached.expiresAt) {
           request.log.info(
@@ -251,7 +268,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const signal = routeSignal(reply);
       const result = await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(request, reply, provider, result, signal, cacheKey);
+      return fetchModels(request, reply, provider, result, signal, cacheKey, sync);
     },
   );
 

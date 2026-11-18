@@ -7,6 +7,7 @@
 import { sortUnique, type CatalogModel } from '../../catalog-types.js';
 import { FALLBACK_EFFORTS } from '../../effort.js';
 import { antigravityHeaders } from './config.js';
+import { antigravityFailure } from './errors.js';
 import { discardBody, fetchWithHosts, readJson, type FetchFn } from './transport.js';
 
 export const ANTIGRAVITY_MODELS_TTL_MS = 4 * 60 * 60 * 1000;
@@ -84,6 +85,7 @@ export interface ListAntigravityOptions {
   fetch?: FetchFn;
   signal?: AbortSignal;
   now?: () => number;
+  strictRefresh?: boolean;
 }
 
 export async function listAntigravityModels(
@@ -93,15 +95,16 @@ export async function listAntigravityModels(
   const projectId = typeof credential.projectId === 'string' ? credential.projectId : '';
   const now = (options.now ?? Date.now)();
   const cached = cache.get(projectId);
-  if (projectId && cached && cached.expiresAt > now) return cached.models;
+  if (!options.strictRefresh && projectId && cached && cached.expiresAt > now) return cached.models;
   let models: CatalogModel[] | undefined;
   try {
     models = await fetchModels(credential.access, projectId, options);
   } catch (error) {
-    if (options.signal?.aborted) throw error;
+    if (options.strictRefresh || options.signal?.aborted) throw error;
     // No answer or an unreadable one: the fallback below, like a refusal.
   }
-  if (!models || models.length === 0) return lastGood.get(projectId) ?? staticAntigravityModels();
+  if (!models || (!options.strictRefresh && models.length === 0)) return lastGood.get(projectId) ?? staticAntigravityModels();
+  options.signal?.throwIfAborted();
   if (projectId) remember(projectId, models, now);
   return models;
 }
@@ -116,7 +119,13 @@ async function fetchModels(access: string, projectId: string, options: ListAntig
   });
   if (!response.ok) {
     await discardBody(response);
+    if (options.strictRefresh) throw antigravityFailure(response.status, '', 'catalog');
     return undefined;
   }
-  return parseAvailableModels(await readJson(response, 'Cloud Code Assist fetchAvailableModels'));
+  const body: unknown = await readJson(response, 'Cloud Code Assist fetchAvailableModels');
+  if (options.strictRefresh) {
+    const models = (body as { models?: unknown } | null)?.models;
+    if (!models || typeof models !== 'object') throw new Error('Invalid Antigravity model catalog');
+  }
+  return parseAvailableModels(body);
 }

@@ -40,6 +40,7 @@ export interface ListCompatibleOptions {
   baseUrl?: string;
   fetch?: FetchLike;
   signal?: AbortSignal;
+  strictRefresh?: boolean;
 }
 
 /** Effort values a `reasoning_effort` request can carry (`off` = send nothing). */
@@ -110,13 +111,16 @@ export async function listCompatibleModels(
   let res = await get(true);
   // OpenRouter and some gateways publish their list but reject an invalid key; the list
   // still loads so the user can pick a model, and the connection test reports the key.
-  if (res.status === 401 || res.status === 403) {
+  if (!options.strictRefresh && (res.status === 401 || res.status === 403)) {
     const publicList = await get(false);
     if (publicList.ok) res = publicList;
   }
   if (!res.ok) throw await failureFromResponse(res, provider, apiKey);
 
   const body = (await res.json()) as { data?: unknown; models?: unknown };
+  if (options.strictRefresh && !Array.isArray(body.data) && !Array.isArray(body.models)) {
+    throw new Error('Invalid model catalog');
+  }
   const list = Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [];
   const models = (list as RawCompatibleModel[])
     .map((raw) => ({ raw, id: String(raw.id ?? raw.name ?? '').replace(/^models\//, '') }))

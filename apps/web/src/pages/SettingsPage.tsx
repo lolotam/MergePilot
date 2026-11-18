@@ -28,6 +28,7 @@ import { JudgeCard } from '../settings/JudgeCard.js';
 import { PricesCard } from '../settings/PricesCard.js';
 import { JudgeTestButton } from '../settings/JudgeTestButton.js';
 import { TestKeyButton } from '../settings/TestKeyButton.js';
+import { SyncModels } from '../settings/SyncModels.js';
 import { isJudgeKeyOnly, useProviderLabel } from '../settings/providers.js';
 
 export function SettingsPage() {
@@ -142,6 +143,10 @@ export function SettingsPage() {
             </button>
           )}
         </div>
+
+        {currentWorkspace && !isMember && keysData && !keysLoading && (
+          <SyncModels key={workspaceId} workspaceId={workspaceId} providers={savedKeys ?? []} />
+        )}
 
         {keysLoading ? (
           <div className="py-4 text-sm text-ink-400">{t('loading')}</div>
