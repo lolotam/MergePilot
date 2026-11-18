@@ -16,6 +16,13 @@ export class SafeFetchLimitError extends Error {
   }
 }
 
+export class SafeFetchTimeoutError extends SafeFetchLimitError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
+
 function requestBody(body: RequestInit['body']): string | undefined {
   if (body === undefined || body === null) return undefined;
   if (typeof body === 'string') return body;
@@ -59,7 +66,7 @@ export function createSafeFetch(options: SafeFetchOptions = {}): FetchLike {
     // only weakly held and can be collected before they fire); cleared when the call ends.
     const controller = new AbortController();
     const timer = setTimeout(
-      () => controller.abort(new SafeFetchLimitError(`no complete answer within ${timeoutMs} ms`)),
+      () => controller.abort(new SafeFetchTimeoutError(`no complete answer within ${timeoutMs} ms`)),
       timeoutMs,
     );
     const done = () => clearTimeout(timer);
@@ -123,11 +130,11 @@ export function createSafeFetch(options: SafeFetchOptions = {}): FetchLike {
         },
       );
       req.setTimeout(idleTimeoutMs, () => {
-        req.destroy(new SafeFetchLimitError(`no data from the server for ${idleTimeoutMs} ms`));
+        req.destroy(new SafeFetchTimeoutError(`no data from the server for ${idleTimeoutMs} ms`));
       });
       req.on('error', (err) => {
         done();
-        reject(err);
+        reject(signal.aborted ? signal.reason : err);
       });
       if (body !== undefined) req.write(body);
       req.end();

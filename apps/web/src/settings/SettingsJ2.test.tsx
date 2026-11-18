@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { refreshCredentialQueries } from '../api/credential-queries.js';
 import userEvent from '@testing-library/user-event';
 import type { FallbackEntry } from '@mergepilot/app/contract';
@@ -111,19 +111,27 @@ describe('J2 settings components', () => {
     expect(screen.queryByRole('option', { name: 'Stale model' })).toBeNull();
   });
 
-  it('drops an in-flight sync result after a credential backup is restored', async () => {
+  it('discards pre-restore catalogs and settings reads after a backup is restored', async () => {
     let finishSync!: (catalog: ModelsResponse) => void;
     vi.mocked(api.syncModels).mockReturnValueOnce(new Promise((resolve) => { finishSync = resolve; }));
     vi.mocked(api.restoreBackup).mockResolvedValueOnce({
       dryRun: false, sections: ['credentials'], settingsChanged: [], bots: 0, skills: 0, skillsMissing: [],
       credentials: [{ provider: 'openai', last4: 'test', action: 'replace' }], keysTested: false,
     });
+    let finishSettings!: (settings: string) => void;
+    const priorSettings = new Promise<string>((resolve) => { finishSettings = resolve; });
+    const readSettings = vi.fn().mockReturnValueOnce(priorSettings).mockResolvedValue('Settings after restore');
+    function WorkspaceSettings() {
+      const settings = useQuery({ queryKey: ['workspaces', 'ws-1', 'settings'], queryFn: readSettings, initialData: 'Cached settings' });
+      return <p>{settings.data}</p>;
+    }
     function Restore() {
       const restore = useRestoreBackup('ws-1');
       return <button onClick={() => restore.mutate({ file: {}, dryRun: false, sections: ['credentials'] })}>Restore</button>;
     }
     renderSettings(<ToastProvider>
       <Restore />
+      <WorkspaceSettings />
       <SyncModels workspaceId="ws-1" providers={['openai']} />
       <ModelSelect workspaceId="ws-1" provider="openai" id="picker" label="Model picker" value="" onChange={vi.fn()} />
     </ToastProvider>, 'en');
@@ -132,6 +140,9 @@ describe('J2 settings components', () => {
     vi.mocked(api.getModels).mockResolvedValue({ models: [{ id: 'restored', name: 'Restored model', efforts: [] }] });
     await user.click(screen.getByRole('button', { name: 'Restore' }));
     await screen.findByText(/Credentials changed/);
+    await screen.findByText('Settings after restore');
+    await act(async () => finishSettings('Settings before restore'));
+    expect(screen.queryByText('Settings before restore')).toBeNull();
     await act(async () => finishSync({ source: 'live', models: [{ id: 'stale', name: 'Stale model', efforts: [] }] }));
     await user.click(picker);
     expect(await screen.findByRole('option', { name: 'Restored model' })).toBeDefined();

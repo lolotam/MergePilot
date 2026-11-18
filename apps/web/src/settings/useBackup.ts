@@ -46,10 +46,19 @@ export function useRestoreBackup(workspaceId: string) {
     mutationFn: (vars: RestoreVariables) => api.restoreBackup(workspaceId, vars),
     onSuccess: async (applied, vars) => {
       if (vars.dryRun) return;
-      if (applied.sections.includes('credentials')) await refreshCredentialQueries(queryClient, workspaceId);
+      const credentialsRestored = applied.sections.includes('credentials');
+      // Credentials refresh their own queries. Cancel other reads even if they have no cached data.
+      const remaining = {
+        queryKey: ['workspaces', workspaceId],
+        predicate: (query: { queryKey: readonly unknown[] }) =>
+          !credentialsRestored || (query.queryKey[2] !== 'keys' && query.queryKey[2] !== 'providers'),
+      };
+      await Promise.all([
+        queryClient.cancelQueries(remaining),
+        credentialsRestored ? refreshCredentialQueries(queryClient, workspaceId) : undefined,
+      ]);
       showToast(t('backupRestored'), 'success');
-      // Settings, bots and keys all live under this workspace's queries.
-      await queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] }, { cancelRefetch: false });
+      await queryClient.invalidateQueries(remaining);
     },
   });
 }

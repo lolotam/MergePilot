@@ -122,7 +122,7 @@ describe('createSafeFetch (custom base URL, ADR-0010)', () => {
     const pending = safeFetch('https://llm.example.com/v1/models');
     await vi.waitFor(() => expect(captured[0]?.idle).toBeDefined());
     captured[0]?.idle?.();
-    await expect(pending).rejects.toThrow('no data from the server');
+    await expect(pending).rejects.toMatchObject({ name: 'TimeoutError', message: 'no data from the server for 5 ms' });
   });
 
   it('honours the caller signal combined with its own limits', async () => {

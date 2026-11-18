@@ -91,3 +91,21 @@ it('promotes a strict result to last good only after the caller accepts it', asy
   expect(await listAntigravityModels(credential, { fetch, now: expired })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
   expect(calls).toHaveLength(4);
 });
+
+it('keeps the latest-started accepted strict result for a shared project', async () => {
+  const older = Promise.withResolvers<Response>();
+  const { fetch } = mockFetch(
+    () => older.promise,
+    jsonResponse({ models: { 'gemini-3.8-flash': {} } }),
+  );
+  const commits: Array<() => void> = [];
+  const options = { fetch, strictRefresh: true, deferCacheWrite: (commit: () => void) => commits.push(commit) };
+  const pending = listAntigravityModels(credential, options);
+  await listAntigravityModels(credential, options);
+  commits[0]?.();
+  older.resolve(jsonResponse({ models: { 'gemini-3.1-pro': {} } }));
+  await pending;
+  expect(commits).toHaveLength(2);
+  commits[1]?.();
+  expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+});

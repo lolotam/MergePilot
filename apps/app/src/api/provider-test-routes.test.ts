@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SafeFetchTimeoutError } from '../core/safe-fetch.js';
 import { createProviderHarness, keyFor, type ProviderHarness } from './provider-routes.fixtures.js';
 
 vi.mock('@mergepilot/engine', async (importOriginal) => {
@@ -131,6 +132,16 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
       code: 'TIMEOUT', provider: 'openai', message: 'fixture timeout',
     }));
     const result = await test('openai', h.adminCookie());
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ ok: false, code: 'network', message: 'Provider model catalog did not answer in time' });
+    expect(testConnection).not.toHaveBeenCalled();
+  });
+
+  it('reports guarded custom catalog timeouts without falling back to a model', async () => {
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels);
+    customFetch.mockRejectedValueOnce(new SafeFetchTimeoutError('fixture idle timeout'));
+    const result = await test('custom', h.adminCookie(), { apiKey: keyFor('c'), baseUrl: 'https://llm.example.com/v1' });
     expect(result.statusCode).toBe(200);
     expect(result.json()).toMatchObject({ ok: false, code: 'network', message: 'Provider model catalog did not answer in time' });
     expect(testConnection).not.toHaveBeenCalled();

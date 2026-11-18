@@ -13,7 +13,7 @@ import {
   type CatalogModel,
 } from '@mergepilot/engine';
 import { requireRole } from '../auth/guard.js';
-import { DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
+import { DASHBOARD_FETCH_LIMITS, SafeFetchTimeoutError } from '../core/safe-fetch.js';
 import type { KeyQuotaStatus, WorkspaceSettings } from '../core/types.js';
 import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } from './contract.js';
 import { sendError } from './helpers.js';
@@ -350,7 +350,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           signal.throwIfAborted();
         } catch (error: unknown) {
           if (reply.raw.destroyed) return reply;
-          if (signal.aborted || (error instanceof LlmFailure && error.code === 'TIMEOUT')) {
+          if (signal.aborted || error instanceof SafeFetchTimeoutError || (error instanceof LlmFailure && error.code === 'TIMEOUT')) {
             return reply.status(200).send({
               ok: false, code: 'network', message: 'Provider model catalog did not answer in time', ms: Date.now() - catalogStart,
             });

@@ -79,19 +79,25 @@ export function staticAntigravityModels(): CatalogModel[] {
 }
 
 const cache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
-const lastGood = new Map<string, CatalogModel[]>();
+const lastGood = new Map<string, { models: CatalogModel[]; sequence: number }>();
+let sequence = 0;
+let eviction = 0;
 
 /** Test helper. */
 export function resetAntigravityModelCache(): void {
   cache.clear();
   lastGood.clear();
+  eviction++;
 }
 
-function remember(projectId: string, models: CatalogModel[], now: number): void {
+function remember(projectId: string, models: CatalogModel[], now: number, readSequence: number): void {
   if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
-  if (lastGood.size >= CACHE_MAX_ENTRIES) lastGood.clear();
+  if (lastGood.size >= CACHE_MAX_ENTRIES && !lastGood.has(projectId)) {
+    lastGood.clear();
+    eviction++;
+  }
   cache.set(projectId, { expiresAt: now + ANTIGRAVITY_MODELS_TTL_MS, models });
-  lastGood.set(projectId, models);
+  lastGood.set(projectId, { models, sequence: readSequence });
 }
 
 export interface ListAntigravityOptions {
@@ -110,6 +116,8 @@ export async function listAntigravityModels(
   const now = (options.now ?? Date.now)();
   const cached = cache.get(projectId);
   if (!options.strictRefresh && projectId && cached && cached.expiresAt > now) return cached.models;
+  const readSequence = ++sequence;
+  const readEviction = eviction;
   let models: CatalogModel[] | undefined;
   try {
     models = await fetchModels(credential.access, projectId, options);
@@ -117,12 +125,20 @@ export async function listAntigravityModels(
     if (options.strictRefresh || options.signal?.aborted) throw error;
     // No answer or an unreadable one: the fallback below, like a refusal.
   }
-  if (!models || (!options.strictRefresh && models.length === 0)) return lastGood.get(projectId) ?? staticAntigravityModels();
+  if (!models || (!options.strictRefresh && models.length === 0)) return lastGood.get(projectId)?.models ?? staticAntigravityModels();
   options.signal?.throwIfAborted();
   if (projectId && models.length > 0) {
     const accepted = models;
-    if (options.strictRefresh) options.deferCacheWrite?.(() => remember(projectId, accepted, (options.now ?? Date.now)()));
-    else if (cache.get(projectId) === cached) remember(projectId, accepted, now);
+    if (options.strictRefresh) {
+      options.deferCacheWrite?.(() => {
+        const latest = lastGood.get(projectId);
+        // Different workspaces can publish for the same project in a different order.
+        if (latest ? latest.sequence >= readSequence : eviction !== readEviction) return;
+        remember(projectId, accepted, (options.now ?? Date.now)(), readSequence);
+      });
+    } else if (cache.get(projectId) === cached && eviction === readEviction) {
+      remember(projectId, accepted, now, readSequence);
+    }
   }
   return models;
 }
