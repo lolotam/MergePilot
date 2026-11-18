@@ -214,7 +214,7 @@ export async function listCodexModelsWithApiKey(
     const apiModels = await listOpenAI(apiKey, options);
     return { models: sortUnique(supplementCatalog(bundled, apiModels)), merged: true };
   } catch (error) {
-    options.signal?.throwIfAborted();
+    if (options.signal?.aborted) throw failureFromThrown(error, 'openai', apiKey, options.signal);
     // A fetch that aborts on its own is a cancellation too, not a listing failure to hide.
     // That includes a body read cut off after the headers, which reaches here as a raw AbortError.
     if (error instanceof LlmFailure && error.code === 'ABORTED') throw error;

@@ -89,7 +89,7 @@ describe('Codex models listed by the OpenAI API key', () => {
       init?.signal?.throwIfAborted();
       return jsonResponse({ data: [] });
     };
-    await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch, signal: controller.signal })).rejects.toThrow();
+    await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch, signal: controller.signal })).rejects.toMatchObject({ code: 'ABORTED', provider: 'openai' });
   });
 
   it('rethrows a fetch that aborts on its own, but still falls back for an ordinary failure', async () => {
