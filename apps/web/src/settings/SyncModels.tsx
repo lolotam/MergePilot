@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { onCredentialChange } from '../api/credential-queries.js';
 import { api, ApiClientError, type KeyProvider } from '../api/client.js';
@@ -27,65 +27,82 @@ export function SyncModels({ workspaceId, providers, rosterUnavailable = false }
   const { t, language } = useI18n();
   const label = useProviderLabel();
   const queryClient = useQueryClient();
-  const active = useRef<{ controller: AbortController; providers: readonly KeyProvider[] } | null>(null);
+  const active = useRef<Map<KeyProvider, AbortController> | null>(null);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<Partial<Record<KeyProvider, Result>>>({});
   const [lastSuccess, setLastSuccess] = useState<Partial<Record<KeyProvider, number>>>({});
   const connected = [...new Set(providers)];
   const reviewProviders = connected.filter((provider) => !isJudgeKeyOnly(provider));
-  const latestReviewProviders = useRef(reviewProviders);
-  latestReviewProviders.current = reviewProviders;
-
-  const stopSync = useCallback((reason: 'cancelled' | 'credentials-changed') => {
-    active.current?.controller.abort();
+  const cancelSync = () => {
+    const batch = active.current;
+    if (!batch) return;
+    for (const controller of batch.values()) controller.abort();
     active.current = null;
     setRunning(false);
-    if (reason === 'credentials-changed') setLastSuccess({});
-    setResults((previous) => Object.fromEntries(Object.entries(previous).flatMap(([provider, status]) => {
-      if (status === queued || status === loading) {
-        const label = reason === 'cancelled' ? 'syncModelsCancelled' : 'syncModelsCredentialsChanged';
-        return [[provider, { label }]];
-      }
-      return reason === 'cancelled' ? [[provider, status]] : [];
-    })));
-  }, []);
+    setResults((previous) => {
+      const next = { ...previous };
+      for (const provider of batch.keys()) next[provider] = { label: 'syncModelsCancelled' };
+      return next;
+    });
+  };
 
   useLayoutEffect(() => {
     const unsubscribe = onCredentialChange(queryClient, workspaceId, (changed) => {
-      const affected = active.current?.providers ?? latestReviewProviders.current;
-      if (affected.some((provider) => changed.includes(provider))) stopSync('credentials-changed');
+      const batch = active.current;
+      const interrupted = changed.filter((provider) => batch?.has(provider));
+      for (const provider of interrupted) {
+        batch?.get(provider)?.abort();
+        batch?.delete(provider);
+      }
+      if (batch?.size === 0) {
+        active.current = null;
+        setRunning(false);
+      }
+      setResults((previous) => {
+        const next = { ...previous };
+        for (const provider of changed) delete next[provider];
+        for (const provider of interrupted) next[provider] = { label: 'syncModelsCredentialsChanged' };
+        return next;
+      });
+      setLastSuccess((previous) => {
+        const next = { ...previous };
+        for (const provider of changed) delete next[provider];
+        return next;
+      });
     });
     return () => {
       unsubscribe();
-      active.current?.controller.abort();
+      for (const controller of active.current?.values() ?? []) controller.abort();
       active.current = null;
     };
-  }, [queryClient, stopSync, workspaceId]);
+  }, [queryClient, workspaceId]);
 
   const sync = async () => {
     if (rosterUnavailable || active.current || reviewProviders.length === 0) return;
-    const controller = new AbortController();
-    active.current = { controller, providers: reviewProviders };
+    const batch = new Map(reviewProviders.map((provider) => [provider, new AbortController()]));
+    active.current = batch;
     setRunning(true);
     setResults(Object.fromEntries(reviewProviders.map((provider) => [provider, queued])));
     const pending = reviewProviders.values();
-    const current = () => active.current?.controller === controller;
 
     const worker = async () => {
-      while (current()) {
+      while (active.current === batch) {
         const next = pending.next();
         if (next.done) return;
         const provider = next.value;
+        const controller = batch.get(provider);
+        if (!controller) continue;
+        const current = () => active.current === batch && batch.get(provider) === controller;
         setResults((previous) => ({ ...previous, [provider]: loading }));
         let result: Result;
         try {
           const fresh = await api.syncModels(workspaceId, provider, controller.signal);
           if (fresh.source !== 'live' && fresh.source !== 'bundled') throw new Error('Missing catalog source');
-          if (!current()) return;
+          if (!current()) continue;
           const queryKey = modelsQueryKey(workspaceId, provider);
           // Prevent a pending picker read from overwriting the result with an older catalog.
           await queryClient.cancelQueries({ queryKey, exact: true });
-          if (!current()) return;
+          if (!current()) continue;
           queryClient.setQueryData(queryKey, fresh);
           result = { label: fresh.source === 'live' ? 'syncModelsLive' : 'syncModelsBundled', count: fresh.models.length };
           if (fresh.source === 'live') {
@@ -95,12 +112,15 @@ export function SyncModels({ workspaceId, providers, rosterUnavailable = false }
         } catch (error) {
           result = { label: failureLabel(error) };
         }
-        if (current()) setResults((previous) => ({ ...previous, [provider]: result }));
+        if (current()) {
+          batch.delete(provider);
+          setResults((previous) => ({ ...previous, [provider]: result }));
+        }
       }
     };
 
     await Promise.all(Array.from({ length: Math.min(concurrency, reviewProviders.length) }, worker));
-    if (current()) {
+    if (active.current === batch) {
       active.current = null;
       setRunning(false);
     }
@@ -114,7 +134,7 @@ export function SyncModels({ workspaceId, providers, rosterUnavailable = false }
         <button type="button" className={buttonClass} disabled={rosterUnavailable || running || reviewProviders.length === 0} onClick={() => void sync()}>
           {t('syncModelsButton')}
         </button>
-        {running && <button type="button" className={buttonClass} onClick={() => stopSync('cancelled')}>{t('syncModelsCancel')}</button>}
+        {running && <button type="button" className={buttonClass} onClick={cancelSync}>{t('syncModelsCancel')}</button>}
         {reviewProviders.length === 0 && <span className="text-xs text-ink-500">{t('syncModelsEmpty')}</span>}
       </div>
       <div role="status" aria-live="polite" className="text-xs text-ink-700 dark:text-ink-300">
