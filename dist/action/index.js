@@ -138165,6 +138165,19 @@ function responsesReasoningHeadroom(model, reasoning) {
   return model.reasoning && model.thinkingLevelMap?.off === null ? DEFAULT_THINKING_HEADROOM : 0;
 }
 
+var OPENAI_NOT_CHAT = /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|search|instruct|computer-use|sora|davinci|babbage/i;
+var CODEX_FAMILY = /^(gpt-(?:[5-9]|\d{2,})|codex-)/;
+function isSupplementaryId(id) {
+  return CODEX_FAMILY.test(id) && !OPENAI_NOT_CHAT.test(id);
+}
+function supplementaryModel(provider, id) {
+  if (provider !== "openai" || !isSupplementaryId(id))
+    return void 0;
+  const bundled = subscriptionProvider("openai").getModels();
+  const template = bundled.reduce((best, model) => !best || model.contextWindow > best.contextWindow ? model : best, void 0);
+  return template ? { ...template, id, name: id } : void 0;
+}
+
 import { randomUUID as randomUUID2 } from "node:crypto";
 
 var ANTIGRAVITY_PROVIDER = "google-antigravity";
@@ -138528,7 +138541,7 @@ var SubscriptionAdapter = class extends LlmAdapter {
     this.resolveSecret = resolveSecret;
   }
   requestedOutputTokens(options) {
-    const model = subscriptionProvider(this.provider).getModels().find((entry) => entry.id === options.model);
+    const model = subscriptionProvider(this.provider).getModels().find((entry) => entry.id === options.model) ?? supplementaryModel(this.provider, options.model);
     if (!model)
       return options.maxOutputTokens;
     const reasoning = reasoningFor(levelFor(getSupportedThinkingLevels(model), options));
@@ -138570,7 +138583,7 @@ var SubscriptionAdapter = class extends LlmAdapter {
     const models = createModels({ credentials: store, authContext: { env: async () => void 0, fileExists: async () => false } });
     const provider = subscriptionProvider(this.provider);
     models.setProvider(provider);
-    const model = models.getModel(provider.id, options.model);
+    const model = models.getModel(provider.id, options.model) ?? supplementaryModel(this.provider, options.model);
     if (!model)
       throw new LlmFailure({ provider: this.provider, code: "BAD_REQUEST", message: `Unknown subscription model: ${options.model}` });
     const level = levelFor(getSupportedThinkingLevels(model), options);
