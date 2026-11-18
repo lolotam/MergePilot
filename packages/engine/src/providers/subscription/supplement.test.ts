@@ -1,4 +1,5 @@
 import { zstdDecompressSync } from 'node:zlib';
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai/models';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Secret } from '../../credentials/secret.js';
 import { encodeSubscription } from '../../credentials/subscription.js';
@@ -38,8 +39,10 @@ describe('Codex models listed by the OpenAI API key', () => {
   it('builds an unlisted Codex-family model from the bundled one and refuses other ids and providers', () => {
     const model = supplementaryModel('openai', 'gpt-99-future');
     expect(model).toMatchObject({ id: 'gpt-99-future', name: 'gpt-99-future' });
-    const template = bundled.reduce((best, entry) => ((entry.contextWindow ?? 0) > (best.contextWindow ?? 0) ? entry : best));
-    expect(model?.contextWindow).toBe(template.contextWindow);
+    // It keeps every effort some bundled model takes, so a saved `off` for a model the catalog dropped stays valid.
+    const widest = Math.max(...bundled.map((entry) => entry.efforts.length));
+    expect(getSupportedThinkingLevels(model!)).toHaveLength(widest);
+    expect(getSupportedThinkingLevels(model!)).toContain('off');
     for (const id of ['gpt-4o', 'o3', 'text-embedding-3-small', 'gpt-5-image', 'gpt-realtime', 'whisper-1']) {
       expect(supplementaryModel('openai', id)).toBeUndefined();
     }

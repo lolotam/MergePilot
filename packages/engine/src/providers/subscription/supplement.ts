@@ -17,18 +17,22 @@ function isSupplementaryId(id: string): boolean {
 }
 
 /**
- * A Codex model the bundled pi-ai catalog does not list yet, built from the bundled model with the
- * largest context window: it keeps that model's protocol, base URL and limits and only swaps the id.
+ * A Codex model the bundled pi-ai catalog does not list yet, built from the bundled model that takes the
+ * most thinking efforts (so a saved `off` stays valid), then has the largest context window: it keeps that
+ * model's protocol, base URL and limits and only swaps the id.
  * Undefined for other providers and for ids outside the Codex families. The ChatGPT backend still
  * decides whether the sign-in may use the model; a refusal reaches the caller as an `LlmFailure`.
  */
 export function supplementaryModel(provider: PiSubscriptionProvider, id: string): PiModel | undefined {
   if (provider !== 'openai' || !isSupplementaryId(id)) return undefined;
   const bundled = subscriptionProvider('openai').getModels();
-  const template = bundled.reduce<PiModel | undefined>(
-    (best, model) => (!best || model.contextWindow > best.contextWindow ? model : best),
-    undefined,
-  );
+  const rank = (model: PiModel): [number, number] => [getSupportedThinkingLevels(model).length, model.contextWindow];
+  const template = bundled.reduce<PiModel | undefined>((best, model) => {
+    if (!best) return model;
+    const [levels, window] = rank(model);
+    const [bestLevels, bestWindow] = rank(best);
+    return levels > bestLevels || (levels === bestLevels && window > bestWindow) ? model : best;
+  }, undefined);
   return template ? { ...template, id, name: id } : undefined;
 }
 
