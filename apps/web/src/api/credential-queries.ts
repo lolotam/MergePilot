@@ -3,18 +3,21 @@ import type { KeyProvider } from './client.js';
 
 const credentialEvents = new WeakMap<QueryClient, EventTarget>();
 
-export function onCredentialChange(client: QueryClient, workspaceId: string, listener: () => void): () => void {
+export function onCredentialChange(
+  client: QueryClient, workspaceId: string, listener: (providers: readonly KeyProvider[]) => void,
+): () => void {
   const events = credentialEvents.get(client) ?? new EventTarget();
   credentialEvents.set(client, events);
-  events.addEventListener(workspaceId, listener);
-  return () => events.removeEventListener(workspaceId, listener);
+  const onChange = (event: Event) => listener((event as CustomEvent<readonly KeyProvider[]>).detail);
+  events.addEventListener(workspaceId, onChange);
+  return () => events.removeEventListener(workspaceId, onChange);
 }
 
 /** Cancel even a first fetch with no cached data before starting a read for the new credential. */
 export async function refreshCredentialQueries(
   client: QueryClient, workspaceId: string, changedProviders: readonly KeyProvider[], refreshWorkspace = false,
 ): Promise<void> {
-  credentialEvents.get(client)?.dispatchEvent(new Event(workspaceId));
+  credentialEvents.get(client)?.dispatchEvent(new CustomEvent(workspaceId, { detail: changedProviders }));
   const keys = { queryKey: ['workspaces', workspaceId, 'keys'] };
   const providers = {
     queryKey: ['workspaces', workspaceId, 'providers'],

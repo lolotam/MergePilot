@@ -27,15 +27,17 @@ export function SyncModels({ workspaceId, providers, rosterUnavailable = false }
   const { t, language } = useI18n();
   const label = useProviderLabel();
   const queryClient = useQueryClient();
-  const active = useRef<AbortController | null>(null);
+  const active = useRef<{ controller: AbortController; providers: readonly KeyProvider[] } | null>(null);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<Partial<Record<KeyProvider, Result>>>({});
   const [lastSuccess, setLastSuccess] = useState<Partial<Record<KeyProvider, number>>>({});
   const connected = [...new Set(providers)];
   const reviewProviders = connected.filter((provider) => !isJudgeKeyOnly(provider));
+  const latestReviewProviders = useRef(reviewProviders);
+  latestReviewProviders.current = reviewProviders;
 
   const stopSync = useCallback((reason: 'cancelled' | 'credentials-changed') => {
-    active.current?.abort();
+    active.current?.controller.abort();
     active.current = null;
     setRunning(false);
     if (reason === 'credentials-changed') setLastSuccess({});
@@ -49,10 +51,13 @@ export function SyncModels({ workspaceId, providers, rosterUnavailable = false }
   }, []);
 
   useLayoutEffect(() => {
-    const unsubscribe = onCredentialChange(queryClient, workspaceId, () => stopSync('credentials-changed'));
+    const unsubscribe = onCredentialChange(queryClient, workspaceId, (changed) => {
+      const affected = active.current?.providers ?? latestReviewProviders.current;
+      if (affected.some((provider) => changed.includes(provider))) stopSync('credentials-changed');
+    });
     return () => {
       unsubscribe();
-      active.current?.abort();
+      active.current?.controller.abort();
       active.current = null;
     };
   }, [queryClient, stopSync, workspaceId]);
@@ -60,11 +65,11 @@ export function SyncModels({ workspaceId, providers, rosterUnavailable = false }
   const sync = async () => {
     if (rosterUnavailable || active.current || reviewProviders.length === 0) return;
     const controller = new AbortController();
-    active.current = controller;
+    active.current = { controller, providers: reviewProviders };
     setRunning(true);
     setResults(Object.fromEntries(reviewProviders.map((provider) => [provider, queued])));
     const pending = reviewProviders.values();
-    const current = () => active.current === controller;
+    const current = () => active.current?.controller === controller;
 
     const worker = async () => {
       while (current()) {

@@ -91,21 +91,28 @@ describe('J2 settings components', () => {
     expect(screen.queryByRole('option', { name: 'Stale model' })).toBeNull();
   });
 
-  it('keeps the OpenAI catalog when only a judge credential changes', async () => {
+  it('keeps the OpenAI catalog and pending sync when only a judge credential changes', async () => {
+    let finishSync!: (catalog: ModelsResponse) => void;
+    vi.mocked(api.syncModels).mockReturnValueOnce(new Promise((resolve) => { finishSync = resolve; }));
     function ChangeJudge() {
       const client = useQueryClient();
       return <button onClick={() => void refreshCredentialQueries(client, 'ws-1', ['typesafe'])}>Change judge</button>;
     }
     renderSettings(<>
       <ChangeJudge />
+      <SyncModels workspaceId="ws-1" providers={['openai', 'typesafe']} />
       <ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />
     </>, 'en');
     const picker = await screen.findByRole('button', { name: 'Model name' });
     await waitFor(() => expect((picker as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole('button', { name: 'Sync all models' }));
     await user.click(screen.getByRole('button', { name: 'Change judge' }));
     await user.click(picker);
     expect(screen.getByRole('option', { name: 'Plain' })).toBeDefined();
     expect(api.getModels).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.syncModels).mock.calls[0]?.[2].aborted).toBe(false);
+    await act(async () => finishSync({ ...CATALOG, source: 'live' }));
+    expect(await screen.findByText(/Live catalog/)).toBeDefined();
   });
 
   it('blocks sync while the connected-provider roster is unavailable', async () => {
