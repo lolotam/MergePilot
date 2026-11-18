@@ -1,3 +1,4 @@
+import { refreshCredentialQueries } from './credential-queries.js';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse, SettingsUpdate } from '@mergepilot/app/contract';
 import { api, ApiClientError, type GetRunsParams, type KeyProvider } from './client.js';
@@ -55,11 +56,11 @@ export function useUpdateSettingsMutation(workspaceId: string) {
   });
 }
 
-export function useKeysQuery(workspaceId: string) {
+export function useKeysQuery(workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: ['workspaces', workspaceId, 'keys'],
     queryFn: () => api.getKeys(workspaceId),
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId) && enabled,
   });
 }
 
@@ -83,10 +84,9 @@ export function useSaveKeyMutation(workspaceId: string) {
       apiKeys && apiKeys.length > 0
         ? api.saveKeys(workspaceId, provider, apiKeys)
         : api.saveKey(workspaceId, provider, apiKey, baseUrl),
-    onSuccess: () => {
+    onSuccess: (_, { provider }) => {
       showToast(t('keySavedSuccess'), 'success');
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+      void refreshCredentialQueries(queryClient, workspaceId, [provider]);
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] });
     },
     onError: (err: Error) => {
@@ -102,9 +102,8 @@ export function useSetProviderDefaultMethodMutation(workspaceId: string) {
   return useMutation({
     mutationFn: ({ provider, method }: { provider: KeyProvider; method: 'subscription' | 'api-key' }) =>
       api.setProviderDefaultMethod(workspaceId, provider, method),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+    onSuccess: (_, { provider }) => {
+      void refreshCredentialQueries(queryClient, workspaceId, [provider]);
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
@@ -118,9 +117,8 @@ export function useDisconnectSubscriptionMutation(workspaceId: string) {
   const { t } = useI18n();
   return useMutation({
     mutationFn: (provider: KeyProvider) => api.disconnectSubscription(workspaceId, provider),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+    onSuccess: (_, provider) => {
+      void refreshCredentialQueries(queryClient, workspaceId, [provider]);
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
@@ -135,10 +133,9 @@ export function useDeleteKeyMutation(workspaceId: string) {
 
   return useMutation({
     mutationFn: (provider: KeyProvider) => api.deleteKey(workspaceId, provider),
-    onSuccess: () => {
+    onSuccess: (_, provider) => {
       showToast(t('keyDeletedSuccess'), 'success');
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+      void refreshCredentialQueries(queryClient, workspaceId, [provider]);
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] });
     },
     onError: (err: Error) => {

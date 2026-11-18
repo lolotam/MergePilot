@@ -1,4 +1,20 @@
 export const arSettings = {
+  credentialRosterError: 'تعذّر تحميل بيانات مزوّدي الخدمة.',
+  syncModelsButton: 'مزامنة كل النماذج',
+  syncModelsCancel: 'إلغاء المزامنة',
+  syncModelsEmpty: 'اربط مزوّد مراجعة لمزامنة قائمة نماذجه.',
+  syncModelsQueued: 'في الانتظار',
+  syncModelsLoading: 'جاري مزامنة القائمة…',
+  syncModelsCredentialsChanged: 'بيانات الدخول اتغيّرت. اعمل مزامنة تاني عشان تحدّث القائمة.',
+  syncModelsCancelled: 'تم الإلغاء',
+  syncModelsUnsupported: 'بيانات دخول للمُحكِّم فقط، مفيش قائمة نماذج للمراجعة.',
+  syncModelsUnavailable: 'الخادم ده مش بيوفّر المزوّد ده.',
+  syncModelsCredentialError: 'المزامنة فشلت. راجع بيانات الدخول الافتراضية أو سجّل دخول تاني.',
+  syncModelsRateError: 'المزامنة فشلت. راجع الحصة المتاحة عند المزوّد أو جرّب بعدين.',
+  syncModelsError: 'المزامنة فشلت. جرّب بعدين أو راجع إعدادات المزوّد.',
+  syncModelsLive: 'قائمة مباشرة من المزوّد · عدد النماذج {count}',
+  syncModelsBundled: 'قائمة مدمجة · عدد النماذج {count} · طريقة الدخول دي مش بتدعم جلب القائمة مباشرة',
+  syncModelsLastSuccess: 'آخر مزامنة مباشرة في الجلسة دي: {time}',
   // New Providers (J2)
   providerOpenrouter: 'OpenRouter',
   providerVercelGateway: 'Vercel AI Gateway',
@@ -25,6 +41,7 @@ export const arSettings = {
   loadModelsError: 'تعذر تحميل قائمة النماذج',
   manualModelFallback: 'إدخال يدوي',
   manualModelFallbackHint: 'يمكنك كتابة اسم النموذج يدويًا في حال تعذر جلبه تلقائيًا',
+  modelsRefreshFailed: 'تعذر تحديث قائمة النماذج. تُعرض آخر قائمة تم تحميلها.',
   noModelsFound: 'لا توجد نماذج مطابقة',
 
   // Effort options

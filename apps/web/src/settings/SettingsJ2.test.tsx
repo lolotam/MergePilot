@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { refreshCredentialQueries } from '../api/credential-queries.js';
 import userEvent from '@testing-library/user-event';
 import type { FallbackEntry } from '@mergepilot/app/contract';
-import { api, ApiClientError, type ApiProvider } from '../api/client.js';
+import { api, ApiClientError, type ApiProvider, type ModelsResponse } from '../api/client.js';
 import { EffortSelect } from './EffortSelect.js';
 import { FallbackModelsCard } from './FallbackModelsCard.js';
 import { HeavyModelCard } from './HeavyModelCard.js';
 import { MaxFindingsSelect } from './MaxFindingsSelect.js';
 import { ModelSelect } from './ModelSelect.js';
+import { useRestoreBackup } from './useBackup.js';
+import { ToastProvider } from '../components/Toast.js';
+import { SyncModels } from './SyncModels.js';
 import { ReviewSettingsCard } from './ReviewSettingsCard.js';
 import { SeveritySelect } from './SeveritySelect.js';
 import { arSettings } from '../i18n/settings-ar.js';
@@ -16,7 +21,7 @@ import { renderSettings } from './settings.fixtures.js';
 
 vi.mock('../api/client.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client.js')>();
-  return { ...actual, api: { ...actual.api, getModels: vi.fn(), testConnection: vi.fn(), testModelsUnsaved: vi.fn() } };
+  return { ...actual, api: { ...actual.api, getModels: vi.fn(), syncModels: vi.fn(), testConnection: vi.fn(), testModelsUnsaved: vi.fn(), restoreBackup: vi.fn() } };
 });
 
 const CATALOG = {
@@ -59,7 +64,127 @@ describe('J2 settings components', () => {
     renderSettings(<ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />, 'en');
     await screen.findByRole('button', { name: 'Model name' });
     await user.click(screen.getByRole('button', { name: 'Refresh list' }));
-    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true));
+    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
+  });
+
+  it('restarts a pending picker refresh without cached data after credentials change', async () => {
+    let resolveRefresh!: (catalog: ModelsResponse) => void;
+    const pending = new Promise<ModelsResponse>((resolve) => { resolveRefresh = resolve; });
+    const current = { models: [{ id: 'current-model', name: 'Current model', efforts: [] }] };
+    vi.mocked(api.getModels).mockRejectedValueOnce(new ApiClientError('no key', 'key_not_found', 404))
+      .mockReturnValueOnce(pending).mockResolvedValueOnce(current);
+    function ChangeCredential() {
+      const client = useQueryClient();
+      return <button onClick={() => void refreshCredentialQueries(client, 'ws-1', ['openai'])}>Change credential</button>;
+    }
+    renderSettings(<>
+      <ChangeCredential />
+      <ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />
+    </>, 'en');
+    await screen.findByRole('textbox', { name: 'Model name' });
+    await user.click(screen.getByRole('button', { name: 'Refresh list' }));
+    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
+    await user.click(screen.getByRole('button', { name: 'Change credential' }));
+    await user.click(await screen.findByRole('button', { name: 'Model name' }));
+    await act(async () => resolveRefresh({ models: [{ id: 'stale', name: 'Stale model', efforts: [] }] }));
+    expect(screen.getByRole('option', { name: 'Current model' })).toBeDefined();
+    expect(screen.queryByRole('option', { name: 'Stale model' })).toBeNull();
+  });
+
+  it('keeps the OpenAI catalog and pending sync when only a judge credential changes', async () => {
+    let finishSync!: (catalog: ModelsResponse) => void;
+    vi.mocked(api.syncModels).mockReturnValueOnce(new Promise((resolve) => { finishSync = resolve; }));
+    function ChangeJudge() {
+      const client = useQueryClient();
+      return <button onClick={() => void refreshCredentialQueries(client, 'ws-1', ['typesafe'])}>Change judge</button>;
+    }
+    renderSettings(<>
+      <ChangeJudge />
+      <SyncModels workspaceId="ws-1" providers={['openai', 'typesafe']} />
+      <ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />
+    </>, 'en');
+    const picker = await screen.findByRole('button', { name: 'Model name' });
+    await waitFor(() => expect((picker as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole('button', { name: 'Sync all models' }));
+    await user.click(screen.getByRole('button', { name: 'Change judge' }));
+    await user.click(picker);
+    expect(screen.getByRole('option', { name: 'Plain' })).toBeDefined();
+    expect(api.getModels).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.syncModels).mock.calls[0]?.[2].aborted).toBe(false);
+    await act(async () => finishSync({ ...CATALOG, source: 'live' }));
+    expect(await screen.findByText(/Live catalog/)).toBeDefined();
+  });
+
+  it('blocks sync while the connected-provider roster is unavailable', async () => {
+    renderSettings(<SyncModels workspaceId="ws-1" providers={['openai']} rosterUnavailable />, 'en');
+    const sync = screen.getByRole<HTMLButtonElement>('button', { name: 'Sync all models' });
+    expect(sync.disabled).toBe(true);
+    await user.click(sync);
+    expect(api.syncModels).not.toHaveBeenCalled();
+  });
+
+  it('keeps synced options when an older individual refresh resolves afterward', async () => {
+    let resolveRefresh!: (catalog: ModelsResponse) => void;
+    const pickerRefresh = new Promise<ModelsResponse>((resolve) => { resolveRefresh = resolve; });
+    vi.mocked(api.syncModels).mockResolvedValueOnce({ source: 'live', models: [{ id: 'new-model', name: 'New model', efforts: [] }] });
+    renderSettings(<>
+      <SyncModels workspaceId="ws-1" providers={['openai']} />
+      <ModelSelect workspaceId="ws-1" provider="openai" id="picker" label="Model picker" value="plain" onChange={vi.fn()} />
+    </>, 'en');
+    await screen.findByText('Plain');
+    vi.mocked(api.getModels).mockReturnValueOnce(pickerRefresh);
+    await user.click(screen.getByRole('button', { name: 'Refresh list' }));
+    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
+    await user.click(screen.getByRole('button', { name: 'Sync all models' }));
+    await screen.findByText(/Live catalog/);
+    await act(async () => resolveRefresh({ models: [{ id: 'stale', name: 'Stale model', efforts: [] }] }));
+    await user.click(screen.getByRole('button', { name: 'Model picker' }));
+    expect(screen.getByRole('option', { name: 'New model' })).toBeDefined();
+    expect(screen.queryByRole('option', { name: 'Stale model' })).toBeNull();
+  });
+
+  it('discards pre-restore catalogs and settings reads after a backup is restored', async () => {
+    let finishSync!: (catalog: ModelsResponse) => void;
+    vi.mocked(api.syncModels).mockReturnValueOnce(new Promise((resolve) => { finishSync = resolve; }));
+    vi.mocked(api.restoreBackup).mockResolvedValueOnce({
+      dryRun: false, sections: ['credentials'], settingsChanged: [], bots: 0, skills: 0, skillsMissing: [],
+      credentials: [{ provider: 'openai', last4: 'test', action: 'replace' }], keysTested: false,
+    });
+    let finishSettings!: (settings: string) => void;
+    const priorSettings = new Promise<string>((resolve) => { finishSettings = resolve; });
+    const readSettings = vi.fn().mockReturnValueOnce(priorSettings).mockResolvedValue('Settings after restore');
+    function WorkspaceSettings() {
+      const settings = useQuery({ queryKey: ['workspaces', 'ws-1', 'settings'], queryFn: readSettings, initialData: 'Cached settings' });
+      return <p>{settings.data}</p>;
+    }
+    function Restore() {
+      const restore = useRestoreBackup('ws-1');
+      return <button disabled={restore.isPending} onClick={() => restore.mutate({ file: {}, dryRun: false, sections: ['credentials'] })}>Restore</button>;
+    }
+    renderSettings(<ToastProvider>
+      <Restore />
+      <WorkspaceSettings />
+      <SyncModels workspaceId="ws-1" providers={['openai']} />
+      <ModelSelect workspaceId="ws-1" provider="openai" id="picker" label="Model picker" value="" onChange={vi.fn()} />
+    </ToastProvider>, 'en');
+    const picker = await screen.findByRole('button', { name: 'Model picker' });
+    await user.click(screen.getByRole('button', { name: 'Sync all models' }));
+    let finishCatalog!: (catalog: ModelsResponse) => void;
+    vi.mocked(api.getModels).mockReturnValue(new Promise((resolve) => { finishCatalog = resolve; }));
+    const restoreButton = screen.getByRole<HTMLButtonElement>('button', { name: 'Restore' });
+    await user.click(restoreButton);
+    await screen.findByText(/Credentials changed/);
+    await screen.findByText('Settings after restore');
+    await act(async () => finishSettings('Settings before restore'));
+    expect(screen.queryByText('Settings before restore')).toBeNull();
+    expect(restoreButton.disabled).toBe(true);
+    expect((picker as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => finishCatalog({ models: [{ id: 'restored', name: 'Restored model', efforts: [] }] }));
+    await waitFor(() => expect(restoreButton.disabled).toBe(false));
+    await act(async () => finishSync({ source: 'live', models: [{ id: 'stale', name: 'Stale model', efforts: [] }] }));
+    await user.click(picker);
+    expect(await screen.findByRole('option', { name: 'Restored model' })).toBeDefined();
+    expect(screen.queryByRole('option', { name: 'Stale model' })).toBeNull();
   });
 
   it('EffortSelect lists the model efforts, is labelled, and hides when there are none', async () => {

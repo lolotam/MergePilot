@@ -22,7 +22,7 @@ import {
 } from './memory-skills.js';
 import type { DeletedReviewSkill, NewReviewSkill, ReviewSkillChange, ReviewSkillRecord, ReviewSkillSummary } from './skill-types.js';
 import {
-  listMemoryProviderKeys, listMemoryWorkspaceProviderKeys, modifyMemoryProviderKeys, readMemoryKeyCursor,
+  listMemoryProviderKeys, listMemoryWorkspaceProviderKeys, modifyMemoryProviderKeys, readMemoryCatalogCredentialState, readMemoryKeyCursor,
   recordMemoryProviderKeyTest, writeMemoryKeyCursor,
 } from './memory-provider-keys.js';
 import {
@@ -270,9 +270,9 @@ export class MemoryStore implements AppStore {
     });
   }
 
-  async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
-    return this.credentials.get(`${workspaceId}:${provider}`) ?? null;
-  }
+  getCredential = async (workspaceId: string, provider: KeyProvider) => this.credentials.get(`${workspaceId}:${provider}`) ?? null;
+
+  readCatalogCredentialState = async (workspaceId: string, provider: KeyProvider) => readMemoryCatalogCredentialState(this, workspaceId, provider);
 
   async listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>> {
     return [...this.credentials.values()]

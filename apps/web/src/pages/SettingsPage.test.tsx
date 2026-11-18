@@ -1,14 +1,148 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { refreshCredentialQueries } from '../api/credential-queries.js';
 import { SettingsPage } from './SettingsPage.js';
-import { I18nProvider } from '../i18n/context.js';
 import { ToastProvider } from '../components/Toast.js';
-import type { KeyItem } from '../api/client.js';
+import { api, type KeyItem, type ModelsResponse } from '../api/client.js';
+import { ModelSelect } from '../settings/ModelSelect.js';
+import { SyncModels } from '../settings/SyncModels.js';
+import { renderSettings } from '../settings/settings.fixtures.js';
 import * as hooks from '../api/hooks.js';
+
+function liveResponse(): ModelsResponse {
+  return { source: 'live', models: [{ id: 'new-model', name: 'New model', efforts: [] }] };
+}
+
+function pendingCatalog() {
+  let resolve!: (value: ModelsResponse) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<ModelsResponse>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+describe('Sync models', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.syncModels).mockReset();
+  });
+
+  it('syncs unique connected providers two at a time and updates pickers only for returned catalogs', async () => {
+    const user = userEvent.setup();
+    const openai = pendingCatalog();
+    const anthropic = pendingCatalog();
+    vi.mocked(api.syncModels)
+      .mockReturnValueOnce(openai.promise)
+      .mockReturnValueOnce(anthropic.promise)
+      .mockResolvedValueOnce({ source: 'bundled', models: [] });
+    const select = vi.fn();
+    renderSettings(<>
+      <SyncModels workspaceId="ws-1" providers={['openai', 'anthropic', 'openai', 'xai', 'typesafe']} />
+      <ModelSelect workspaceId="ws-1" provider="openai" id="openai-model" label="OpenAI picker" value="saved-id" onChange={select} />
+      <ModelSelect workspaceId="ws-1" provider="anthropic" id="anthropic-model" label="Anthropic picker" value="claude-3-7-sonnet" onChange={select} />
+    </>, 'en');
+    await screen.findByText('Claude 3.7 Sonnet');
+    const button = screen.getByRole('button', { name: 'Sync all models' });
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    expect(api.syncModels).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Queued')).toBeDefined();
+    await act(async () => anthropic.reject(new Error('private upstream details')));
+    await screen.findByText(/Bundled catalog · 0 models/);
+    expect(vi.mocked(api.syncModels).mock.calls.map(([workspaceId, provider]) => [workspaceId, provider])).toEqual([
+      ['ws-1', 'openai'], ['ws-1', 'anthropic'], ['ws-1', 'xai'],
+    ]);
+    await act(async () => openai.resolve(liveResponse()));
+    expect(screen.getByText('Live catalog · 1 models returned')).toBeDefined();
+    expect(screen.getAllByText(/Last live sync this session/)).toHaveLength(1);
+    expect(screen.getByText(/Catalog sync failed/)).toBeDefined();
+    expect(screen.queryByText('private upstream details')).toBeNull();
+    expect(screen.getByText(/Judge-only credential/)).toBeDefined();
+    expect(screen.getByText('Claude 3.7 Sonnet')).toBeDefined();
+    expect(screen.getByText('saved-id')).toBeDefined();
+    await user.click(screen.getByRole('button', { name: 'OpenAI picker' }));
+    expect(screen.getByRole('option', { name: 'New model' })).toBeDefined();
+    expect(select).not.toHaveBeenCalled();
+    expect(api.getModels).toHaveBeenCalledTimes(2);
+    expect(api.testConnection).not.toHaveBeenCalled();
+  });
+
+  it('discards cancellations and late results after switching workspaces or unmounting', async () => {
+    const user = userEvent.setup();
+    const cancelled = pendingCatalog();
+    const switched = pendingCatalog();
+    const unmounted = pendingCatalog();
+    vi.mocked(api.syncModels)
+      .mockReturnValueOnce(cancelled.promise)
+      .mockReturnValueOnce(switched.promise)
+      .mockReturnValueOnce(unmounted.promise);
+    const control = (workspaceId: string) => <SyncModels key={workspaceId} workspaceId={workspaceId} providers={['openai']} />;
+    const page = renderSettings(control('ws-1'), 'en');
+    const clickSync = () => user.click(screen.getByRole('button', { name: 'Sync all models' }));
+    await clickSync();
+    await user.click(screen.getByRole('button', { name: 'Cancel sync' }));
+    expect(screen.getByText('Cancelled')).toBeDefined();
+    await clickSync();
+    page.rerender(control('ws-2'));
+    await clickSync();
+    await act(async () => {
+      cancelled.resolve(liveResponse());
+      switched.resolve(liveResponse());
+    });
+    expect(screen.getByText('Syncing catalog…')).toBeDefined();
+    expect(screen.queryByText(/Last live sync/)).toBeNull();
+    page.rerender(<></>);
+    await act(async () => unmounted.resolve(liveResponse()));
+    expect(vi.mocked(api.syncModels).mock.calls.map(([, , signal]) => signal.aborted)).toEqual([true, true, true]);
+    for (const workspaceId of ['ws-1', 'ws-2']) {
+      page.rerender(<ModelSelect key={workspaceId} workspaceId={workspaceId} provider="openai" id="picker" label="Model picker" value="claude-3-7-sonnet" onChange={vi.fn()} />);
+      await screen.findByText('Claude 3.7 Sonnet');
+      await user.click(screen.getByRole('button', { name: 'Model picker' }));
+      expect(screen.getByRole('option', { name: 'Claude 3.7 Sonnet' })).toBeDefined();
+      expect(screen.queryByRole('option', { name: 'New model' })).toBeNull();
+    }
+  });
+
+  it('keeps the new picker options when an older sync finishes after credentials change', async () => {
+    const user = userEvent.setup();
+    const pendingKeys = new Promise<{ keys: [] }>(() => {});
+    const previousSync = pendingCatalog();
+    vi.mocked(api.syncModels).mockReturnValueOnce(previousSync.promise);
+    function CredentialChange() {
+      const client = useQueryClient();
+      useQuery({ queryKey: ['workspaces', 'ws-1', 'keys'], queryFn: () => pendingKeys, initialData: { keys: [] } });
+      return <button type="button" onClick={() => void refreshCredentialQueries(client, 'ws-1', ['openai'])}>Change credentials</button>;
+    }
+    renderSettings(<>
+      <CredentialChange />
+      <SyncModels workspaceId="ws-1" providers={['openai']} />
+      <ModelSelect workspaceId="ws-1" provider="openai" id="picker" label="Model picker" value="" onChange={vi.fn()} />
+    </>, 'en');
+    const picker = screen.getByRole('button', { name: 'Model picker' }) as HTMLButtonElement;
+    await waitFor(() => expect(picker.disabled).toBe(false));
+    await user.click(screen.getByRole('button', { name: 'Change credentials' }));
+    await user.click(screen.getByRole('button', { name: 'Sync all models' }));
+    vi.mocked(api.getModels).mockResolvedValueOnce({ models: [{ id: 'current-account', name: 'Current account model', efforts: [] }] });
+    await user.click(screen.getByRole('button', { name: 'Change credentials' }));
+    await act(async () => previousSync.resolve(liveResponse()));
+    expect(screen.getByText(/Credentials changed/)).toBeDefined();
+    expect(screen.queryByText(/Last live sync/)).toBeNull();
+    await user.click(picker);
+    expect(await screen.findByRole('option', { name: 'Current account model' })).toBeDefined();
+    expect(screen.queryByRole('option', { name: 'New model' })).toBeNull();
+  });
+
+  it('makes no request with no connected review providers', () => {
+    renderSettings(<SyncModels workspaceId="ws-1" providers={[]} />, 'en');
+    expect((screen.getByRole('button', { name: 'Sync all models' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Connect a review provider/)).toBeDefined();
+    expect(api.syncModels).not.toHaveBeenCalled();
+  });
+});
 
 vi.mock('../api/hooks.js');
 vi.mock('../api/client.js', async (importOriginal) => {
@@ -17,6 +151,7 @@ vi.mock('../api/client.js', async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
+      syncModels: vi.fn(),
       getModels: vi.fn().mockResolvedValue({
         models: [
           { id: 'claude-3-7-sonnet', name: 'Claude 3.7 Sonnet', efforts: ['low', 'medium', 'high'] },
@@ -119,33 +254,16 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     } as unknown as ReturnType<typeof hooks.useRunReposQuery>);
   };
 
-  const renderComponent = () =>
-    render(
-      React.createElement(
-        QueryClientProvider,
-        { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-        React.createElement(
-        I18nProvider,
-        { initialLanguage: 'ar' },
-        React.createElement(
-          ToastProvider,
-          null,
-          React.createElement(
-            MemoryRouter,
-            { initialEntries: ['/w/ws-1/settings'] },
-            React.createElement(
-              Routes,
-              null,
-              React.createElement(Route, {
-                path: '/w/:workspaceId/settings',
-                element: React.createElement(SettingsPage, null),
-              }),
-            ),
-          ),
-        ),
-      ),
-      ),
-    );
+  const renderComponent = () => renderSettings(
+    <ToastProvider>
+      <MemoryRouter initialEntries={['/w/ws-1/settings']}>
+        <Routes>
+          <Route path="/w/:workspaceId/settings" element={<SettingsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>,
+    'ar',
+  );
 
   it('validates settings form: model required and budget must be positive', async () => {
     const user = userEvent.setup();
@@ -179,7 +297,11 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
 
   it('enforces member read-only mode', () => {
     setupMocks({ role: 'member' });
+    vi.mocked(hooks.useKeysQuery).mockReturnValue({ isLoading: false, isError: true } as ReturnType<typeof hooks.useKeysQuery>);
     renderComponent();
+    expect(hooks.useKeysQuery).toHaveBeenLastCalledWith('ws-1', false);
+    expect(screen.queryByText('تعذّر تحميل بيانات مزوّدي الخدمة.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'مزامنة كل النماذج' })).toBeNull();
 
     // Member banner should be visible
     expect(screen.getByText(/أنت تتصفح الإعدادات كعضو فقط/i)).toBeDefined();
@@ -196,6 +318,13 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     expect(screen.queryByRole('button', { name: /إضافة بيانات دخول/i })).toBeNull();
   });
 
+  it('offers model sync to an admin with connected review credentials', () => {
+    setupMocks();
+    renderComponent();
+    expect((screen.getByRole('button', { name: 'مزامنة كل النماذج' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(hooks.useKeysQuery).toHaveBeenLastCalledWith('ws-1', true);
+  });
+
   it('shows the rename card to admin/owner and the danger zone to the owner only', () => {
     setupMocks({ role: 'admin' });
     const { unmount } = renderComponent();
@@ -210,7 +339,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     expect(screen.getByRole('button', { name: /حذف مساحة العمل/i })).toBeDefined();
   });
 
-  it('shows the default-method selector only when subscription and API keys coexist', () => {
+  it('keeps the default-method selector separate from testing an API key slot', async () => {
     setupMocks({
       role: 'admin',
       keys: [
@@ -235,6 +364,8 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     });
     renderComponent();
     expect(screen.getAllByLabelText(/الطريقة الافتراضية/i)).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: /openai, #1, .*4242/ }));
+    expect(api.testConnection).toHaveBeenCalledWith('ws-1', 'openai', { keyId: 'k1' });
   });
 
   it('asks for a new sign-in when the provider refused the subscription refresh', () => {

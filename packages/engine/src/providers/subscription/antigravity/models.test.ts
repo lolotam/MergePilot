@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ANTIGRAVITY_MODELS_TTL_MS, listAntigravityModels, parseAvailableModels, resetAntigravityModelCache, staticAntigravityModels } from './models.js';
 
+import { jsonResponse, mockFetch, textResponse } from '../../fetch-mock.fixtures.js';
+
 const credential = { access: ['fake', 'access'].join('-'), projectId: 'project-1' };
 
 beforeEach(() => resetAntigravityModelCache());
@@ -66,4 +68,96 @@ describe('listAntigravityModels', () => {
     const other = { ...credential, projectId: 'project-2' };
     expect(await listAntigravityModels(other, { fetch: fetchMock, now: () => now })).toEqual(staticAntigravityModels());
   });
+});
+
+it('promotes a strict result to last good only after the caller accepts it', async () => {
+  const { fetch, calls } = mockFetch(
+    jsonResponse({ models: { 'gemini-3.1-pro': {} } }),
+    jsonResponse({ models: { 'models/gemini-3.8-flash': {} } }),
+    jsonResponse({ models: {} }),
+    () => textResponse('denied', 403),
+  );
+  const commits: Array<() => void> = [];
+  const options = { fetch, now: () => 100, strictRefresh: true, deferCacheWrite: (commit: () => void) => commits.push(commit) };
+  expect(await listAntigravityModels(credential, { fetch, now: options.now })).toMatchObject([{ id: 'gemini-3.1-pro' }]);
+  expect(await listAntigravityModels(credential, options)).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  expect(await listAntigravityModels(credential, { fetch, now: options.now })).toMatchObject([{ id: 'gemini-3.1-pro' }]);
+  expect(commits).toHaveLength(1);
+  commits[0]?.();
+  expect(await listAntigravityModels(credential, { fetch, now: options.now })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  expect(await listAntigravityModels(credential, options)).toEqual([]);
+  expect(commits).toHaveLength(1);
+  const expired = () => 100 + ANTIGRAVITY_MODELS_TTL_MS + 1;
+  expect(await listAntigravityModels(credential, { fetch, now: expired })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  expect(calls).toHaveLength(4);
+});
+
+it('keeps the latest-started accepted strict result for a shared project', async () => {
+  const older = Promise.withResolvers<Response>();
+  const { fetch, calls } = mockFetch(
+    () => older.promise,
+    jsonResponse({ models: { 'gemini-3.8-flash': {} } }),
+  );
+  const commits: Array<() => void> = [];
+  const options = { fetch, strictRefresh: true, deferCacheWrite: (commit: () => void) => commits.push(commit) };
+  const pending = listAntigravityModels(credential, options);
+  await listAntigravityModels(credential, options);
+  commits[0]?.();
+  older.resolve(jsonResponse({ models: { 'gemini-3.1-pro': {} } }));
+  await pending;
+  expect(commits).toHaveLength(2);
+  commits[1]?.();
+  expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  expect(calls).toHaveLength(2);
+});
+
+it('publishes an accepted strict read even when a later ordinary read finishes first', async () => {
+  const strict = Promise.withResolvers<Response>();
+  const { fetch } = mockFetch(() => strict.promise, jsonResponse({ models: { 'gemini-3.1-pro': {} } }));
+  const commits: Array<() => void> = [];
+  const pending = listAntigravityModels(credential, {
+    fetch, strictRefresh: true, deferCacheWrite: (commit) => commits.push(commit),
+  });
+  expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.1-pro' }]);
+  strict.resolve(jsonResponse({ models: { 'gemini-3.8-flash': {} } }));
+  await pending;
+  expect(commits).toHaveLength(1);
+  commits[0]?.();
+  expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+});
+
+it.each(['refresh', 'evict-other', 'evict-target'] as const)('keeps catalog ordering under cache pressure: %s', async (operation) => {
+  const stale = Promise.withResolvers<Response>();
+  const pending = listAntigravityModels(credential, { now: () => 0, fetch: () => stale.promise });
+  const newer = mockFetch(jsonResponse({ models: { 'gemini-3.8-flash': {} } })).fetch;
+  await listAntigravityModels(credential, { now: () => 1, fetch: newer });
+  for (let i = 0; i < 499; i++) {
+    await listAntigravityModels({ ...credential, projectId: 'fill-' + i }, { now: () => 1, fetch: newer });
+  }
+  let acceptStrict: (() => void) | undefined;
+  if (operation === 'evict-other') {
+    // Keep the target recently used without refreshing its TTL or writing a new catalog.
+    await listAntigravityModels(credential, { now: () => 2, fetch: newer });
+    await listAntigravityModels(credential, {
+      now: () => 2, strictRefresh: true,
+      fetch: mockFetch(jsonResponse({ models: { 'claude-opus-4-6': {} } })).fetch,
+      deferCacheWrite: (commit) => { acceptStrict = commit; },
+    });
+  }
+  const afterExpiry = () => ANTIGRAVITY_MODELS_TTL_MS + 2;
+  const touched = { ...credential, projectId: operation === 'refresh' ? 'fill-0' : 'new-project' };
+  await listAntigravityModels(touched, { now: afterExpiry, fetch: newer });
+  acceptStrict?.();
+  stale.resolve(jsonResponse({ models: { 'gemini-3.1-pro': {} } }));
+  await pending;
+  const refused = mockFetch(() => textResponse('denied', 403)).fetch;
+  const result = await listAntigravityModels(credential, { now: afterExpiry, fetch: refused });
+  if (operation === 'evict-target') expect(result).toEqual(staticAntigravityModels());
+  else expect(result).toMatchObject([{ id: operation === 'evict-other' ? 'claude-opus-4-6' : 'gemini-3.8-flash' }]);
+  if (operation === 'evict-other') {
+    const oldest = { ...credential, projectId: 'fill-0' };
+    const retained = { ...credential, projectId: 'fill-1' };
+    expect(await listAntigravityModels(oldest, { now: afterExpiry, fetch: refused })).toEqual(staticAntigravityModels());
+    expect(await listAntigravityModels(retained, { now: afterExpiry, fetch: refused })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  }
 });

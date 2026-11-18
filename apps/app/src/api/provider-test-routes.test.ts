@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SafeFetchTimeoutError } from '../core/safe-fetch.js';
 import { createProviderHarness, keyFor, type ProviderHarness } from './provider-routes.fixtures.js';
 
 vi.mock('@mergepilot/engine', async (importOriginal) => {
@@ -6,7 +7,7 @@ vi.mock('@mergepilot/engine', async (importOriginal) => {
   return { ...actual, listModels: vi.fn(actual.listModels), testConnection: vi.fn(actual.testConnection) };
 });
 
-const { listModels, testConnection } = await import('@mergepilot/engine');
+const { listModels, testConnection, LlmFailure } = await import('@mergepilot/engine');
 
 describe('connection test route (J2)', { timeout: 25000 }, () => {
   let h: ProviderHarness;
@@ -67,8 +68,10 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     await test('openai', h.adminCookie());
     expect(vi.mocked(testConnection).mock.calls[0]?.[2]).toBe('gpt-5-mini');
 
+    vi.mocked(listModels).mockResolvedValueOnce([{ id: 'account-model', name: 'Account model', efforts: [] }]);
     await test('openrouter', h.adminCookie(), { apiKey: keyFor('or') });
-    expect(vi.mocked(testConnection).mock.calls[1]?.[2]).not.toBe('');
+    expect(vi.mocked(testConnection).mock.calls[1]?.[2]).toBe('account-model');
+    expect(vi.mocked(listModels).mock.lastCall?.[2]).toMatchObject({ strictRefresh: true });
 
     const custom = await test('custom', h.adminCookie(), { apiKey: keyFor('c'), baseUrl: 'https://llm.example.com/v1' });
     expect([custom.statusCode, custom.json().error.code]).toEqual([400, 'model_required']);
@@ -99,6 +102,101 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('glm-4-free');
   });
 
+  it.each([
+    { failure: 'INVALID_CREDENTIAL', code: 'auth' },
+    { failure: 'QUOTA', code: 'quota' },
+    { failure: 'RATE_LIMIT', code: 'rate-limit' },
+  ] as const)('does not change key health from an OpenRouter catalog failure ($failure)', async ({ failure, code }) => {
+    const provider = 'openrouter';
+    const key = await h.credentials.appendProviderKey({
+      workspaceId: 'ws-1', provider, apiKey: keyFor('or'), userId: 'u-admin',
+    });
+    const previousTest = new Date('2026-01-01T00:00:00Z');
+    await h.credentials.recordKeyTest('ws-1', provider, key.id, 'valid', previousTest);
+    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: failure, provider, message: 'fixture failure' }));
+    const result = await test(provider, h.adminCookie(), { keyId: key.id });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ ok: false, code });
+    expect(result.json()).not.toHaveProperty('quotaStatus');
+    expect(testConnection).not.toHaveBeenCalled();
+    const [stored] = await h.store.listProviderKeys('ws-1', provider);
+    expect(stored?.lastTestStatus).toBe('valid');
+    expect(stored?.lastTestedAt).toEqual(previousTest);
+  });
+
+  it('returns the inference result when recording the stored key status fails', async () => {
+    const provider = 'openrouter';
+    const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
+    vi.mocked(testConnection).mockResolvedValueOnce({ ok: false, code: 'auth', ms: 1, message: 'fixture inference failure' });
+    const write = vi.spyOn(h.credentials, 'recordKeyTest').mockRejectedValueOnce(new Error('fixture storage error'));
+    const response = await test(provider, h.adminCookie(), { keyId: slot.id, model: 'fixture' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: false, code: 'auth' });
+    expect(response.json()).not.toHaveProperty('quotaStatus');
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(testConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects from the tested slot catalog and still honors an explicit model', async () => {
+    const provider = 'openrouter';
+    const headers = { cookie: h.adminCookie() };
+    const saved = await h.app.inject({
+      method: 'PUT', url: '/api/workspaces/ws-1/settings', headers,
+      payload: { provider, model: 'openai/workspace-default', language: 'en' },
+    });
+    expect(saved.statusCode).toBe(200);
+    const defaultSlot = await h.credentials.appendProviderKey({
+      workspaceId: 'ws-1', provider, apiKey: keyFor('default'), userId: 'u-admin',
+    });
+    const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
+    const model = 'openai/account:free';
+    vi.mocked(listModels).mockResolvedValueOnce([{ id: model, name: 'Account model', efforts: [] }]);
+    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model, reply: 'OK' });
+
+    expect((await test(provider, h.adminCookie(), { keyId: slot.id })).statusCode).toBe(200);
+    expect(listModels).toHaveBeenCalledWith(provider, keyFor('slot'), expect.objectContaining({ strictRefresh: true }));
+    expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), model, expect.anything());
+    const stored = await h.store.listProviderKeys('ws-1', provider);
+    expect(stored.find(({ id }) => id === slot.id)?.lastTestStatus).toBe('valid');
+    expect(stored.find(({ id }) => id === defaultSlot.id)?.lastTestStatus).toBeNull();
+
+    await test(provider, h.adminCookie(), { keyId: slot.id, model: 'openai/explicit' });
+    expect(listModels).toHaveBeenCalledTimes(1);
+    expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), 'openai/explicit', expect.anything());
+  });
+
+  it.each(['empty', 'server', 'denied'] as const)('uses a configured OpenAI model for a slot if discovery is %s', async (discovery) => {
+    const provider = 'openai';
+    const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
+    const model = 'gpt-5-mini';
+    const settings = await h.app.inject({
+      method: 'PUT', url: '/api/workspaces/ws-1/settings', headers: { cookie: h.adminCookie() },
+      payload: { provider, model, language: 'en' },
+    });
+    expect(settings.statusCode).toBe(200);
+    if (discovery === 'empty') vi.mocked(listModels).mockResolvedValueOnce([]);
+    else {
+      const code = discovery === 'denied' ? 'INVALID_CREDENTIAL' : 'SERVER';
+      vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code, provider, message: 'fixture failure' }));
+    }
+    vi.mocked(testConnection).mockResolvedValueOnce({ ok: true, ms: 1, model, reply: 'OK' });
+    const response = await test(provider, h.adminCookie(), { keyId: slot.id });
+    expect(response.json()).toMatchObject({ ok: true, model });
+    expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), model, expect.anything());
+  });
+
+  it('keeps the key status unchanged when the slot has no catalog model to test', async () => {
+    const provider = 'gemini';
+    const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
+    vi.mocked(listModels).mockResolvedValueOnce([]);
+    const response = await test(provider, h.adminCookie(), { keyId: slot.id });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('model_required');
+    expect(testConnection).not.toHaveBeenCalled();
+    const [stored] = await h.store.listProviderKeys('ws-1', provider);
+    expect(stored?.lastTestStatus).toBeNull();
+  });
+
   it('never caches an unsaved key catalog, and skips a retired default the provider no longer lists', async () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model: 'x', reply: 'OK' });
     vi.mocked(listModels).mockResolvedValue([{ id: 'mimo-v2.6', name: 'MiMo v2.6', efforts: [] }]);
@@ -108,6 +206,42 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     await test('xiaomi', h.adminCookie(), { apiKey: keyFor('xb') });
     // Each unsaved key lists its own models: nothing was served from the workspace cache.
     expect(vi.mocked(listModels)).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a connection test catalog out of subsequent picker responses', async () => {
+    const testModels = [{ id: 'test-account-model', name: 'Test model', efforts: [] }];
+    const pickerModels = [{ id: 'picker-account-model', name: 'Picker model', efforts: [] }];
+    vi.mocked(listModels).mockResolvedValueOnce(pickerModels).mockResolvedValueOnce(testModels);
+    vi.mocked(testConnection).mockResolvedValueOnce({ ok: true, ms: 1, model: 'test-account-model', reply: 'OK' });
+    await saveOpenAi();
+    const getPicker = () => h.app.inject({
+      method: 'GET', url: '/api/workspaces/ws-1/providers/openai/models', headers: { cookie: h.memberCookie() },
+    });
+    expect((await getPicker()).json()).toEqual({ models: pickerModels });
+    expect((await test('openai', h.adminCookie())).statusCode).toBe(200);
+    expect(vi.mocked(testConnection).mock.lastCall?.[2]).toBe('test-account-model');
+    expect((await getPicker()).json()).toEqual({ models: pickerModels });
+  });
+
+  it('returns a classified timeout without testing a model when listing times out', async () => {
+    await saveOpenAi();
+    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({
+      code: 'TIMEOUT', provider: 'openai', message: 'fixture timeout',
+    }));
+    const result = await test('openai', h.adminCookie());
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ ok: false, code: 'network', message: 'Provider model catalog did not answer in time' });
+    expect(testConnection).not.toHaveBeenCalled();
+  });
+
+  it('reports guarded custom catalog timeouts without falling back to a model', async () => {
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels);
+    customFetch.mockRejectedValueOnce(new SafeFetchTimeoutError('fixture idle timeout'));
+    const result = await test('custom', h.adminCookie(), { apiKey: keyFor('c'), baseUrl: 'https://llm.example.com/v1' });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ ok: false, code: 'network', message: 'Provider model catalog did not answer in time' });
+    expect(testConnection).not.toHaveBeenCalled();
   });
 
   it('falls back to the registry default when listing models fails', async () => {

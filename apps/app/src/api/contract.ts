@@ -212,6 +212,8 @@ export const CatalogModelSchema = z.object({
 
 export const ModelsResponseSchema = z.object({
   models: z.array(CatalogModelSchema),
+  /** Present on explicit admin sync responses. */
+  source: z.enum(['live', 'bundled']).optional(),
 });
 export type ModelsResponse = z.infer<typeof ModelsResponseSchema>;
 

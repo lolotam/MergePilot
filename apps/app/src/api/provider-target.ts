@@ -2,7 +2,7 @@ import { SUBSCRIPTION_PREFIX, type ApiProviderId, type FetchLike } from '@mergep
 import { createSafeFetch, DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { AppStore, KeyProvider } from '../core/types.js';
-import { isKeyListProvider } from '../credentials/multi-key.js';
+import { isDualMethodProvider, isKeyListProvider } from '../credentials/multi-key.js';
 import type { CredentialService } from '../credentials/service.js';
 
 /**
@@ -12,6 +12,7 @@ import type { CredentialService } from '../credentials/service.js';
  */
 export interface ProviderTarget {
   apiKey: string;
+  slotId?: string;
   baseUrl?: string | undefined;
   fetch?: FetchLike | undefined;
 }
@@ -65,12 +66,15 @@ export async function storedTarget(
   let apiKey: string;
   try {
     const effective = await deps.credentials.getEffectiveAuthMethod(workspaceId, provider as KeyProvider);
-    if (effective === 'api-key' && isKeyListProvider(provider)) {
-      const roster = await deps.credentials.resolveKeyRoster(workspaceId, provider as KeyProvider);
-      const start = roster?.startIndex ?? 0;
-      const secret = roster?.secrets[start];
-      if (!secret) return fail(404, 'key_not_found', `No API key configured for provider "${provider}"`);
-      apiKey = secret.reveal();
+    if (isKeyListProvider(provider) && (!isDualMethodProvider(provider) || effective === 'api-key')) {
+      const state = await deps.store.readCatalogCredentialState(workspaceId, provider as KeyProvider);
+      const slotId = state?.slots[state.cursor]?.id;
+      if (slotId) {
+        const secret = await deps.credentials.readStoredKey(workspaceId, provider, slotId);
+        if (!secret) return fail(404, 'key_not_found', 'Stored API key was not found');
+        return { ok: true, target: { apiKey: secret.reveal(), slotId } };
+      }
+      apiKey = (await deps.credentials.resolve(workspaceId, provider)).reveal();
     } else {
       apiKey = (await deps.credentials.resolve(workspaceId, provider)).reveal();
     }

@@ -206,6 +206,14 @@ export interface ProviderKeyChange {
   authPreference?: ProviderAuthMethod | null | undefined;
 }
 
+/** Metadata for the catalog cache, read in one snapshot without credential values. */
+export interface CatalogCredentialState {
+  parent: Pick<StoredCredential, 'id' | 'createdAt' | 'baseUrl' | 'signInRequiredAt'>;
+  slots: Array<Pick<StoredProviderKey, 'id' | 'position' | 'createdAt'>>;
+  cursor: number;
+  preference: string | null;
+}
+
 /** ADR-0027: selectable default for dual-method providers. */
 export type ProviderAuthMethod = 'subscription' | 'api-key';
 
@@ -401,6 +409,7 @@ export interface AppStore extends RunMaintenanceStore, ModelPriceStore, Reviewer
   /** Serialized across processes in Postgres, including login, deletion and OAuth refresh. Null deletes. */
   modifyCredential(workspaceId: string, provider: KeyProvider, change: (current: StoredCredential | null) => Promise<StoredCredential | null>, signal?: AbortSignal): Promise<StoredCredential | null>;
   getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null>;
+  readCatalogCredentialState(workspaceId: string, provider: KeyProvider): Promise<CatalogCredentialState | null>;
   listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>>;
   deleteCredential(workspaceId: string, provider: KeyProvider): Promise<void>;
 

@@ -26,6 +26,22 @@ If Google asks you to verify the account, or reports it ineligible or suspended,
 
 Each workspace has one active credential per provider, except where ADR-0026 and ADR-0027 say otherwise. Gemini, OpenRouter and OpenCode Zen store an ordered list of up to 20 API keys (ADR-0026). OpenAI, Anthropic and xAI may keep a consumer subscription and up to 20 API keys together, with a stored default method (ADR-0027). Reviews start on the effective default; when both methods exist, quota or rate limit on the default may switch to the other method on the same provider and model (disclosed in the GitHub summary and run record). Primary, heavy-duty, configured fallbacks, and reviewer-panel bots build the same dual-method chain when both methods are connected. Switching methods does not automatically change the selected model; API and subscription model lists can differ.
 
+## Sync model catalogs
+
+Workspace admins and owners can choose **Sync all models** under **Settings → Provider credentials**.
+Each connected review provider is listed once using its effective default credential. Results distinguish
+live catalogs from the bundled OpenAI, Anthropic, and xAI subscription lists. Google Antigravity uses its
+existing model-list endpoint when available on the server. Typesafe is judge-only and has no review catalog.
+If a paginated catalog cannot finish within the request limits, sync reports an error and keeps the previous list.
+Catalog reads check one shared credential snapshot at a time. An in-flight listing is checked again before publication.
+A credential change committed after that final read takes effect on subsequent requests. The check does not hold a database lock across the provider request.
+The catalog cache and the protection of a synced catalog from a later ordinary picker refresh live in the web process, like pending sign-ins. With several web replicas, route `/api/workspaces/*/providers/*`, `/api/workspaces/*/credentials/*` and `/api/workspaces/*/keys/*` to one replica per workspace (sticky routing); otherwise an ordinary refresh served by another replica can replace a synced list until the next sync. Credential checks and saved credentials stay shared through Postgres.
+
+Successful results populate the workspace's model pickers. Failed requests leave the last known list
+available. The last live sync time is shown per provider while the workspace settings page stays open.
+Sync lists models without running inference or testing access. To use a returned model, select it and
+save the bot settings through the existing workspace controls.
+
 ## Storage and refresh
 
 Access tokens, refresh tokens, expiry, and provider-specific account data are stored together in a versioned envelope inside the existing vault-encrypted credential column. Dashboard responses expose only the authentication method and normal credential metadata. Individual token values are included in review redaction. No provider CLI or agent tools run in subscription mode.

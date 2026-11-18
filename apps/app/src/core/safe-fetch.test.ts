@@ -30,15 +30,19 @@ interface Captured {
 function fakeRequest(
   status: number,
   headers: Record<string, string>,
-  body: string | Buffer[] | null,
+  body: string | Buffer[] | Readable | null,
   captured: Captured[],
+  includeResponseCause = true,
 ): RequestFn {
   return ((url: URL, options: Captured['options'], onResponse: (res: IncomingMessage) => void) => {
     const entry: Captured = { url, options, written: [] };
     captured.push(entry);
     const req = new EventEmitter() as unknown as ClientRequest;
     const destroy = (err?: Error) => {
-      queueMicrotask(() => req.emit('error', err ?? new Error('destroyed')));
+      queueMicrotask(() => {
+        req.emit('error', err ?? new Error('destroyed'));
+        if (body instanceof Readable) body.destroy(new Error('response reset', includeResponseCause ? { cause: err } : undefined));
+      });
       return req;
     };
     options.signal?.addEventListener('abort', () => destroy(Object.assign(new Error('aborted'), { name: 'AbortError' })));
@@ -51,8 +55,8 @@ function fakeRequest(
       destroy,
       end: () => {
         if (body === null) return;
-        const chunks = typeof body === 'string' ? [Buffer.from(body)] : body;
-        const res = Readable.from(chunks) as unknown as IncomingMessage;
+        const source = typeof body === 'string' ? [Buffer.from(body)] : body;
+        const res = (source instanceof Readable ? source : Readable.from(source)) as IncomingMessage;
         Object.assign(res, { statusCode: status, statusMessage: '', headers });
         onResponse(res);
       },
@@ -122,7 +126,17 @@ describe('createSafeFetch (custom base URL, ADR-0010)', () => {
     const pending = safeFetch('https://llm.example.com/v1/models');
     await vi.waitFor(() => expect(captured[0]?.idle).toBeDefined());
     captured[0]?.idle?.();
-    await expect(pending).rejects.toThrow('no data from the server');
+    await expect(pending).rejects.toMatchObject({ name: 'TimeoutError', message: 'no data from the server for 5 ms' });
+  });
+
+  it.each([true, false])('preserves an idle body timeout (response has cause: %s)', async (includeCause) => {
+    const captured: Captured[] = [];
+    const body = new Readable({ read() {} });
+    const guarded = createSafeFetch({ lookup: publicLookup, request: fakeRequest(200, {}, body, captured, includeCause) });
+    const response = await guarded('https://llm.example.com/v1/models');
+    const pending = response.json();
+    captured[0]?.idle?.();
+    await expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
   });
 
   it('honours the caller signal combined with its own limits', async () => {

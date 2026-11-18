@@ -4,9 +4,10 @@
  * and with none a static list is returned, so the model picker still opens; a real access problem
  * then shows on the connection test or the review as an `LlmFailure`.
  */
-import { sortUnique, type CatalogModel } from '../../catalog-types.js';
+import { invalidCatalog, sortUnique, validModelId, type CatalogModel } from '../../catalog-types.js';
 import { FALLBACK_EFFORTS } from '../../effort.js';
 import { antigravityHeaders } from './config.js';
+import { antigravityFailure } from './errors.js';
 import { discardBody, fetchWithHosts, readJson, type FetchFn } from './transport.js';
 
 export const ANTIGRAVITY_MODELS_TTL_MS = 4 * 60 * 60 * 1000;
@@ -41,6 +42,19 @@ function catalogEntry(id: string, name?: unknown, contextWindow?: unknown): Cata
   };
 }
 
+function availableModelId(item: unknown): string | undefined {
+  if (!item || typeof item !== 'object') return undefined;
+  const { id, model, name } = item as Record<string, unknown>;
+  return [id, model, name].find(validModelId);
+}
+
+function isValidModelList(models: unknown): boolean {
+  if (Array.isArray(models)) return models.every((item) => availableModelId(item) !== undefined);
+  if (!models || typeof models !== 'object') return false;
+  return Object.entries(models).every(([id, details]) =>
+    validModelId(id) && details !== null && typeof details === 'object' && !Array.isArray(details));
+}
+
 /** `models` is a map keyed by id in the answers seen so far; an array of entries is accepted too. */
 export function parseAvailableModels(body: unknown): CatalogModel[] {
   const models = body && typeof body === 'object' ? (body as { models?: unknown }).models : undefined;
@@ -49,11 +63,11 @@ export function parseAvailableModels(body: unknown): CatalogModel[] {
     for (const item of models) {
       if (!item || typeof item !== 'object') continue;
       const record = item as Record<string, unknown>;
-      const id = [record.id, record.model, record.name].find((value): value is string => typeof value === 'string');
+      const id = availableModelId(record);
       if (id) entries.push([id.replace(/^models\//, ''), record]);
     }
   } else if (models && typeof models === 'object') {
-    for (const [id, value] of Object.entries(models)) entries.push([id, value && typeof value === 'object' ? (value as Record<string, unknown>) : {}]);
+    for (const [id, value] of Object.entries(models)) entries.push([id.replace(/^models\//, ''), value && typeof value === 'object' ? (value as Record<string, unknown>) : {}]);
   }
   return sortUnique(entries
     .filter(([id]) => CHAT_MODEL.test(id) && !NOT_CHAT.test(id))
@@ -64,26 +78,35 @@ export function staticAntigravityModels(): CatalogModel[] {
   return sortUnique(ANTIGRAVITY_STATIC_MODELS.map((id) => catalogEntry(id)));
 }
 
-const cache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
-const lastGood = new Map<string, CatalogModel[]>();
+const cache = new Map<string, { expiresAt: number; models: CatalogModel[]; strictSequence: number; lineage: object }>();
+let sequence = 0;
+let eviction = 0;
 
 /** Test helper. */
 export function resetAntigravityModelCache(): void {
   cache.clear();
-  lastGood.clear();
+  eviction++;
 }
 
-function remember(projectId: string, models: CatalogModel[], now: number): void {
-  if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
-  if (lastGood.size >= CACHE_MAX_ENTRIES) lastGood.clear();
-  cache.set(projectId, { expiresAt: now + ANTIGRAVITY_MODELS_TTL_MS, models });
-  lastGood.set(projectId, models);
+function remember(projectId: string, models: CatalogModel[], now: number, strictSequence: number): void {
+  const lineage = cache.get(projectId)?.lineage ?? {};
+  cache.delete(projectId);
+  if (cache.size >= CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) {
+      cache.delete(oldest.value);
+      eviction++;
+    }
+  }
+  cache.set(projectId, { expiresAt: now + ANTIGRAVITY_MODELS_TTL_MS, models, strictSequence, lineage });
 }
 
 export interface ListAntigravityOptions {
   fetch?: FetchFn;
   signal?: AbortSignal;
   now?: () => number;
+  strictRefresh?: boolean;
+  deferCacheWrite?: (commit: () => void) => void;
 }
 
 export async function listAntigravityModels(
@@ -93,16 +116,36 @@ export async function listAntigravityModels(
   const projectId = typeof credential.projectId === 'string' ? credential.projectId : '';
   const now = (options.now ?? Date.now)();
   const cached = cache.get(projectId);
-  if (projectId && cached && cached.expiresAt > now) return cached.models;
+  if (!options.strictRefresh && projectId && cached && cached.expiresAt > now) {
+    cache.delete(projectId);
+    cache.set(projectId, cached);
+    return cached.models;
+  }
+  const readSequence = ++sequence;
+  const readEviction = eviction;
   let models: CatalogModel[] | undefined;
   try {
     models = await fetchModels(credential.access, projectId, options);
   } catch (error) {
-    if (options.signal?.aborted) throw error;
+    if (options.strictRefresh || options.signal?.aborted) throw error;
     // No answer or an unreadable one: the fallback below, like a refusal.
   }
-  if (!models || models.length === 0) return lastGood.get(projectId) ?? staticAntigravityModels();
-  if (projectId) remember(projectId, models, now);
+  if (!models || (!options.strictRefresh && models.length === 0)) return cache.get(projectId)?.models ?? staticAntigravityModels();
+  options.signal?.throwIfAborted();
+  if (projectId && models.length > 0) {
+    const accepted = models;
+    if (options.strictRefresh) {
+      options.deferCacheWrite?.(() => {
+        const latest = cache.get(projectId);
+        // Ordinary refreshes keep the latest accepted strict sequence.
+        const displaced = cached ? latest?.lineage !== cached.lineage : eviction !== readEviction;
+        if (displaced || (latest?.strictSequence ?? 0) >= readSequence) return;
+        remember(projectId, accepted, (options.now ?? Date.now)(), readSequence);
+      });
+    } else if (cache.get(projectId) === cached && eviction === readEviction) {
+      remember(projectId, accepted, now, cached?.strictSequence ?? 0);
+    }
+  }
   return models;
 }
 
@@ -116,7 +159,13 @@ async function fetchModels(access: string, projectId: string, options: ListAntig
   });
   if (!response.ok) {
     await discardBody(response);
+    if (options.strictRefresh) throw antigravityFailure(response.status, '', 'catalog');
     return undefined;
   }
-  return parseAvailableModels(await readJson(response, 'Cloud Code Assist fetchAvailableModels'));
+  const body: unknown = await readJson(response, 'Cloud Code Assist fetchAvailableModels');
+  if (options.strictRefresh) {
+    const models = (body as { models?: unknown } | null)?.models;
+    if (!isValidModelList(models)) throw invalidCatalog('google-antigravity');
+  }
+  return parseAvailableModels(body);
 }

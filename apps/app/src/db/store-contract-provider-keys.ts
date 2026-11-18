@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { credentialFromSlot } from '../credentials/key-list-helpers.js';
 import type { AppStore, KeyProvider, StoredProviderKey } from '../core/types.js';
 
 export function defineProviderKeyCursorContract(
@@ -25,6 +26,25 @@ export function defineProviderKeyCursorContract(
         lastTestedAt: null,
       };
     }
+
+    it('keeps the catalog identity when the default cursor is first persisted', async () => {
+      const store = await createStore();
+      try {
+        const first = slot(randomUUID(), 0, 'aaa1');
+        const second = slot(randomUUID(), 1, 'bbb2');
+        await store.modifyProviderKeys(workspaceId, provider, async () => ({
+          keys: [first, second], parent: credentialFromSlot(first, null),
+        }));
+        const initial = await store.readCatalogCredentialState(workspaceId, provider);
+        expect(initial).toMatchObject({ cursor: 0 });
+        await store.setKeyCursor(workspaceId, provider, first.id);
+        expect(await store.readCatalogCredentialState(workspaceId, provider)).toEqual(initial);
+        await store.setKeyCursor(workspaceId, provider, second.id);
+        expect(await store.readCatalogCredentialState(workspaceId, provider)).toEqual({ ...initial, cursor: 1 });
+      } finally {
+        await cleanup?.();
+      }
+    });
 
     it('stores the current index of a key id and ignores missing ids', async () => {
       const store = await createStore();

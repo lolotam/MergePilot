@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Plug, XCircle } from 'lucide-react';
-import { api, ApiClientError, type ApiProvider, type TestConnectionResponse } from '../api/client.js';
+import { api, ApiClientError, type ApiProvider, type KeySlotItem, type TestConnectionResponse } from '../api/client.js';
 import type { I18nKey } from '../i18n/ar.js';
 import { useI18n } from '../i18n/context.js';
 import { useModelsQuery } from './providers.js';
@@ -44,31 +45,37 @@ export interface TestKeyButtonProps {
   workspaceId: string;
   provider: ApiProvider;
   disabled?: boolean;
+  slot?: Pick<KeySlotItem, 'id' | 'last4' | 'position'>;
 }
 
 /** Per-key test icon: idle → spinner → ✓ with latency, or ✗ with the reason (details on hover). */
-export function TestKeyButton({ workspaceId, provider, disabled = false }: TestKeyButtonProps) {
+export function TestKeyButton({ workspaceId, provider, disabled = false, slot }: TestKeyButtonProps) {
   const { t } = useI18n();
   const reason = useTestReason();
+  const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<TestConnectionResponse | null>(null);
 
   // "Auto" ('') lets the server pick (configured model, a free model, then the default); the
   // models list is only fetched once the picker is opened, so the keys page stays cheap.
   const [wantModels, setWantModels] = useState(false);
-  const modelsQuery = useModelsQuery(workspaceId, provider, wantModels);
+  const modelsQuery = useModelsQuery(workspaceId, provider, !slot && wantModels);
   const models = modelsQuery.data?.models ?? [];
   const [selectedModel, setSelectedModel] = useState('');
 
   const handleTest = async () => {
     setIsLoading(true);
     setResult(null);
-    const options = selectedModel ? { model: selectedModel } : undefined;
-    setResult(
-      await runConnectionTest(() =>
-        options ? api.testConnection(workspaceId, provider, options) : api.testConnection(workspaceId, provider),
-      ),
+    const model = selectedModel.trim();
+    const modelOptions = model ? { model } : undefined;
+    const options = slot ? { keyId: slot.id, ...modelOptions } : modelOptions;
+    const outcome = await runConnectionTest(() =>
+      options ? api.testConnection(workspaceId, provider, options) : api.testConnection(workspaceId, provider),
     );
+    setResult(outcome);
+    if (slot && outcome.quotaStatus) {
+      void queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
+    }
     setIsLoading(false);
   };
 
@@ -77,31 +84,50 @@ export function TestKeyButton({ workspaceId, provider, disabled = false }: TestK
 
   return (
     <div className="inline-flex items-center gap-1.5">
-      <select
-        aria-label={`${t('testModelLabel')} (${provider})`}
-        value={selectedModel}
-        disabled={disabled || isLoading}
-        onFocus={() => setWantModels(true)}
-        onMouseDown={() => setWantModels(true)}
-        onChange={(e) => {
-          setSelectedModel(e.target.value);
-          setResult(null);
-        }}
-        className="px-2 py-1 text-[11px] rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 max-w-[130px] truncate focus:ring-1 focus:ring-brand-500 focus:outline-hidden disabled:opacity-50"
-      >
-        <option value="">{t('testModelAuto')}</option>
-        {models.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name || m.id}
-          </option>
-        ))}
-      </select>
+      {slot ? (
+        <>
+          <span dir="ltr" className="font-mono text-[11px]">#{slot.position + 1} ••••{slot.last4}</span>
+          <input
+            type="text"
+            dir="ltr"
+            aria-label={`${t('testModelLabel')} (${provider}, #${slot.position + 1})`}
+            placeholder={t('testModelAuto')}
+            value={selectedModel}
+            maxLength={200}
+            disabled={disabled || isLoading}
+            onChange={(event) => { setSelectedModel(event.target.value); setResult(null); }}
+            className="w-28 rounded-lg border border-ink-300 dark:border-ink-700 bg-transparent px-2 py-1 text-[11px]"
+          />
+        </>
+      ) : (
+        <select
+          aria-label={`${t('testModelLabel')} (${provider})`}
+          value={selectedModel}
+          disabled={disabled || isLoading}
+          onFocus={() => setWantModels(true)}
+          onMouseDown={() => setWantModels(true)}
+          onChange={(e) => {
+            setSelectedModel(e.target.value);
+            setResult(null);
+          }}
+          className="px-2 py-1 text-[11px] rounded-lg border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100 max-w-[130px] truncate focus:ring-1 focus:ring-brand-500 focus:outline-hidden disabled:opacity-50"
+        >
+          <option value="">{t('testModelAuto')}</option>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name || m.id}
+            </option>
+          ))}
+        </select>
+      )}
       <button
         type="button"
         disabled={disabled || isLoading}
         onClick={() => void handleTest()}
         title={t('testKeyAction')}
-        aria-label={`${t('testKeyAction')} (${provider})`}
+        aria-label={slot
+          ? `${t('testKeyAction')} (${provider}, #${slot.position + 1}, ••••${slot.last4})`
+          : `${t('testKeyAction')} (${provider})`}
         className="p-1.5 rounded-lg border border-ink-200 dark:border-ink-700 hover:bg-ink-100 dark:hover:bg-ink-800 disabled:opacity-50 text-ink-600 dark:text-ink-300 transition-colors inline-flex items-center justify-center focus:ring-2 focus:ring-brand-500 focus:outline-hidden"
       >
         {isLoading ? (
@@ -134,6 +160,21 @@ export function TestKeyButton({ workspaceId, provider, disabled = false }: TestK
             </span>
           ))}
       </span>
+    </div>
+  );
+}
+
+export function ProviderTestButtons({ workspaceId, provider, slots }: {
+  workspaceId: string;
+  provider: ApiProvider;
+  slots?: readonly KeySlotItem[] | undefined;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <TestKeyButton workspaceId={workspaceId} provider={provider} />
+      {slots?.map((slot) => (
+        <TestKeyButton key={slot.id} workspaceId={workspaceId} provider={provider} slot={slot} />
+      ))}
     </div>
   );
 }

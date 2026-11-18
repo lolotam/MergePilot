@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
+  decodeSubscription,
   failureKind,
+  isSubscriptionAvailable,
   listModels,
   LlmFailure,
   providerEntry,
@@ -11,22 +13,21 @@ import {
   type CatalogModel,
 } from '@mergepilot/engine';
 import { requireRole } from '../auth/guard.js';
-import { DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
+import { DASHBOARD_FETCH_LIMITS, SafeFetchTimeoutError } from '../core/safe-fetch.js';
 import type { KeyQuotaStatus, WorkspaceSettings } from '../core/types.js';
 import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } from './contract.js';
 import { sendError } from './helpers.js';
-import { engineOptions, storedKeyById, storedTarget, unsavedTarget, type TargetResult } from './provider-target.js';
+import { engineOptions, storedKeyById, storedTarget, unsavedTarget, type ProviderTarget, type TargetResult } from './provider-target.js';
 import type { DashboardApiDeps } from './routes.js';
+import { beginCatalogRead, cachedCatalog, catalogCredentialRevision, resetCatalogCache } from './provider-catalog-cache.js';
+
+export { invalidateModelsCache } from './provider-catalog-cache.js';
 
 /**
  * Model catalog and connection-test routes (J2). A key typed into the "add key" dialog may be
  * sent here BEFORE it is saved: it is used for that one provider call only, never stored, never
  * logged, and every message that could carry it is redacted.
  */
-
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 1000;
-const modelsCache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
 
 const RATE_WINDOW_MS = 60 * 1000;
 export const TEST_LIMIT = 10;
@@ -43,21 +44,7 @@ function quotaStatusOf(ok: boolean, code: string | undefined): KeyQuotaStatus | 
 /** Test helper: forget every cached model list and rate-limit bucket. */
 export function resetProviderTestRateLimits(): void {
   rateBuckets.clear();
-  modelsCache.clear();
-}
-
-/** Drops a workspace's cached model list for one provider (its key changed or was removed). */
-export function invalidateModelsCache(workspaceId: string, provider: string): void {
-  modelsCache.delete(`${workspaceId}:${provider}`);
-}
-
-function cacheModels(key: string, models: CatalogModel[]): void {
-  const now = Date.now();
-  if (modelsCache.size >= CACHE_MAX_ENTRIES) {
-    for (const [k, v] of modelsCache) if (v.expiresAt <= now) modelsCache.delete(k);
-    if (modelsCache.size >= CACHE_MAX_ENTRIES) modelsCache.clear();
-  }
-  modelsCache.set(key, { expiresAt: now + CACHE_TTL_MS, models });
+  resetCatalogCache();
 }
 
 export function allow(bucket: string, limit: number): boolean {
@@ -98,6 +85,7 @@ function parseProvider(request: FastifyRequest, reply: FastifyReply): ApiProvide
  */
 export function routeSignal(reply: FastifyReply): AbortSignal {
   const controller = new AbortController();
+  if (reply.raw.destroyed) { controller.abort(); return controller.signal; }
   const timer = setTimeout(() => controller.abort(), DASHBOARD_FETCH_LIMITS.timeoutMs);
   reply.raw.once('close', () => {
     clearTimeout(timer);
@@ -133,18 +121,10 @@ export function configuredModelFor(settings: WorkspaceSettings | null, provider:
 }
 
 /**
- * The model a connection test uses when the request names none: the workspace's primary model,
- * then its heavy model, then its first fallback for this provider, then a free model from the
- * provider's models list (OpenRouter / OpenCode Zen), then the registry default
- * (`custom` has none, so a custom key used only as heavy/fallback still tests its own model).
+ * With no explicit or workspace model, prefer a free catalog model, then the registry default
+ * when listed, then the first catalog model.
  */
-export function testModelFor(
-  settings: WorkspaceSettings | null,
-  provider: ApiProviderId,
-  models?: readonly CatalogModel[],
-): string {
-  const configured = configuredModelFor(settings, provider);
-  if (configured) return configured;
+function testModelFor(provider: ApiProviderId, models?: readonly CatalogModel[]): string {
   const fallback = providerEntry(provider).defaultModel;
   if (models && models.length > 0) {
     const free = pickFreeModel(provider, models);
@@ -159,20 +139,36 @@ function sendTargetError(reply: FastifyReply, result: Exclude<TargetResult, { ok
   return sendError(reply, result.status, result.code, result.message);
 }
 
+interface CatalogRequest {
+  provider: ApiProviderId;
+  target: ProviderTarget;
+  signal: AbortSignal;
+  mode?: 'sync';
+  publish?: (models: CatalogModel[], commit?: () => void) => Promise<{ models: CatalogModel[] } | 'catalog_credentials_changed' | 'catalog_superseded'>;
+}
+
 async function fetchModels(
   request: FastifyRequest,
   reply: FastifyReply,
-  provider: ApiProviderId,
-  result: Extract<TargetResult, { ok: true }>,
-  signal: AbortSignal,
-  cacheKey?: string,
+  { provider, target, signal, mode, publish }: CatalogRequest,
 ): Promise<FastifyReply> {
-  const { target } = result;
+  const sync = mode === 'sync';
   const start = Date.now();
   try {
-    const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
+    let commitCatalog: (() => void) | undefined;
+    let models = await listModels(provider, target.apiKey, {
+      ...engineOptions(target), signal,
+      ...(sync ? { strictRefresh: true, deferAntigravityCacheWrite: (commit) => { commitCatalog = commit; } } : {}),
+    });
+    signal.throwIfAborted();
+    if (publish) {
+      const publication = await publish(models, commitCatalog);
+      if (typeof publication === 'string') {
+        return sendError(reply, 409, publication, 'The catalog request is outdated. Refresh the model catalog again.');
+      }
+      models = publication.models;
+    }
     const ms = Date.now() - start;
-    if (cacheKey) cacheModels(cacheKey, models);
     request.log.info(
       {
         event: 'provider.models_listed',
@@ -184,7 +180,9 @@ async function fetchModels(
       },
       'Provider models listed',
     );
-    return reply.status(200).send({ models });
+    const subscription = sync && decodeSubscription(target.apiKey, provider);
+    const source = subscription && subscription.provider !== 'google-antigravity' ? 'bundled' : 'live';
+    return reply.status(200).send({ models, ...(sync ? { source } : {}) });
   } catch (err) {
     const ms = Date.now() - start;
     if (err instanceof LlmFailure) {
@@ -201,7 +199,7 @@ async function fetchModels(
         },
         'Provider models listing failed',
       );
-      return sendError(reply, statusFor(kind), kind, redact(err.message, target.apiKey));
+      return sendError(reply, statusFor(kind), kind, sync ? 'Could not sync model catalog' : redact(err.message, target.apiKey));
     }
     const msg = err instanceof Error ? err.message : String(err);
     request.log.info(
@@ -216,24 +214,38 @@ async function fetchModels(
       },
       'Provider models listing failed',
     );
-    return sendError(reply, 502, 'models_fetch_failed', redact(msg, target.apiKey));
+    return sendError(reply, 502, 'models_fetch_failed', sync ? 'Could not sync model catalog' : redact(msg, target.apiKey));
   }
 }
 
+function isModelSync(request: FastifyRequest): boolean {
+  return (request.query as { sync?: string } | undefined)?.sync === 'true';
+}
+
 export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiDeps): void {
+  const readModels = requireRole('member', deps.auth);
+  const syncModels = requireRole('admin', deps.auth);
   // Model list with the workspace's stored key. Members may read it (it reveals no secret).
   app.get(
     '/api/workspaces/:workspaceId/providers/:provider/models',
-    { preHandler: [requireRole('member', deps.auth)] },
+    { preHandler: [(request, reply) => (isModelSync(request) ? syncModels : readModels)(request, reply)] },
     async (request, reply) => {
       const { workspaceId } = request.params as { workspaceId: string };
       const provider = parseProvider(request, reply);
       if (!provider) return reply;
       const { refresh } = (request.query ?? {}) as { refresh?: string };
+      const sync = isModelSync(request);
+      if (sync) reply.header('Cache-Control', 'no-store');
+      if (sync && provider === 'google-antigravity' && !(deps.subscriptionAvailable ?? isSubscriptionAvailable)(provider)) {
+        return sendError(reply, 400, 'provider_unavailable', 'This server does not offer Google Antigravity');
+      }
       const cacheKey = `${workspaceId}:${provider}`;
-      if (refresh !== 'true' && refresh !== '1') {
-        const cached = modelsCache.get(cacheKey);
-        if (cached && Date.now() < cached.expiresAt) {
+      const signal = routeSignal(reply);
+      const { revision, slotId } = await catalogCredentialRevision(deps.store, workspaceId, provider);
+      signal.throwIfAborted();
+      if (!sync && refresh !== 'true' && refresh !== '1') {
+        const cached = cachedCatalog(cacheKey, revision);
+        if (cached) {
           request.log.info(
             {
               event: 'provider.models_listed',
@@ -248,10 +260,30 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           return reply.status(200).send({ models: cached.models });
         }
       }
-      const signal = routeSignal(reply);
-      const result = await storedTarget(deps, workspaceId, provider, signal);
-      if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(request, reply, provider, result, signal, cacheKey);
+      const read = beginCatalogRead(cacheKey, revision, sync ? 'sync' : 'ordinary');
+      try {
+        const result = await storedTarget(deps, workspaceId, provider, signal);
+        if (!result.ok) return sendTargetError(reply, result);
+        const resolvedSlot = result.target.slotId;
+        if ((resolvedSlot !== undefined && resolvedSlot !== slotId) ||
+          (await catalogCredentialRevision(deps.store, workspaceId, provider)).revision !== revision) {
+          return sendError(reply, 409, 'catalog_credentials_changed', 'The catalog request is outdated. Refresh the model catalog again.');
+        }
+        signal.throwIfAborted();
+        const publish: NonNullable<CatalogRequest['publish']> = async (models, commit) => {
+          const current = await catalogCredentialRevision(deps.store, workspaceId, provider);
+          signal.throwIfAborted();
+          if (current.revision !== revision) return 'catalog_credentials_changed';
+          const publication = read.publish(models);
+          if (typeof publication !== 'string') commit?.();
+          return publication;
+        };
+        return await fetchModels(request, reply, {
+          provider, target: result.target, signal, publish, ...(sync ? { mode: 'sync' } : {}),
+        });
+      } finally {
+        read.finish();
+      }
     },
   );
 
@@ -271,7 +303,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const signal = routeSignal(reply);
       const result = await unsavedTarget(deps, provider, body.data.apiKey, body.data.baseUrl, signal);
       if (!result.ok) return sendTargetError(reply, result);
-      return fetchModels(request, reply, provider, result, signal);
+      return fetchModels(request, reply, { provider, target: result.target, signal });
     },
   );
 
@@ -300,47 +332,66 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           : await storedTarget(deps, workspaceId, provider, signal);
       if (!result.ok) return sendTargetError(reply, result);
       const { target } = result;
-
-      const settings = await deps.store.getSettings(workspaceId);
-      let model = body.model?.trim() || configuredModelFor(settings, provider);
-      if (!model) {
-        // The workspace cache belongs to the stored key: an unsaved key never reads or fills it.
-        const cacheKey = apiKey ? undefined : `${workspaceId}:${provider}`;
-        let models: CatalogModel[] | undefined;
-        const cached = cacheKey ? modelsCache.get(cacheKey) : undefined;
-        if (cached && Date.now() < cached.expiresAt) {
-          models = cached.models;
-        } else {
-          try {
-            models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
-            if (cacheKey) cacheModels(cacheKey, models);
-          } catch (error: unknown) {
-            if (signal.aborted) throw error;
-            // Not fatal: the test still runs on the registry default, and the reply names that model.
-            request.log.warn(
-              { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
-              'Could not list models to pick a test model; using the registry default',
-            );
-          }
+      const recordOutcome = async (ok: boolean, code?: string) => {
+        const status = quotaStatusOf(ok, code);
+        if (!keyId || !status) return status;
+        try {
+          return await deps.credentials.recordKeyTest(workspaceId, provider, keyId, status, new Date()) ? status : null;
+        } catch {
+          request.log.warn({ event: 'provider.key_test_status_write_failed', provider }, 'Could not save provider key test status');
+          return null;
         }
-        model = testModelFor(settings, provider, models);
+      };
+
+      const explicitModel = body.model?.trim();
+      const configured = explicitModel ? undefined : configuredModelFor(await deps.store.getSettings(workspaceId), provider);
+      let model = explicitModel || (keyId ? undefined : configured);
+      if (!model) {
+        const accountCatalogRequired = Boolean(keyId) || provider === 'openrouter';
+        const slotFallback = keyId && provider !== 'openrouter' ? configured : undefined;
+        let models: CatalogModel[] | undefined;
+        const catalogStart = Date.now();
+        try {
+          // The test may have resolved a different key than the latest picker catalog.
+          models = await listModels(provider, target.apiKey, {
+            ...engineOptions(target), signal,
+            ...((accountCatalogRequired || provider === 'google-antigravity') ? { strictRefresh: true } : {}),
+          });
+          signal.throwIfAborted();
+        } catch (error: unknown) {
+          if (reply.raw.destroyed) return reply;
+          if (signal.aborted || error instanceof SafeFetchTimeoutError || (error instanceof LlmFailure && error.code === 'TIMEOUT')) {
+            return reply.status(200).send({
+              ok: false, code: 'network', message: 'Provider model catalog did not answer in time', ms: Date.now() - catalogStart,
+            });
+          }
+          // A key restricted from listing models can still run inference, so a configured model gets a real test.
+          const listingOnlyFailure = error instanceof LlmFailure && (error.code === 'SERVER' || error.code === 'INVALID_CREDENTIAL');
+          if (accountCatalogRequired && !(slotFallback && listingOnlyFailure)) {
+            const code = error instanceof LlmFailure ? failureKind(error.code) : 'network';
+            return reply.status(200).send({
+              ok: false, code, message: 'Could not read the provider account catalog', ms: Date.now() - catalogStart,
+            });
+          }
+          // Other providers can still use their registry default when model listing fails.
+          request.log.warn(
+            { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
+            'Could not list models to pick a test model; trying the configured fallback',
+          );
+        }
+        model = accountCatalogRequired && !models?.length ? slotFallback : testModelFor(provider, models);
       }
       if (!model) return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
       const effort = body.effort?.trim();
 
       const start = Date.now();
-      const remember = async (status: KeyQuotaStatus | null): Promise<void> => {
-        if (!keyId || !status) return;
-        await deps.credentials.recordKeyTest(workspaceId, provider, keyId, status, new Date());
-      };
       try {
         const outcome = await testConnection(provider, target.apiKey, model, {
           ...engineOptions(target),
           timeoutMs: DASHBOARD_FETCH_LIMITS.timeoutMs,
           ...(effort ? { effort } : {}),
         });
-        const quotaStatus = quotaStatusOf(outcome.ok, outcome.ok ? undefined : outcome.code);
-        await remember(quotaStatus);
+        const quotaStatus = await recordOutcome(outcome.ok, outcome.ok ? undefined : outcome.code);
         if (outcome.ok) {
           request.log.info(
             {
@@ -353,7 +404,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
             },
             'Provider connection tested',
           );
-          return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model, quotaStatus });
+          return reply.status(200).send({ ok: true, ms: outcome.ms, model: outcome.model, ...(quotaStatus ? { quotaStatus } : {}) });
         }
         request.log.info(
           {

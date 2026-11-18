@@ -6,7 +6,7 @@ import { FALLBACK_EFFORTS, minimaxTakesEffort } from '../effort.js';
 import { bearerHeaders, failureFromResponse, failureFromThrown, type FetchLike, type KeyInput } from '../http.js';
 import type { ApiProviderId } from '../ids.js';
 import { chatModelsFor, providerEntry, resolveBaseUrl } from '../registry.js';
-import type { CatalogModel } from '../catalog-types.js';
+import { invalidCatalog, validModelId, type CatalogModel } from '../catalog-types.js';
 
 /** Gateways list image, video and embedding models next to chat models. */
 const NON_CHAT_TYPES = new Set([
@@ -40,6 +40,7 @@ export interface ListCompatibleOptions {
   baseUrl?: string;
   fetch?: FetchLike;
   signal?: AbortSignal;
+  strictRefresh?: boolean;
 }
 
 /** Effort values a `reasoning_effort` request can carry (`off` = send nothing). */
@@ -94,7 +95,8 @@ export async function listCompatibleModels(
   apiKey: KeyInput,
   options: ListCompatibleOptions = {},
 ): Promise<CatalogModel[]> {
-  const url = `${resolveBaseUrl(provider, options.baseUrl)}/models`;
+  const path = provider === 'openrouter' && options.strictRefresh ? '/models/user' : '/models';
+  const url = `${resolveBaseUrl(provider, options.baseUrl)}${path}`;
   const doFetch = options.fetch ?? ((input, init) => fetch(input, init));
   const get = async (withKey: boolean): Promise<Response> => {
     try {
@@ -110,15 +112,20 @@ export async function listCompatibleModels(
   let res = await get(true);
   // OpenRouter and some gateways publish their list but reject an invalid key; the list
   // still loads so the user can pick a model, and the connection test reports the key.
-  if (res.status === 401 || res.status === 403) {
+  if (!options.strictRefresh && (res.status === 401 || res.status === 403)) {
     const publicList = await get(false);
     if (publicList.ok) res = publicList;
   }
   if (!res.ok) throw await failureFromResponse(res, provider, apiKey);
 
-  const body = (await res.json()) as { data?: unknown; models?: unknown };
-  const list = Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [];
-  const models = (list as RawCompatibleModel[])
+  const body = (await res.json()) as { data?: unknown; models?: unknown } | null;
+  const list = Array.isArray(body?.data) ? body.data : Array.isArray(body?.models) ? body.models : undefined;
+  if (options.strictRefresh && (!list || list.some((raw: RawCompatibleModel | null) => {
+    return !validModelId(raw?.id === undefined ? raw?.name : raw.id);
+  }))) {
+    throw invalidCatalog(provider);
+  }
+  const models = ((list ?? []) as RawCompatibleModel[])
     .map((raw) => ({ raw, id: String(raw.id ?? raw.name ?? '').replace(/^models\//, '') }))
     .filter(({ raw, id }) => id && !NON_CHAT_TYPES.has(String(raw.type)) && !NON_CHAT_ID.test(id))
     .filter(({ raw }) => !LANGUAGE_TYPED.has(provider) || raw.type === 'language')
