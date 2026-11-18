@@ -24,4 +24,16 @@ describe('ModelSelect refresh failure', () => {
     expect(screen.getByRole('button', { name: 'Model name' })).toBeDefined();
     expect((await screen.findByRole('status')).textContent).toMatch(/Could not refresh the model list/);
   });
+
+  it('still reports a failed refresh when the follow-up refetch returns the old list', async () => {
+    const user = userEvent.setup();
+    const catalog = { models: [{ id: 'kept-model', name: 'Kept model', efforts: [] }] };
+    vi.mocked(api.getModels).mockReset();
+    vi.mocked(api.getModels).mockResolvedValueOnce(catalog)
+      .mockRejectedValueOnce(new ApiClientError('boom', 'server_error', 500)).mockResolvedValue(catalog);
+    renderSettings(<ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />, 'en');
+    await screen.findByRole('button', { name: 'Model name' });
+    await user.click(screen.getByRole('button', { name: 'Refresh list' }));
+    expect((await screen.findByRole('status')).textContent).toMatch(/Could not refresh the model list/);
+  });
 });

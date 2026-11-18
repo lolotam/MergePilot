@@ -28,6 +28,8 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
   const query = useModelsQuery(workspaceId, provider);
   const [manualChosen, setManualChosen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // The follow-up refetch can succeed with the old list, which clears query.isError.
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -40,6 +42,7 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
 
   useEffect(() => {
     setManualChosen(false);
+    setRefreshFailed(false);
     setSearch('');
   }, [provider]);
 
@@ -53,6 +56,7 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
 
   const refresh = async () => {
     setRefreshing(true);
+    setRefreshFailed(false);
     setManualChosen(false);
     try {
       const queryKey = modelsQueryKey(workspaceId, provider);
@@ -64,7 +68,10 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
         retry: false,
       });
     } catch (error) {
-      if (!isCancelledError(error)) await query.refetch();
+      if (!isCancelledError(error)) {
+        setRefreshFailed(true);
+        await query.refetch();
+      }
     } finally {
       setRefreshing(false);
     }
@@ -162,7 +169,7 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
         </span>
       </button>
 
-      {query.isError && (
+      {(query.isError || refreshFailed) && (
         <p role="status" className="text-[11px] text-amber-600 dark:text-amber-400 ms-2">
           {t('modelsRefreshFailed')}
         </p>
