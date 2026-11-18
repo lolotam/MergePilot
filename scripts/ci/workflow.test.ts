@@ -104,10 +104,14 @@ describe('CI workflow contract', () => {
     expect(workflow.concurrency).toEqual({ group: 'ci-${{ github.ref }}', 'cancel-in-progress': true });
     expect(REQUIRED_CHECKS).toContain('check');
     expect(jobs.check.name).toBe('check');
-    expect(jobs.check.if).toBe('${{ always() && !cancelled() }}');
+    expect(jobs.check.if).toBe('${{ always() }}');
     expect(jobs.check.needs?.slice().sort()).toEqual(Object.keys(jobs).filter((name) => name !== 'check').sort());
     expect(jobs.check.needs?.slice().sort()).toEqual(['static', 'unit']);
-    const gate = jobs.check.steps.at(-1);
+    const gate = jobs.check.steps.at(-2);
+    expect(gate?.if).toBe('${{ success() && !cancelled() }}');
+    expect(jobs.check.steps.at(-1)).toEqual({
+      name: 'Reject workflow cancellation', if: '${{ cancelled() }}', run: 'exit 1',
+    });
     expect(gate?.env).toEqual({ CI_NEEDS: '${{ toJSON(needs) }}' });
     expect(gate?.run).toBe('node --experimental-strip-types scripts/ci/gate.ts');
   });
@@ -142,7 +146,9 @@ describe('CI workflow contract', () => {
     for (const job of Object.values(jobs)) {
       expect(job['runs-on']).toBe('ubuntu-latest');
       expect(job['timeout-minutes']).toBe(30);
-      for (const step of job.steps) expect(step.if).toBeUndefined();
+      for (const step of job.steps.slice(0, job === jobs.check ? -2 : undefined)) {
+        expect(step.if).toBeUndefined();
+      }
     }
     for (const job of [jobs.static, jobs.unit]) {
       expect(job.steps.some((step) => step.uses === 'pnpm/action-setup@v4')).toBe(true);
