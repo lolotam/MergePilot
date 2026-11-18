@@ -120,7 +120,9 @@ export async function listCompatibleModels(
 
   const body = (await res.json()) as { data?: unknown; models?: unknown } | null;
   const list = Array.isArray(body?.data) ? body.data : Array.isArray(body?.models) ? body.models : undefined;
-  if (options.strictRefresh && (!list || list.some((raw: RawCompatibleModel | null) => !validModelId(raw?.id ?? raw?.name)))) {
+  if (options.strictRefresh && (!list || list.some((raw: RawCompatibleModel | null) => {
+    return !validModelId(raw?.id === undefined ? raw?.name : raw.id);
+  }))) {
     throw invalidCatalog(provider);
   }
   const models = ((list ?? []) as RawCompatibleModel[])

@@ -21,6 +21,7 @@ describe('listModels', () => {
     { provider: 'gemini' as const, payload: { models: [{ name: 'models/gemini-example', supportedGenerationMethods: ['generateContent', 5] }] } },
     { provider: 'openrouter' as const, payload: { data: [null] } },
     { provider: 'openrouter' as const, payload: { data: [{ id: 17 }] } },
+    { provider: 'openrouter' as const, payload: { data: [{ id: null, name: 'openai/gpt-example' }] } },
   ])('strict $provider sync rejects malformed catalogs with a classified failure', async ({ provider, payload }) => {
     const { fetch } = mockFetch(jsonResponse(payload));
     await expect(listModels(provider, KEY, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER', provider });
@@ -40,6 +41,12 @@ describe('listModels', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe('https://openrouter.ai/api/v1/models/user');
     expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe(`Bearer ${KEY.reveal()}`);
+  });
+
+  it('accepts a compatible catalog entry that only provides a name', async () => {
+    const { fetch } = mockFetch(jsonResponse({ data: [{ name: 'openai/gpt-example' }] }));
+    await expect(listModels('openrouter', KEY, { fetch, strictRefresh: true }))
+      .resolves.toMatchObject([{ id: 'openai/gpt-example' }]);
   });
 
   it('strict refresh surfaces an authenticated gateway refusal without an anonymous retry', async () => {
