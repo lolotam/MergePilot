@@ -107,6 +107,13 @@ describe('Codex models listed by the OpenAI API key', () => {
     await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch, signal: controller.signal })).rejects.toMatchObject({ code: 'ABORTED' });
   });
 
+  it('keeps a timeout signal as TIMEOUT', async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException('slow', 'TimeoutError'));
+    await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch: async () => textResponse('x', 500), signal: controller.signal }))
+      .rejects.toMatchObject({ code: 'TIMEOUT' });
+  });
+
   it('streams a call for an API-listed Codex id and sends that id, while an unknown Grok id still fails', async () => {
     let sent: Record<string, unknown> = {};
     vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {

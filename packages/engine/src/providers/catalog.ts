@@ -215,7 +215,8 @@ export async function listCodexModelsWithApiKey(
     return { models: sortUnique(supplementCatalog(bundled, apiModels)), merged: true };
   } catch (error) {
     // Whatever the listing threw, a cancelled caller sees a cancellation, not an HTTP failure its abort caused.
-    if (options.signal?.aborted) throw new LlmFailure({ code: 'ABORTED', provider: 'openai', message: 'request aborted' });
+    // The signal's own reason decides the code: a timeout stays TIMEOUT, any other abort is ABORTED.
+    if (options.signal?.aborted) throw failureFromThrown(options.signal.reason, 'openai', apiKey, options.signal);
     // A fetch that aborts on its own is a cancellation too, not a listing failure to hide.
     // That includes a body read cut off after the headers, which reaches here as a raw AbortError.
     if (error instanceof LlmFailure && error.code === 'ABORTED') throw error;
