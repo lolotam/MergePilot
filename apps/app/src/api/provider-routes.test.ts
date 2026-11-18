@@ -196,6 +196,25 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     }
   });
 
+  it('refuses a catalog if target resolution sees a different active key slot', async () => {
+    const provider = 'openrouter';
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('first'), userId: 'u-admin' });
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('second'), userId: 'u-admin' });
+    const state = await h.store.readCatalogCredentialState('ws-1', provider);
+    if (!state) throw new Error('Missing fixture credentials');
+    const snapshots = vi.spyOn(h.store, 'readCatalogCredentialState')
+      .mockResolvedValueOnce(state)
+      .mockResolvedValueOnce({ ...state, cursor: 1 });
+    try {
+      const result = await get(provider, h.adminCookie(), '?sync=true');
+      expect(result.statusCode).toBe(409);
+      expect(result.json().error.code).toBe('catalog_credentials_changed');
+      expect(listModels).not.toHaveBeenCalled();
+    } finally {
+      snapshots.mockRestore();
+    }
+  });
+
   it('refreshes picker data after changing the first credential in a key roster', async () => {
     const first = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('first'), userId: 'u-admin' });
     const second = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('second'), userId: 'u-admin' });

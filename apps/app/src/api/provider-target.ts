@@ -12,6 +12,7 @@ import type { CredentialService } from '../credentials/service.js';
  */
 export interface ProviderTarget {
   apiKey: string;
+  slotId?: string;
   baseUrl?: string | undefined;
   fetch?: FetchLike | undefined;
 }
@@ -66,11 +67,14 @@ export async function storedTarget(
   try {
     const effective = await deps.credentials.getEffectiveAuthMethod(workspaceId, provider as KeyProvider);
     if (isKeyListProvider(provider) && (!isDualMethodProvider(provider) || effective === 'api-key')) {
-      const roster = await deps.credentials.resolveKeyRoster(workspaceId, provider as KeyProvider);
-      const start = roster?.startIndex ?? 0;
-      const secret = roster?.secrets[start];
-      if (!secret) return fail(404, 'key_not_found', `No API key configured for provider "${provider}"`);
-      apiKey = secret.reveal();
+      const state = await deps.store.readCatalogCredentialState(workspaceId, provider as KeyProvider);
+      const slotId = state?.slots[state.cursor]?.id;
+      if (slotId) {
+        const secret = await deps.credentials.readStoredKey(workspaceId, provider, slotId);
+        if (!secret) return fail(404, 'key_not_found', 'Stored API key was not found');
+        return { ok: true, target: { apiKey: secret.reveal(), slotId } };
+      }
+      apiKey = (await deps.credentials.resolve(workspaceId, provider)).reveal();
     } else {
       apiKey = (await deps.credentials.resolve(workspaceId, provider)).reveal();
     }

@@ -159,7 +159,7 @@ async function listGemini(key: KeyInput, options: ListModelsOptions): Promise<Ca
       if (typeof item.name !== 'string') continue;
       const id = item.name.replace(/^models\//, '');
       const supportedMethods = item.supportedGenerationMethods;
-      if (options.strictRefresh && (!Array.isArray(supportedMethods) || supportedMethods.some((method) => typeof method !== 'string'))) {
+      if (options.strictRefresh && supportedMethods !== undefined && (!Array.isArray(supportedMethods) || supportedMethods.some((method) => typeof method !== 'string'))) {
         throw invalidCatalog('gemini');
       }
       const methods = Array.isArray(supportedMethods) ? supportedMethods : [];

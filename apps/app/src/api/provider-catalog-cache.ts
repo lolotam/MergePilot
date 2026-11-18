@@ -11,9 +11,9 @@ const cache = new Map<string, CachedCatalog>();
 const active = new Map<string, CatalogRead>();
 
 /** Read shared credential identities without treating OAuth token rotation as a new account. */
-export async function catalogCredentialRevision(store: AppStore, workspaceId: string, provider: KeyProvider): Promise<string> {
+export async function catalogCredentialRevision(store: AppStore, workspaceId: string, provider: KeyProvider) {
   const state = await store.readCatalogCredentialState(workspaceId, provider);
-  return createHash('sha256').update(JSON.stringify(state)).digest('hex');
+  return { revision: createHash('sha256').update(JSON.stringify(state)).digest('hex'), slotId: state?.slots[state.cursor]?.id };
 }
 
 export function cachedCatalog(key: string, revision: string): CachedCatalog | undefined {

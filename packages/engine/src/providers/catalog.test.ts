@@ -90,7 +90,7 @@ describe('listModels', () => {
     {
       provider: 'gemini' as const,
       page: (i: number, more: boolean, cursor: unknown = `page-${i}`) =>
-        ({ models: [{ name: `models/gemini-${i}`, supportedGenerationMethods: ['generateContent'] }], nextPageToken: more ? cursor : '' }),
+        ({ models: [{ name: `models/gemini-${i}`, supportedGenerationMethods: ['generateContent'] }, { name: 'models/metadata-only' }], nextPageToken: more ? cursor : '' }),
     },
   ])('$provider strict sync pagination', ({ provider, page }) => {
     it('accepts a complete catalog on the last allowed page', async () => {

@@ -249,7 +249,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       }
       const cacheKey = `${workspaceId}:${provider}`;
       const signal = routeSignal(reply);
-      const revision = await catalogCredentialRevision(deps.store, workspaceId, provider);
+      const { revision, slotId } = await catalogCredentialRevision(deps.store, workspaceId, provider);
       signal.throwIfAborted();
       if (!sync && refresh !== 'true' && refresh !== '1') {
         const cached = cachedCatalog(cacheKey, revision);
@@ -272,14 +272,16 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       try {
         const result = await storedTarget(deps, workspaceId, provider, signal);
         if (!result.ok) return sendTargetError(reply, result);
-        if (await catalogCredentialRevision(deps.store, workspaceId, provider) !== revision) {
+        const resolvedSlot = result.target.slotId;
+        if ((resolvedSlot !== undefined && resolvedSlot !== slotId) ||
+          (await catalogCredentialRevision(deps.store, workspaceId, provider)).revision !== revision) {
           return sendError(reply, 409, 'catalog_credentials_changed', 'The catalog request is outdated. Refresh the model catalog again.');
         }
         signal.throwIfAborted();
         const publish: NonNullable<CatalogRequest['publish']> = async (models, commit) => {
           const current = await catalogCredentialRevision(deps.store, workspaceId, provider);
           signal.throwIfAborted();
-          if (current !== revision) return 'catalog_credentials_changed';
+          if (current.revision !== revision) return 'catalog_credentials_changed';
           const publication = read.publish(models);
           if (typeof publication !== 'string') commit?.();
           return publication;
@@ -346,7 +348,10 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         const catalogStart = Date.now();
         try {
           // The test may have resolved a different key than the latest picker catalog.
-          models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
+          models = await listModels(provider, target.apiKey, {
+            ...engineOptions(target), signal,
+            ...((provider === 'openrouter' || provider === 'google-antigravity') ? { strictRefresh: true } : {}),
+          });
           signal.throwIfAborted();
         } catch (error: unknown) {
           if (reply.raw.destroyed) return reply;
@@ -355,11 +360,20 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
               ok: false, code: 'network', message: 'Provider model catalog did not answer in time', ms: Date.now() - catalogStart,
             });
           }
-          // Not fatal: the test still runs on the registry default, and the reply names that model.
+          if (provider === 'openrouter' && error instanceof LlmFailure) {
+            return reply.status(200).send({
+              ok: false, code: failureKind(error.code), message: 'Could not read the OpenRouter account catalog',
+              ms: Date.now() - catalogStart,
+            });
+          }
+          // Other providers can still use their registry default when model listing fails.
           request.log.warn(
             { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
             'Could not list models to pick a test model; using the registry default',
           );
+        }
+        if (provider === 'openrouter' && models?.length === 0) {
+          return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
         }
         model = testModelFor(settings, provider, models);
       }

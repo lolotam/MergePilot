@@ -127,7 +127,7 @@ describe('J2 settings components', () => {
     }
     function Restore() {
       const restore = useRestoreBackup('ws-1');
-      return <button onClick={() => restore.mutate({ file: {}, dryRun: false, sections: ['credentials'] })}>Restore</button>;
+      return <button disabled={restore.isPending} onClick={() => restore.mutate({ file: {}, dryRun: false, sections: ['credentials'] })}>Restore</button>;
     }
     renderSettings(<ToastProvider>
       <Restore />
@@ -137,12 +137,18 @@ describe('J2 settings components', () => {
     </ToastProvider>, 'en');
     const picker = await screen.findByRole('button', { name: 'Model picker' });
     await user.click(screen.getByRole('button', { name: 'Sync all models' }));
-    vi.mocked(api.getModels).mockResolvedValue({ models: [{ id: 'restored', name: 'Restored model', efforts: [] }] });
-    await user.click(screen.getByRole('button', { name: 'Restore' }));
+    let finishCatalog!: (catalog: ModelsResponse) => void;
+    vi.mocked(api.getModels).mockReturnValue(new Promise((resolve) => { finishCatalog = resolve; }));
+    const restoreButton = screen.getByRole<HTMLButtonElement>('button', { name: 'Restore' });
+    await user.click(restoreButton);
     await screen.findByText(/Credentials changed/);
     await screen.findByText('Settings after restore');
     await act(async () => finishSettings('Settings before restore'));
     expect(screen.queryByText('Settings before restore')).toBeNull();
+    expect(restoreButton.disabled).toBe(true);
+    expect((picker as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => finishCatalog({ models: [{ id: 'restored', name: 'Restored model', efforts: [] }] }));
+    await waitFor(() => expect(restoreButton.disabled).toBe(false));
     await act(async () => finishSync({ source: 'live', models: [{ id: 'stale', name: 'Stale model', efforts: [] }] }));
     await user.click(picker);
     expect(await screen.findByRole('option', { name: 'Restored model' })).toBeDefined();

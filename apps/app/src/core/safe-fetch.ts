@@ -96,6 +96,7 @@ export function createSafeFetch(options: SafeFetchOptions = {}): FetchLike {
     const method = (init.method ?? 'GET').toUpperCase();
 
     return new Promise<Response>((resolve, reject) => {
+      let idleError: SafeFetchTimeoutError | undefined;
       const req = doRequest(
         url,
         {
@@ -122,7 +123,11 @@ export function createSafeFetch(options: SafeFetchOptions = {}): FetchLike {
             res.resume();
           } else {
             const capped = res.pipe(byteCapStream(maxBytes, () => new SafeFetchLimitError(`response body exceeds ${maxBytes} bytes`)));
-            res.on('error', (err) => capped.destroy(err));
+            res.on('error', (err: Error) => {
+              const reason = signal.reason;
+              if (reason instanceof SafeFetchTimeoutError) return capped.destroy(reason);
+              return capped.destroy(idleError ?? (err.cause instanceof SafeFetchTimeoutError ? err.cause : err));
+            });
             capped.once('close', done);
             stream = Readable.toWeb(capped) as unknown as ReadableStream<Uint8Array>;
           }
@@ -130,7 +135,8 @@ export function createSafeFetch(options: SafeFetchOptions = {}): FetchLike {
         },
       );
       req.setTimeout(idleTimeoutMs, () => {
-        req.destroy(new SafeFetchTimeoutError(`no data from the server for ${idleTimeoutMs} ms`));
+        idleError = new SafeFetchTimeoutError(`no data from the server for ${idleTimeoutMs} ms`);
+        req.destroy(idleError);
       });
       req.on('error', (err) => {
         done();

@@ -68,8 +68,10 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     await test('openai', h.adminCookie());
     expect(vi.mocked(testConnection).mock.calls[0]?.[2]).toBe('gpt-5-mini');
 
+    vi.mocked(listModels).mockResolvedValueOnce([{ id: 'account-model', name: 'Account model', efforts: [] }]);
     await test('openrouter', h.adminCookie(), { apiKey: keyFor('or') });
-    expect(vi.mocked(testConnection).mock.calls[1]?.[2]).not.toBe('');
+    expect(vi.mocked(testConnection).mock.calls[1]?.[2]).toBe('account-model');
+    expect(vi.mocked(listModels).mock.lastCall?.[2]).toMatchObject({ strictRefresh: true });
 
     const custom = await test('custom', h.adminCookie(), { apiKey: keyFor('c'), baseUrl: 'https://llm.example.com/v1' });
     expect([custom.statusCode, custom.json().error.code]).toEqual([400, 'model_required']);

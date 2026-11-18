@@ -94,7 +94,7 @@ it('promotes a strict result to last good only after the caller accepts it', asy
 
 it('keeps the latest-started accepted strict result for a shared project', async () => {
   const older = Promise.withResolvers<Response>();
-  const { fetch } = mockFetch(
+  const { fetch, calls } = mockFetch(
     () => older.promise,
     jsonResponse({ models: { 'gemini-3.8-flash': {} } }),
   );
@@ -108,6 +108,7 @@ it('keeps the latest-started accepted strict result for a shared project', async
   expect(commits).toHaveLength(2);
   commits[1]?.();
   expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  expect(calls).toHaveLength(2);
 });
 
 it('publishes an accepted strict read even when a later ordinary read finishes first', async () => {
@@ -133,19 +134,26 @@ it.each(['refresh', 'evict-other', 'evict-target'] as const)('keeps catalog orde
   for (let i = 0; i < 499; i++) {
     await listAntigravityModels({ ...credential, projectId: 'fill-' + i }, { now: () => 1, fetch: newer });
   }
+  let acceptStrict: (() => void) | undefined;
   if (operation === 'evict-other') {
     // Keep the target recently used without refreshing its TTL or writing a new catalog.
     await listAntigravityModels(credential, { now: () => 2, fetch: newer });
+    await listAntigravityModels(credential, {
+      now: () => 2, strictRefresh: true,
+      fetch: mockFetch(jsonResponse({ models: { 'claude-opus-4-6': {} } })).fetch,
+      deferCacheWrite: (commit) => { acceptStrict = commit; },
+    });
   }
   const afterExpiry = () => ANTIGRAVITY_MODELS_TTL_MS + 2;
   const touched = { ...credential, projectId: operation === 'refresh' ? 'fill-0' : 'new-project' };
   await listAntigravityModels(touched, { now: afterExpiry, fetch: newer });
+  acceptStrict?.();
   stale.resolve(jsonResponse({ models: { 'gemini-3.1-pro': {} } }));
   await pending;
   const refused = mockFetch(() => textResponse('denied', 403)).fetch;
   const result = await listAntigravityModels(credential, { now: afterExpiry, fetch: refused });
   if (operation === 'evict-target') expect(result).toEqual(staticAntigravityModels());
-  else expect(result).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  else expect(result).toMatchObject([{ id: operation === 'evict-other' ? 'claude-opus-4-6' : 'gemini-3.8-flash' }]);
   if (operation === 'evict-other') {
     const oldest = { ...credential, projectId: 'fill-0' };
     const retained = { ...credential, projectId: 'fill-1' };

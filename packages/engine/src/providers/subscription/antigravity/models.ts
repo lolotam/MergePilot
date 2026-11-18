@@ -78,7 +78,7 @@ export function staticAntigravityModels(): CatalogModel[] {
   return sortUnique(ANTIGRAVITY_STATIC_MODELS.map((id) => catalogEntry(id)));
 }
 
-const cache = new Map<string, { expiresAt: number; models: CatalogModel[]; strictSequence: number }>();
+const cache = new Map<string, { expiresAt: number; models: CatalogModel[]; strictSequence: number; lineage: object }>();
 let sequence = 0;
 let eviction = 0;
 
@@ -89,6 +89,7 @@ export function resetAntigravityModelCache(): void {
 }
 
 function remember(projectId: string, models: CatalogModel[], now: number, strictSequence: number): void {
+  const lineage = cache.get(projectId)?.lineage ?? {};
   cache.delete(projectId);
   if (cache.size >= CACHE_MAX_ENTRIES) {
     const oldest = cache.keys().next();
@@ -97,7 +98,7 @@ function remember(projectId: string, models: CatalogModel[], now: number, strict
       eviction++;
     }
   }
-  cache.set(projectId, { expiresAt: now + ANTIGRAVITY_MODELS_TTL_MS, models, strictSequence });
+  cache.set(projectId, { expiresAt: now + ANTIGRAVITY_MODELS_TTL_MS, models, strictSequence, lineage });
 }
 
 export interface ListAntigravityOptions {
@@ -137,7 +138,8 @@ export async function listAntigravityModels(
       options.deferCacheWrite?.(() => {
         const latest = cache.get(projectId);
         // Ordinary refreshes keep the latest accepted strict sequence.
-        if (eviction !== readEviction || (latest?.strictSequence ?? 0) >= readSequence) return;
+        const displaced = cached ? latest?.lineage !== cached.lineage : eviction !== readEviction;
+        if (displaced || (latest?.strictSequence ?? 0) >= readSequence) return;
         remember(projectId, accepted, (options.now ?? Date.now)(), readSequence);
       });
     } else if (cache.get(projectId) === cached && eviction === readEviction) {

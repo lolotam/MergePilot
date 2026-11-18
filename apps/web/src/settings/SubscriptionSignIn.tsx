@@ -68,8 +68,7 @@ export function SubscriptionSignIn({ workspaceId, provider, onConnected }: {
           if (stopped) return;
           setLogin(saved);
           activeId.current = undefined;
-          await refreshCredentialQueries(cache, workspaceId);
-          void cache.invalidateQueries({ queryKey: ['workspaces', workspaceId] }, { cancelRefetch: false });
+          await refreshCredentialQueries(cache, workspaceId, true);
           if (!stopped) connected.current();
           return;
         }

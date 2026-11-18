@@ -43,8 +43,11 @@ describe('storedTarget (ADR-0027)', () => {
     await credentials.appendProviderKey({ workspaceId: 'ws', provider, apiKey: key('second'), userId: 'u' });
     const slots = await store.listProviderKeys('ws', provider);
     await store.setKeyCursor('ws', provider, slots[1]!.id);
+    await store.modifyProviderKeys('ws', provider, async (current) => ({
+      keys: current.map((slot, i) => i === 0 ? { ...slot, ciphertext: 'unreadable' } : slot),
+    }));
     expect(await storedTarget({ store, credentials }, 'ws', provider))
-      .toMatchObject({ ok: true, target: { apiKey: key('second') } });
+      .toMatchObject({ ok: true, target: { apiKey: key('second'), slotId: slots[1]!.id } });
   });
 
   it('resolves the subscription envelope when the effective default is subscription', async () => {
