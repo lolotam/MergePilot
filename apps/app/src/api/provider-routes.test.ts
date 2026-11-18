@@ -158,6 +158,38 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     }
   });
 
+  it('rejects an API catalog when another replica switches the default to a subscription', async () => {
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels).mockImplementationOnce(engine.listModels);
+    const connected = { type: 'oauth' as const, access: 'fixture-access', refresh: 'fixture-refresh', expires: Date.now() + 3_600_000 };
+    await h.credentials.saveSubscription('ws-1', 'openai', connected, 'u-admin');
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('api'), userId: 'u-admin' });
+    await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'api-key');
+    const requested = Promise.withResolvers<void>();
+    const oldCatalog = Promise.withResolvers<Response>();
+    const upstream = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      requested.resolve();
+      return oldCatalog.promise;
+    });
+    const pending = get('openai', h.adminCookie(), '?sync=true').then((response) => response);
+    try {
+      await requested.promise;
+      await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
+      const current = await get('openai', h.adminCookie(), '?sync=true');
+      expect(current.json()).toMatchObject({ source: 'bundled' });
+      oldCatalog.resolve(Response.json({ data: [{ id: 'gpt-old-account' }] }));
+      const outdated = await pending;
+      expect(outdated.statusCode).toBe(409);
+      expect(outdated.json().error.code).toBe('catalog_credentials_changed');
+      expect((await get('openai', h.memberCookie())).json()).toEqual({ models: current.json().models });
+      expect(upstream).toHaveBeenCalledTimes(1);
+    } finally {
+      oldCatalog.resolve(Response.json({ data: [] }));
+      await pending;
+      upstream.mockRestore();
+    }
+  });
+
   it('refreshes picker data after changing the first credential in a key roster', async () => {
     const first = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('first'), userId: 'u-admin' });
     const second = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('second'), userId: 'u-admin' });

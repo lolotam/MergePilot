@@ -266,6 +266,9 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         const signal = routeSignal(reply);
         const result = await storedTarget(deps, workspaceId, provider, signal);
         if (!result.ok) return sendTargetError(reply, result);
+        if (await catalogCredentialRevision(deps.store, workspaceId, provider) !== revision) {
+          return sendError(reply, 409, 'catalog_credentials_changed', 'The catalog request is outdated. Refresh the model catalog again.');
+        }
         const publish: NonNullable<CatalogRequest['publish']> = async (models) => {
           const current = await catalogCredentialRevision(deps.store, workspaceId, provider);
           signal.throwIfAborted();

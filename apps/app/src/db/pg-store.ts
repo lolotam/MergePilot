@@ -21,12 +21,13 @@ import {
   startPgMaintenanceRun,
 } from './pg-maintenance.js';
 import { restorePgWorkspace, writePgCredential } from './pg-backup.js';
+import { readPgCatalogCredentialState } from './pg-catalog-credentials.js';
 import { deletePgProviderKeyRows } from './pg-provider-keys.js';
 import {
   deletePgAuthPreference, readPgAuthPreference, writePgAuthPreference,
 } from './pg-auth-preferences.js';
 import {
-  listStoredProviderKeys, listWorkspaceStoredProviderKeys, mapCredentialRow, modifyStoredProviderKeys, readStoredKeyCursor,
+  listStoredProviderKeys, listWorkspaceStoredProviderKeys, modifyStoredProviderKeys, readParentCredential, readStoredKeyCursor,
   recordStoredProviderKeyTest, writeStoredKeyCursor,
 } from './pg-key-roster.js';
 import { deletePgReviewerBot, listPgReviewerBots, upsertPgReviewerBot } from './pg-bots.js';
@@ -237,15 +238,9 @@ export class PgStore implements AppStore {
     await restorePgWorkspace(this.db, workspaceId, restore);
   }
 
-  async getCredential(workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
-    const rows = await this.db
-      .select()
-      .from(providerCredentials)
-      .where(and(eq(providerCredentials.workspaceId, workspaceId), eq(providerCredentials.provider, provider)));
-    const row = rows[0];
-    if (!row) return null;
-    return mapCredentialRow(row);
-  }
+  getCredential = (workspaceId: string, provider: KeyProvider) => readParentCredential(this.db, workspaceId, provider);
+
+  readCatalogCredentialState = (workspaceId: string, provider: KeyProvider) => readPgCatalogCredentialState(this.db, workspaceId, provider);
 
   async listCredentials(workspaceId: string): Promise<Array<Omit<StoredCredential, 'ciphertext'>>> {
     const rows = await this.db

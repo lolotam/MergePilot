@@ -31,7 +31,7 @@ export function mapCredentialRow(row: typeof providerCredentials.$inferSelect): 
   };
 }
 
-export async function readParentCredential(tx: AppTx, workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
+export async function readParentCredential(tx: AppDb | AppTx, workspaceId: string, provider: KeyProvider): Promise<StoredCredential | null> {
   const rows = await tx
     .select()
     .from(providerCredentials)

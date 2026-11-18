@@ -33,6 +33,8 @@ Each connected review provider is listed once using its effective default creden
 live catalogs from the bundled OpenAI, Anthropic, and xAI subscription lists. Google Antigravity uses its
 existing model-list endpoint when available on the server. Typesafe is judge-only and has no review catalog.
 If a paginated catalog cannot finish within the request limits, sync reports an error and keeps the previous list.
+Catalog reads check one shared credential snapshot at a time. An in-flight listing is checked again before publication.
+A credential change committed after that final read takes effect on subsequent requests. The check does not hold a database lock across the provider request.
 
 Successful results populate the workspace's model pickers. Failed requests leave the last known list
 available. The last live sync time is shown per provider while the workspace settings page stays open.

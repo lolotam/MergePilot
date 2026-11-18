@@ -1,6 +1,6 @@
 import { clampKeyCursor } from './key-cursor.js';
-import { deleteMemoryAuthPreference, writeMemoryAuthPreference } from './memory-auth-preferences.js';
-import type { KeyProvider, KeyQuotaStatus, ProviderAuthMethod, ProviderKeyChange, StoredCredential, StoredProviderKey } from './types.js';
+import { deleteMemoryAuthPreference, readMemoryAuthPreference, writeMemoryAuthPreference } from './memory-auth-preferences.js';
+import type { CatalogCredentialState, KeyProvider, KeyQuotaStatus, ProviderAuthMethod, ProviderKeyChange, StoredCredential, StoredProviderKey } from './types.js';
 
 /** In-memory twin of the provider-key tables. Keyed like credentials (`workspaceId:provider`). */
 export interface MemoryKeyTables {
@@ -29,6 +29,19 @@ export function listMemoryProviderKeys(
   provider: KeyProvider,
 ): StoredProviderKey[] {
   return copies(tables.providerKeys.get(slotKey(workspaceId, provider)) ?? []).sort((a, b) => a.position - b.position);
+}
+
+export function readMemoryCatalogCredentialState(tables: MemoryKeyTables, workspaceId: string, provider: KeyProvider): CatalogCredentialState | null {
+  const key = `${workspaceId}:${provider}`;
+  const credential = tables.credentials.get(key);
+  if (!credential) return null;
+  const { id, createdAt, baseUrl, signInRequiredAt } = credential;
+  return {
+    parent: { id, createdAt, baseUrl: baseUrl ?? null, signInRequiredAt: signInRequiredAt ?? null },
+    slots: listMemoryProviderKeys(tables, workspaceId, provider).map(({ id, position, createdAt }) => ({ id, position, createdAt })),
+    cursor: tables.keyCursors.get(key) ?? null,
+    preference: readMemoryAuthPreference(tables, workspaceId, provider),
+  };
 }
 
 export function listMemoryWorkspaceProviderKeys(tables: MemoryKeyTables, workspaceId: string): StoredProviderKey[] {

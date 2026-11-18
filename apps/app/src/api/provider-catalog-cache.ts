@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { CatalogModel } from '@mergepilot/engine';
 import type { AppStore, KeyProvider } from '../core/types.js';
-import { isDualMethodProvider, isKeyListProvider } from '../credentials/multi-key.js';
 
 const TTL_MS = 10 * 60 * 1000;
 const MAX_ENTRIES = 1000;
@@ -13,16 +12,8 @@ const active = new Map<string, CatalogRead>();
 
 /** Read shared credential identities without treating OAuth token rotation as a new account. */
 export async function catalogCredentialRevision(store: AppStore, workspaceId: string, provider: KeyProvider): Promise<string> {
-  const parent = await store.getCredential(workspaceId, provider);
-  const slotInputs = isKeyListProvider(provider) ? await Promise.all([
-    store.listProviderKeys(workspaceId, provider), store.getKeyCursor(workspaceId, provider),
-    isDualMethodProvider(provider) ? store.getProviderAuthPreference(workspaceId, provider) : null,
-  ]) : null;
-  const slots = slotInputs?.[0].map(({ id, position, createdAt }) => [id, position, createdAt]);
-  return createHash('sha256').update(JSON.stringify([
-    parent && [parent.id, parent.createdAt, parent.baseUrl, parent.signInRequiredAt],
-    slots, slotInputs?.[1], slotInputs?.[2],
-  ])).digest('hex');
+  const state = await store.readCatalogCredentialState(workspaceId, provider);
+  return createHash('sha256').update(JSON.stringify(state)).digest('hex');
 }
 
 export function cachedCatalog(key: string, revision: string): CachedCatalog | undefined {
