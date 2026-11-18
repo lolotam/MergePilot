@@ -4,7 +4,7 @@
  * and with none a static list is returned, so the model picker still opens; a real access problem
  * then shows on the connection test or the review as an `LlmFailure`.
  */
-import { sortUnique, type CatalogModel } from '../../catalog-types.js';
+import { invalidCatalog, sortUnique, validModelId, type CatalogModel } from '../../catalog-types.js';
 import { FALLBACK_EFFORTS } from '../../effort.js';
 import { antigravityHeaders } from './config.js';
 import { antigravityFailure } from './errors.js';
@@ -42,6 +42,19 @@ function catalogEntry(id: string, name?: unknown, contextWindow?: unknown): Cata
   };
 }
 
+function availableModelId(item: unknown): string | undefined {
+  if (!item || typeof item !== 'object') return undefined;
+  const { id, model, name } = item as Record<string, unknown>;
+  return [id, model, name].find(validModelId);
+}
+
+function isValidModelList(models: unknown): boolean {
+  if (Array.isArray(models)) return models.every((item) => availableModelId(item) !== undefined);
+  if (!models || typeof models !== 'object') return false;
+  return Object.entries(models).every(([id, details]) =>
+    validModelId(id) && details !== null && typeof details === 'object' && !Array.isArray(details));
+}
+
 /** `models` is a map keyed by id in the answers seen so far; an array of entries is accepted too. */
 export function parseAvailableModels(body: unknown): CatalogModel[] {
   const models = body && typeof body === 'object' ? (body as { models?: unknown }).models : undefined;
@@ -50,7 +63,7 @@ export function parseAvailableModels(body: unknown): CatalogModel[] {
     for (const item of models) {
       if (!item || typeof item !== 'object') continue;
       const record = item as Record<string, unknown>;
-      const id = [record.id, record.model, record.name].find((value): value is string => typeof value === 'string');
+      const id = availableModelId(record);
       if (id) entries.push([id.replace(/^models\//, ''), record]);
     }
   } else if (models && typeof models === 'object') {
@@ -105,7 +118,7 @@ export async function listAntigravityModels(
   }
   if (!models || (!options.strictRefresh && models.length === 0)) return lastGood.get(projectId) ?? staticAntigravityModels();
   options.signal?.throwIfAborted();
-  if (projectId) remember(projectId, models, now);
+  if (projectId && models.length > 0) remember(projectId, models, now);
   return models;
 }
 
@@ -125,7 +138,7 @@ async function fetchModels(access: string, projectId: string, options: ListAntig
   const body: unknown = await readJson(response, 'Cloud Code Assist fetchAvailableModels');
   if (options.strictRefresh) {
     const models = (body as { models?: unknown } | null)?.models;
-    if (!models || typeof models !== 'object') throw new Error('Invalid Antigravity model catalog');
+    if (!isValidModelList(models)) throw invalidCatalog('google-antigravity');
   }
   return parseAvailableModels(body);
 }

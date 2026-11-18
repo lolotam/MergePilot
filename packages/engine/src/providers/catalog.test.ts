@@ -9,6 +9,27 @@ import { jsonResponse, mockFetch, textResponse } from './fetch-mock.fixtures.js'
 const KEY = new Secret(['s', 'k-', 'x'.repeat(24)].join(''));
 
 describe('listModels', () => {
+  it.each([
+    { provider: 'anthropic' as const, payload: { data: [{}], has_more: false } },
+    { provider: 'anthropic' as const, payload: { data: [{ id: 'claude-valid' }] } },
+    { provider: 'anthropic' as const, payload: { data: [{ id: 'claude-valid' }], has_more: 'false' } },
+    { provider: 'openai' as const, payload: { data: [{ id: ' ' }] } },
+    { provider: 'gemini' as const, payload: { models: [{ name: 'models/' }] } },
+    { provider: 'openrouter' as const, payload: { data: [null] } },
+    { provider: 'openrouter' as const, payload: { data: [{ id: 17 }] } },
+  ])('strict $provider sync rejects malformed catalogs with a classified failure', async ({ provider, payload }) => {
+    const { fetch } = mockFetch(jsonResponse(payload));
+    await expect(listModels(provider, KEY, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER', provider });
+  });
+
+  it('normalizes strict catalog cancellation before contacting the provider', async () => {
+    const { fetch, calls } = mockFetch();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(listModels('openai', KEY, { fetch, strictRefresh: true, signal: controller.signal })).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(calls).toHaveLength(0);
+  });
+
   it('strict refresh surfaces an authenticated gateway refusal without an anonymous retry', async () => {
     const { fetch, calls } = mockFetch(textResponse('denied', 401), jsonResponse({ data: [{ id: 'public-model' }] }));
     await expect(listModels('openrouter', KEY, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
@@ -22,13 +43,20 @@ describe('listModels', () => {
     const { fetch, calls } = mockFetch(
       jsonResponse({ models: { 'gemini-3.1-pro': {} } }),
       () => textResponse('denied', 403),
+      jsonResponse({ models: [null] }),
+      jsonResponse({ models: { 'gemini-3.1-pro': null } }),
       jsonResponse({ models: {} }),
     );
     expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
     await expect(listModels('google-antigravity', key, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
     expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
+    for (let i = 0; i < 2; i++) {
+      await expect(listModels('google-antigravity', key, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER' });
+      expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
+    }
     expect(await listModels('google-antigravity', key, { fetch, strictRefresh: true })).toEqual([]);
-    expect(calls).toHaveLength(3);
+    expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
+    expect(calls).toHaveLength(5);
   });
 
   describe.each([

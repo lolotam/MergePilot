@@ -110,6 +110,19 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect(vi.mocked(listModels)).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a connection test catalog out of subsequent picker responses', async () => {
+    const testModels = [{ id: 'test-account-model', name: 'Test model', efforts: [] }];
+    const pickerModels = [{ id: 'picker-account-model', name: 'Picker model', efforts: [] }];
+    vi.mocked(listModels).mockResolvedValueOnce(testModels).mockResolvedValueOnce(pickerModels);
+    vi.mocked(testConnection).mockResolvedValueOnce({ ok: true, ms: 1, model: 'test-account-model', reply: 'OK' });
+    await saveOpenAi();
+    expect((await test('openai', h.adminCookie())).statusCode).toBe(200);
+    const picker = await h.app.inject({
+      method: 'GET', url: '/api/workspaces/ws-1/providers/openai/models', headers: { cookie: h.memberCookie() },
+    });
+    expect(picker.json()).toEqual({ models: pickerModels });
+  });
+
   it('falls back to the registry default when listing models fails', async () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model: 'x', reply: 'OK' });
     vi.mocked(listModels).mockRejectedValue(new Error('boom'));

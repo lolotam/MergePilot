@@ -30,7 +30,7 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 1000;
 const modelsCache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
 
-const activeCatalogReads = new Map<string, { count: number }>();
+const activeCatalogReads = new Map<string, { count: number; started: number; lastPublished: number }>();
 
 const RATE_WINDOW_MS = 60 * 1000;
 export const TEST_LIMIT = 10;
@@ -170,26 +170,24 @@ interface CatalogRequest {
   provider: ApiProviderId;
   target: ProviderTarget;
   signal: AbortSignal;
-  cacheKey?: string;
   mode?: 'sync';
-  stillCurrent?: () => boolean;
+  publish?: (models: CatalogModel[]) => boolean;
 }
 
 async function fetchModels(
   request: FastifyRequest,
   reply: FastifyReply,
-  { provider, target, signal, cacheKey, mode, stillCurrent }: CatalogRequest,
+  { provider, target, signal, mode, publish }: CatalogRequest,
 ): Promise<FastifyReply> {
   const sync = mode === 'sync';
   const start = Date.now();
   try {
     const models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal, ...(sync ? { strictRefresh: true } : {}) });
     signal.throwIfAborted();
-    if (stillCurrent?.() === false) {
+    if (publish?.(models) === false) {
       return sendError(reply, 409, 'catalog_credentials_changed', 'Provider credentials changed. Refresh the model catalog again.');
     }
     const ms = Date.now() - start;
-    if (cacheKey) cacheModels(cacheKey, models);
     request.log.info(
       {
         event: 'provider.models_listed',
@@ -278,16 +276,26 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           return reply.status(200).send({ models: cached.models });
         }
       }
-      const catalogReads = activeCatalogReads.get(cacheKey) ?? { count: 0 };
+      const catalogReads = activeCatalogReads.get(cacheKey) ?? { count: 0, started: 0, lastPublished: 0 };
       activeCatalogReads.set(cacheKey, catalogReads);
       catalogReads.count++;
+      const readNumber = ++catalogReads.started;
       const stillCurrent = () => activeCatalogReads.get(cacheKey) === catalogReads;
+      const publish = (models: CatalogModel[]) => {
+        if (!stillCurrent()) return false;
+        // A slower older request must not replace a catalog that has already been refreshed.
+        if (readNumber > catalogReads.lastPublished) {
+          cacheModels(cacheKey, models);
+          catalogReads.lastPublished = readNumber;
+        }
+        return true;
+      };
       try {
         const signal = routeSignal(reply);
         const result = await storedTarget(deps, workspaceId, provider, signal);
         if (!result.ok) return sendTargetError(reply, result);
         return await fetchModels(request, reply, {
-          provider, target: result.target, signal, cacheKey, stillCurrent, ...(sync ? { mode: 'sync' } : {}),
+          provider, target: result.target, signal, publish, ...(sync ? { mode: 'sync' } : {}),
         });
       } finally {
         catalogReads.count--;
@@ -345,8 +353,8 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const settings = await deps.store.getSettings(workspaceId);
       let model = body.model?.trim() || configuredModelFor(settings, provider);
       if (!model) {
-        // The workspace cache belongs to the stored key: an unsaved key never reads or fills it.
-        const cacheKey = apiKey ? undefined : `${workspaceId}:${provider}`;
+        // Only a test of the default credential can reuse its cached catalog.
+        const cacheKey = apiKey || keyId ? undefined : `${workspaceId}:${provider}`;
         let models: CatalogModel[] | undefined;
         const cached = cacheKey ? modelsCache.get(cacheKey) : undefined;
         if (cached && Date.now() < cached.expiresAt) {
@@ -354,7 +362,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         } else {
           try {
             models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
-            if (cacheKey) cacheModels(cacheKey, models);
+            // A connection test reads models for its own request. Only catalog routes publish cached lists.
           } catch (error: unknown) {
             if (signal.aborted) throw error;
             // Not fatal: the test still runs on the registry default, and the reply names that model.

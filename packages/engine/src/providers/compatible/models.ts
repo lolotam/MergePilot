@@ -6,7 +6,7 @@ import { FALLBACK_EFFORTS, minimaxTakesEffort } from '../effort.js';
 import { bearerHeaders, failureFromResponse, failureFromThrown, type FetchLike, type KeyInput } from '../http.js';
 import type { ApiProviderId } from '../ids.js';
 import { chatModelsFor, providerEntry, resolveBaseUrl } from '../registry.js';
-import type { CatalogModel } from '../catalog-types.js';
+import { invalidCatalog, validModelId, type CatalogModel } from '../catalog-types.js';
 
 /** Gateways list image, video and embedding models next to chat models. */
 const NON_CHAT_TYPES = new Set([
@@ -117,12 +117,12 @@ export async function listCompatibleModels(
   }
   if (!res.ok) throw await failureFromResponse(res, provider, apiKey);
 
-  const body = (await res.json()) as { data?: unknown; models?: unknown };
-  if (options.strictRefresh && !Array.isArray(body.data) && !Array.isArray(body.models)) {
-    throw new Error('Invalid model catalog');
+  const body = (await res.json()) as { data?: unknown; models?: unknown } | null;
+  const list = Array.isArray(body?.data) ? body.data : Array.isArray(body?.models) ? body.models : undefined;
+  if (options.strictRefresh && (!list || list.some((raw: RawCompatibleModel | null) => !validModelId(raw?.id ?? raw?.name)))) {
+    throw invalidCatalog(provider);
   }
-  const list = Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [];
-  const models = (list as RawCompatibleModel[])
+  const models = ((list ?? []) as RawCompatibleModel[])
     .map((raw) => ({ raw, id: String(raw.id ?? raw.name ?? '').replace(/^models\//, '') }))
     .filter(({ raw, id }) => id && !NON_CHAT_TYPES.has(String(raw.type)) && !NON_CHAT_ID.test(id))
     .filter(({ raw }) => !LANGUAGE_TYPED.has(provider) || raw.type === 'language')

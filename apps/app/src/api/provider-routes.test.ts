@@ -128,7 +128,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     const upstream = vi.spyOn(globalThis, 'fetch')
       .mockRejectedValue(new Error('Unexpected provider request'))
       .mockImplementationOnce(() => { started.resolve(); return oldCatalog.promise; })
-      .mockResolvedValueOnce(Response.json({ data: [{ id: 'claude-new-account' }] }));
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'claude-new-account' }], has_more: false }));
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'anthropic', apiKey: keyFor('old'), userId: 'u-admin' });
     const pendingSync = get('anthropic', h.adminCookie(), '?sync=true').then((response) => response);
     try {
@@ -140,7 +140,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
       expect(changed.statusCode).toBe(200);
       const current = await get('anthropic', h.memberCookie());
       expect(current.json().models).toMatchObject([{ id: 'claude-new-account' }]);
-      oldCatalog.resolve(Response.json({ data: [{ id: 'claude-old-account' }] }));
+      oldCatalog.resolve(Response.json({ data: [{ id: 'claude-old-account' }], has_more: false }));
       const outdated = await pendingSync;
       expect(outdated.statusCode).toBe(409);
       expect(outdated.json().error.code).toBe('catalog_credentials_changed');
@@ -150,6 +150,19 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
       await pendingSync;
       upstream.mockRestore();
     }
+  });
+
+  it('refreshes picker data after changing the first credential in a key roster', async () => {
+    const first = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('first'), userId: 'u-admin' });
+    const second = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('second'), userId: 'u-admin' });
+    vi.mocked(listModels).mockImplementation(async (_, credential) => [{ id: credential === keyFor('first') ? 'first-model' : 'second-model', name: 'Model', efforts: [] }]);
+    expect((await get('openai', h.memberCookie())).json().models).toMatchObject([{ id: 'first-model' }]);
+    const changed = await h.app.inject({
+      method: 'PUT', url: '/api/workspaces/ws-1/keys/openai/order', headers: { cookie: h.adminCookie() },
+      payload: { ids: [second.id, first.id] },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect((await get('openai', h.memberCookie())).json().models).toMatchObject([{ id: 'second-model' }]);
   });
 
   it('answers 404 key_not_found without a stored key and 400 for an unknown provider', async () => {

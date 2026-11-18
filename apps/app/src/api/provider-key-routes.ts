@@ -142,6 +142,7 @@ export function registerProviderKeyRoutes(
       if (!body.success) return sendError(reply, 400, 'validation_error', body.error.issues[0]?.message ?? 'Invalid key order');
       try {
         const keys = await credentials.reorderProviderKeys(workspaceId, provider, body.data.ids);
+        invalidateModelsCache(workspaceId, provider);
         request.log.info({ event: 'credential.key_reordered', workspaceId, provider, keyCount: keys.length }, 'Provider API keys reordered');
         return reply.status(200).send({ keys: keys.map(slotBody) });
       } catch (err) {

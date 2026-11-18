@@ -3,7 +3,7 @@
  * Failures are `LlmFailure`s whose messages never contain the key (Gemini's key travels in the
  * `x-goog-api-key` header, never in the URL).
  */
-import { type CatalogModel, sortUnique } from './catalog-types.js';
+import { type CatalogModel, invalidCatalog, sortUnique, validModelId } from './catalog-types.js';
 import { listCompatibleModels } from './compatible/models.js';
 import { FALLBACK_EFFORTS } from './effort.js';
 import { failureFromResponse, failureFromThrown, keyValue, type FetchLike, type KeyInput } from './http.js';
@@ -51,10 +51,12 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
-function catalogEntries(value: unknown, options: ListModelsOptions): unknown[] {
-  if (Array.isArray(value)) return value;
-  if (options.strictRefresh) throw new Error('Invalid model catalog');
-  return [];
+function catalogEntries(value: unknown, idField: 'id' | 'name', provider: ApiProviderId, options: ListModelsOptions): unknown[] {
+  const rows: unknown[] = Array.isArray(value) ? value : [];
+  if (options.strictRefresh && (!Array.isArray(value) || rows.some((row) => !validModelId(record(row)[idField])))) {
+    throw invalidCatalog(provider);
+  }
+  return rows;
 }
 
 function checkNextPage(provider: 'anthropic' | 'gemini', page: number, cursor: unknown, seen: Set<string>): void {
@@ -100,11 +102,12 @@ async function listAnthropic(key: KeyInput, options: ListModelsOptions): Promise
   for (let page = 0; page < MAX_PAGES; page++) {
     const query = `limit=1000${after ? `&after_id=${encodeURIComponent(after)}` : ''}`;
     const body = record(await getJson('anthropic', `${base}/models?${query}`, headers, key, options));
-    const data = catalogEntries(body.data, options);
+    const data = catalogEntries(body.data, 'id', 'anthropic', options);
     for (const item of data.map(record)) {
       if (typeof item.id !== 'string') continue;
       out.push(entry(item.id, item.display_name, anthropicEfforts(item.capabilities), positive(item.max_input_tokens)));
     }
+    if (options.strictRefresh && typeof body.has_more !== 'boolean') throw invalidCatalog('anthropic');
     if (body.has_more !== true) break;
     if (options.strictRefresh) checkNextPage('anthropic', page, body.last_id, seen);
     if (typeof body.last_id !== 'string') break;
@@ -124,7 +127,7 @@ async function listOpenAI(key: KeyInput, options: ListModelsOptions): Promise<Ca
   const body = record(
     await getJson('openai', `${base}/models`, value ? { Authorization: `Bearer ${value}` } : {}, key, options),
   );
-  const data = catalogEntries(body.data, options);
+  const data = catalogEntries(body.data, 'id', 'openai', options);
   return data
     .map(record)
     .filter((m): m is Record<string, unknown> & { id: string } => typeof m.id === 'string')
@@ -150,7 +153,7 @@ async function listGemini(key: KeyInput, options: ListModelsOptions): Promise<Ca
   for (let page = 0; page < MAX_PAGES; page++) {
     const query = `pageSize=1000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
     const body = record(await getJson('gemini', `${base}/models?${query}`, headers, key, options));
-    const models = catalogEntries(body.models, options);
+    const models = catalogEntries(body.models, 'name', 'gemini', options);
     for (const item of models.map(record)) {
       if (typeof item.name !== 'string') continue;
       const id = item.name.replace(/^models\//, '');
@@ -177,6 +180,21 @@ export async function listModels(
   apiKey: KeyInput,
   options: ListModelsOptions = {},
 ): Promise<CatalogModel[]> {
+  if (!options.strictRefresh) return loadModelCatalog(provider, apiKey, options);
+  try {
+    options.signal?.throwIfAborted();
+    const models = await loadModelCatalog(provider, apiKey, options);
+    options.signal?.throwIfAborted();
+    return models;
+  } catch (error) {
+    if (error instanceof LlmFailure) throw error;
+    const { code } = failureFromThrown(error, provider, undefined, options.signal);
+    // Raw transport and JSON errors can contain response details, including credentials.
+    throw new LlmFailure({ code, provider, message: 'Could not read provider model catalog' });
+  }
+}
+
+async function loadModelCatalog(provider: ApiProviderId, apiKey: KeyInput, options: ListModelsOptions): Promise<CatalogModel[]> {
   const subscription = decodeSubscription(keyValue(apiKey) ?? '', provider);
   if (subscription?.provider === 'google-antigravity') {
     return listAntigravityModels(subscription.credential, {

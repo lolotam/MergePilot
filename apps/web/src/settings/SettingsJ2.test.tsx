@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { FallbackEntry } from '@mergepilot/app/contract';
-import { api, ApiClientError, type ApiProvider } from '../api/client.js';
+import { api, ApiClientError, type ApiProvider, type ModelsResponse } from '../api/client.js';
 import { EffortSelect } from './EffortSelect.js';
 import { FallbackModelsCard } from './FallbackModelsCard.js';
 import { HeavyModelCard } from './HeavyModelCard.js';
 import { MaxFindingsSelect } from './MaxFindingsSelect.js';
 import { ModelSelect } from './ModelSelect.js';
+import { SyncModels } from './SyncModels.js';
 import { ReviewSettingsCard } from './ReviewSettingsCard.js';
 import { SeveritySelect } from './SeveritySelect.js';
 import { arSettings } from '../i18n/settings-ar.js';
@@ -16,7 +17,7 @@ import { renderSettings } from './settings.fixtures.js';
 
 vi.mock('../api/client.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client.js')>();
-  return { ...actual, api: { ...actual.api, getModels: vi.fn(), testConnection: vi.fn(), testModelsUnsaved: vi.fn() } };
+  return { ...actual, api: { ...actual.api, getModels: vi.fn(), syncModels: vi.fn(), testConnection: vi.fn(), testModelsUnsaved: vi.fn() } };
 });
 
 const CATALOG = {
@@ -59,7 +60,27 @@ describe('J2 settings components', () => {
     renderSettings(<ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />, 'en');
     await screen.findByRole('button', { name: 'Model name' });
     await user.click(screen.getByRole('button', { name: 'Refresh list' }));
-    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true));
+    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
+  });
+
+  it('keeps synced options when an older individual refresh resolves afterward', async () => {
+    let resolveRefresh!: (catalog: ModelsResponse) => void;
+    const pickerRefresh = new Promise<ModelsResponse>((resolve) => { resolveRefresh = resolve; });
+    vi.mocked(api.syncModels).mockResolvedValueOnce({ source: 'live', models: [{ id: 'new-model', name: 'New model', efforts: [] }] });
+    renderSettings(<>
+      <SyncModels workspaceId="ws-1" providers={['openai']} />
+      <ModelSelect workspaceId="ws-1" provider="openai" id="picker" label="Model picker" value="plain" onChange={vi.fn()} />
+    </>, 'en');
+    await screen.findByText('Plain');
+    vi.mocked(api.getModels).mockReturnValueOnce(pickerRefresh);
+    await user.click(screen.getByRole('button', { name: 'Refresh list' }));
+    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
+    await user.click(screen.getByRole('button', { name: 'Sync all models' }));
+    await screen.findByText(/Live catalog/);
+    await act(async () => resolveRefresh({ models: [{ id: 'stale', name: 'Stale model', efforts: [] }] }));
+    await user.click(screen.getByRole('button', { name: 'Model picker' }));
+    expect(screen.getByRole('option', { name: 'New model' })).toBeDefined();
+    expect(screen.queryByRole('option', { name: 'Stale model' })).toBeNull();
   });
 
   it('EffortSelect lists the model efforts, is labelled, and hides when there are none', async () => {

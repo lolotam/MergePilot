@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { isCancelledError, useQueryClient } from '@tanstack/react-query';
 import { api, ApiClientError, type ApiProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
 import { fieldClass, modelsQueryKey, useModelsQuery } from './providers.js';
@@ -54,10 +54,16 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
     setRefreshing(true);
     setManualChosen(false);
     try {
-      const fresh = await api.getModels(workspaceId, provider, true);
-      queryClient.setQueryData(modelsQueryKey(workspaceId, provider), fresh);
-    } catch {
-      await query.refetch();
+      const queryKey = modelsQueryKey(workspaceId, provider);
+      await queryClient.cancelQueries({ queryKey, exact: true });
+      await queryClient.fetchQuery({
+        queryKey,
+        queryFn: ({ signal }) => api.getModels(workspaceId, provider, true, signal),
+        staleTime: 0,
+        retry: false,
+      });
+    } catch (error) {
+      if (!isCancelledError(error)) await query.refetch();
     } finally {
       setRefreshing(false);
     }
