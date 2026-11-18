@@ -1,5 +1,10 @@
 # MergePilot agent instructions
 
+## CI critical-path and measurement policy — MP س67 (2026-11-18)
+
+Canonical owner rule: [docs/decisions.ar.md, س67](docs/decisions.ar.md#س67-تسريع-ci-مع-الحفاظ-على-البوابات-وقياس-الأثر). Inspect actual workflow dependencies before changes; apply independent scheduling and isolated test shards without reducing coverage or failure propagation. Workflow changes require a dedicated reviewed CI PR. Measurement and owner/due date live in [docs/plans/ci-critical-path-20261118.md](docs/plans/ci-critical-path-20261118.md) and `tasks/todo.md`. Preserve release/deploy/security/HOLD/freeze controls; no main-only coverage relocation without the applicable approval.
+
+
 MergePilot reviews pull requests through a shared TypeScript engine, a GitHub Action, and a GitHub App with a web dashboard and review workers.
 
 ## Before changing code
