@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { isCancelledError, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiClientError, type ApiProvider } from '../api/client.js';
 import { useI18n } from '../i18n/context.js';
 import { fieldClass, modelsQueryKey, useModelsQuery } from './providers.js';
@@ -28,10 +28,6 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
   const query = useModelsQuery(workspaceId, provider);
   const [manualChosen, setManualChosen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  // The follow-up refetch can succeed with the old list, which clears query.isError.
-  // Tied to the catalog it failed against: another workspace, provider or newer catalog hides it.
-  const [failedRefresh, setFailedRefresh] = useState<{ scope: string; dataUpdatedAt: number } | null>(null);
-  const refreshFailed = failedRefresh?.scope === `${workspaceId}:${provider}` && failedRefresh.dataUpdatedAt === query.dataUpdatedAt;
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -57,7 +53,6 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
 
   const refresh = async () => {
     setRefreshing(true);
-    setFailedRefresh(null);
     setManualChosen(false);
     try {
       const queryKey = modelsQueryKey(workspaceId, provider);
@@ -68,11 +63,10 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
         staleTime: 0,
         retry: false,
       });
-    } catch (error) {
-      if (!isCancelledError(error)) {
-        const settled = await query.refetch();
-        setFailedRefresh({ scope: `${workspaceId}:${provider}`, dataUpdatedAt: settled.dataUpdatedAt });
-      }
+    } catch {
+      // A failed fetch leaves the query in its error state with the last good catalog kept,
+      // so the notice below stays until a newer catalog (refresh, sync, credential change) replaces it.
+      // A cancelled fetch means a newer read took over.
     } finally {
       setRefreshing(false);
     }
@@ -170,7 +164,7 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
         </span>
       </button>
 
-      {(query.isError || refreshFailed) && (
+      {query.isError && (
         <p role="status" className="text-[11px] text-amber-600 dark:text-amber-400 ms-2">
           {t('modelsRefreshFailed')}
         </p>
