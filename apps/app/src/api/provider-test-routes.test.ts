@@ -125,6 +125,41 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     else expect(stored?.lastTestedAt).toEqual(previousTest);
   });
 
+  it('selects from the tested slot catalog and still honors an explicit model', async () => {
+    const provider = 'openrouter';
+    const headers = { cookie: h.adminCookie() };
+    const saved = await h.app.inject({
+      method: 'PUT', url: '/api/workspaces/ws-1/settings', headers,
+      payload: { provider, model: 'openai/workspace-default', language: 'en' },
+    });
+    expect(saved.statusCode).toBe(200);
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('default'), userId: 'u-admin' });
+    const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
+    const model = 'openai/account:free';
+    vi.mocked(listModels).mockResolvedValueOnce([{ id: model, name: 'Account model', efforts: [] }]);
+    vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model, reply: 'OK' });
+
+    expect((await test(provider, h.adminCookie(), { keyId: slot.id })).statusCode).toBe(200);
+    expect(listModels).toHaveBeenCalledWith(provider, keyFor('slot'), expect.objectContaining({ strictRefresh: true }));
+    expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), model, expect.anything());
+
+    await test(provider, h.adminCookie(), { keyId: slot.id, model: 'openai/explicit' });
+    expect(listModels).toHaveBeenCalledTimes(1);
+    expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), 'openai/explicit', expect.anything());
+  });
+
+  it('keeps the key status unchanged when the slot has no catalog model to test', async () => {
+    const provider = 'gemini';
+    const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
+    vi.mocked(listModels).mockResolvedValueOnce([]);
+    const response = await test(provider, h.adminCookie(), { keyId: slot.id });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('model_required');
+    expect(testConnection).not.toHaveBeenCalled();
+    const [stored] = await h.store.listProviderKeys('ws-1', provider);
+    expect(stored?.lastTestStatus).toBeNull();
+  });
+
   it('never caches an unsaved key catalog, and skips a retired default the provider no longer lists', async () => {
     vi.mocked(testConnection).mockResolvedValue({ ok: true, ms: 1, model: 'x', reply: 'OK' });
     vi.mocked(listModels).mockResolvedValue([{ id: 'mimo-v2.6', name: 'MiMo v2.6', efforts: [] }]);

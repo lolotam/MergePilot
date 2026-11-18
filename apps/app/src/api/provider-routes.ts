@@ -123,8 +123,8 @@ export function configuredModelFor(settings: WorkspaceSettings | null, provider:
 /**
  * The model a connection test uses when the request names none: the workspace's primary model,
  * then its heavy model, then its first fallback for this provider, then a free model from the
- * provider's models list (OpenRouter / OpenCode Zen), then the registry default
- * (`custom` has none, so a custom key used only as heavy/fallback still tests its own model).
+ * provider's models list (OpenRouter / OpenCode Zen), then the registry default.
+ * A slot test uses its own catalog; it ignores workspace settings unless the caller supplies a model.
  */
 export function testModelFor(
   settings: WorkspaceSettings | null,
@@ -133,7 +133,6 @@ export function testModelFor(
 ): string {
   const configured = configuredModelFor(settings, provider);
   if (configured) return configured;
-  if (provider === 'openrouter' && models?.length === 0) return '';
   const fallback = providerEntry(provider).defaultModel;
   if (models && models.length > 0) {
     const free = pickFreeModel(provider, models);
@@ -347,16 +346,17 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         return status;
       };
 
-      const settings = await deps.store.getSettings(workspaceId);
+      const settings = keyId ? null : await deps.store.getSettings(workspaceId);
       let model = body.model?.trim() || configuredModelFor(settings, provider);
       if (!model) {
+        const accountCatalogRequired = Boolean(keyId) || provider === 'openrouter';
         let models: CatalogModel[] | undefined;
         const catalogStart = Date.now();
         try {
           // The test may have resolved a different key than the latest picker catalog.
           models = await listModels(provider, target.apiKey, {
             ...engineOptions(target), signal,
-            ...((provider === 'openrouter' || provider === 'google-antigravity') ? { strictRefresh: true } : {}),
+            ...((accountCatalogRequired || provider === 'google-antigravity') ? { strictRefresh: true } : {}),
           });
           signal.throwIfAborted();
         } catch (error: unknown) {
@@ -366,11 +366,11 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
               ok: false, code: 'network', message: 'Provider model catalog did not answer in time', ms: Date.now() - catalogStart,
             });
           }
-          if (provider === 'openrouter' && error instanceof LlmFailure) {
-            const code = failureKind(error.code);
+          if (accountCatalogRequired) {
+            const code = error instanceof LlmFailure ? failureKind(error.code) : 'network';
             const quotaStatus = await recordOutcome(false, code);
             return reply.status(200).send({
-              ok: false, code, message: 'Could not read the OpenRouter account catalog',
+              ok: false, code, message: 'Could not read the provider account catalog',
               ms: Date.now() - catalogStart, ...(quotaStatus ? { quotaStatus } : {}),
             });
           }
@@ -380,7 +380,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
             'Could not list models to pick a test model; using the registry default',
           );
         }
-        model = testModelFor(settings, provider, models);
+        model = accountCatalogRequired && !models?.length ? '' : testModelFor(settings, provider, models);
       }
       if (!model) return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
       const effort = body.effort?.trim();
