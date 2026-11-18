@@ -1,4 +1,4 @@
-import { clampKeyCursor } from './key-cursor.js';
+import { clampKeyCursor, effectiveKeyCursor } from './key-cursor.js';
 import { deleteMemoryAuthPreference, readMemoryAuthPreference, writeMemoryAuthPreference } from './memory-auth-preferences.js';
 import type { CatalogCredentialState, KeyProvider, KeyQuotaStatus, ProviderAuthMethod, ProviderKeyChange, StoredCredential, StoredProviderKey } from './types.js';
 
@@ -39,7 +39,7 @@ export function readMemoryCatalogCredentialState(tables: MemoryKeyTables, worksp
   return {
     parent: { id, createdAt, baseUrl: baseUrl ?? null, signInRequiredAt: signInRequiredAt ?? null },
     slots: listMemoryProviderKeys(tables, workspaceId, provider).map(({ id, position, createdAt }) => ({ id, position, createdAt })),
-    cursor: tables.keyCursors.get(key) ?? null,
+    cursor: readMemoryKeyCursor(tables, workspaceId, provider),
     preference: readMemoryAuthPreference(tables, workspaceId, provider),
   };
 }
@@ -114,10 +114,7 @@ export async function modifyMemoryProviderKeys(
 /** Missing, empty, or out-of-range cursors read as 0. The row is left untouched. */
 export function readMemoryKeyCursor(tables: MemoryKeyTables, workspaceId: string, provider: KeyProvider): number {
   const length = tables.providerKeys.get(slotKey(workspaceId, provider))?.length ?? 0;
-  if (length === 0) return 0;
-  const stored = tables.keyCursors.get(slotKey(workspaceId, provider));
-  if (stored === undefined || !Number.isInteger(stored) || stored < 0 || stored >= length) return 0;
-  return stored;
+  return effectiveKeyCursor(tables.keyCursors.get(slotKey(workspaceId, provider)), length);
 }
 
 /** No slots means there is nothing to remember, so the cursor row is removed. */

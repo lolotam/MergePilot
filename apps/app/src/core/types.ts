@@ -210,7 +210,7 @@ export interface ProviderKeyChange {
 export interface CatalogCredentialState {
   parent: Pick<StoredCredential, 'id' | 'createdAt' | 'baseUrl' | 'signInRequiredAt'>;
   slots: Array<Pick<StoredProviderKey, 'id' | 'position' | 'createdAt'>>;
-  cursor: number | null;
+  cursor: number;
   preference: string | null;
 }
 

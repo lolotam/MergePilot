@@ -1,4 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm';
+import { effectiveKeyCursor } from '../core/key-cursor.js';
 import type { CatalogCredentialState, KeyProvider } from '../core/types.js';
 import type { AppDb } from './pg-store.js';
 import { providerApiKeys, providerAuthPreferences, providerCredentials, providerKeyCursors } from './schema.js';
@@ -23,5 +24,6 @@ export async function readPgCatalogCredentialState(
     .orderBy(asc(providerApiKeys.position));
   const first = rows[0];
   if (!first) return null;
-  return { parent: first.parent, slots: rows.flatMap(({ slot }) => slot ? [slot] : []), cursor: first.cursor, preference: first.preference };
+  const slots = rows.flatMap(({ slot }) => slot ? [slot] : []);
+  return { parent: first.parent, slots, cursor: effectiveKeyCursor(first.cursor, slots.length), preference: first.preference };
 }

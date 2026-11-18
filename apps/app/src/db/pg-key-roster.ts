@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { clampKeyCursor } from '../core/key-cursor.js';
+import { clampKeyCursor, effectiveKeyCursor } from '../core/key-cursor.js';
 import type { KeyProvider, KeyQuotaStatus, ProviderAuthMethod, ProviderKeyChange, StoredProviderKey } from '../core/types.js';
 import { deletePgAuthPreference, writePgAuthPreference } from './pg-auth-preferences.js';
 import { writePgCredential } from './pg-backup.js';
@@ -115,8 +115,7 @@ export async function readStoredKeyCursor(db: AppDb, workspaceId: string, provid
   const keys = await listPgProviderKeys(db, workspaceId, provider);
   if (keys.length === 0) return 0;
   const stored = await readPgKeyCursor(db, workspaceId, provider);
-  if (stored === null || !Number.isInteger(stored) || stored < 0 || stored >= keys.length) return 0;
-  return stored;
+  return effectiveKeyCursor(stored, keys.length);
 }
 
 /** No slots means there is nothing to remember, so the cursor row is removed. */
