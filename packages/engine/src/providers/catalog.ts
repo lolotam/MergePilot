@@ -216,7 +216,8 @@ export async function listCodexModelsWithApiKey(
   } catch (error) {
     options.signal?.throwIfAborted();
     // A fetch that aborts on its own is a cancellation too, not a listing failure to hide.
-    if (error instanceof LlmFailure && error.code === 'ABORTED') throw error;
+    // That includes a body read cut off after the headers, which reaches here as a raw AbortError.
+    if ((error instanceof LlmFailure && error.code === 'ABORTED') || (error instanceof Error && error.name === 'AbortError')) throw error;
     return { models: bundled, merged: false };
   }
 }

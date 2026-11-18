@@ -95,6 +95,8 @@ describe('Codex models listed by the OpenAI API key', () => {
   it('rethrows a fetch that aborts on its own, but still falls back for an ordinary failure', async () => {
     const aborting = async (): Promise<Response> => { throw new DOMException('aborted', 'AbortError'); };
     await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch: aborting })).rejects.toMatchObject({ code: 'ABORTED' });
+    const cutBody = async (): Promise<Response> => ({ ok: true, json: async () => { throw new DOMException('aborted', 'AbortError'); } }) as unknown as Response;
+    await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch: cutBody })).rejects.toMatchObject({ name: 'AbortError' });
     const { fetch } = mockFetch(textResponse('down', 503));
     await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch })).resolves.toMatchObject({ merged: false });
   });
