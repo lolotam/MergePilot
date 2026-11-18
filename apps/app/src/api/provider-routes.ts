@@ -17,7 +17,7 @@ import { DASHBOARD_FETCH_LIMITS, SafeFetchTimeoutError } from '../core/safe-fetc
 import type { KeyQuotaStatus, WorkspaceSettings } from '../core/types.js';
 import { ApiProviderSchema, ListModelsBodySchema, TestConnectionBodySchema } from './contract.js';
 import { sendError } from './helpers.js';
-import { engineOptions, storedKeyById, storedTarget, unsavedTarget, type ProviderTarget, type TargetResult } from './provider-target.js';
+import { catalogTarget, engineOptions, listTargetCatalog, storedKeyById, storedTarget, unsavedTarget, type ProviderTarget, type TargetResult } from './provider-target.js';
 import type { DashboardApiDeps } from './routes.js';
 import { beginCatalogRead, cachedCatalog, catalogCredentialRevision, resetCatalogCache } from './provider-catalog-cache.js';
 
@@ -156,10 +156,12 @@ async function fetchModels(
   const start = Date.now();
   try {
     let commitCatalog: (() => void) | undefined;
-    let models = await listModels(provider, target.apiKey, {
+    const listOptions = {
       ...engineOptions(target), signal,
-      ...(sync ? { strictRefresh: true, deferAntigravityCacheWrite: (commit) => { commitCatalog = commit; } } : {}),
-    });
+      ...(sync ? { strictRefresh: true, deferAntigravityCacheWrite: (commit: () => void) => { commitCatalog = commit; } } : {}),
+    };
+    const { models: listed, merged } = await listTargetCatalog(provider, target, listOptions);
+    let models = listed;
     signal.throwIfAborted();
     if (publish) {
       const publication = await publish(models, commitCatalog);
@@ -169,19 +171,9 @@ async function fetchModels(
       models = publication.models;
     }
     const ms = Date.now() - start;
-    request.log.info(
-      {
-        event: 'provider.models_listed',
-        provider,
-        ok: true,
-        count: models.length,
-        ms,
-        cached: false,
-      },
-      'Provider models listed',
-    );
+    request.log.info({ event: 'provider.models_listed', provider, ok: true, count: models.length, ms, cached: false }, 'Provider models listed');
     const subscription = sync && decodeSubscription(target.apiKey, provider);
-    const source = subscription && subscription.provider !== 'google-antigravity' ? 'bundled' : 'live';
+    const source = subscription && subscription.provider !== 'google-antigravity' && !merged ? 'bundled' : 'live';
     return reply.status(200).send({ models, ...(sync ? { source } : {}) });
   } catch (err) {
     const ms = Date.now() - start;
@@ -262,7 +254,7 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       }
       const read = beginCatalogRead(cacheKey, revision, sync ? 'sync' : 'ordinary');
       try {
-        const result = await storedTarget(deps, workspaceId, provider, signal);
+        const result = await catalogTarget(deps, workspaceId, provider, signal);
         if (!result.ok) return sendTargetError(reply, result);
         const resolvedSlot = result.target.slotId;
         if ((resolvedSlot !== undefined && resolvedSlot !== slotId) ||

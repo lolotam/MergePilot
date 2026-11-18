@@ -58,7 +58,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect(vi.mocked(listModels).mock.calls[0]?.[1]).toBe(keyFor('vg'));
   });
 
-  it('syncs only the effective default method for admins and keeps the previous cached catalog on failure', async () => {
+  it('syncs the effective default method for admins, adds the API key models to a Codex sign-in and keeps the cached catalog on failure', async () => {
     const query = '?refresh=true&sync=true';
     const access = ['test', 'access'].join('-');
     const refresh = ['test', 'refresh'].join('-');
@@ -70,20 +70,26 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
     vi.mocked(listModels)
       .mockImplementationOnce(engine.listModels)
-      .mockImplementationOnce(engine.listModels)
       .mockImplementationOnce(engine.listModels);
     const upstream = vi.spyOn(globalThis, 'fetch')
       .mockRejectedValue(new Error('Unexpected provider request'))
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'gpt-9-fixture' }, { id: 'gpt-4o' }] }))
       .mockResolvedValueOnce(Response.json({ data: [{ id: 'gpt-fixture' }] }))
       .mockResolvedValueOnce(new Response(keyFor('first'), { status: 429 }));
     try {
       expect((await get('openai', h.memberCookie(), query)).statusCode).toBe(403);
       const bundled = await get('openai', h.adminCookie(), query);
-      expect(bundled.json()).toMatchObject({ source: 'bundled' });
-      expect(bundled.json().models.length).toBeGreaterThan(0);
+      expect(bundled.json()).toMatchObject({ source: 'live' });
+      const ids = bundled.json().models.map((model: { id: string }) => model.id);
+      // The sign-in's bundled catalog plus the API key's Codex-family model; GPT-4 ids stay out.
+      expect(ids).toContain('gpt-9-fixture');
+      expect(ids).not.toContain('gpt-4o');
+      expect(ids.length).toBeGreaterThan(1);
+      expect(bundled.json().models.find((model: { id: string }) => model.id === 'gpt-9-fixture').efforts.length).toBeGreaterThan(0);
       expect(bundled.body).not.toContain(access);
       expect(bundled.body).not.toContain(refresh);
-      expect(upstream).not.toHaveBeenCalled();
+      expect(bundled.body).not.toContain(keyFor('first'));
+      expect(upstream).toHaveBeenCalledTimes(1);
 
       await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'api-key');
       const live = await get('openai', h.adminCookie(), query);
@@ -97,7 +103,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
       expect(failed.body).not.toContain(keyFor('first'));
       expect((await get('openai', h.memberCookie())).json()).toEqual({ models: live.json().models });
       expect(upstream.mock.calls.map(([url, init]) => [new URL(String(url)).pathname, new Headers(init?.headers).get('authorization')]))
-        .toEqual([['/v1/models', `Bearer ${keyFor('first')}`], ['/v1/models', `Bearer ${keyFor('first')}`]]);
+        .toEqual(Array(3).fill(['/v1/models', `Bearer ${keyFor('first')}`]));
       expect(testConnection).not.toHaveBeenCalled();
     } finally {
       upstream.mockRestore();
@@ -108,7 +114,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect((await h.app.inject({
       method: 'GET', url: `/api/workspaces/ws-other/providers/openai/models${query}`, headers: { cookie: h.adminCookie() },
     })).statusCode).toBe(403);
-    expect(listModels).toHaveBeenCalledTimes(3);
+    expect(listModels).toHaveBeenCalledTimes(2);
   });
 
   it('drops the cached list when the key is replaced', async () => {
@@ -166,29 +172,32 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
 
   it('rejects an API catalog when another replica switches the default to a subscription', async () => {
     const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
-    vi.mocked(listModels).mockImplementationOnce(engine.listModels).mockImplementationOnce(engine.listModels);
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels);
     const connected = { type: 'oauth' as const, access: 'fixture-access', refresh: 'fixture-refresh', expires: Date.now() + 3_600_000 };
     await h.credentials.saveSubscription('ws-1', 'openai', connected, 'u-admin');
     await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('api'), userId: 'u-admin' });
     await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'api-key');
     const requested = Promise.withResolvers<void>();
     const oldCatalog = Promise.withResolvers<Response>();
-    const upstream = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
-      requested.resolve();
-      return oldCatalog.promise;
-    });
+    // The subscription sync below also lists the workspace's API key, so only the first fetch is held back.
+    const upstream = vi.spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(() => {
+        requested.resolve();
+        return oldCatalog.promise;
+      })
+      .mockResolvedValue(Response.json({ data: [] }));
     const pending = get('openai', h.adminCookie(), '?sync=true').then((response) => response);
     try {
       await waitForProviderFetch(requested.promise, pending);
       await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
       const current = await get('openai', h.adminCookie(), '?sync=true');
-      expect(current.json()).toMatchObject({ source: 'bundled' });
+      expect(current.json()).toMatchObject({ source: 'live' });
       oldCatalog.resolve(Response.json({ data: [{ id: 'gpt-old-account' }] }));
       const outdated = await pending;
       expect(outdated.statusCode).toBe(409);
       expect(outdated.json().error.code).toBe('catalog_credentials_changed');
       expect((await get('openai', h.memberCookie())).json()).toEqual({ models: current.json().models });
-      expect(upstream).toHaveBeenCalledTimes(1);
+      expect(upstream).toHaveBeenCalledTimes(2);
     } finally {
       oldCatalog.resolve(Response.json({ data: [] }));
       await pending;

@@ -1,4 +1,13 @@
-import { SUBSCRIPTION_PREFIX, type ApiProviderId, type FetchLike } from '@mergepilot/engine';
+import {
+  decodeSubscription,
+  listCodexModelsWithApiKey,
+  listModels,
+  SUBSCRIPTION_PREFIX,
+  type ApiProviderId,
+  type CatalogModel,
+  type FetchLike,
+  type ListModelsOptions,
+} from '@mergepilot/engine';
 import { createSafeFetch, DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { AppStore, KeyProvider } from '../core/types.js';
@@ -13,6 +22,8 @@ import type { CredentialService } from '../credentials/service.js';
 export interface ProviderTarget {
   apiKey: string;
   slotId?: string;
+  /** The workspace's OpenAI API key next to a Codex sign-in: its models are added to the catalog. */
+  catalogApiKey?: string;
   baseUrl?: string | undefined;
   fetch?: FetchLike | undefined;
 }
@@ -130,4 +141,50 @@ export function engineOptions(target: ProviderTarget): { baseUrl?: string; fetch
     ...(target.baseUrl ? { baseUrl: target.baseUrl } : {}),
     ...(target.fetch ? { fetch: target.fetch } : {}),
   };
+}
+
+/**
+ * The workspace's own OpenAI API key when it signs in with Codex and also keeps an API key
+ * (ADR-0027); undefined otherwise. A roster that cannot be read only skips the merge.
+ */
+async function codexApiKey(
+  deps: ProviderTargetDeps,
+  workspaceId: string,
+  provider: ApiProviderId,
+  storedKey: string,
+): Promise<string | undefined> {
+  if (provider !== 'openai' || !decodeSubscription(storedKey, provider)) return undefined;
+  try {
+    const roster = await deps.credentials.resolveKeyRoster(workspaceId, provider);
+    return roster?.secrets[roster.startIndex]?.reveal();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The target's catalog; a Codex sign-in with an API key also gets the key's models (`merged`). */
+export async function listTargetCatalog(
+  provider: ApiProviderId,
+  target: ProviderTarget,
+  options: ListModelsOptions,
+): Promise<{ models: CatalogModel[]; merged: boolean }> {
+  if (target.catalogApiKey) return listCodexModelsWithApiKey(target.apiKey, target.catalogApiKey, options);
+  return { models: await listModels(provider, target.apiKey, options), merged: false };
+}
+
+/**
+ * `storedTarget` for the model catalog: a Codex sign-in also carries the workspace's OpenAI API key,
+ * whose models join the list. Only the catalog reads that key; every other call keeps using the
+ * effective method alone.
+ */
+export async function catalogTarget(
+  deps: ProviderTargetDeps,
+  workspaceId: string,
+  provider: ApiProviderId,
+  signal?: AbortSignal,
+): Promise<TargetResult> {
+  const result = await storedTarget(deps, workspaceId, provider, signal);
+  if (!result.ok) return result;
+  const catalogApiKey = await codexApiKey(deps, workspaceId, provider, result.target.apiKey);
+  return catalogApiKey ? { ok: true, target: { ...result.target, catalogApiKey } } : result;
 }

@@ -12,6 +12,7 @@ import { providerEntry, resolveBaseUrl } from './registry.js';
 import { decodeSubscription, isSubscriptionOnlyProvider } from '../credentials/subscription.js';
 import { LlmFailure } from '../llm/failure.js';
 import { subscriptionModels } from './subscription/adapter.js';
+import { OPENAI_NOT_CHAT, supplementCatalog } from './subscription/supplement.js';
 import { listAntigravityModels } from './subscription/antigravity/models.js';
 
 export type { CatalogModel } from './catalog-types.js';
@@ -118,8 +119,6 @@ async function listAnthropic(key: KeyInput, options: ListModelsOptions): Promise
 }
 
 const OPENAI_CHAT = /^(gpt-|o\d|chatgpt-|codex-)/;
-const OPENAI_NOT_CHAT =
-  /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|search|instruct|computer-use|sora|davinci|babbage/i;
 const OPENAI_REASONING = /^(o\d|gpt-5|codex-)/;
 
 async function listOpenAI(key: KeyInput, options: ListModelsOptions): Promise<CatalogModel[]> {
@@ -196,6 +195,27 @@ export async function listModels(
     const { code } = failureFromThrown(error, provider, undefined, options.signal);
     // Raw transport and JSON errors can contain response details, including credentials.
     throw new LlmFailure({ code, provider, message: 'Could not read provider model catalog' });
+  }
+}
+
+/**
+ * The Codex sign-in's bundled catalog plus the Codex-family models the same workspace's OpenAI API
+ * key lists (ADR-0027 dual method), so a model OpenAI released after the bundled catalog still shows.
+ * `merged` is false when the key's listing failed: the bundled catalog alone is then still right for
+ * the sign-in, and the key's failure is not the sign-in's. An abort is rethrown.
+ */
+export async function listCodexModelsWithApiKey(
+  subscriptionKey: KeyInput,
+  apiKey: KeyInput,
+  options: ListModelsOptions = {},
+): Promise<{ models: CatalogModel[]; merged: boolean }> {
+  const bundled = await listModels('openai', subscriptionKey, options);
+  try {
+    const apiModels = await listOpenAI(apiKey, options);
+    return { models: sortUnique(supplementCatalog(bundled, apiModels)), merged: true };
+  } catch {
+    options.signal?.throwIfAborted();
+    return { models: bundled, merged: false };
   }
 }
 

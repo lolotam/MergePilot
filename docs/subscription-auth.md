@@ -32,6 +32,11 @@ Workspace admins and owners can choose **Sync all models** under **Settings → 
 Each connected review provider is listed once using its effective default credential. Results distinguish
 live catalogs from the bundled OpenAI, Anthropic, and xAI subscription lists. Google Antigravity uses its
 existing model-list endpoint when available on the server. Typesafe is judge-only and has no review catalog.
+A Codex sign-in has no model-list endpoint, so its bundled list can trail OpenAI's releases. When the workspace also keeps an
+OpenAI API key (ADR-0027), the catalog read lists that key too and adds its GPT-5 and later or `codex-` ids that the bundled list
+lacks, built from the bundled Codex model with the largest context window (the result then reports as live). GPT-4, o-series and
+non-chat ids are not added. If the key's listing fails, the bundled list is returned unchanged. The ChatGPT backend still decides
+whether the sign-in may use an added model; a refusal surfaces as an ordinary provider failure. Grok and Claude sign-ins stay bundled.
 If a paginated catalog cannot finish within the request limits, sync reports an error and keeps the previous list.
 Catalog reads check one shared credential snapshot at a time. An in-flight listing is checked again before publication.
 A credential change committed after that final read takes effect on subsequent requests. The check does not hold a database lock across the provider request.
