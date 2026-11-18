@@ -34,7 +34,8 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
 
   const models = useMemo(() => query.data?.models ?? [], [query.data]);
   const isLoading = query.isLoading || refreshing;
-  const isManual = manualChosen || query.isError;
+  // A failed refetch keeps the last good catalog; only fall back to typing when there is none.
+  const isManual = manualChosen || (query.isError && models.length === 0);
   const errorCode = query.error instanceof ApiClientError ? query.error.code : undefined;
 
   useEffect(() => {
