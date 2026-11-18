@@ -85,6 +85,7 @@ function parseProvider(request: FastifyRequest, reply: FastifyReply): ApiProvide
  */
 export function routeSignal(reply: FastifyReply): AbortSignal {
   const controller = new AbortController();
+  if (reply.raw.destroyed) { controller.abort(); return controller.signal; }
   const timer = setTimeout(() => controller.abort(), DASHBOARD_FETCH_LIMITS.timeoutMs);
   reply.raw.once('close', () => {
     clearTimeout(timer);
@@ -243,7 +244,9 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
         return sendError(reply, 400, 'provider_unavailable', 'This server does not offer Google Antigravity');
       }
       const cacheKey = `${workspaceId}:${provider}`;
+      const signal = routeSignal(reply);
       const revision = await catalogCredentialRevision(deps.store, workspaceId, provider);
+      signal.throwIfAborted();
       if (!sync && refresh !== 'true' && refresh !== '1') {
         const cached = cachedCatalog(cacheKey, revision);
         if (cached) {
@@ -263,12 +266,12 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       }
       const read = beginCatalogRead(cacheKey, revision, sync ? 'sync' : 'ordinary');
       try {
-        const signal = routeSignal(reply);
         const result = await storedTarget(deps, workspaceId, provider, signal);
         if (!result.ok) return sendTargetError(reply, result);
         if (await catalogCredentialRevision(deps.store, workspaceId, provider) !== revision) {
           return sendError(reply, 409, 'catalog_credentials_changed', 'The catalog request is outdated. Refresh the model catalog again.');
         }
+        signal.throwIfAborted();
         const publish: NonNullable<CatalogRequest['publish']> = async (models) => {
           const current = await catalogCredentialRevision(deps.store, workspaceId, provider);
           signal.throwIfAborted();
@@ -332,24 +335,17 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       const settings = await deps.store.getSettings(workspaceId);
       let model = body.model?.trim() || configuredModelFor(settings, provider);
       if (!model) {
-        // Only a test of the default credential can reuse its cached catalog.
-        const cacheKey = apiKey || keyId ? undefined : `${workspaceId}:${provider}`;
         let models: CatalogModel[] | undefined;
-        const cached = cacheKey ? cachedCatalog(cacheKey, await catalogCredentialRevision(deps.store, workspaceId, provider)) : undefined;
-        if (cached) {
-          models = cached.models;
-        } else {
-          try {
-            models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
-            // A connection test reads models for its own request. Only catalog routes publish cached lists.
-          } catch (error: unknown) {
-            if (signal.aborted) throw error;
-            // Not fatal: the test still runs on the registry default, and the reply names that model.
-            request.log.warn(
-              { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
-              'Could not list models to pick a test model; using the registry default',
-            );
-          }
+        try {
+          // The test may have resolved a different key than the latest picker catalog.
+          models = await listModels(provider, target.apiKey, { ...engineOptions(target), signal });
+        } catch (error: unknown) {
+          if (signal.aborted) throw error;
+          // Not fatal: the test still runs on the registry default, and the reply names that model.
+          request.log.warn(
+            { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
+            'Could not list models to pick a test model; using the registry default',
+          );
         }
         model = testModelFor(settings, provider, models);
       }

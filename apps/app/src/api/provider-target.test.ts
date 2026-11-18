@@ -33,6 +33,20 @@ describe('storedTarget (ADR-0027)', () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  it('uses the active roster key for an API-key-only provider', async () => {
+    const store = new MemoryStore();
+    const vault = new EnvelopeVault(Buffer.alloc(32, 5).toString('base64'));
+    const credentials = new CredentialService({ store, vault });
+    const provider = 'openrouter';
+    const key = (suffix: string) => ['test', 'roster', 'key', suffix].join('-');
+    await credentials.appendProviderKey({ workspaceId: 'ws', provider, apiKey: key('first'), userId: 'u' });
+    await credentials.appendProviderKey({ workspaceId: 'ws', provider, apiKey: key('second'), userId: 'u' });
+    const slots = await store.listProviderKeys('ws', provider);
+    await store.setKeyCursor('ws', provider, slots[1]!.id);
+    expect(await storedTarget({ store, credentials }, 'ws', provider))
+      .toMatchObject({ ok: true, target: { apiKey: key('second') } });
+  });
+
   it('resolves the subscription envelope when the effective default is subscription', async () => {
     const store = new MemoryStore();
     const vault = new EnvelopeVault(Buffer.alloc(32, 4).toString('base64'));

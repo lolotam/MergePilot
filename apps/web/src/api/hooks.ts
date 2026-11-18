@@ -1,3 +1,4 @@
+import { refreshCredentialQueries } from './credential-queries.js';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse, SettingsUpdate } from '@mergepilot/app/contract';
 import { api, ApiClientError, type GetRunsParams, type KeyProvider } from './client.js';
@@ -85,8 +86,7 @@ export function useSaveKeyMutation(workspaceId: string) {
         : api.saveKey(workspaceId, provider, apiKey, baseUrl),
     onSuccess: () => {
       showToast(t('keySavedSuccess'), 'success');
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+      void refreshCredentialQueries(queryClient, workspaceId);
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] });
     },
     onError: (err: Error) => {
@@ -103,8 +103,7 @@ export function useSetProviderDefaultMethodMutation(workspaceId: string) {
     mutationFn: ({ provider, method }: { provider: KeyProvider; method: 'subscription' | 'api-key' }) =>
       api.setProviderDefaultMethod(workspaceId, provider, method),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+      void refreshCredentialQueries(queryClient, workspaceId);
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
@@ -119,8 +118,7 @@ export function useDisconnectSubscriptionMutation(workspaceId: string) {
   return useMutation({
     mutationFn: (provider: KeyProvider) => api.disconnectSubscription(workspaceId, provider),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+      void refreshCredentialQueries(queryClient, workspaceId);
     },
     onError: (err: Error) => {
       showToast(err.message || t('error'), 'error');
@@ -137,8 +135,7 @@ export function useDeleteKeyMutation(workspaceId: string) {
     mutationFn: (provider: KeyProvider) => api.deleteKey(workspaceId, provider),
     onSuccess: () => {
       showToast(t('keyDeletedSuccess'), 'success');
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'keys'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'providers'] });
+      void refreshCredentialQueries(queryClient, workspaceId);
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'prices'] });
     },
     onError: (err: Error) => {

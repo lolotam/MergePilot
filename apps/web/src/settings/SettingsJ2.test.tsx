@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
+import { useQueryClient } from '@tanstack/react-query';
+import { refreshCredentialQueries } from '../api/credential-queries.js';
 import userEvent from '@testing-library/user-event';
 import type { FallbackEntry } from '@mergepilot/app/contract';
 import { api, ApiClientError, type ApiProvider, type ModelsResponse } from '../api/client.js';
@@ -61,6 +63,30 @@ describe('J2 settings components', () => {
     await screen.findByRole('button', { name: 'Model name' });
     await user.click(screen.getByRole('button', { name: 'Refresh list' }));
     await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
+  });
+
+  it('restarts a pending picker refresh without cached data after credentials change', async () => {
+    let resolveRefresh!: (catalog: ModelsResponse) => void;
+    const pending = new Promise<ModelsResponse>((resolve) => { resolveRefresh = resolve; });
+    const current = { models: [{ id: 'current-model', name: 'Current model', efforts: [] }] };
+    vi.mocked(api.getModels).mockRejectedValueOnce(new ApiClientError('no key', 'key_not_found', 404))
+      .mockReturnValueOnce(pending).mockResolvedValueOnce(current);
+    function ChangeCredential() {
+      const client = useQueryClient();
+      return <button onClick={() => void refreshCredentialQueries(client, 'ws-1')}>Change credential</button>;
+    }
+    renderSettings(<>
+      <ChangeCredential />
+      <ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />
+    </>, 'en');
+    await screen.findByRole('textbox', { name: 'Model name' });
+    await user.click(screen.getByRole('button', { name: 'Refresh list' }));
+    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
+    await user.click(screen.getByRole('button', { name: 'Change credential' }));
+    await user.click(await screen.findByRole('button', { name: 'Model name' }));
+    await act(async () => resolveRefresh({ models: [{ id: 'stale', name: 'Stale model', efforts: [] }] }));
+    expect(screen.getByRole('option', { name: 'Current model' })).toBeDefined();
+    expect(screen.queryByRole('option', { name: 'Stale model' })).toBeNull();
   });
 
   it('keeps synced options when an older individual refresh resolves afterward', async () => {

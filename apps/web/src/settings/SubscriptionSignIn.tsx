@@ -1,3 +1,4 @@
+import { refreshCredentialQueries } from '../api/credential-queries.js';
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, type SubscriptionLogin, type SubscriptionLoginErrorCode, type SubscriptionProvider } from '../api/client.js';
@@ -67,8 +68,9 @@ export function SubscriptionSignIn({ workspaceId, provider, onConnected }: {
           if (stopped) return;
           setLogin(saved);
           activeId.current = undefined;
-          void cache.invalidateQueries({ queryKey: ['workspaces', workspaceId] });
-          connected.current();
+          await refreshCredentialQueries(cache, workspaceId);
+          void cache.invalidateQueries({ queryKey: ['workspaces', workspaceId] }, { cancelRefetch: false });
+          if (!stopped) connected.current();
           return;
         }
         setLogin(next);

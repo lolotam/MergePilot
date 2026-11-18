@@ -67,7 +67,7 @@ export function parseAvailableModels(body: unknown): CatalogModel[] {
       if (id) entries.push([id.replace(/^models\//, ''), record]);
     }
   } else if (models && typeof models === 'object') {
-    for (const [id, value] of Object.entries(models)) entries.push([id, value && typeof value === 'object' ? (value as Record<string, unknown>) : {}]);
+    for (const [id, value] of Object.entries(models)) entries.push([id.replace(/^models\//, ''), value && typeof value === 'object' ? (value as Record<string, unknown>) : {}]);
   }
   return sortUnique(entries
     .filter(([id]) => CHAT_MODEL.test(id) && !NOT_CHAT.test(id))
@@ -118,7 +118,8 @@ export async function listAntigravityModels(
   }
   if (!models || (!options.strictRefresh && models.length === 0)) return lastGood.get(projectId) ?? staticAntigravityModels();
   options.signal?.throwIfAborted();
-  if (projectId && models.length > 0) remember(projectId, models, now);
+  // A strict result is only eligible for the dashboard cache after its credential and ordering checks.
+  if (!options.strictRefresh && projectId && models.length > 0) remember(projectId, models, now);
   return models;
 }
 

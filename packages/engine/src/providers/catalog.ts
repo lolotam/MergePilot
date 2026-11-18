@@ -157,7 +157,11 @@ async function listGemini(key: KeyInput, options: ListModelsOptions): Promise<Ca
     for (const item of models.map(record)) {
       if (typeof item.name !== 'string') continue;
       const id = item.name.replace(/^models\//, '');
-      const methods = Array.isArray(item.supportedGenerationMethods) ? (item.supportedGenerationMethods as unknown[]) : [];
+      const supportedMethods = item.supportedGenerationMethods;
+      if (options.strictRefresh && (!Array.isArray(supportedMethods) || supportedMethods.some((method) => typeof method !== 'string'))) {
+        throw invalidCatalog('gemini');
+      }
+      const methods = Array.isArray(supportedMethods) ? supportedMethods : [];
       if (!methods.includes('generateContent') || GEMINI_NOT_CHAT.test(id)) continue;
       out.push(entry(id, item.displayName, geminiEfforts(id, item.thinking), positive(item.inputTokenLimit)));
     }

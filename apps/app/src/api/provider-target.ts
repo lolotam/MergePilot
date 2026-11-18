@@ -2,7 +2,7 @@ import { SUBSCRIPTION_PREFIX, type ApiProviderId, type FetchLike } from '@mergep
 import { createSafeFetch, DASHBOARD_FETCH_LIMITS } from '../core/safe-fetch.js';
 import { assertSafeBaseUrl, type DnsLookupFn } from '../core/ssrf.js';
 import type { AppStore, KeyProvider } from '../core/types.js';
-import { isKeyListProvider } from '../credentials/multi-key.js';
+import { isDualMethodProvider, isKeyListProvider } from '../credentials/multi-key.js';
 import type { CredentialService } from '../credentials/service.js';
 
 /**
@@ -65,7 +65,7 @@ export async function storedTarget(
   let apiKey: string;
   try {
     const effective = await deps.credentials.getEffectiveAuthMethod(workspaceId, provider as KeyProvider);
-    if (effective === 'api-key' && isKeyListProvider(provider)) {
+    if (isKeyListProvider(provider) && (!isDualMethodProvider(provider) || effective === 'api-key')) {
       const roster = await deps.credentials.resolveKeyRoster(workspaceId, provider as KeyProvider);
       const start = roster?.startIndex ?? 0;
       const secret = roster?.secrets[start];

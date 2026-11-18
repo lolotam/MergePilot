@@ -8,6 +8,12 @@ vi.mock('@mergepilot/engine', async (importOriginal) => {
 });
 
 const { listModels, testConnection } = await import('@mergepilot/engine');
+async function waitForProviderFetch(started: Promise<void>, response: Promise<{ statusCode: number }>): Promise<void> {
+  await Promise.race([started, response.then(({ statusCode }) => {
+    throw new Error(`Catalog request returned ${statusCode} before starting provider fetch`);
+  })]);
+}
+
 const MODELS = [{ id: 'm-1', name: 'Model 1', efforts: ['low', 'high'] }];
 
 describe('model catalog routes (J2)', { timeout: 25000 }, () => {
@@ -133,7 +139,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect((await get('anthropic', h.memberCookie())).json()).toEqual({ models: MODELS });
     const pendingSync = get('anthropic', h.adminCookie(), '?sync=true').then((response) => response);
     try {
-      await started.promise;
+      await waitForProviderFetch(started.promise, pendingSync);
       if (mutation === 'API mutation') {
         const changed = await h.app.inject({
           method: 'PUT', url: '/api/workspaces/ws-1/keys/anthropic', headers: { cookie: h.adminCookie() },
@@ -173,7 +179,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     });
     const pending = get('openai', h.adminCookie(), '?sync=true').then((response) => response);
     try {
-      await requested.promise;
+      await waitForProviderFetch(requested.promise, pending);
       await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
       const current = await get('openai', h.adminCookie(), '?sync=true');
       expect(current.json()).toMatchObject({ source: 'bundled' });
@@ -218,7 +224,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openrouter', apiKey: keyFor('router'), userId: 'u-admin' });
     const olderRequest = get('openrouter', h.adminCookie(), '?sync=true').then((response) => response);
     try {
-      await started.promise;
+      await waitForProviderFetch(started.promise, olderRequest);
       expect((await get('openrouter', h.adminCookie(), newer)).statusCode).toBe(200);
       older.resolve(Response.json({ data: [{ id: 'openai/older' }] }));
       const response = await olderRequest;

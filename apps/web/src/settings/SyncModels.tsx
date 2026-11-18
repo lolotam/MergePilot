@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { onCredentialChange } from '../api/credential-queries.js';
 import { api, ApiClientError, type KeyProvider } from '../api/client.js';
 import type { I18nKey } from '../i18n/ar.js';
 import { useI18n } from '../i18n/context.js';
@@ -46,14 +47,7 @@ export function SyncModels({ workspaceId, providers }: { workspaceId: string; pr
   }, []);
 
   useLayoutEffect(() => {
-    // Credential mutations invalidate this query before refetching the model pickers.
-    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
-      if (event.type !== 'updated' || event.action.type !== 'invalidate') return;
-      const key = event.query.queryKey;
-      if (key.length === 3 && key[0] === 'workspaces' && key[1] === workspaceId && key[2] === 'keys') {
-        stopSync('credentials-changed');
-      }
-    });
+    const unsubscribe = onCredentialChange(queryClient, workspaceId, () => stopSync('credentials-changed'));
     return () => {
       unsubscribe();
       active.current?.abort();

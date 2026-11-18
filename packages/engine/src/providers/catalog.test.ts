@@ -17,6 +17,8 @@ describe('listModels', () => {
     { provider: 'openai' as const, payload: { data: [{ id: ' gpt-example ' }] } },
     { provider: 'gemini' as const, payload: { models: [{ name: 'models/' }] } },
     { provider: 'gemini' as const, payload: { models: [{ name: 'models/ gemini-example' }] } },
+    { provider: 'gemini' as const, payload: { models: [{ name: 'models/gemini-example', supportedGenerationMethods: 'generateContent' }] } },
+    { provider: 'gemini' as const, payload: { models: [{ name: 'models/gemini-example', supportedGenerationMethods: ['generateContent', 5] }] } },
     { provider: 'openrouter' as const, payload: { data: [null] } },
     { provider: 'openrouter' as const, payload: { data: [{ id: 17 }] } },
   ])('strict $provider sync rejects malformed catalogs with a classified failure', async ({ provider, payload }) => {
@@ -55,6 +57,7 @@ describe('listModels', () => {
       () => textResponse('denied', 403),
       jsonResponse({ models: [null] }),
       jsonResponse({ models: { 'gemini-3.1-pro': null } }),
+      jsonResponse({ models: { 'models/gemini-3.8-flash': {} } }),
       jsonResponse({ models: {} }),
     );
     expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
@@ -64,9 +67,11 @@ describe('listModels', () => {
       await expect(listModels('google-antigravity', key, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER' });
       expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
     }
+    expect(await listModels('google-antigravity', key, { fetch, strictRefresh: true })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+    expect(await listModels('google-antigravity', key, { fetch })).toMatchObject([{ id: 'gemini-3.1-pro' }]);
     expect(await listModels('google-antigravity', key, { fetch, strictRefresh: true })).toEqual([]);
     expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(6);
   });
 
   describe.each([

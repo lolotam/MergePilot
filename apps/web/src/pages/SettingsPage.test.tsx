@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
+import { refreshCredentialQueries } from '../api/credential-queries.js';
 import { SettingsPage } from './SettingsPage.js';
 import { I18nProvider } from '../i18n/context.js';
 import { ToastProvider } from '../components/Toast.js';
@@ -110,17 +111,13 @@ describe('Sync models', () => {
 
   it('keeps the new picker options when an older sync finishes after credentials change', async () => {
     const user = userEvent.setup();
+    const pendingKeys = new Promise<{ keys: [] }>(() => {});
     const previousSync = pendingCatalog();
     vi.mocked(api.syncModels).mockReturnValueOnce(previousSync.promise);
     function CredentialChange() {
       const client = useQueryClient();
-      const workspaceKey = ['workspaces', 'ws-1'];
-      const keysQuery = [...workspaceKey, 'keys'];
-      useQuery({ queryKey: keysQuery, queryFn: async () => ({ keys: [] }), initialData: { keys: [] } });
-      return <button type="button" onClick={() => {
-        void client.invalidateQueries({ queryKey: keysQuery });
-        void client.invalidateQueries({ queryKey: [...workspaceKey, 'providers'] });
-      }}>Change credentials</button>;
+      useQuery({ queryKey: ['workspaces', 'ws-1', 'keys'], queryFn: () => pendingKeys, initialData: { keys: [] } });
+      return <button type="button" onClick={() => void refreshCredentialQueries(client, 'ws-1')}>Change credentials</button>;
     }
     renderSettings(<>
       <CredentialChange />
@@ -129,6 +126,7 @@ describe('Sync models', () => {
     </>, 'en');
     const picker = screen.getByRole('button', { name: 'Model picker' }) as HTMLButtonElement;
     await waitFor(() => expect(picker.disabled).toBe(false));
+    await user.click(screen.getByRole('button', { name: 'Change credentials' }));
     await user.click(screen.getByRole('button', { name: 'Sync all models' }));
     vi.mocked(api.getModels).mockResolvedValueOnce({ models: [{ id: 'current-account', name: 'Current account model', efforts: [] }] });
     await user.click(screen.getByRole('button', { name: 'Change credentials' }));
