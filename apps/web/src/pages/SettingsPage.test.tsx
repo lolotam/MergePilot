@@ -354,7 +354,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     expect(screen.getByRole('button', { name: /حذف مساحة العمل/i })).toBeDefined();
   });
 
-  it('shows the default-method selector only when subscription and API keys coexist', () => {
+  it('keeps the default-method selector separate from testing an API key slot', async () => {
     setupMocks({
       role: 'admin',
       keys: [
@@ -379,6 +379,8 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     });
     renderComponent();
     expect(screen.getAllByLabelText(/الطريقة الافتراضية/i)).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: /openai, #1, .*4242/ }));
+    expect(api.testConnection).toHaveBeenCalledWith('ws-1', 'openai', { keyId: 'k1' });
   });
 
   it('asks for a new sign-in when the provider refused the subscription refresh', () => {

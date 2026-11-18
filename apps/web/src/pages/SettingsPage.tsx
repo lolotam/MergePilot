@@ -27,7 +27,7 @@ import { RetentionCard } from '../settings/RetentionCard.js';
 import { JudgeCard } from '../settings/JudgeCard.js';
 import { PricesCard } from '../settings/PricesCard.js';
 import { JudgeTestButton } from '../settings/JudgeTestButton.js';
-import { TestKeyButton } from '../settings/TestKeyButton.js';
+import { ProviderTestButtons } from '../settings/TestKeyButton.js';
 import { SyncModels } from '../settings/SyncModels.js';
 import { isJudgeKeyOnly, useProviderLabel } from '../settings/providers.js';
 
@@ -241,7 +241,7 @@ export function SettingsPage() {
                           {isJudgeKeyOnly(k.provider) ? (
                             <JudgeTestButton workspaceId={workspaceId} provider={k.provider} disabled={isMember} />
                           ) : (
-                            <TestKeyButton workspaceId={workspaceId} provider={k.provider} disabled={isMember} />
+                            <ProviderTestButtons workspaceId={workspaceId} provider={k.provider} slots={k.keys} />
                           )}
                           <button
                             type="button"

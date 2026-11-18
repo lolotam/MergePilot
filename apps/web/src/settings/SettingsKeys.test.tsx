@@ -31,6 +31,18 @@ describe('key test icon and "test before saving" (J2)', () => {
     expect(api.testConnection).toHaveBeenCalledWith('ws-1', 'openrouter');
   });
 
+  it('tests the selected OpenRouter slot rather than the provider default', async () => {
+    vi.mocked(api.testConnection).mockResolvedValueOnce({ ok: false, code: 'quota', quotaStatus: 'quota-exhausted' });
+    renderSettings(<>
+      <TestKeyButton workspaceId="ws-1" provider="openrouter" slot={{ id: 'first', position: 0, last4: '1234' }} />
+      <TestKeyButton workspaceId="ws-1" provider="openrouter" slot={{ id: 'second', position: 1, last4: '5678' }} />
+    </>, 'en');
+    await user.click(screen.getByRole('button', { name: /openrouter, #2, .*5678/ }));
+    expect(await screen.findByText('Quota or credit exhausted')).toBeDefined();
+    expect(api.testConnection).toHaveBeenCalledExactlyOnceWith('ws-1', 'openrouter', { keyId: 'second' });
+    expect(api.getModels).not.toHaveBeenCalled();
+  });
+
   it('TestKeyButton: a failure shows the translated reason, with the server message on hover', async () => {
     vi.mocked(api.testConnection).mockResolvedValueOnce({ ok: false, code: 'quota', message: 'credit exhausted' });
     renderSettings(<TestKeyButton workspaceId="ws-1" provider="zai-coding" />, 'en');
