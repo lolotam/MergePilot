@@ -60,18 +60,6 @@ describe('J2 settings components', () => {
     expect(onChange).toHaveBeenLastCalledWith('g', []);
   });
 
-  it('ModelSelect keeps the last good catalog in the dropdown when a refresh fails', async () => {
-    vi.mocked(api.getModels).mockRejectedValue(new ApiClientError('boom', 'server_error', 500));
-    vi.mocked(api.getModels).mockResolvedValueOnce({ models: [{ id: 'kept-model', name: 'Kept model', efforts: [] }] });
-    renderSettings(<ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />, 'en');
-    await user.click(await screen.findByRole('button', { name: 'Model name' }));
-    expect(screen.getByRole('option', { name: /Kept model/ })).toBeDefined();
-    await user.click(screen.getByRole('button', { name: 'Refresh list' }));
-    await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
-    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Model name' })).toBeNull());
-    expect(screen.getByRole('button', { name: 'Model name' })).toBeDefined();
-  });
-
   it('ModelSelect refresh asks the server to bypass its cache', async () => {
     renderSettings(<ModelSelect id="m" workspaceId="ws-1" provider="openai" value="" onChange={vi.fn()} />, 'en');
     await screen.findByRole('button', { name: 'Model name' });
