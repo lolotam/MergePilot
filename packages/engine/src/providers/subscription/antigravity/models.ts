@@ -78,26 +78,22 @@ export function staticAntigravityModels(): CatalogModel[] {
   return sortUnique(ANTIGRAVITY_STATIC_MODELS.map((id) => catalogEntry(id)));
 }
 
-const cache = new Map<string, { expiresAt: number; models: CatalogModel[] }>();
-const lastGood = new Map<string, { models: CatalogModel[]; sequence: number }>();
+const cache = new Map<string, { expiresAt: number; models: CatalogModel[]; strictSequence: number }>();
 let sequence = 0;
 let eviction = 0;
 
 /** Test helper. */
 export function resetAntigravityModelCache(): void {
   cache.clear();
-  lastGood.clear();
   eviction++;
 }
 
-function remember(projectId: string, models: CatalogModel[], now: number, readSequence: number): void {
-  if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
-  if (lastGood.size >= CACHE_MAX_ENTRIES && !lastGood.has(projectId)) {
-    lastGood.clear();
+function remember(projectId: string, models: CatalogModel[], now: number, strictSequence: number): void {
+  if (cache.size >= CACHE_MAX_ENTRIES && !cache.has(projectId)) {
+    cache.clear();
     eviction++;
   }
-  cache.set(projectId, { expiresAt: now + ANTIGRAVITY_MODELS_TTL_MS, models });
-  lastGood.set(projectId, { models, sequence: readSequence });
+  cache.set(projectId, { expiresAt: now + ANTIGRAVITY_MODELS_TTL_MS, models, strictSequence });
 }
 
 export interface ListAntigravityOptions {
@@ -125,19 +121,19 @@ export async function listAntigravityModels(
     if (options.strictRefresh || options.signal?.aborted) throw error;
     // No answer or an unreadable one: the fallback below, like a refusal.
   }
-  if (!models || (!options.strictRefresh && models.length === 0)) return lastGood.get(projectId)?.models ?? staticAntigravityModels();
+  if (!models || (!options.strictRefresh && models.length === 0)) return cache.get(projectId)?.models ?? staticAntigravityModels();
   options.signal?.throwIfAborted();
   if (projectId && models.length > 0) {
     const accepted = models;
     if (options.strictRefresh) {
       options.deferCacheWrite?.(() => {
-        const latest = lastGood.get(projectId);
-        // Different workspaces can publish for the same project in a different order.
-        if (latest ? latest.sequence >= readSequence : eviction !== readEviction) return;
+        const latest = cache.get(projectId);
+        // Ordinary refreshes keep the latest accepted strict sequence.
+        if (eviction !== readEviction || (latest?.strictSequence ?? 0) >= readSequence) return;
         remember(projectId, accepted, (options.now ?? Date.now)(), readSequence);
       });
     } else if (cache.get(projectId) === cached && eviction === readEviction) {
-      remember(projectId, accepted, now, readSequence);
+      remember(projectId, accepted, now, cached?.strictSequence ?? 0);
     }
   }
   return models;

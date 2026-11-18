@@ -109,3 +109,37 @@ it('keeps the latest-started accepted strict result for a shared project', async
   commits[1]?.();
   expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
 });
+
+it('publishes an accepted strict read even when a later ordinary read finishes first', async () => {
+  const strict = Promise.withResolvers<Response>();
+  const { fetch } = mockFetch(() => strict.promise, jsonResponse({ models: { 'gemini-3.1-pro': {} } }));
+  const commits: Array<() => void> = [];
+  const pending = listAntigravityModels(credential, {
+    fetch, strictRefresh: true, deferCacheWrite: (commit) => commits.push(commit),
+  });
+  expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.1-pro' }]);
+  strict.resolve(jsonResponse({ models: { 'gemini-3.8-flash': {} } }));
+  await pending;
+  expect(commits).toHaveLength(1);
+  commits[0]?.();
+  expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+});
+
+it.each([false, true])('rejects an old write under cache pressure (new project evicts: %s)', async (evict) => {
+  const stale = Promise.withResolvers<Response>();
+  const pending = listAntigravityModels(credential, { now: () => 0, fetch: () => stale.promise });
+  const newer = mockFetch(jsonResponse({ models: { 'gemini-3.8-flash': {} } })).fetch;
+  await listAntigravityModels(credential, { now: () => 1, fetch: newer });
+  for (let i = 0; i < 499; i++) {
+    await listAntigravityModels({ ...credential, projectId: 'fill-' + i }, { now: () => 1, fetch: newer });
+  }
+  const afterExpiry = () => ANTIGRAVITY_MODELS_TTL_MS + 2;
+  const touched = { ...credential, projectId: evict ? 'new-project' : 'fill-0' };
+  await listAntigravityModels(touched, { now: afterExpiry, fetch: newer });
+  stale.resolve(jsonResponse({ models: { 'gemini-3.1-pro': {} } }));
+  await pending;
+  const refused = mockFetch(() => textResponse('denied', 403)).fetch;
+  const result = await listAntigravityModels(credential, { now: afterExpiry, fetch: refused });
+  if (evict) expect(result).toEqual(staticAntigravityModels());
+  else expect(result).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+});
