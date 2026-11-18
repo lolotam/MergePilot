@@ -92,6 +92,13 @@ describe('Codex models listed by the OpenAI API key', () => {
     await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch, signal: controller.signal })).rejects.toThrow();
   });
 
+  it('rethrows a fetch that aborts on its own, but still falls back for an ordinary failure', async () => {
+    const aborting = async (): Promise<Response> => { throw new DOMException('aborted', 'AbortError'); };
+    await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch: aborting })).rejects.toMatchObject({ code: 'ABORTED' });
+    const { fetch } = mockFetch(textResponse('down', 503));
+    await expect(listCodexModelsWithApiKey(subscriptionKey, apiKey, { fetch })).resolves.toMatchObject({ merged: false });
+  });
+
   it('streams a call for an API-listed Codex id and sends that id, while an unknown Grok id still fails', async () => {
     let sent: Record<string, unknown> = {};
     vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {

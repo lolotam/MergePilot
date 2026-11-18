@@ -254,7 +254,8 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
       }
       const read = beginCatalogRead(cacheKey, revision, sync ? 'sync' : 'ordinary');
       try {
-        const result = await catalogTarget(deps, workspaceId, provider, signal);
+        // Only an admin sync spends the workspace's API key; a member's refresh stays on the effective method.
+        const result = await (sync ? catalogTarget : storedTarget)(deps, workspaceId, provider, signal);
         if (!result.ok) return sendTargetError(reply, result);
         const resolvedSlot = result.target.slotId;
         if ((resolvedSlot !== undefined && resolvedSlot !== slotId) ||

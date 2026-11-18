@@ -152,11 +152,13 @@ async function codexApiKey(
   workspaceId: string,
   provider: ApiProviderId,
   storedKey: string,
-): Promise<string | undefined> {
+): Promise<{ key: string; id: string } | undefined> {
   if (provider !== 'openai' || !decodeSubscription(storedKey, provider)) return undefined;
   try {
     const roster = await deps.credentials.resolveKeyRoster(workspaceId, provider);
-    return roster?.secrets[roster.startIndex]?.reveal();
+    const key = roster?.secrets[roster.startIndex]?.reveal();
+    const id = roster?.keyIds[roster.startIndex];
+    return key && id ? { key, id } : undefined;
   } catch {
     return undefined;
   }
@@ -173,7 +175,7 @@ export async function listTargetCatalog(
 }
 
 /**
- * `storedTarget` for the model catalog: a Codex sign-in also carries the workspace's OpenAI API key,
+ * `storedTarget` for an admin catalog sync: a Codex sign-in also carries the workspace's OpenAI API key,
  * whose models join the list. Only the catalog reads that key; every other call keeps using the
  * effective method alone.
  */
@@ -185,6 +187,7 @@ export async function catalogTarget(
 ): Promise<TargetResult> {
   const result = await storedTarget(deps, workspaceId, provider, signal);
   if (!result.ok) return result;
-  const catalogApiKey = await codexApiKey(deps, workspaceId, provider, result.target.apiKey);
-  return catalogApiKey ? { ok: true, target: { ...result.target, catalogApiKey } } : result;
+  const api = await codexApiKey(deps, workspaceId, provider, result.target.apiKey);
+  // The key's slot id is the target's slot, so the route checks it against the slot its snapshot read.
+  return api ? { ok: true, target: { ...result.target, catalogApiKey: api.key, slotId: api.id } } : result;
 }

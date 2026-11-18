@@ -117,6 +117,21 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect(listModels).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a member refresh on the effective method: only an admin sync lists the API key', async () => {
+    await h.credentials.saveSubscription('ws-1', 'openai', { type: 'oauth', access: 'a-1', refresh: 'r-1', expires: Date.now() + 3_600_000 }, 'u-admin');
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('api'), userId: 'u-admin' });
+    await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels);
+    const upstream = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected provider request'));
+    try {
+      expect((await get('openai', h.memberCookie(), '?refresh=true')).statusCode).toBe(200);
+      expect(upstream).not.toHaveBeenCalled();
+    } finally {
+      upstream.mockRestore();
+    }
+  });
+
   it('drops the cached list when the key is replaced', async () => {
     vi.mocked(listModels).mockResolvedValue(MODELS);
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('o1'), userId: 'u-admin' });

@@ -74,7 +74,7 @@ describe('catalogTarget', () => {
 
   it('adds the OpenAI API key next to a Codex sign-in, and leaves storedTarget on the sign-in alone', async () => {
     const { deps } = await setup('openai', true);
-    expect(await catalogTarget(deps, 'ws', 'openai')).toMatchObject({ ok: true, target: { catalogApiKey: ['test', 'catalog', 'key'].join('-') } });
+    expect(await catalogTarget(deps, 'ws', 'openai')).toMatchObject({ ok: true, target: { catalogApiKey: ['test', 'catalog', 'key'].join('-'), slotId: expect.any(String) } });
     const plain = await storedTarget(deps, 'ws', 'openai');
     expect(plain.ok && plain.target.catalogApiKey).toBeFalsy();
   });
