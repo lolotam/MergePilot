@@ -41,6 +41,7 @@ export const arSettings = {
   loadModelsError: 'تعذر تحميل قائمة النماذج',
   manualModelFallback: 'إدخال يدوي',
   manualModelFallbackHint: 'يمكنك كتابة اسم النموذج يدويًا في حال تعذر جلبه تلقائيًا',
+  modelsRefreshFailed: 'تعذر تحديث قائمة النماذج. تُعرض آخر قائمة تم تحميلها.',
   noModelsFound: 'لا توجد نماذج مطابقة',
 
   // Effort options

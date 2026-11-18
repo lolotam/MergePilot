@@ -162,6 +162,12 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
         </span>
       </button>
 
+      {query.isError && (
+        <p role="status" className="text-[11px] text-amber-600 dark:text-amber-400 ms-2">
+          {t('modelsRefreshFailed')}
+        </p>
+      )}
+
       {isOpen && (
         <div className="absolute top-full mt-1 start-0 end-0 z-30 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-2xl shadow-lg p-2 flex flex-col gap-1">
           <input

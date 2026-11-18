@@ -41,6 +41,7 @@ export const enSettings = {
   loadModelsError: 'Failed to load models list',
   manualModelFallback: 'Manual entry',
   manualModelFallbackHint: 'You can type the model name manually if automatic loading fails',
+  modelsRefreshFailed: 'Could not refresh the model list. Showing the last loaded list.',
   noModelsFound: 'No matching models found',
 
   // Effort options

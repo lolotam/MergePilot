@@ -22,5 +22,6 @@ describe('ModelSelect refresh failure', () => {
     await waitFor(() => expect(api.getModels).toHaveBeenCalledWith('ws-1', 'openai', true, expect.any(AbortSignal)));
     await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Model name' })).toBeNull());
     expect(screen.getByRole('button', { name: 'Model name' })).toBeDefined();
+    expect((await screen.findByRole('status')).textContent).toMatch(/Could not refresh the model list/);
   });
 });
