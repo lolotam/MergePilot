@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { refreshCredentialQueries } from '../api/credential-queries.js';
 import { SettingsPage } from './SettingsPage.js';
-import { I18nProvider } from '../i18n/context.js';
 import { ToastProvider } from '../components/Toast.js';
 import { api, type KeyItem, type ModelsResponse } from '../api/client.js';
 import { ModelSelect } from '../settings/ModelSelect.js';
@@ -256,33 +254,16 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     } as unknown as ReturnType<typeof hooks.useRunReposQuery>);
   };
 
-  const renderComponent = () =>
-    render(
-      React.createElement(
-        QueryClientProvider,
-        { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-        React.createElement(
-        I18nProvider,
-        { initialLanguage: 'ar' },
-        React.createElement(
-          ToastProvider,
-          null,
-          React.createElement(
-            MemoryRouter,
-            { initialEntries: ['/w/ws-1/settings'] },
-            React.createElement(
-              Routes,
-              null,
-              React.createElement(Route, {
-                path: '/w/:workspaceId/settings',
-                element: React.createElement(SettingsPage, null),
-              }),
-            ),
-          ),
-        ),
-      ),
-      ),
-    );
+  const renderComponent = () => renderSettings(
+    <ToastProvider>
+      <MemoryRouter initialEntries={['/w/ws-1/settings']}>
+        <Routes>
+          <Route path="/w/:workspaceId/settings" element={<SettingsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>,
+    'ar',
+  );
 
   it('validates settings form: model required and budget must be positive', async () => {
     const user = userEvent.setup();
@@ -316,7 +297,10 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
 
   it('enforces member read-only mode', () => {
     setupMocks({ role: 'member' });
+    vi.mocked(hooks.useKeysQuery).mockReturnValue({ isLoading: false, isError: true } as ReturnType<typeof hooks.useKeysQuery>);
     renderComponent();
+    expect(hooks.useKeysQuery).toHaveBeenLastCalledWith('ws-1', false);
+    expect(screen.queryByText('تعذّر تحميل بيانات مزوّدي الخدمة.')).toBeNull();
     expect(screen.queryByRole('button', { name: 'مزامنة كل النماذج' })).toBeNull();
 
     // Member banner should be visible
@@ -338,6 +322,7 @@ describe('SettingsPage - validation, permissions, and key privacy', () => {
     setupMocks();
     renderComponent();
     expect((screen.getByRole('button', { name: 'مزامنة كل النماذج' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(hooks.useKeysQuery).toHaveBeenLastCalledWith('ws-1', true);
   });
 
   it('shows the rename card to admin/owner and the danger zone to the owner only', () => {

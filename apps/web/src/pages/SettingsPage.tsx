@@ -37,8 +37,11 @@ export function SettingsPage() {
   const providerLabel = useProviderLabel();
 
   const { data: meData } = useMeQuery();
+  const currentWorkspace = meData?.workspaces.find((w) => w.id === workspaceId);
+  const isMember = currentWorkspace?.role === 'member';
+  const canManageCredentials = currentWorkspace?.role === 'admin' || currentWorkspace?.role === 'owner';
   const { data: settingsData, isLoading: settingsLoading } = useSettingsQuery(workspaceId);
-  const { data: keysData, isLoading: keysLoading, isFetching: keysFetching, isError: keysError, refetch: refetchKeys } = useKeysQuery(workspaceId);
+  const { data: keysData, isLoading: keysLoading, isFetching: keysFetching, isError: keysError, refetch: refetchKeys } = useKeysQuery(workspaceId, canManageCredentials);
 
   const updateSettingsMutation = useUpdateSettingsMutation(workspaceId);
   const saveKeyMutation = useSaveKeyMutation(workspaceId);
@@ -50,12 +53,9 @@ export function SettingsPage() {
   /** The row shows a subscription: the dual row's own flag, else the stored method. */
   const showsSubscription = (k: KeyItem) => (isDualProviderRow(k) ? k.hasSubscription === true : k.authMethod === 'subscription');
 
-  const currentWorkspace = meData?.workspaces.find((w) => w.id === workspaceId);
-  const isMember = currentWorkspace?.role === 'member';
-
   const [addKeyModalOpen, setAddKeyModalOpen] = useState(false);
   // Heavy-duty and fallback models may only use providers with a saved key (members cannot list keys).
-  const savedKeys = isMember || !keysData ? undefined : keysData.keys.map((k) => k.provider);
+  const savedKeys = !canManageCredentials || !keysData ? undefined : keysData.keys.map((k) => k.provider);
   // Jev-only key types (ADR-0015) never serve as review providers.
   const keyedProviders = savedKeys?.filter((p): p is ApiProvider => !isJudgeKeyOnly(p));
 
@@ -132,7 +132,7 @@ export function SettingsPage() {
               <p className="text-xs text-ink-500 dark:text-ink-400 mt-0.5">{t('apiKeysDesc')}</p>
             </div>
           </div>
-          {!isMember && (
+          {canManageCredentials && (
             <button
               type="button"
               onClick={() => setAddKeyModalOpen(true)}
@@ -144,18 +144,18 @@ export function SettingsPage() {
           )}
         </div>
 
-        {currentWorkspace && !isMember && keysData && !keysLoading && (
+        {canManageCredentials && keysData && !keysLoading && (
           <SyncModels key={workspaceId} workspaceId={workspaceId} providers={savedKeys ?? []} rosterUnavailable={keysFetching || keysError} />
         )}
 
-        {keysError && (
+        {canManageCredentials && keysError && (
           <div role="alert" className="flex items-center gap-2 py-2 text-xs text-red-700 dark:text-red-300">
             {t('credentialRosterError')}
             <button type="button" disabled={keysFetching} className="underline" onClick={() => void refetchKeys()}>{t('retry')}</button>
           </div>
         )}
 
-        {keysLoading ? (
+        {!canManageCredentials ? null : keysLoading ? (
           <div className="py-4 text-sm text-ink-400">{t('loading')}</div>
         ) : !keysData?.keys || keysData.keys.length === 0 ? (
           keysData && !keysError && <div className="py-6 text-center text-xs text-ink-500 dark:text-ink-400 border border-dashed border-ink-200 dark:border-ink-800 rounded-[10px]">

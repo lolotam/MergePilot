@@ -56,11 +56,11 @@ export function useUpdateSettingsMutation(workspaceId: string) {
   });
 }
 
-export function useKeysQuery(workspaceId: string) {
+export function useKeysQuery(workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: ['workspaces', workspaceId, 'keys'],
     queryFn: () => api.getKeys(workspaceId),
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId) && enabled,
   });
 }
 
