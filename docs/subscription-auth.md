@@ -35,6 +35,7 @@ existing model-list endpoint when available on the server. Typesafe is judge-onl
 If a paginated catalog cannot finish within the request limits, sync reports an error and keeps the previous list.
 Catalog reads check one shared credential snapshot at a time. An in-flight listing is checked again before publication.
 A credential change committed after that final read takes effect on subsequent requests. The check does not hold a database lock across the provider request.
+The catalog cache and the protection of a synced catalog from a later ordinary picker refresh live in the web process, like pending sign-ins. With several web replicas, route `/api/workspaces/*/providers/*` and `/api/workspaces/*/credentials/*` to one replica per workspace (sticky routing); otherwise an ordinary refresh served by another replica can replace a synced list until the next sync. Credential checks and saved credentials stay shared through Postgres.
 
 Successful results populate the workspace's model pickers. Failed requests leave the last known list
 available. The last live sync time is shown per provider while the workspace settings page stays open.

@@ -123,7 +123,7 @@ WORKER_CONCURRENCY=8
 
 بعد تسجيل الدخول للوحة التحكم، الأدمن أو المالك يقدر يربط اشتراك OpenAI/Codex أو Claude أو Grok من إعدادات بيانات الدخول. ده منفصل عن Google/GitHub اللي بيسجّلوا دخول المستخدم لـ MergePilot. [خطوات الدخول والتجديد](subscription-auth.md).
 
-توكنات المزوّدين بتتخزّن مشفّرة في Postgres، والـ web والـ worker لازم يستخدموا نفس إعدادات الخزنة `MERGEPILOT_MASTER_KEY`. مفيش تثبيت CLI أو فتح منافذ localhost للـ OAuth. لو بتشغّل أكتر من نسخة web، فعّل sticky routing لمسارات `/api/workspaces/*/subscriptions/*` أثناء الدخول. إعادة تشغيل web بتلغي محاولات الدخول المعلّقة، لكن بيانات الدخول المحفوظة بتفضل موجودة.
+توكنات المزوّدين بتتخزّن مشفّرة في Postgres، والـ web والـ worker لازم يستخدموا نفس إعدادات الخزنة `MERGEPILOT_MASTER_KEY`. مفيش تثبيت CLI أو فتح منافذ localhost للـ OAuth. لو بتشغّل أكتر من نسخة web، فعّل sticky routing لمسارات `/api/workspaces/*/subscriptions/*` أثناء الدخول، ولمسارات `/api/workspaces/*/providers/*` و`/api/workspaces/*/credentials/*` لكل workspace، لأن كاش قوائم الموديلات الموحَّدة بعد المزامنة محفوظ في ذاكرة عملية الـ web. إعادة تشغيل web بتلغي محاولات الدخول المعلّقة، لكن بيانات الدخول المحفوظة بتفضل موجودة.
 
 ---
 
