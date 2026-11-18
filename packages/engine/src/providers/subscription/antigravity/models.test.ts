@@ -125,7 +125,7 @@ it('publishes an accepted strict read even when a later ordinary read finishes f
   expect(await listAntigravityModels(credential, { fetch })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
 });
 
-it.each([false, true])('rejects an old write under cache pressure (new project evicts: %s)', async (evict) => {
+it.each(['refresh', 'evict-other', 'evict-target'] as const)('keeps catalog ordering under cache pressure: %s', async (operation) => {
   const stale = Promise.withResolvers<Response>();
   const pending = listAntigravityModels(credential, { now: () => 0, fetch: () => stale.promise });
   const newer = mockFetch(jsonResponse({ models: { 'gemini-3.8-flash': {} } })).fetch;
@@ -133,13 +133,23 @@ it.each([false, true])('rejects an old write under cache pressure (new project e
   for (let i = 0; i < 499; i++) {
     await listAntigravityModels({ ...credential, projectId: 'fill-' + i }, { now: () => 1, fetch: newer });
   }
+  if (operation === 'evict-other') {
+    // Keep the target recently used without refreshing its TTL or writing a new catalog.
+    await listAntigravityModels(credential, { now: () => 2, fetch: newer });
+  }
   const afterExpiry = () => ANTIGRAVITY_MODELS_TTL_MS + 2;
-  const touched = { ...credential, projectId: evict ? 'new-project' : 'fill-0' };
+  const touched = { ...credential, projectId: operation === 'refresh' ? 'fill-0' : 'new-project' };
   await listAntigravityModels(touched, { now: afterExpiry, fetch: newer });
   stale.resolve(jsonResponse({ models: { 'gemini-3.1-pro': {} } }));
   await pending;
   const refused = mockFetch(() => textResponse('denied', 403)).fetch;
   const result = await listAntigravityModels(credential, { now: afterExpiry, fetch: refused });
-  if (evict) expect(result).toEqual(staticAntigravityModels());
+  if (operation === 'evict-target') expect(result).toEqual(staticAntigravityModels());
   else expect(result).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  if (operation === 'evict-other') {
+    const oldest = { ...credential, projectId: 'fill-0' };
+    const retained = { ...credential, projectId: 'fill-1' };
+    expect(await listAntigravityModels(oldest, { now: afterExpiry, fetch: refused })).toEqual(staticAntigravityModels());
+    expect(await listAntigravityModels(retained, { now: afterExpiry, fetch: refused })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+  }
 });

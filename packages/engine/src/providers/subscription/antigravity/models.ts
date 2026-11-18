@@ -89,9 +89,13 @@ export function resetAntigravityModelCache(): void {
 }
 
 function remember(projectId: string, models: CatalogModel[], now: number, strictSequence: number): void {
-  if (cache.size >= CACHE_MAX_ENTRIES && !cache.has(projectId)) {
-    cache.clear();
-    eviction++;
+  cache.delete(projectId);
+  if (cache.size >= CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) {
+      cache.delete(oldest.value);
+      eviction++;
+    }
   }
   cache.set(projectId, { expiresAt: now + ANTIGRAVITY_MODELS_TTL_MS, models, strictSequence });
 }
@@ -111,7 +115,11 @@ export async function listAntigravityModels(
   const projectId = typeof credential.projectId === 'string' ? credential.projectId : '';
   const now = (options.now ?? Date.now)();
   const cached = cache.get(projectId);
-  if (!options.strictRefresh && projectId && cached && cached.expiresAt > now) return cached.models;
+  if (!options.strictRefresh && projectId && cached && cached.expiresAt > now) {
+    cache.delete(projectId);
+    cache.set(projectId, cached);
+    return cached.models;
+  }
   const readSequence = ++sequence;
   const readEviction = eviction;
   let models: CatalogModel[] | undefined;
