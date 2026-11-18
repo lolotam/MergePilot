@@ -103,10 +103,10 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
   });
 
   it.each([
-    { failure: 'INVALID_CREDENTIAL', code: 'auth', status: 'invalid' },
-    { failure: 'QUOTA', code: 'quota', status: 'quota-exhausted' },
-    { failure: 'RATE_LIMIT', code: 'rate-limit', status: undefined },
-  ] as const)('records only definitive OpenRouter catalog failures ($failure)', async ({ failure, code, status }) => {
+    { failure: 'INVALID_CREDENTIAL', code: 'auth' },
+    { failure: 'QUOTA', code: 'quota' },
+    { failure: 'RATE_LIMIT', code: 'rate-limit' },
+  ] as const)('does not change key health from an OpenRouter catalog failure ($failure)', async ({ failure, code }) => {
     const provider = 'openrouter';
     const key = await h.credentials.appendProviderKey({
       workspaceId: 'ws-1', provider, apiKey: keyFor('or'), userId: 'u-admin',
@@ -117,25 +117,24 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     const result = await test(provider, h.adminCookie(), { keyId: key.id });
     expect(result.statusCode).toBe(200);
     expect(result.json()).toMatchObject({ ok: false, code });
-    expect(result.json().quotaStatus).toBe(status);
+    expect(result.json()).not.toHaveProperty('quotaStatus');
     expect(testConnection).not.toHaveBeenCalled();
     const [stored] = await h.store.listProviderKeys('ws-1', provider);
-    expect(stored?.lastTestStatus).toBe(status ?? 'valid');
-    if (status) expect(stored?.lastTestedAt?.getTime()).toBeGreaterThan(previousTest.getTime());
-    else expect(stored?.lastTestedAt).toEqual(previousTest);
+    expect(stored?.lastTestStatus).toBe('valid');
+    expect(stored?.lastTestedAt).toEqual(previousTest);
   });
 
-  it('returns the catalog failure when recording the stored key status fails', async () => {
+  it('returns the inference result when recording the stored key status fails', async () => {
     const provider = 'openrouter';
     const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
-    vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: 'INVALID_CREDENTIAL', provider, message: 'fixture failure' }));
+    vi.mocked(testConnection).mockResolvedValueOnce({ ok: false, code: 'auth', ms: 1, message: 'fixture inference failure' });
     const write = vi.spyOn(h.credentials, 'recordKeyTest').mockRejectedValueOnce(new Error('fixture storage error'));
-    const response = await test(provider, h.adminCookie(), { keyId: slot.id });
+    const response = await test(provider, h.adminCookie(), { keyId: slot.id, model: 'fixture' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ ok: false, code: 'auth' });
     expect(response.json()).not.toHaveProperty('quotaStatus');
     expect(write).toHaveBeenCalledTimes(1);
-    expect(testConnection).not.toHaveBeenCalled();
+    expect(testConnection).toHaveBeenCalledTimes(1);
   });
 
   it('selects from the tested slot catalog and still honors an explicit model', async () => {
@@ -146,7 +145,9 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
       payload: { provider, model: 'openai/workspace-default', language: 'en' },
     });
     expect(saved.statusCode).toBe(200);
-    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('default'), userId: 'u-admin' });
+    const defaultSlot = await h.credentials.appendProviderKey({
+      workspaceId: 'ws-1', provider, apiKey: keyFor('default'), userId: 'u-admin',
+    });
     const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
     const model = 'openai/account:free';
     vi.mocked(listModels).mockResolvedValueOnce([{ id: model, name: 'Account model', efforts: [] }]);
@@ -155,10 +156,30 @@ describe('connection test route (J2)', { timeout: 25000 }, () => {
     expect((await test(provider, h.adminCookie(), { keyId: slot.id })).statusCode).toBe(200);
     expect(listModels).toHaveBeenCalledWith(provider, keyFor('slot'), expect.objectContaining({ strictRefresh: true }));
     expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), model, expect.anything());
+    const stored = await h.store.listProviderKeys('ws-1', provider);
+    expect(stored.find(({ id }) => id === slot.id)?.lastTestStatus).toBe('valid');
+    expect(stored.find(({ id }) => id === defaultSlot.id)?.lastTestStatus).toBeNull();
 
     await test(provider, h.adminCookie(), { keyId: slot.id, model: 'openai/explicit' });
     expect(listModels).toHaveBeenCalledTimes(1);
     expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), 'openai/explicit', expect.anything());
+  });
+
+  it.each(['empty', 'server'] as const)('uses a configured OpenAI model for a slot if discovery is %s', async (discovery) => {
+    const provider = 'openai';
+    const slot = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('slot'), userId: 'u-admin' });
+    const model = 'gpt-5-mini';
+    const settings = await h.app.inject({
+      method: 'PUT', url: '/api/workspaces/ws-1/settings', headers: { cookie: h.adminCookie() },
+      payload: { provider, model, language: 'en' },
+    });
+    expect(settings.statusCode).toBe(200);
+    if (discovery === 'empty') vi.mocked(listModels).mockResolvedValueOnce([]);
+    else vi.mocked(listModels).mockRejectedValueOnce(new LlmFailure({ code: 'SERVER', provider, message: 'fixture failure' }));
+    vi.mocked(testConnection).mockResolvedValueOnce({ ok: true, ms: 1, model, reply: 'OK' });
+    const response = await test(provider, h.adminCookie(), { keyId: slot.id });
+    expect(response.json()).toMatchObject({ ok: true, model });
+    expect(testConnection).toHaveBeenLastCalledWith(provider, keyFor('slot'), model, expect.anything());
   });
 
   it('keeps the key status unchanged when the slot has no catalog model to test', async () => {

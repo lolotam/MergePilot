@@ -67,6 +67,7 @@ describe('dashboard subscription login', () => {
     await waitFor(() => expect(readWorkspace).toHaveBeenCalledTimes(2));
     expect(connected).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Language en' }));
+    expect(connected).not.toHaveBeenCalled();
     await act(async () => finishRefresh('new'));
     await waitFor(() => expect(connected).toHaveBeenCalledTimes(1));
     expect(api.finishSubscription).toHaveBeenCalledTimes(1);

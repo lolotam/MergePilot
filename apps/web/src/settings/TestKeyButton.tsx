@@ -66,7 +66,9 @@ export function TestKeyButton({ workspaceId, provider, disabled = false, slot }:
   const handleTest = async () => {
     setIsLoading(true);
     setResult(null);
-    const options = slot ? { keyId: slot.id } : selectedModel ? { model: selectedModel } : undefined;
+    const model = selectedModel.trim();
+    const modelOptions = model ? { model } : undefined;
+    const options = slot ? { keyId: slot.id, ...modelOptions } : modelOptions;
     const outcome = await runConnectionTest(() =>
       options ? api.testConnection(workspaceId, provider, options) : api.testConnection(workspaceId, provider),
     );
@@ -82,7 +84,22 @@ export function TestKeyButton({ workspaceId, provider, disabled = false, slot }:
 
   return (
     <div className="inline-flex items-center gap-1.5">
-      {slot ? <span dir="ltr" className="font-mono text-[11px]">••••{slot.last4}</span> : (
+      {slot ? (
+        <>
+          <span dir="ltr" className="font-mono text-[11px]">#{slot.position + 1} ••••{slot.last4}</span>
+          <input
+            type="text"
+            dir="ltr"
+            aria-label={`${t('testModelLabel')} (${provider}, #${slot.position + 1})`}
+            placeholder={t('testModelAuto')}
+            value={selectedModel}
+            maxLength={200}
+            disabled={disabled || isLoading}
+            onChange={(event) => { setSelectedModel(event.target.value); setResult(null); }}
+            className="w-28 rounded-lg border border-ink-300 dark:border-ink-700 bg-transparent px-2 py-1 text-[11px]"
+          />
+        </>
+      ) : (
         <select
           aria-label={`${t('testModelLabel')} (${provider})`}
           value={selectedModel}

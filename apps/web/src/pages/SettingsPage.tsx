@@ -38,7 +38,7 @@ export function SettingsPage() {
 
   const { data: meData } = useMeQuery();
   const { data: settingsData, isLoading: settingsLoading } = useSettingsQuery(workspaceId);
-  const { data: keysData, isLoading: keysLoading, isFetching: keysFetching, isError: keysError } = useKeysQuery(workspaceId);
+  const { data: keysData, isLoading: keysLoading, isFetching: keysFetching, isError: keysError, refetch: refetchKeys } = useKeysQuery(workspaceId);
 
   const updateSettingsMutation = useUpdateSettingsMutation(workspaceId);
   const saveKeyMutation = useSaveKeyMutation(workspaceId);
@@ -148,10 +148,17 @@ export function SettingsPage() {
           <SyncModels key={workspaceId} workspaceId={workspaceId} providers={savedKeys ?? []} rosterUnavailable={keysFetching || keysError} />
         )}
 
+        {keysError && (
+          <div role="alert" className="flex items-center gap-2 py-2 text-xs text-red-700 dark:text-red-300">
+            {t('credentialRosterError')}
+            <button type="button" disabled={keysFetching} className="underline" onClick={() => void refetchKeys()}>{t('retry')}</button>
+          </div>
+        )}
+
         {keysLoading ? (
           <div className="py-4 text-sm text-ink-400">{t('loading')}</div>
         ) : !keysData?.keys || keysData.keys.length === 0 ? (
-          <div className="py-6 text-center text-xs text-ink-500 dark:text-ink-400 border border-dashed border-ink-200 dark:border-ink-800 rounded-[10px]">
+          keysData && !keysError && <div className="py-6 text-center text-xs text-ink-500 dark:text-ink-400 border border-dashed border-ink-200 dark:border-ink-800 rounded-[10px]">
             {t('noKeysConfigured')}
           </div>
         ) : (

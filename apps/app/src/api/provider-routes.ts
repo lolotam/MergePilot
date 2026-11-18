@@ -341,13 +341,14 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
           request.log.warn({ event: 'provider.key_test_status_write_failed', provider }, 'Could not save provider key test status');
           return null;
         }
-        return status;
       };
 
-      const settings = keyId ? null : await deps.store.getSettings(workspaceId);
-      let model = body.model?.trim() || configuredModelFor(settings, provider);
+      const explicitModel = body.model?.trim();
+      const configured = explicitModel ? undefined : configuredModelFor(await deps.store.getSettings(workspaceId), provider);
+      let model = explicitModel || (keyId ? undefined : configured);
       if (!model) {
         const accountCatalogRequired = Boolean(keyId) || provider === 'openrouter';
+        const slotFallback = keyId && provider !== 'openrouter' ? configured : undefined;
         let models: CatalogModel[] | undefined;
         const catalogStart = Date.now();
         try {
@@ -364,21 +365,19 @@ export function registerProviderRoutes(app: FastifyInstance, deps: DashboardApiD
               ok: false, code: 'network', message: 'Provider model catalog did not answer in time', ms: Date.now() - catalogStart,
             });
           }
-          if (accountCatalogRequired) {
+          if (accountCatalogRequired && !(slotFallback && error instanceof LlmFailure && error.code === 'SERVER')) {
             const code = error instanceof LlmFailure ? failureKind(error.code) : 'network';
-            const quotaStatus = await recordOutcome(false, code);
             return reply.status(200).send({
-              ok: false, code, message: 'Could not read the provider account catalog',
-              ms: Date.now() - catalogStart, ...(quotaStatus ? { quotaStatus } : {}),
+              ok: false, code, message: 'Could not read the provider account catalog', ms: Date.now() - catalogStart,
             });
           }
           // Other providers can still use their registry default when model listing fails.
           request.log.warn(
             { event: 'provider.test_model_list_failed', provider, code: error instanceof LlmFailure ? error.code : 'error' },
-            'Could not list models to pick a test model; using the registry default',
+            'Could not list models to pick a test model; trying the configured fallback',
           );
         }
-        model = accountCatalogRequired && !models?.length ? '' : testModelFor(provider, models);
+        model = accountCatalogRequired && !models?.length ? slotFallback : testModelFor(provider, models);
       }
       if (!model) return sendError(reply, 400, 'model_required', 'Choose a model to test this provider');
       const effort = body.effort?.trim();

@@ -1,4 +1,5 @@
 export const enSettings = {
+  credentialRosterError: 'Could not load provider credentials.',
   syncModelsButton: 'Sync all models',
   syncModelsCancel: 'Cancel sync',
   syncModelsEmpty: 'Connect a review provider to sync its model catalog.',

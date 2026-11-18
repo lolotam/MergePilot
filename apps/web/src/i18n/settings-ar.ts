@@ -1,4 +1,5 @@
 export const arSettings = {
+  credentialRosterError: 'تعذّر تحميل بيانات مزوّدي الخدمة.',
   syncModelsButton: 'مزامنة كل النماذج',
   syncModelsCancel: 'إلغاء المزامنة',
   syncModelsEmpty: 'اربط مزوّد مراجعة لمزامنة قائمة نماذجه.',
