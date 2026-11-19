@@ -255,28 +255,40 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   const gate = evaluateChecks(sha, await gh.checkRuns(sha), await gh.commitFiles(sha));
   if (gate.kind === 'pending') return { kind: 'waiting', detail: `waiting for ${gate.waiting.join(', ')}` };
   if (gate.kind === 'blocked') return { kind: 'blocked', detail: gate.reasons.join('; ') };
-  if (gate.kind === 'no-image') return { kind: 'skipped', detail: gate.reason };
+  // A candidate that builds no image is not released, but it still finishes a stopped release.
+  const noImage = gate.kind === 'no-image' ? gate.reason : undefined;
 
-  const deployed = await currentDeployment(cfg, gh);
-  if (!deployed) return { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
-  // A web-phase head is a release stopped between its phases: its web phase may never have been
-  // deployed or verified, so it is neither a finished release nor a safe rollback target. A person
-  // reconciles production; until the hold is closed every release stops at the hold check above.
+  // An unreadable release branch must not turn a candidate that is skipped anyway into a failed run.
+  const deployed = await currentDeployment(cfg, gh).catch((err: unknown) => (noImage ? null : Promise.reject(err)));
+  if (!deployed) return noImage ? { kind: 'skipped', detail: noImage } : { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
+  // A web-phase head is a release stopped between its phases. It is finished only when production
+  // already runs exactly that web phase, healthy; anything else (its web phase never deployed or
+  // verified, a compose file changed by hand) is not safe to build on and ends in a hold.
   if (deployed.webPhase) {
     const short = (deployed.sourceSha ?? 'unknown').slice(0, 7);
     // A dry run changes nothing, not even the hold issue: it only reports what a live run would do.
-    if (!cfg.live) return { kind: 'blocked', detail: `release ${short} stopped between its phases; a live run would open a hold` };
+    if (!cfg.live) return { kind: 'blocked', detail: `release ${short} stopped between its phases; a live run would finish its worker phase if production runs its web phase, or open a hold` };
+    const resumed = await resumeWebPhase(cfg, ports, deployed);
+    if ('outcome' in resumed) {
+      const { outcome } = resumed;
+      // Finishing the stopped release used the deploy and verify rounds this job has time for, so
+      // the candidate is released by the next run (a new main commit, or a manual run).
+      return outcome.kind !== 'deployed' || sha === deployed.sourceSha || noImage ? outcome : { kind: 'deployed', detail: `${outcome.detail}; ${sha.slice(0, 7)} was not released in this run, run the release again for it` };
+    }
     const hold = await gh.openHold(
       `Release hold: ${short} stopped between its phases`,
       [
         `The release branch head is the web phase of \`${deployed.sourceSha ?? 'unknown'}\` (\`${deployed.imageRef}\`), and its worker phase never ran.`,
-        `The web phase may not have been deployed or verified; the worker should still run \`${deployed.workerImageRef}\`.`,
+        `The worker should still run \`${deployed.workerImageRef}\`. It was not finished automatically:`,
+        ...resumed.reasons.map((r) => `- ${r}`),
         '',
         'Check what production runs, then finish the release or roll it back by hand, and close this hold.',
       ].join('\n'),
     );
     return { kind: 'failed', detail: `release ${short} stopped between its phases`, hold };
   }
+
+  if (noImage) return { kind: 'skipped', detail: noImage };
 
   const candidateCompose = await gh.fileAt(sha, cfg.composePath);
   const decision = decideRelease({
@@ -391,6 +403,48 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   const problems = await deployAndVerify(ports, cfg, ports.dokploy, { web: { imageRef, sourceSha: sha }, worker: { imageRef, sourceSha: sha } }, `release ${sha.slice(0, 7)} (worker)`);
   if (problems.length === 0) return { kind: 'deployed', detail: `${imageRef} is running and healthy` };
   return rollBack(cfg, ports, ports.dokploy, { sha, imageRef, workerImageRef: imageRef, workerSourceSha: sha, releaseCommit: workerCommit, problems, previous });
+}
+
+/**
+ * Finishes a release stopped between its phases: writes the worker-phase commit and deploys it. It
+ * does so only when production runs exactly the web phase the head names (web and migrate on the new
+ * image, the worker on the old one, everything healthy) and the head differs from the release's own
+ * compose file in the image pins alone. Otherwise it returns why it did not, and the caller opens a
+ * hold. A failed worker phase rolls both images back like any other failed release.
+ */
+async function resumeWebPhase(cfg: ReleaseConfig, ports: ReleasePorts, deployed: Deployed): Promise<{ outcome: ReleaseOutcome } | { reasons: string[] }> {
+  const { github: gh, log, dokploy } = ports;
+  const source = deployed.sourceSha;
+  if (!dokploy) return { reasons: ['no Dokploy credentials are configured, so production cannot be checked'] };
+  if (!source || !deployed.head) return { reasons: ['the release record does not name its source commit'] };
+
+  const expected = { web: { imageRef: deployed.imageRef, sourceSha: source }, worker: { imageRef: deployed.workerImageRef, sourceSha: commitOf(deployed) } };
+  let problems: string[];
+  try {
+    const health = await ports.health();
+    problems = [...verifyContainers(await dokploy.containers(), expected), ...verifyHealthResponse(health.status, health.body)];
+  } catch (err) {
+    return { reasons: [`production could not be checked: ${err instanceof Error ? err.message : String(err)}`] };
+  }
+  if (problems.length > 0) return { reasons: ['production does not run the web phase of this release:', ...problems.map((p) => `  ${p}`)] };
+
+  const candidateCompose = await gh.fileAt(source, cfg.composePath);
+  if (!hasWorkerPin(candidateCompose) || !sameExceptPins(candidateCompose, await gh.fileAt(deployed.head, cfg.composePath))) return { reasons: ['the release branch compose file differs from the release in more than its image pins'] };
+
+  const previous: ReleaseTarget = { sourceSha: deployed.previousSourceCommit, imageRef: deployed.previousImageRef, workerSourceSha: deployed.previousWorkerSourceCommit, workerImageRef: deployed.previousWorkerImageRef };
+  const imageRef = deployed.imageRef; log(`resuming release ${source.slice(0, 7)}: production runs its web phase, so its worker phase deploys ${imageRef}`);
+  let workerCommit: string;
+  try {
+    const message = releaseMessage(trailersOf({ sourceCommit: source, imageRef, workerSourceCommit: source, workerImageRef: imageRef }, previous), 'release');
+    const content = rewritePins(candidateCompose, { image: imageRef, workerImage: imageRef });
+    workerCommit = await gh.writeReleaseCommit({ branch: cfg.releaseBranch, path: cfg.composePath, parentSha: source, content, message, expectedHead: deployed.head });
+  } catch (err) {
+    return { reasons: [`the worker-phase release commit could not be written: ${err instanceof Error ? err.message : String(err)}`] };
+  }
+  log(`release commit ${workerCommit} on ${cfg.releaseBranch} (worker phase, resumed)`);
+  const workerProblems = await deployAndVerify(ports, cfg, dokploy, { web: { imageRef, sourceSha: source }, worker: { imageRef, sourceSha: source } }, `release ${source.slice(0, 7)} (worker)`);
+  if (workerProblems.length === 0) return { outcome: { kind: 'deployed', detail: `finished the worker phase of ${source.slice(0, 7)}: ${imageRef} is running and healthy` } };
+  return { outcome: await rollBack(cfg, ports, dokploy, { sha: source, imageRef, workerImageRef: imageRef, workerSourceSha: source, releaseCommit: workerCommit, problems: workerProblems, previous }) };
 }
 
 interface FailedRelease {
