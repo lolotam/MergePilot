@@ -247,6 +247,16 @@ describe('the two-phase release', () => {
     expect(github.openHold).not.toHaveBeenCalled();
   });
 
+  it('finishes a stopped release on a docs-only candidate without asking to rerun it', async () => {
+    const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhaseHead() } });
+    vi.mocked(github.commitFiles).mockResolvedValue(['docs/deploy.ar.md']);
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'deployed' });
+    expect(outcome.detail).not.toContain('run the release again');
+    expect(commits).toHaveLength(1);
+    expect(deployments).toHaveLength(1);
+  });
+
   it('opens a hold for a web-phase head when production does not run its web phase', async () => {
     const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhaseHead() }, productionBehind: true });
     const outcome = await runRelease(cfg, ports);

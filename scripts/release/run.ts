@@ -255,10 +255,11 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   const gate = evaluateChecks(sha, await gh.checkRuns(sha), await gh.commitFiles(sha));
   if (gate.kind === 'pending') return { kind: 'waiting', detail: `waiting for ${gate.waiting.join(', ')}` };
   if (gate.kind === 'blocked') return { kind: 'blocked', detail: gate.reasons.join('; ') };
-  if (gate.kind === 'no-image') return { kind: 'skipped', detail: gate.reason };
+  // A candidate that builds no image is not released, but it still finishes a stopped release.
+  const noImage = gate.kind === 'no-image' ? gate.reason : undefined;
 
   const deployed = await currentDeployment(cfg, gh);
-  if (!deployed) return { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
+  if (!deployed) return noImage ? { kind: 'skipped', detail: noImage } : { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
   // A web-phase head is a release stopped between its phases. It is finished only when production
   // already runs exactly that web phase, healthy; anything else (its web phase never deployed or
   // verified, a compose file changed by hand) is not safe to build on and ends in a hold.
@@ -269,10 +270,9 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
     const resumed = await resumeWebPhase(cfg, ports, deployed);
     if ('outcome' in resumed) {
       const { outcome } = resumed;
-      if (outcome.kind !== 'deployed' || sha === deployed.sourceSha) return outcome;
       // Finishing the stopped release used the deploy and verify rounds this job has time for, so
       // the candidate is released by the next run (a new main commit, or a manual run).
-      return { kind: 'deployed', detail: `${outcome.detail}; ${sha.slice(0, 7)} was not released in this run, run the release again for it` };
+      return outcome.kind !== 'deployed' || sha === deployed.sourceSha || noImage ? outcome : { kind: 'deployed', detail: `${outcome.detail}; ${sha.slice(0, 7)} was not released in this run, run the release again for it` };
     }
     const hold = await gh.openHold(
       `Release hold: ${short} stopped between its phases`,
@@ -286,6 +286,8 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
     );
     return { kind: 'failed', detail: `release ${short} stopped between its phases`, hold };
   }
+
+  if (noImage) return { kind: 'skipped', detail: noImage };
 
   const candidateCompose = await gh.fileAt(sha, cfg.composePath);
   const decision = decideRelease({
