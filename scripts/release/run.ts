@@ -268,7 +268,7 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
     if (!cfg.live) return { kind: 'blocked', detail: `release ${short} stopped between its phases; a live run would finish its worker phase if production runs its web phase, or open a hold` };
     const resumed = await resumeWebPhase(cfg, ports, deployed);
     if ('outcome' in resumed) {
-      const outcome = resumed.outcome;
+      const { outcome } = resumed;
       if (outcome.kind !== 'deployed' || sha === deployed.sourceSha) return outcome;
       // Finishing the stopped release used the deploy and verify rounds this job has time for, so
       // the candidate is released by the next run (a new main commit, or a manual run).
@@ -410,8 +410,7 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
  * hold. A failed worker phase rolls both images back like any other failed release.
  */
 async function resumeWebPhase(cfg: ReleaseConfig, ports: ReleasePorts, deployed: Deployed): Promise<{ outcome: ReleaseOutcome } | { reasons: string[] }> {
-  const { github: gh, log } = ports;
-  const dokploy = ports.dokploy;
+  const { github: gh, log, dokploy } = ports;
   const source = deployed.sourceSha;
   if (!dokploy) return { reasons: ['no Dokploy credentials are configured, so production cannot be checked'] };
   if (!source || !deployed.head) return { reasons: ['the release record does not name its source commit'] };
@@ -427,28 +426,15 @@ async function resumeWebPhase(cfg: ReleaseConfig, ports: ReleasePorts, deployed:
   if (problems.length > 0) return { reasons: ['production does not run the web phase of this release:', ...problems.map((p) => `  ${p}`)] };
 
   const candidateCompose = await gh.fileAt(source, cfg.composePath);
-  if (!hasWorkerPin(candidateCompose) || !sameExceptPins(candidateCompose, await gh.fileAt(deployed.head, cfg.composePath))) {
-    return { reasons: ['the release branch compose file differs from the release in more than its image pins'] };
-  }
+  if (!hasWorkerPin(candidateCompose) || !sameExceptPins(candidateCompose, await gh.fileAt(deployed.head, cfg.composePath))) return { reasons: ['the release branch compose file differs from the release in more than its image pins'] };
 
-  const previous: ReleaseTarget = {
-    sourceSha: deployed.previousSourceCommit,
-    imageRef: deployed.previousImageRef,
-    workerSourceSha: deployed.previousWorkerSourceCommit,
-    workerImageRef: deployed.previousWorkerImageRef,
-  };
-  const imageRef = deployed.imageRef;
-  log(`resuming release ${source.slice(0, 7)}: production runs its web phase, so its worker phase deploys ${imageRef}`);
+  const previous: ReleaseTarget = { sourceSha: deployed.previousSourceCommit, imageRef: deployed.previousImageRef, workerSourceSha: deployed.previousWorkerSourceCommit, workerImageRef: deployed.previousWorkerImageRef };
+  const imageRef = deployed.imageRef; log(`resuming release ${source.slice(0, 7)}: production runs its web phase, so its worker phase deploys ${imageRef}`);
   let workerCommit: string;
   try {
-    workerCommit = await gh.writeReleaseCommit({
-      branch: cfg.releaseBranch,
-      path: cfg.composePath,
-      parentSha: source,
-      content: rewritePins(candidateCompose, { image: imageRef, workerImage: imageRef }),
-      message: releaseMessage(trailersOf({ sourceCommit: source, imageRef, workerSourceCommit: source, workerImageRef: imageRef }, previous), 'release'),
-      expectedHead: deployed.head,
-    });
+    const message = releaseMessage(trailersOf({ sourceCommit: source, imageRef, workerSourceCommit: source, workerImageRef: imageRef }, previous), 'release');
+    const content = rewritePins(candidateCompose, { image: imageRef, workerImage: imageRef });
+    workerCommit = await gh.writeReleaseCommit({ branch: cfg.releaseBranch, path: cfg.composePath, parentSha: source, content, message, expectedHead: deployed.head });
   } catch (err) {
     return { reasons: [`the worker-phase release commit could not be written: ${err instanceof Error ? err.message : String(err)}`] };
   }
