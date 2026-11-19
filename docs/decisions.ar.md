@@ -1061,3 +1061,13 @@
 **إجابة صاحب المشروع (بنصّها):** «Skip closed/merged PRs (Recommended)».
 
 **التنفيذ:** [تعديل ADR-0025](adr/0025-gated-production-release.md#amendment-2026-11-11-operator-requested-single-phase). التشغيل اليدوي ليه اختيار `single_phase` بينقل الـ web والـ worker مع بعض في deploy واحد. قبل تشغيل الـ worker بنشيل مهام المراجعة اللي الـ PR بتاعها اتقفل أو اتدمج، ونسجّلها عشان تتطلب تاني لو احتاجناها. بعد التحقق بيتقفل #200.
+
+### س68: مستويات التسليم (Light / Medium / Heavy)
+
+**المصدر:** رسالة من مدير PosPay (3T-Pospay manager) بتاريخ 2026-11-19 الساعة 23:05 بتوقيت الكويت، بتنقل تعليمات Waleed، ومرجعها PosPay PP-195 (lolotam/PayPos.systems#1085).
+
+**تعليمات صاحب المشروع (بنصّها):** «ابعت بقي ملفات وخطة ال3 pip lines دي لكل المديرين علشان يسجلوها وينفزوها كقاعدة عنهم في كل الشغل ويعملولها merg علطول بدون مراجعة light task كاضافة وثائق في ملفات المشاريع cladue.md file and agent file»
+
+**التنفيذ:** قسم "Delivery tiers" في `AGENTS.md` و`CLAUDE.md`. كارت اختيار المستوى قبل أي مهمة جديدة. Light بيتدمج لما الـ CI يخضّر من غير ما نستنى الـ review bots. Medium بحد أقصى 3 جولات مراجعة. Heavy بخطة من Fable 5.2 ومناقشة جولة واحدة من Astra 6.2، وأي migration أو فلوس أو صلاحيات بتتدمج بعد موافقة Waleed بس. الـ production والسيرفرات والـ secrets والـ HOLD فاضلين قراره.
+
+**التعارض مع القواعد الحالية:** في MergePilot مفيش staging، فبدل "staging deploy" بنستخدم الـ release gate بتاع ADR-0025. الـ commit التوثيق بيتخطّى كـ `no-image`. أي تغيير Light بيلمس مسار بيبني image بيعدّي على نفس الـ gate. بقية بوابات المشروع زي ما هي.
