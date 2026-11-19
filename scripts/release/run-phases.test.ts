@@ -249,8 +249,11 @@ describe('the two-phase release', () => {
 
   it('finishes a stopped release on a docs-only candidate without asking to rerun it', async () => {
     const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhaseHead() } });
+    const docs = 'd0c5d0c5d0c5';
     vi.mocked(github.commitFiles).mockResolvedValue(['docs/deploy.ar.md']);
-    const outcome = await runRelease(cfg, ports);
+    vi.mocked(github.checkRuns).mockResolvedValue(green(docs).filter((r) => r.name !== 'Build and Push Docker Image'));
+    vi.mocked(github.isAncestor).mockResolvedValue(true);
+    const outcome = await runRelease({ ...cfg, sha: docs }, ports);
     expect(outcome).toMatchObject({ kind: 'deployed' });
     expect(outcome.detail).not.toContain('run the release again');
     expect(commits).toHaveLength(1);
