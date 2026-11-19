@@ -13,22 +13,85 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  static:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
+        id: node
         with:
           node-version: 22
           cache: pnpm
+      - name: Runner resources and dependency cache
+        env:
+          CACHE_HIT: ${{ steps.node.outputs.cache-hit }}
+        run: |
+          node --input-type=module -e 'import os from "node:os"; console.log(`cpu_count=${os.availableParallelism()} ram_bytes=${os.totalmem()}`)'
+          printf 'pnpm_cache_hit=%s\n' "${CACHE_HIT:-unknown}"
       - run: pnpm install --frozen-lockfile
       - name: typecheck
-        run: pnpm typecheck
+        run: |
+          /usr/bin/time -f 'cpu_user_seconds=%U cpu_system_seconds=%S max_rss_kib=%M elapsed_seconds=%e' pnpm typecheck
+          pnpm exec tsc --noEmit --target ES2023 --lib ES2023 --module NodeNext --types node --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --verbatimModuleSyntax --erasableSyntaxOnly --skipLibCheck scripts/ci/gate.ts scripts/ci/inventory.ts scripts/ci/workflow.test.ts
       - name: lint
-        run: pnpm lint
-      - name: test
-        run: pnpm test
+        run: /usr/bin/time -f 'cpu_user_seconds=%U cpu_system_seconds=%S max_rss_kib=%M elapsed_seconds=%e' pnpm lint
       - name: build
-        run: pnpm build
+        run: /usr/bin/time -f 'cpu_user_seconds=%U cpu_system_seconds=%S max_rss_kib=%M elapsed_seconds=%e' pnpm build
+      - name: Verify complete unit shard inventory
+        run: node --experimental-strip-types scripts/ci/inventory.ts
+      - name: Workflow and gate tests (no database)
+        run: pnpm exec vitest run scripts/ci/workflow.test.ts --maxWorkers=2
+
+  unit:
+    name: unit (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        id: node
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Runner resources and dependency cache
+        env:
+          CACHE_HIT: ${{ steps.node.outputs.cache-hit }}
+        run: |
+          node --input-type=module -e 'import os from "node:os"; console.log(`cpu_count=${os.availableParallelism()} ram_bytes=${os.totalmem()}`)'
+          printf 'pnpm_cache_hit=%s\n' "${CACHE_HIT:-unknown}"
+      - run: pnpm install --frozen-lockfile
+      # Workspace-package imports resolve emitted dist, so every isolated shard needs this.
+      - name: typecheck and emit workspace packages
+        run: /usr/bin/time -f 'cpu_user_seconds=%U cpu_system_seconds=%S max_rss_kib=%M elapsed_seconds=%e' pnpm typecheck
+      - name: Complete unit shard
+        run: /usr/bin/time -f 'cpu_user_seconds=%U cpu_system_seconds=%S max_rss_kib=%M elapsed_seconds=%e' pnpm exec vitest run --shard=${{ matrix.shard }}/2 --maxWorkers=2
+
+  # Keep the required check and release contract; a matrix result succeeds only if every shard does.
+  check:
+    name: check
+    if: ${{ always() }}
+    needs: [static, unit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require every CI outcome
+        if: ${{ success() && !cancelled() }}
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: node --experimental-strip-types scripts/ci/gate.ts
+      # GitHub accepts skipped required jobs. Keep the job eligible and fail explicitly.
+      - name: Reject workflow cancellation
+        if: ${{ cancelled() }}
+        run: exit 1
