@@ -34,7 +34,8 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
 
   const models = useMemo(() => query.data?.models ?? [], [query.data]);
   const isLoading = query.isLoading || refreshing;
-  const isManual = manualChosen || query.isError;
+  // A failed refetch keeps the last good catalog; only fall back to typing when there is none.
+  const isManual = manualChosen || (query.isError && models.length === 0);
   const errorCode = query.error instanceof ApiClientError ? query.error.code : undefined;
 
   useEffect(() => {
@@ -54,10 +55,18 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
     setRefreshing(true);
     setManualChosen(false);
     try {
-      const fresh = await api.getModels(workspaceId, provider, true);
-      queryClient.setQueryData(modelsQueryKey(workspaceId, provider), fresh);
+      const queryKey = modelsQueryKey(workspaceId, provider);
+      await queryClient.cancelQueries({ queryKey, exact: true });
+      await queryClient.fetchQuery({
+        queryKey,
+        queryFn: ({ signal }) => api.getModels(workspaceId, provider, true, signal),
+        staleTime: 0,
+        retry: false,
+      });
     } catch {
-      await query.refetch();
+      // A failed fetch leaves the query in its error state with the last good catalog kept,
+      // so the notice below stays until a newer catalog (refresh, sync, credential change) replaces it.
+      // A cancelled fetch means a newer read took over.
     } finally {
       setRefreshing(false);
     }
@@ -154,6 +163,12 @@ export function ModelSelect({ workspaceId, provider, value, onChange, disabled =
           ▾
         </span>
       </button>
+
+      {query.isError && (
+        <p role="status" className="text-[11px] text-amber-600 dark:text-amber-400 ms-2">
+          {t('modelsRefreshFailed')}
+        </p>
+      )}
 
       {isOpen && (
         <div className="absolute top-full mt-1 start-0 end-0 z-30 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-2xl shadow-lg p-2 flex flex-col gap-1">

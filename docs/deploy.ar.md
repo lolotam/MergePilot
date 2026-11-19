@@ -123,7 +123,7 @@ WORKER_CONCURRENCY=8
 
 بعد تسجيل الدخول للوحة التحكم، الأدمن أو المالك يقدر يربط اشتراك OpenAI/Codex أو Claude أو Grok من إعدادات بيانات الدخول. ده منفصل عن Google/GitHub اللي بيسجّلوا دخول المستخدم لـ MergePilot. [خطوات الدخول والتجديد](subscription-auth.md).
 
-توكنات المزوّدين بتتخزّن مشفّرة في Postgres، والـ web والـ worker لازم يستخدموا نفس إعدادات الخزنة `MERGEPILOT_MASTER_KEY`. مفيش تثبيت CLI أو فتح منافذ localhost للـ OAuth. لو بتشغّل أكتر من نسخة web، فعّل sticky routing لمسارات `/api/workspaces/*/subscriptions/*` أثناء الدخول. إعادة تشغيل web بتلغي محاولات الدخول المعلّقة، لكن بيانات الدخول المحفوظة بتفضل موجودة.
+توكنات المزوّدين بتتخزّن مشفّرة في Postgres، والـ web والـ worker لازم يستخدموا نفس إعدادات الخزنة `MERGEPILOT_MASTER_KEY`. مفيش تثبيت CLI أو فتح منافذ localhost للـ OAuth. لو بتشغّل أكتر من نسخة web، فعّل sticky routing لمسارات `/api/workspaces/*/subscriptions/*` أثناء الدخول، ولمسارات `/api/workspaces/*/providers/*` و`/api/workspaces/*/credentials/*` و`/api/workspaces/*/keys/*` لكل workspace، لأن كاش قوائم الموديلات الموحَّدة بعد المزامنة محفوظ في ذاكرة عملية الـ web. إعادة تشغيل web بتلغي محاولات الدخول المعلّقة، لكن بيانات الدخول المحفوظة بتفضل موجودة.
 
 ---
 
@@ -191,7 +191,7 @@ commit فيه تغيير توثيق بس بيتخطّى (مفيش صورة جد�
    - `Build and Push Docker Image` ما ينفعش يبقى required: على الـ PRs الـ workflow ده بيشتغل بس لو اتغيّر `Dockerfile` أو `.dockerignore` أو `docker-compose*.yml` أو `deploy/**` أو `docker.yml`. فأي PR تاني (زي PR توثيق) كان هيفضل مستنيه للأبد ومش هيتعمل له merge.
    - الصورة لسه مطلوبة وقت النشر: البوابة بتستنى الـ check ده على commit الـ `main`، وبتتأكد إن revision الصورة هو نفس الـ SHA.
 8. يحط الـ variable `MERGEPILOT_AUTO_RELEASE` = `enabled`، وبعدها على طول يشغّل الـ workflow يدوي (`workflow_dispatch`) كاختبار قبول على **آخر commit في `main` بيبني صورة**، ويتأكد من الصورة والـ SHA على الحاويات و`/health`.
-   - commit توثيق بس بيتخطّى كـ `no-image` من غير ما ينشر حاجة، فما ينفعش يبقى اختبار القبول.
+   - commit توثيق بس بيتخطّى كـ `no-image` من غير ما ينشر حاجة، فما ينفعش يبقى اختبار القبول. والاستثناء: لو الـ release اللي على `production` واقف بين المرحلتين، الـ run الـ live بيكمّل مرحلة الـ worker بتاعته (وده بيعمل drain للـ worker) حتى لو الـ commit الجديد توثيق بس؛ والـ commit التوثيق نفسه بيتخطّى ومش بيتنشر.
    - النهارده (2026-10-15) الـ commit ده هو `88a87bb70b10bea06c004273528f98ed31632ea7`، وصورته `sha256:eabfe1fbc4571e8e8c7626e62f6039fd0c002141b95e9ac4959c1b4d7d43fd53`.
 
 **الإيقاف:** امسح الـ variable `MERGEPILOT_AUTO_RELEASE` (أو غيّر قيمته)، والـ workflow يرجع dry run. ولإيقاف مؤقت من غير ما تلمس الإعدادات، افتح issue عليه `release-hold`.

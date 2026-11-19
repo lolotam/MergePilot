@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { api, type SubscriptionLogin } from '../api/client.js';
+import { useQuery } from '@tanstack/react-query';
+import { useI18n } from '../i18n/context.js';
 import { AddKeyModal } from '../components/AddKeyModal.js';
 import { SubscriptionSignIn } from './SubscriptionSignIn.js';
 import { renderSettings } from './settings.fixtures.js';
@@ -42,6 +44,33 @@ describe('dashboard subscription login', () => {
     expect(screen.getByRole('link').getAttribute('href')).toBe('https://auth.openai.com/codex/device');
     await waitFor(() => expect(connected).toHaveBeenCalledTimes(1));
     expect(api.finishSubscription).toHaveBeenCalledWith('ws', 'login-1');
+  });
+
+  it('reports a saved login after a language switch during the workspace refresh', async () => {
+    const user = userEvent.setup();
+    const connected = vi.fn();
+    let finishRefresh!: (value: string) => void;
+    const pending = new Promise<string>((resolve) => { finishRefresh = resolve; });
+    const readWorkspace = vi.fn().mockResolvedValueOnce('old').mockReturnValueOnce(pending);
+    function Workspace() {
+      const { toggleLanguage, language } = useI18n();
+      useQuery({ queryKey: ['workspaces', 'ws', 'settings'], queryFn: readWorkspace });
+      return <button onClick={toggleLanguage}>Language {language}</button>;
+    }
+    vi.mocked(api.getSubscriptionLogin).mockResolvedValue({ ...state, status: 'ready' });
+    vi.mocked(api.finishSubscription).mockResolvedValue({ ...state, status: 'completed' });
+    renderSettings(<>
+      <Workspace />
+      <SubscriptionSignIn workspaceId="ws" provider="openai" onConnected={connected} />
+    </>, 'en');
+    await user.click(screen.getByRole('button', { name: /Sign in with ChatGPT/ }));
+    await waitFor(() => expect(readWorkspace).toHaveBeenCalledTimes(2));
+    expect(connected).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Language en' }));
+    expect(connected).not.toHaveBeenCalled();
+    await act(async () => finishRefresh('new'));
+    await waitFor(() => expect(connected).toHaveBeenCalledTimes(1));
+    expect(api.finishSubscription).toHaveBeenCalledTimes(1);
   });
 
   it('submits a Claude code with the current prompt id and cancels on unmount', async () => {

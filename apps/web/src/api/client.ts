@@ -1,5 +1,6 @@
 import type {
   MeResponse,
+  ModelsResponse as CatalogResponse,
   Settings,
   SettingsUpdate,
   ErrorBody,
@@ -84,6 +85,7 @@ export interface CatalogModel {
 
 export interface ModelsResponse {
   models: CatalogModel[];
+  source?: CatalogResponse['source'];
 }
 
 export interface TestConnectionResponse {
@@ -272,9 +274,15 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ apiKeys: [...apiKeys] }),
     }),
-  getModels: (workspaceId: string, provider: ApiProvider, refresh = false) =>
+  getModels: (workspaceId: string, provider: ApiProvider, refresh = false, signal?: AbortSignal) =>
     fetchApi<ModelsResponse>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(provider)}/models${refresh ? '?refresh=true' : ''}`,
+      signal ? { signal } : undefined,
+    ),
+  syncModels: (workspaceId: string, provider: ApiProvider, signal: AbortSignal) =>
+    fetchApi<ModelsResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/providers/${encodeURIComponent(provider)}/models?refresh=true&sync=true`,
+      { signal, cache: 'no-store' },
     ),
   testModelsUnsaved: (workspaceId: string, provider: ApiProvider, apiKey: string, baseUrl?: string | undefined) =>
     fetchApi<ModelsResponse>(

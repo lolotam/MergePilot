@@ -1,3 +1,5 @@
+import { LlmFailure } from '../llm/failure.js';
+
 /** One model a provider offers, as shown in a model picker. */
 export interface CatalogModel {
   id: string;
@@ -19,4 +21,14 @@ export function sortUnique(models: readonly CatalogModel[]): CatalogModel[] {
     out.push(model);
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function validModelId(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const id = value.replace(/^models\//, '');
+  return id.length > 0 && id === id.trim();
+}
+
+export function invalidCatalog(provider: string): LlmFailure {
+  return new LlmFailure({ provider, code: 'SERVER', message: 'Provider returned an invalid model catalog' });
 }

@@ -7,7 +7,13 @@ vi.mock('@mergepilot/engine', async (importOriginal) => {
   return { ...actual, listModels: vi.fn(actual.listModels), testConnection: vi.fn(actual.testConnection) };
 });
 
-const { listModels } = await import('@mergepilot/engine');
+const { listModels, testConnection } = await import('@mergepilot/engine');
+async function waitForProviderFetch(started: Promise<void>, response: Promise<{ statusCode: number }>): Promise<void> {
+  await Promise.race([started, response.then(({ statusCode }) => {
+    throw new Error(`Catalog request returned ${statusCode} before starting provider fetch`);
+  })]);
+}
+
 const MODELS = [{ id: 'm-1', name: 'Model 1', efforts: ['low', 'high'] }];
 
 describe('model catalog routes (J2)', { timeout: 25000 }, () => {
@@ -16,7 +22,7 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    h = await createProviderHarness(customFetch);
+    h = await createProviderHarness(customFetch, undefined, (provider) => provider !== 'google-antigravity');
   }, 30000);
 
   afterEach(async () => {
@@ -52,6 +58,80 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect(vi.mocked(listModels).mock.calls[0]?.[1]).toBe(keyFor('vg'));
   });
 
+  it('syncs the effective default method for admins, adds the API key models to a Codex sign-in and keeps the cached catalog on failure', async () => {
+    const query = '?refresh=true&sync=true';
+    const access = ['test', 'access'].join('-');
+    const refresh = ['test', 'refresh'].join('-');
+    await h.credentials.saveSubscription('ws-1', 'openai', { type: 'oauth', access, refresh, expires: Date.now() + 3_600_000 }, 'u-admin');
+    for (const tag of ['first', 'second']) {
+      await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor(tag), userId: 'u-admin' });
+    }
+    await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels)
+      .mockImplementationOnce(engine.listModels)
+      .mockImplementationOnce(engine.listModels);
+    const upstream = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected provider request'))
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'gpt-9-fixture' }, { id: 'gpt-4o' }] }))
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'gpt-fixture' }] }))
+      .mockResolvedValueOnce(new Response(keyFor('first'), { status: 429 }));
+    try {
+      expect((await get('openai', h.memberCookie(), query)).statusCode).toBe(403);
+      const bundled = await get('openai', h.adminCookie(), query);
+      expect(bundled.json()).toMatchObject({ source: 'live' });
+      const ids = bundled.json().models.map((model: { id: string }) => model.id);
+      // The sign-in's bundled catalog plus the API key's Codex-family model; GPT-4 ids stay out.
+      expect(ids).toContain('gpt-9-fixture');
+      expect(ids).not.toContain('gpt-4o');
+      expect(ids.length).toBeGreaterThan(1);
+      expect(bundled.json().models.find((model: { id: string }) => model.id === 'gpt-9-fixture').efforts.length).toBeGreaterThan(0);
+      expect(bundled.body).not.toContain(access);
+      expect(bundled.body).not.toContain(refresh);
+      expect(bundled.body).not.toContain(keyFor('first'));
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'api-key');
+      const live = await get('openai', h.adminCookie(), query);
+      expect(live.json()).toEqual({
+        models: [{ id: 'gpt-fixture', name: 'gpt-fixture', efforts: [] }], source: 'live',
+      });
+      expect(live.headers['cache-control']).toBe('no-store');
+
+      const failed = await get('openai', h.adminCookie(), query);
+      expect(failed.statusCode).toBe(429);
+      expect(failed.body).not.toContain(keyFor('first'));
+      expect((await get('openai', h.memberCookie())).json()).toEqual({ models: live.json().models });
+      expect(upstream.mock.calls.map(([url, init]) => [new URL(String(url)).pathname, new Headers(init?.headers).get('authorization')]))
+        .toEqual(Array(3).fill(['/v1/models', `Bearer ${keyFor('first')}`]));
+      expect(testConnection).not.toHaveBeenCalled();
+    } finally {
+      upstream.mockRestore();
+    }
+    expect((await get('gemini', h.adminCookie(), query)).statusCode).toBe(404);
+    expect((await get('typesafe', h.adminCookie(), query)).statusCode).toBe(400);
+    expect((await get('google-antigravity', h.adminCookie(), query)).json().error.code).toBe('provider_unavailable');
+    expect((await h.app.inject({
+      method: 'GET', url: `/api/workspaces/ws-other/providers/openai/models${query}`, headers: { cookie: h.adminCookie() },
+    })).statusCode).toBe(403);
+    expect(listModels).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a member refresh on the effective method: only an admin sync lists the API key', async () => {
+    await h.credentials.saveSubscription('ws-1', 'openai', { type: 'oauth', access: 'a-1', refresh: 'r-1', expires: Date.now() + 3_600_000 }, 'u-admin');
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('api'), userId: 'u-admin' });
+    await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels);
+    const upstream = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected provider request'));
+    try {
+      expect((await get('openai', h.memberCookie(), '?refresh=true')).statusCode).toBe(200);
+      expect(upstream).not.toHaveBeenCalled();
+    } finally {
+      upstream.mockRestore();
+    }
+  });
+
   it('drops the cached list when the key is replaced', async () => {
     vi.mocked(listModels).mockResolvedValue(MODELS);
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('o1'), userId: 'u-admin' });
@@ -65,6 +145,140 @@ describe('model catalog routes (J2)', { timeout: 25000 }, () => {
     expect(put.statusCode).toBe(200);
     await get('openai', h.memberCookie());
     expect(listModels).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['API mutation', 'shared-store mutation'])('rejects stale catalog responses after a %s', async (mutation) => {
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockResolvedValueOnce(MODELS).mockImplementationOnce(engine.listModels).mockImplementationOnce(engine.listModels);
+    const started = Promise.withResolvers<void>();
+    const oldCatalog = Promise.withResolvers<Response>();
+    const upstream = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected provider request'))
+      .mockImplementationOnce(() => { started.resolve(); return oldCatalog.promise; })
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'claude-new-account' }], has_more: false }));
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'anthropic', apiKey: keyFor('old'), userId: 'u-admin' });
+    expect((await get('anthropic', h.memberCookie())).json()).toEqual({ models: MODELS });
+    const pendingSync = get('anthropic', h.adminCookie(), '?sync=true').then((response) => response);
+    try {
+      await waitForProviderFetch(started.promise, pendingSync);
+      if (mutation === 'API mutation') {
+        const changed = await h.app.inject({
+          method: 'PUT', url: '/api/workspaces/ws-1/keys/anthropic', headers: { cookie: h.adminCookie() },
+          payload: { apiKey: keyFor('new') },
+        });
+        expect(changed.statusCode).toBe(200);
+      } else {
+        // Another replica changes shared credentials without invalidating this web process.
+        await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'anthropic', apiKey: keyFor('new'), userId: 'u-admin' });
+      }
+      const current = await get('anthropic', h.memberCookie());
+      expect(current.json().models).toMatchObject([{ id: 'claude-new-account' }]);
+      oldCatalog.resolve(Response.json({ data: [{ id: 'claude-old-account' }], has_more: false }));
+      const outdated = await pendingSync;
+      expect(outdated.statusCode).toBe(409);
+      expect(outdated.json().error.code).toBe('catalog_credentials_changed');
+      expect((await get('anthropic', h.memberCookie())).json()).toEqual(current.json());
+    } finally {
+      oldCatalog.resolve(Response.json({ data: [] }));
+      await pendingSync;
+      upstream.mockRestore();
+    }
+  });
+
+  it('rejects an API catalog when another replica switches the default to a subscription', async () => {
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels);
+    const connected = { type: 'oauth' as const, access: 'fixture-access', refresh: 'fixture-refresh', expires: Date.now() + 3_600_000 };
+    await h.credentials.saveSubscription('ws-1', 'openai', connected, 'u-admin');
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('api'), userId: 'u-admin' });
+    await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'api-key');
+    const requested = Promise.withResolvers<void>();
+    const oldCatalog = Promise.withResolvers<Response>();
+    // The subscription sync below also lists the workspace's API key, so only the first fetch is held back.
+    const upstream = vi.spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(() => {
+        requested.resolve();
+        return oldCatalog.promise;
+      })
+      .mockResolvedValue(Response.json({ data: [] }));
+    const pending = get('openai', h.adminCookie(), '?sync=true').then((response) => response);
+    try {
+      await waitForProviderFetch(requested.promise, pending);
+      await h.credentials.setProviderDefaultMethod('ws-1', 'openai', 'subscription');
+      const current = await get('openai', h.adminCookie(), '?sync=true');
+      expect(current.json()).toMatchObject({ source: 'live' });
+      oldCatalog.resolve(Response.json({ data: [{ id: 'gpt-old-account' }] }));
+      const outdated = await pending;
+      expect(outdated.statusCode).toBe(409);
+      expect(outdated.json().error.code).toBe('catalog_credentials_changed');
+      expect((await get('openai', h.memberCookie())).json()).toEqual({ models: current.json().models });
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      oldCatalog.resolve(Response.json({ data: [] }));
+      await pending;
+      upstream.mockRestore();
+    }
+  });
+
+  it('refuses a catalog if target resolution sees a different active key slot', async () => {
+    const provider = 'openrouter';
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('first'), userId: 'u-admin' });
+    await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider, apiKey: keyFor('second'), userId: 'u-admin' });
+    const state = await h.store.readCatalogCredentialState('ws-1', provider);
+    if (!state) throw new Error('Missing fixture credentials');
+    const snapshots = vi.spyOn(h.store, 'readCatalogCredentialState')
+      .mockResolvedValueOnce(state)
+      .mockResolvedValueOnce({ ...state, cursor: 1 });
+    try {
+      const result = await get(provider, h.adminCookie(), '?sync=true');
+      expect(result.statusCode).toBe(409);
+      expect(result.json().error.code).toBe('catalog_credentials_changed');
+      expect(listModels).not.toHaveBeenCalled();
+    } finally {
+      snapshots.mockRestore();
+    }
+  });
+
+  it('refreshes picker data after changing the first credential in a key roster', async () => {
+    const first = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('first'), userId: 'u-admin' });
+    const second = await h.credentials.appendProviderKey({ workspaceId: 'ws-1', provider: 'openai', apiKey: keyFor('second'), userId: 'u-admin' });
+    vi.mocked(listModels).mockImplementation(async (_, credential) => [{ id: credential === keyFor('first') ? 'first-model' : 'second-model', name: 'Model', efforts: [] }]);
+    expect((await get('openai', h.memberCookie())).json().models).toMatchObject([{ id: 'first-model' }]);
+    const changed = await h.app.inject({
+      method: 'PUT', url: '/api/workspaces/ws-1/keys/openai/order', headers: { cookie: h.adminCookie() },
+      payload: { ids: [second.id, first.id] },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect((await get('openai', h.memberCookie())).json().models).toMatchObject([{ id: 'second-model' }]);
+  });
+
+  it.each([
+    { newer: '?refresh=true', oldStatus: 200, expected: 'openai/older' },
+    { newer: '?sync=true', oldStatus: 409, expected: 'openai/newer' },
+  ])('gives a strict catalog priority with $newer in flight', async ({ newer, oldStatus, expected }) => {
+    const engine = await vi.importActual<typeof import('@mergepilot/engine')>('@mergepilot/engine');
+    vi.mocked(listModels).mockImplementationOnce(engine.listModels).mockImplementationOnce(engine.listModels);
+    const started = Promise.withResolvers<void>();
+    const older = Promise.withResolvers<Response>();
+    const upstream = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected provider request'))
+      .mockImplementationOnce(() => { started.resolve(); return older.promise; })
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'openai/newer' }] }));
+    await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openrouter', apiKey: keyFor('router'), userId: 'u-admin' });
+    const olderRequest = get('openrouter', h.adminCookie(), '?sync=true').then((response) => response);
+    try {
+      await waitForProviderFetch(started.promise, olderRequest);
+      expect((await get('openrouter', h.adminCookie(), newer)).statusCode).toBe(200);
+      older.resolve(Response.json({ data: [{ id: 'openai/older' }] }));
+      const response = await olderRequest;
+      expect(response.statusCode).toBe(oldStatus);
+      if (oldStatus === 409) expect(response.json().error.code).toBe('catalog_superseded');
+      expect((await get('openrouter', h.memberCookie())).json().models).toMatchObject([{ id: expected }]);
+    } finally {
+      older.resolve(Response.json({ data: [] }));
+      await olderRequest;
+      upstream.mockRestore();
+    }
   });
 
   it('answers 404 key_not_found without a stored key and 400 for an unknown provider', async () => {

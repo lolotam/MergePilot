@@ -12,6 +12,7 @@ import { redactSecrets } from '../../security/redact.js';
 import { subscriptionProvider } from './auth.js';
 import { failureFromResponse } from '../http.js';
 import { subscriptionOutputTokens } from './output-tokens.js';
+import { supplementaryModel } from './supplement.js';
 import { SubscriptionRefreshError } from './refresh-error.js';
 import { AntigravityAdapter } from './antigravity/adapter.js';
 
@@ -77,7 +78,8 @@ export class SubscriptionAdapter extends LlmAdapter {
     private readonly resolveSecret?: () => Promise<Secret>) { super(); }
 
   override requestedOutputTokens(options: OutputTokenRequest): number {
-    const model = subscriptionProvider(this.provider).getModels().find((entry) => entry.id === options.model);
+    const model = subscriptionProvider(this.provider).getModels().find((entry) => entry.id === options.model)
+      ?? supplementaryModel(this.provider, options.model);
     if (!model) return options.maxOutputTokens;
     const reasoning = reasoningFor(levelFor(getSupportedThinkingLevels(model), options));
     return subscriptionOutputTokens(model, reasoning, options.maxOutputTokens).requested;
@@ -116,7 +118,7 @@ export class SubscriptionAdapter extends LlmAdapter {
     const models = createModels({ credentials: store, authContext: { env: async () => undefined, fileExists: async () => false } });
     const provider = subscriptionProvider(this.provider);
     models.setProvider(provider);
-    const model = models.getModel(provider.id, options.model);
+    const model = models.getModel(provider.id, options.model) ?? supplementaryModel(this.provider, options.model);
     if (!model) throw new LlmFailure({ provider: this.provider, code: 'BAD_REQUEST', message: `Unknown subscription model: ${options.model}` });
     const level = levelFor(getSupportedThinkingLevels(model), options);
     if (options.effort !== undefined && !level) {

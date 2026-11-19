@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Secret } from '../credentials/secret.js';
+import { encodeSubscription } from '../credentials/subscription.js';
 import { LlmFailure } from '../llm/failure.js';
 import { listModels } from './catalog.js';
 import { jsonResponse, mockFetch, textResponse } from './fetch-mock.fixtures.js';
@@ -8,6 +9,112 @@ import { jsonResponse, mockFetch, textResponse } from './fetch-mock.fixtures.js'
 const KEY = new Secret(['s', 'k-', 'x'.repeat(24)].join(''));
 
 describe('listModels', () => {
+  it.each([
+    { provider: 'anthropic' as const, payload: { data: [{}], has_more: false } },
+    { provider: 'anthropic' as const, payload: { data: [{ id: 'claude-valid' }] } },
+    { provider: 'anthropic' as const, payload: { data: [{ id: 'claude-valid' }], has_more: 'false' } },
+    { provider: 'openai' as const, payload: { data: [{ id: ' ' }] } },
+    { provider: 'openai' as const, payload: { data: [{ id: ' gpt-example ' }] } },
+    { provider: 'gemini' as const, payload: { models: [{ name: 'models/' }] } },
+    { provider: 'gemini' as const, payload: { models: [{ name: 'models/ gemini-example' }] } },
+    { provider: 'gemini' as const, payload: { models: [{ name: 'models/gemini-example', supportedGenerationMethods: 'generateContent' }] } },
+    { provider: 'gemini' as const, payload: { models: [{ name: 'models/gemini-example', supportedGenerationMethods: ['generateContent', 5] }] } },
+    { provider: 'openrouter' as const, payload: { data: [null] } },
+    { provider: 'openrouter' as const, payload: { data: [{ id: 17 }] } },
+    { provider: 'openrouter' as const, payload: { data: [{ id: null, name: 'openai/gpt-example' }] } },
+  ])('strict $provider sync rejects malformed catalogs with a classified failure', async ({ provider, payload }) => {
+    const { fetch } = mockFetch(jsonResponse(payload));
+    await expect(listModels(provider, KEY, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER', provider });
+  });
+
+  it('normalizes strict catalog cancellation before contacting the provider', async () => {
+    const { fetch, calls } = mockFetch();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(listModels('openai', KEY, { fetch, strictRefresh: true, signal: controller.signal })).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('strict OpenRouter refresh reads the authenticated account catalog', async () => {
+    const { fetch, calls } = mockFetch(jsonResponse({ data: [{ id: 'openai/gpt-account-model' }] }));
+    await expect(listModels('openrouter', KEY, { fetch, strictRefresh: true })).resolves.toMatchObject([{ id: 'openai/gpt-account-model' }]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('https://openrouter.ai/api/v1/models/user');
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe(`Bearer ${KEY.reveal()}`);
+  });
+
+  it('accepts a compatible catalog entry that only provides a name', async () => {
+    const { fetch } = mockFetch(jsonResponse({ data: [{ name: 'openai/gpt-example' }] }));
+    await expect(listModels('openrouter', KEY, { fetch, strictRefresh: true }))
+      .resolves.toMatchObject([{ id: 'openai/gpt-example' }]);
+  });
+
+  it('strict refresh surfaces an authenticated gateway refusal without an anonymous retry', async () => {
+    const { fetch, calls } = mockFetch(textResponse('denied', 401), jsonResponse({ data: [{ id: 'public-model' }] }));
+    await expect(listModels('openrouter', KEY, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('strict Antigravity refresh bypasses its inner cache and surfaces refusals without a fallback', async () => {
+    const key = encodeSubscription('google-antigravity', {
+      type: 'oauth', access: 'fixture-access', refresh: 'fixture-refresh', expires: 100_000, projectId: 'strict-sync-test',
+    });
+    const { fetch, calls } = mockFetch(
+      jsonResponse({ models: { 'gemini-3.1-pro': {} } }),
+      () => textResponse('denied', 403),
+      jsonResponse({ models: [null] }),
+      jsonResponse({ models: { 'gemini-3.1-pro': null } }),
+      jsonResponse({ models: { 'models/gemini-3.8-flash': {} } }),
+      jsonResponse({ models: {} }),
+    );
+    expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
+    await expect(listModels('google-antigravity', key, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'INVALID_CREDENTIAL' });
+    expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
+    for (let i = 0; i < 2; i++) {
+      await expect(listModels('google-antigravity', key, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER' });
+      expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
+    }
+    expect(await listModels('google-antigravity', key, { fetch, strictRefresh: true })).toMatchObject([{ id: 'gemini-3.8-flash' }]);
+    expect(await listModels('google-antigravity', key, { fetch })).toMatchObject([{ id: 'gemini-3.1-pro' }]);
+    expect(await listModels('google-antigravity', key, { fetch, strictRefresh: true })).toEqual([]);
+    expect(await listModels('google-antigravity', key, { fetch })).toHaveLength(1);
+    expect(calls).toHaveLength(6);
+  });
+
+  describe.each([
+    {
+      provider: 'anthropic' as const,
+      page: (i: number, more: boolean, cursor: unknown = `page-${i}`) =>
+        ({ data: [{ id: `claude-${i}` }], has_more: more, last_id: cursor }),
+    },
+    {
+      provider: 'gemini' as const,
+      page: (i: number, more: boolean, cursor: unknown = `page-${i}`) =>
+        ({ models: [{ name: `models/gemini-${i}`, supportedGenerationMethods: ['generateContent'] }, { name: 'models/metadata-only' }], nextPageToken: more ? cursor : '' }),
+    },
+  ])('$provider strict sync pagination', ({ provider, page }) => {
+    it('accepts a complete catalog on the last allowed page', async () => {
+      const { fetch, calls } = mockFetch(...Array.from({ length: 10 }, (_, i) => jsonResponse(page(i, i < 9))));
+      await expect(listModels(provider, KEY, { fetch, strictRefresh: true })).resolves.toHaveLength(10);
+      expect(calls).toHaveLength(10);
+    });
+
+    it('rejects an incomplete catalog at the page cap without fetching another page', async () => {
+      const { fetch, calls } = mockFetch(...Array.from({ length: 10 }, (_, i) => jsonResponse(page(i, true))));
+      await expect(listModels(provider, KEY, { fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER' });
+      expect(calls).toHaveLength(10);
+    });
+
+    it('rejects repeated or malformed continuation cursors', async () => {
+      const repeated = mockFetch(jsonResponse(page(0, true)), jsonResponse(page(1, true, 'page-0')));
+      await expect(listModels(provider, KEY, { fetch: repeated.fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER' });
+      expect(repeated.calls).toHaveLength(2);
+      const malformed = mockFetch(jsonResponse(page(0, true, 123)));
+      await expect(listModels(provider, KEY, { fetch: malformed.fetch, strictRefresh: true })).rejects.toMatchObject({ code: 'SERVER' });
+      expect(malformed.calls).toHaveLength(1);
+    });
+  });
+
   describe('Anthropic', () => {
     it('requests models with x-api-key and anthropic-version, following pages', async () => {
       const page1 = {

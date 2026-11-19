@@ -3,14 +3,16 @@
  * Failures are `LlmFailure`s whose messages never contain the key (Gemini's key travels in the
  * `x-goog-api-key` header, never in the URL).
  */
-import { type CatalogModel, sortUnique } from './catalog-types.js';
+import { type CatalogModel, invalidCatalog, sortUnique, validModelId } from './catalog-types.js';
 import { listCompatibleModels } from './compatible/models.js';
 import { FALLBACK_EFFORTS } from './effort.js';
 import { failureFromResponse, failureFromThrown, keyValue, type FetchLike, type KeyInput } from './http.js';
 import type { ApiProviderId } from './ids.js';
 import { providerEntry, resolveBaseUrl } from './registry.js';
 import { decodeSubscription, isSubscriptionOnlyProvider } from '../credentials/subscription.js';
+import { LlmFailure } from '../llm/failure.js';
 import { subscriptionModels } from './subscription/adapter.js';
+import { OPENAI_NOT_CHAT, supplementCatalog, withCodexExtras } from './subscription/supplement.js';
 import { listAntigravityModels } from './subscription/antigravity/models.js';
 
 export type { CatalogModel } from './catalog-types.js';
@@ -20,6 +22,9 @@ export interface ListModelsOptions {
   baseUrl?: string;
   fetch?: FetchLike;
   signal?: AbortSignal;
+  /** Explicit sync bypasses inner caches and surfaces failed authenticated listings. */
+  strictRefresh?: boolean;
+  deferAntigravityCacheWrite?: (commit: () => void) => void;
 }
 
 /** Pages followed at most, so a misbehaving API cannot loop forever. */
@@ -46,6 +51,21 @@ async function getJson(
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function catalogEntries(value: unknown, idField: 'id' | 'name', provider: ApiProviderId, options: ListModelsOptions): unknown[] {
+  const rows: unknown[] = Array.isArray(value) ? value : [];
+  if (options.strictRefresh && (!Array.isArray(value) || rows.some((row) => !validModelId(record(row)[idField])))) {
+    throw invalidCatalog(provider);
+  }
+  return rows;
+}
+
+function checkNextPage(provider: 'anthropic' | 'gemini', page: number, cursor: unknown, seen: Set<string>): void {
+  if (page + 1 >= MAX_PAGES || typeof cursor !== 'string' || !cursor.trim() || seen.has(cursor)) {
+    throw new LlmFailure({ provider, code: 'SERVER', message: 'Provider model catalog pagination did not complete' });
+  }
+  seen.add(cursor);
 }
 
 function positive(value: unknown): number | undefined {
@@ -80,23 +100,25 @@ async function listAnthropic(key: KeyInput, options: ListModelsOptions): Promise
   const headers = { 'x-api-key': keyValue(key) ?? '', 'anthropic-version': ANTHROPIC_VERSION };
   const out: CatalogModel[] = [];
   let after: string | undefined;
+  const seen = new Set<string>();
   for (let page = 0; page < MAX_PAGES; page++) {
     const query = `limit=1000${after ? `&after_id=${encodeURIComponent(after)}` : ''}`;
     const body = record(await getJson('anthropic', `${base}/models?${query}`, headers, key, options));
-    const data = Array.isArray(body.data) ? (body.data as unknown[]) : [];
+    const data = catalogEntries(body.data, 'id', 'anthropic', options);
     for (const item of data.map(record)) {
       if (typeof item.id !== 'string') continue;
       out.push(entry(item.id, item.display_name, anthropicEfforts(item.capabilities), positive(item.max_input_tokens)));
     }
-    if (body.has_more !== true || typeof body.last_id !== 'string') break;
+    if (options.strictRefresh && typeof body.has_more !== 'boolean') throw invalidCatalog('anthropic');
+    if (body.has_more !== true) break;
+    if (options.strictRefresh) checkNextPage('anthropic', page, body.last_id, seen);
+    if (typeof body.last_id !== 'string') break;
     after = body.last_id;
   }
   return out;
 }
 
 const OPENAI_CHAT = /^(gpt-|o\d|chatgpt-|codex-)/;
-const OPENAI_NOT_CHAT =
-  /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|search|instruct|computer-use|sora|davinci|babbage/i;
 const OPENAI_REASONING = /^(o\d|gpt-5|codex-)/;
 
 async function listOpenAI(key: KeyInput, options: ListModelsOptions): Promise<CatalogModel[]> {
@@ -105,7 +127,7 @@ async function listOpenAI(key: KeyInput, options: ListModelsOptions): Promise<Ca
   const body = record(
     await getJson('openai', `${base}/models`, value ? { Authorization: `Bearer ${value}` } : {}, key, options),
   );
-  const data = Array.isArray(body.data) ? (body.data as unknown[]) : [];
+  const data = catalogEntries(body.data, 'id', 'openai', options);
   return data
     .map(record)
     .filter((m): m is Record<string, unknown> & { id: string } => typeof m.id === 'string')
@@ -127,19 +149,27 @@ async function listGemini(key: KeyInput, options: ListModelsOptions): Promise<Ca
   const headers = { 'x-goog-api-key': keyValue(key) ?? '' };
   const out: CatalogModel[] = [];
   let pageToken: string | undefined;
+  const seen = new Set<string>();
   for (let page = 0; page < MAX_PAGES; page++) {
     const query = `pageSize=1000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
     const body = record(await getJson('gemini', `${base}/models?${query}`, headers, key, options));
-    const models = Array.isArray(body.models) ? (body.models as unknown[]) : [];
+    const models = catalogEntries(body.models, 'name', 'gemini', options);
     for (const item of models.map(record)) {
       if (typeof item.name !== 'string') continue;
       const id = item.name.replace(/^models\//, '');
-      const methods = Array.isArray(item.supportedGenerationMethods) ? (item.supportedGenerationMethods as unknown[]) : [];
+      const supportedMethods = item.supportedGenerationMethods;
+      if (options.strictRefresh && supportedMethods !== undefined && (!Array.isArray(supportedMethods) || supportedMethods.some((method) => typeof method !== 'string'))) {
+        throw invalidCatalog('gemini');
+      }
+      const methods = Array.isArray(supportedMethods) ? supportedMethods : [];
       if (!methods.includes('generateContent') || GEMINI_NOT_CHAT.test(id)) continue;
       out.push(entry(id, item.displayName, geminiEfforts(id, item.thinking), positive(item.inputTokenLimit)));
     }
-    if (typeof body.nextPageToken !== 'string' || !body.nextPageToken) break;
-    pageToken = body.nextPageToken;
+    const nextPageToken = body.nextPageToken;
+    if (nextPageToken == null || nextPageToken === '') break;
+    if (options.strictRefresh) checkNextPage('gemini', page, nextPageToken, seen);
+    if (typeof nextPageToken !== 'string') break;
+    pageToken = nextPageToken;
   }
   return out;
 }
@@ -154,14 +184,58 @@ export async function listModels(
   apiKey: KeyInput,
   options: ListModelsOptions = {},
 ): Promise<CatalogModel[]> {
+  if (!options.strictRefresh) return loadModelCatalog(provider, apiKey, options);
+  try {
+    options.signal?.throwIfAborted();
+    const models = await loadModelCatalog(provider, apiKey, options);
+    options.signal?.throwIfAborted();
+    return models;
+  } catch (error) {
+    if (error instanceof LlmFailure) throw error;
+    const { code } = failureFromThrown(error, provider, undefined, options.signal);
+    // Raw transport and JSON errors can contain response details, including credentials.
+    throw new LlmFailure({ code, provider, message: 'Could not read provider model catalog' });
+  }
+}
+
+/**
+ * The Codex sign-in's bundled catalog plus the Codex-family models the same workspace's OpenAI API
+ * key lists (ADR-0027 dual method), so a model OpenAI released after the bundled catalog still shows.
+ * `merged` is false when the key's listing failed: the bundled catalog alone is then still right for
+ * the sign-in, and the key's failure is not the sign-in's. An abort is rethrown.
+ */
+export async function listCodexModelsWithApiKey(
+  subscriptionKey: KeyInput,
+  apiKey: KeyInput,
+  options: ListModelsOptions = {},
+): Promise<{ models: CatalogModel[]; merged: boolean }> {
+  const bundled = await listModels('openai', subscriptionKey, options);
+  try {
+    const apiModels = await listOpenAI(apiKey, options);
+    return { models: sortUnique(supplementCatalog(bundled, apiModels)), merged: true };
+  } catch (error) {
+    // Whatever the listing threw, a cancelled caller sees a cancellation, not an HTTP failure its abort caused.
+    // The signal's own reason decides the code: a timeout stays TIMEOUT, any other abort is ABORTED.
+    if (options.signal?.aborted) throw failureFromThrown(options.signal.reason, 'openai', apiKey, options.signal);
+    // A fetch that aborts on its own is a cancellation too, not a listing failure to hide.
+    // That includes a body read cut off after the headers, which reaches here as a raw AbortError.
+    if (error instanceof LlmFailure && error.code === 'ABORTED') throw error;
+    if (error instanceof Error && error.name === 'AbortError') throw failureFromThrown(error, 'openai', apiKey, options.signal);
+    return { models: bundled, merged: false };
+  }
+}
+
+async function loadModelCatalog(provider: ApiProviderId, apiKey: KeyInput, options: ListModelsOptions): Promise<CatalogModel[]> {
   const subscription = decodeSubscription(keyValue(apiKey) ?? '', provider);
   if (subscription?.provider === 'google-antigravity') {
     return listAntigravityModels(subscription.credential, {
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.strictRefresh ? { strictRefresh: true } : {}),
+      ...(options.deferAntigravityCacheWrite ? { deferCacheWrite: options.deferAntigravityCacheWrite } : {}),
     });
   }
-  if (subscription) return sortUnique(subscriptionModels(subscription.provider));
+  if (subscription) return sortUnique(withCodexExtras(subscription.provider, subscriptionModels(subscription.provider)));
   if (isSubscriptionOnlyProvider(provider)) throw new Error(`Provider ${provider} needs a subscription sign-in`);
   let models: CatalogModel[];
   if (provider === 'anthropic') models = await listAnthropic(apiKey, options);
