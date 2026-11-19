@@ -53,6 +53,8 @@ interface Options {
   changedLine?: string;
   /** Makes the worker-phase release commit fail, as a moved release branch would. */
   failWorkerCommit?: boolean;
+  /** Production still runs the old web image although the head names a newer web phase. */
+  productionBehind?: boolean;
 }
 
 function setup(opts: Options = {}) {
@@ -84,6 +86,7 @@ function setup(opts: Options = {}) {
     worker: head?.workerImageRef ?? OLD_REF,
     workerSha: head?.workerSourceCommit ?? OLD,
   };
+  if (opts.productionBehind) Object.assign(running, { web: OLD_REF, webSha: OLD });
   const commits: { parentSha: string; content: string; message: string }[] = [];
   const deployments: { title: string; web: string; worker: string }[] = [];
   const deployed: string[] = [];
@@ -218,8 +221,8 @@ describe('the two-phase release', () => {
     expect(github.openHold).toHaveBeenCalledTimes(1);
   });
 
-  it('opens a hold for a web-phase head instead of treating it as deployed', async () => {
-    const webPhase = releaseMessage(
+  const webPhaseHead = () =>
+    releaseMessage(
       {
         sourceCommit: NEW,
         imageRef: NEW_REF,
@@ -232,7 +235,20 @@ describe('the two-phase release', () => {
       },
       'web',
     );
-    const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhase } });
+
+  it('finishes the worker phase of a web-phase head when production runs that web phase', async () => {
+    const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhaseHead() } });
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'deployed' });
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.message.split('\n')[0]).toBe(`chore(release): deploy ${NEW.slice(0, 7)}`);
+    expect(commits[0]?.content).toContain(`x-worker-image: &worker-image ${NEW_REF}`);
+    expect(deployments).toEqual([{ title: `release ${NEW.slice(0, 7)} (worker)`, web: NEW_REF, worker: NEW_REF }]);
+    expect(github.openHold).not.toHaveBeenCalled();
+  });
+
+  it('opens a hold for a web-phase head when production does not run its web phase', async () => {
+    const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhaseHead() }, productionBehind: true });
     const outcome = await runRelease(cfg, ports);
     expect(outcome).toMatchObject({ kind: 'failed', hold: 77, detail: expect.stringContaining('stopped between its phases') });
     expect(commits).toHaveLength(0);
@@ -240,13 +256,26 @@ describe('the two-phase release', () => {
     const hold = vi.mocked(github.openHold).mock.calls[0];
     expect(hold?.[0]).toBe(`Release hold: ${NEW.slice(0, 7)} stopped between its phases`);
     expect(hold?.[1]).toContain(OLD_REF);
+    expect(hold?.[1]).toContain('does not run the web phase');
+  });
 
-    // A dry run on the same state only reports: no hold, no commit, no deploy.
-    const dry = setup({ head: { sha: 'r1', message: webPhase } });
-    const dryOutcome = await runRelease({ ...dry.cfg, live: false }, dry.ports);
-    expect(dryOutcome).toMatchObject({ kind: 'blocked', detail: expect.stringContaining('a live run would open a hold') });
+  it('rolls back when the resumed worker phase fails', async () => {
+    const { cfg, ports, commits, deployments } = setup({ head: { sha: 'r1', message: webPhaseHead() }, fail: 'worker' });
+    const outcome = await runRelease(cfg, ports);
+    expect(outcome).toMatchObject({ kind: 'rolled-back', hold: 77 });
+    expect(commits).toHaveLength(2);
+    expect(commits[1]?.content).toContain(`x-image: &image ${OLD_REF}`);
+    expect(commits[1]?.content).toContain(`x-worker-image: &worker-image ${OLD_REF}`);
+    expect(deployments.map((d) => d.worker)).toEqual([NEW_REF, OLD_REF]);
+  });
+
+  it('only reports in a dry run on a web-phase head', async () => {
+    const dry = setup({ head: { sha: 'r1', message: webPhaseHead() } });
+    const outcome = await runRelease({ ...dry.cfg, live: false }, dry.ports);
+    expect(outcome).toMatchObject({ kind: 'blocked', detail: expect.stringContaining('a live run would finish its worker phase') });
     expect(dry.github.openHold).not.toHaveBeenCalled();
     expect(dry.commits).toHaveLength(0);
+    expect(dry.deployments).toHaveLength(0);
   });
 
   it('rolls a newer candidate back to the pair a split rollback record runs', async () => {
