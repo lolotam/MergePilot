@@ -258,7 +258,8 @@ export async function runRelease(cfg: ReleaseConfig, ports: ReleasePorts): Promi
   // A candidate that builds no image is not released, but it still finishes a stopped release.
   const noImage = gate.kind === 'no-image' ? gate.reason : undefined;
 
-  const deployed = await currentDeployment(cfg, gh);
+  // An unreadable release branch must not turn a candidate that is skipped anyway into a failed run.
+  const deployed = await currentDeployment(cfg, gh).catch((err: unknown) => (noImage ? null : Promise.reject(err)));
   if (!deployed) return noImage ? { kind: 'skipped', detail: noImage } : { kind: 'blocked', detail: `release branch ${cfg.releaseBranch} does not exist; bootstrap it first` };
   // A web-phase head is a release stopped between its phases. It is finished only when production
   // already runs exactly that web phase, healthy; anything else (its web phase never deployed or

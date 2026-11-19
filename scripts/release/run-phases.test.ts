@@ -260,6 +260,15 @@ describe('the two-phase release', () => {
     expect(deployments).toHaveLength(1);
   });
 
+  it('skips a docs-only candidate even when the release branch compose has no image pin', async () => {
+    const { cfg, ports, commits, github } = setup({ head: { sha: 'r1', message: 'chore: hand edit' } });
+    vi.mocked(github.commitFiles).mockResolvedValue(['docs/deploy.ar.md']);
+    vi.mocked(github.checkRuns).mockResolvedValue(green(NEW).filter((r) => r.name !== 'Build and Push Docker Image'));
+    vi.mocked(github.fileAt).mockResolvedValue('services: {}');
+    await expect(runRelease(cfg, ports)).resolves.toMatchObject({ kind: 'skipped' });
+    expect(commits).toHaveLength(0);
+  });
+
   it('opens a hold for a web-phase head when production does not run its web phase', async () => {
     const { cfg, ports, commits, deployments, github } = setup({ head: { sha: 'r1', message: webPhaseHead() }, productionBehind: true });
     const outcome = await runRelease(cfg, ports);
