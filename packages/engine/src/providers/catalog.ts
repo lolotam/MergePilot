@@ -12,7 +12,7 @@ import { providerEntry, resolveBaseUrl } from './registry.js';
 import { decodeSubscription, isSubscriptionOnlyProvider } from '../credentials/subscription.js';
 import { LlmFailure } from '../llm/failure.js';
 import { subscriptionModels } from './subscription/adapter.js';
-import { OPENAI_NOT_CHAT, supplementCatalog } from './subscription/supplement.js';
+import { OPENAI_NOT_CHAT, supplementCatalog, withCodexExtras } from './subscription/supplement.js';
 import { listAntigravityModels } from './subscription/antigravity/models.js';
 
 export type { CatalogModel } from './catalog-types.js';
@@ -235,7 +235,7 @@ async function loadModelCatalog(provider: ApiProviderId, apiKey: KeyInput, optio
       ...(options.deferAntigravityCacheWrite ? { deferCacheWrite: options.deferAntigravityCacheWrite } : {}),
     });
   }
-  if (subscription) return sortUnique(subscriptionModels(subscription.provider));
+  if (subscription) return sortUnique(withCodexExtras(subscription.provider, subscriptionModels(subscription.provider)));
   if (isSubscriptionOnlyProvider(provider)) throw new Error(`Provider ${provider} needs a subscription sign-in`);
   let models: CatalogModel[];
   if (provider === 'anthropic') models = await listAnthropic(apiKey, options);

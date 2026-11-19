@@ -36,7 +36,7 @@ A Codex sign-in has no model-list endpoint, so its bundled list can trail OpenAI
 OpenAI API key (ADR-0027), the catalog read lists that key too and adds its GPT-5 and later or `codex-` ids that the bundled list
 lacks, built from the bundled Codex model that takes the most thinking efforts, then has the largest context window, so a saved `off` effort stays valid (the result then reports as live). GPT-4, o-series and
 non-chat ids are not added. If the key's listing fails, the bundled list is returned unchanged. The ChatGPT backend still decides
-whether the sign-in may use an added model; a refusal surfaces as an ordinary provider failure. Grok and Claude sign-ins stay bundled.
+whether the sign-in may use an added model; a refusal surfaces as an ordinary provider failure. Grok and Claude sign-ins stay bundled. `CODEX_EXTRA_MODEL_IDS` (`packages/engine/src/providers/subscription/supplement.ts`) lists Codex models released after the bundled catalog, currently `gpt-6.2-astra` and `gpt-6.2-sol`; every Codex sign-in lists them without an API key. Remove an id once the bundled catalog has it.
 If a paginated catalog cannot finish within the request limits, sync reports an error and keeps the previous list.
 Catalog reads check one shared credential snapshot at a time. An in-flight listing is checked again before publication.
 A credential change committed after that final read takes effect on subsequent requests. The check does not hold a database lock across the provider request.
