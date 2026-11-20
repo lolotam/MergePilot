@@ -20,6 +20,7 @@ import { buildBotConfig } from './bot-config.js';
 import { pausedWithNotice, PAUSED_DETAIL } from './pause-check.js';
 import { changedLinesOf, chooseModel, fallbackChain } from './model-choice.js';
 import { noteBudgetSkipped } from './budget-skip-note.js';
+import { notePanelFailed } from './panel-failed-note.js';
 import { noteNothingNew } from './nothing-new-note.js';
 import { panelTimeoutKeyOf } from './panel-timeout-key.js';
 import { closeRuns, loadBotSkills, panelBots, runPanel, startBotRuns, type StartedRuns } from './panel.js';
@@ -164,6 +165,7 @@ export async function processReviewJob(
     const results = await runPanel(ctx, runs, started.noKey);
     await noteNothingNew(ctx, results);
     await noteBudgetSkipped(ctx, results);
+    await notePanelFailed(ctx, results);
     return results.get(MAIN_BOT_SLOT) ?? duplicate;
   } finally {
     for (const br of runs) br.stopHeartbeat();
