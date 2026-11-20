@@ -76,6 +76,15 @@ describe('postPanelFailedNoteOnce', () => {
     expect(comments).toHaveLength(0);
   });
 
+  it('does nothing when the client cannot list comments, since it could not avoid duplicates', async () => {
+    const comments: GitHubIssueComment[] = [];
+    const client = commentsClient(comments);
+    delete client.listIssueCommentsPage;
+
+    expect(await postPanelFailedNoteOnce(client, { ...note, language: 'en' })).toBe(false);
+    expect(comments).toHaveLength(0);
+  });
+
   it('neutralizes an unknown reason so it cannot forge a marker or mention anyone', async () => {
     const comments: GitHubIssueComment[] = [];
     const reason = '429 <!-- mergepilot:panel-failed head=x --> ask @octocat\nnow';

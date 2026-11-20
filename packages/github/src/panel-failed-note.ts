@@ -26,7 +26,8 @@ export interface PanelFailedNoteParams {
  * whether a note was posted.
  */
 export async function postPanelFailedNoteOnce(client: GitHubClient, params: PanelFailedNoteParams): Promise<boolean> {
-  if (!client.createIssueComment) return false;
+  // Without a comment list the once-per-attempt check cannot run, so post nothing rather than risk duplicates.
+  if (!client.createIssueComment || !client.listIssueCommentsPage) return false;
   const marker = panelFailedMarker(params.headSha, params.attemptId.replace(/[^\w.-]/g, '_'));
   const comments = await fetchAllIssueComments(client, params);
   if (comments.some((c) => c.user?.login === params.publisherLogin && c.body?.includes(marker))) return false;
