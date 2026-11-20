@@ -53,6 +53,8 @@ export interface BotReviewParams {
   judge?: ReviewJudge | undefined;
   /** The reviewer-panel bot (ADR-0017), default 1: its own earlier reviews are the incremental base. */
   botSlot?: number | undefined;
+  /** The slot that carries the panel's publication, used as the incremental base in consensus. */
+  publisherSlot?: number | undefined;
   /** The PR's files, when the caller already listed them (the panel lists them once). */
   prFiles?: PullRequestFile[] | undefined;
   /**
@@ -213,8 +215,8 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
 
 /**
  * The follow-up of an incremental run (ADR-0030). Its open findings are those of the slot whose
- * reviews were the incremental base: slot 1's when the caller made the selection (a consensus
- * panel publishes as slot 1), else this bot's own.
+ * reviews were the incremental base: the publisher slot when the caller made the selection (a
+ * consensus panel), else this bot's own.
  */
 function followUpOf(
   params: BotReviewParams,
@@ -228,7 +230,7 @@ function followUpOf(
     prFiles,
     pullNumber: params.pullNumber,
     publisherLogin: params.publisherLogin ?? DEFAULT_PUBLISHER_LOGIN,
-    botSlot: callerSelected ? MAIN_BOT_SLOT : params.botSlot,
+    botSlot: callerSelected ? (params.publisherSlot ?? MAIN_BOT_SLOT) : params.botSlot,
   };
 }
 

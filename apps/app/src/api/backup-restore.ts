@@ -302,6 +302,7 @@ async function planSettings(
   }
   // A backup from before exploration restores the main bot with exploration off, and one from
   // before the call timeout restores it to inheritance: a restore replaces the stored value.
+  // A backup from before the on/off switches leaves them out, so the target keeps its own switches.
   const withDefaults = {
     ...merged,
     exploreEnabled: update.exploreEnabled ?? false,

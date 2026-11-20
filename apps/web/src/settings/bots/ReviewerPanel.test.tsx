@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { SettingsUpdate } from '@mergepilot/app/contract';
 import { api, ApiClientError } from '../../api/client.js';
 import { CATALOG, extraBot, fakeBotsServer, MAIN_SETTINGS, renderPanel } from './bots-test-utils.js';
 
@@ -178,13 +179,12 @@ describe('Reviewer panel settings (bot tabs)', () => {
     expect((screen.getByRole('radio', { name: 'One consensus review' }) as HTMLInputElement).disabled).toBe(true);
   });
 
-  it('the main tab saves its name and logo with the settings; its switch is locked on', async () => {
+  it('the main tab saves its name and logo with the settings; its switch is live', async () => {
     fakeBotsServer();
     const { onSave } = renderPanel();
-    const toggle = screen.getByRole('switch', { name: 'Bot active' }) as HTMLButtonElement;
+    const toggle = screen.getByRole('switch', { name: 'Main bot active' }) as HTMLButtonElement;
     expect(toggle.getAttribute('aria-checked')).toBe('true');
-    expect(toggle.disabled).toBe(true);
-    expect(toggle.closest('[title]')?.getAttribute('title')).toBe('The main bot is always on; use pause to stop reviews');
+    expect(toggle.disabled).toBe(false);
 
     const name = screen.getByLabelText('Bot name');
     await user.clear(name);
@@ -239,5 +239,42 @@ describe('Reviewer panel settings (bot tabs)', () => {
     await waitFor(() => expect((screen.getByRole('radio', { name: 'Each bot posts its own review' }) as HTMLInputElement).disabled).toBe(false));
     await user.click(screen.getByRole('radio', { name: 'Each bot posts its own review' }));
     await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Minimum agreement' })).toBeNull());
+  });
+
+  it('the master switch saves botsEnabled at once and leaves the per-bot switches usable', async () => {
+    const server = fakeBotsServer({ bots: [extraBot(2, { name: 'Owl bot', active: false })] });
+    const onSave = vi.fn(async (_next: SettingsUpdate) => undefined);
+    const { rerenderSettings } = renderPanel({ onSave });
+    const master = screen.getByRole('switch', { name: 'All bots active' }) as HTMLButtonElement;
+    expect(master.getAttribute('aria-checked')).toBe('true');
+
+    await user.click(master);
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({
+      botsEnabled: false,
+      base: { provider: 'openrouter', model: 'main/model', language: 'en', botsEnabled: true },
+    });
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'All bots active' }).getAttribute('aria-checked')).toBe('false'));
+    // The warning follows the saved settings, the same source the switches read from.
+    rerenderSettings({ ...MAIN_SETTINGS, botsEnabled: false });
+    expect(await screen.findByText('Reviews are paused for this workspace.')).toBeDefined();
+    expect(server.writes()).toHaveLength(0);
+
+    await openTab(user, /Owl bot/);
+    expect((screen.getByRole('switch', { name: 'Bot active' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('warns when the master is on but every bot is off', async () => {
+    fakeBotsServer({ bots: [extraBot(2, { name: 'Owl bot', active: false })] });
+    renderPanel({ settings: { ...MAIN_SETTINGS, mainBotActive: false } });
+    expect(await screen.findByText('Reviews are paused for this workspace.')).toBeDefined();
+  });
+
+  it('no warning while at least one bot is on', async () => {
+    fakeBotsServer({ bots: [extraBot(2, { name: 'Owl bot', active: true })] });
+    renderPanel();
+    await screen.findByRole('tab', { name: /Owl bot/ });
+    expect(screen.queryByText('Reviews are paused for this workspace.')).toBeNull();
   });
 });

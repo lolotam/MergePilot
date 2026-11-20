@@ -59,6 +59,9 @@ export async function publishConsensus(
 
   const knownSecrets = completed.flatMap((c) => c.pending.knownSecrets);
   const holder = completed.find((c) => c.br.bot.slot === MAIN_BOT_SLOT) ?? completed[0]!;
+  // The job fixes the publication slot before any bot runs: even when that bot fails and another
+  // completes, the review keeps its identity (migration 0021).
+  const publisherSlot = ctx.publisherSlot;
   const judgeSetup = await workspaceJudge(settings, ctx.workspaceId, ctx.deps.credentials, logger, {
     jobId: job.deliveryId,
     runId: holder.br.run.id,
@@ -103,7 +106,7 @@ export async function publishConsensus(
     judge: dedupeJudge,
     knownSecrets,
     maxUsd: dedupeJudge ? budget() : undefined,
-    botSlot: MAIN_BOT_SLOT,
+    botSlot: publisherSlot,
   });
   const judgeReport = judge?.judge.report();
   // The dedupe's request was the last one, so the final report names the entry that answered it.
@@ -186,7 +189,7 @@ export async function publishConsensus(
     publisherLogin: ctx.publisherLogin,
     partial: incompleteReasons.length > 0,
     alreadyDeduplicated: true,
-    botSlot: MAIN_BOT_SLOT,
+    botSlot: publisherSlot,
     ...(job.force ? { force: true } : {}),
   });
   ctx.deps.log?.(`Review panel publication outcome: ${publish.status}`);

@@ -14,6 +14,7 @@ import {
   sameBotName,
 } from './BotLogo.js';
 import { BOT_PANEL_ID, BotTabs, botTabId, type BotTab } from './BotTabs.js';
+import { BotsMasterSwitch } from './BotsMasterSwitch.js';
 import { ExtraBotCard, type MainBotModel } from './ExtraBotCard.js';
 import { PanelOutputCard } from './PanelOutputCard.js';
 
@@ -38,7 +39,7 @@ function mainBotOf(settings: Settings | null | undefined, bots: BotsResponse | u
       slot: 1,
       name: settings.botName ?? MAIN_BOT_DEFAULT_NAME,
       logo: settings.botLogo ?? MAIN_BOT_DEFAULT_LOGO,
-      active: true,
+      active: settings.mainBotActive ?? true,
       provider: settings.provider,
       model: settings.model,
       effort: settings.effort ?? null,
@@ -50,7 +51,7 @@ function mainBotOf(settings: Settings | null | undefined, bots: BotsResponse | u
     slot: 1,
     name: main?.name ?? MAIN_BOT_DEFAULT_NAME,
     logo: main?.logo ?? MAIN_BOT_DEFAULT_LOGO,
-    active: true,
+    active: main?.active ?? true,
     provider: main?.provider ?? null,
     model: main?.model ?? null,
     effort: main?.effort ?? null,
@@ -99,6 +100,10 @@ export function ReviewerPanel({ workspaceId, settings, isLoading, isMember, onSa
   const selectedSlot = current ? current.slot : 1;
   const draft = newBotInput(main, extras);
   const canAddMore = tabs.length < MAX_BOTS;
+  // One source: the saved switches. Master off or no bot left on pauses reviews, while every
+  // per-bot switch stays usable.
+  const paused = !(settings?.botsEnabled ?? true)
+    || !((settings?.mainBotActive ?? true) || extras.some((b) => b.active));
 
   const handleAdd = async () => {
     if (!draft) return;
@@ -115,6 +120,17 @@ export function ReviewerPanel({ workspaceId, settings, isLoading, isMember, onSa
   return (
     <>
       <section className="flex flex-col gap-3" aria-label={t('botsTabsLabel')}>
+        <BotsMasterSwitch
+          settings={settings}
+          onSave={onSave}
+          isMember={isMember}
+          isSaving={isSaving}
+        />
+        {paused && (
+          <p role="status" className="text-xs text-amber-700 dark:text-amber-300">
+            {t('botsPausedWarning')}
+          </p>
+        )}
         <BotTabs
           tabs={tabs}
           selected={selectedSlot}

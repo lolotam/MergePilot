@@ -173,6 +173,8 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
         botLogo: 'pilot',
         panelMode: 'separate',
         panelMinAgreement: 1,
+        mainBotActive: true,
+        botsEnabled: true,
       },
     });
 
@@ -185,6 +187,38 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     expect(getRes.statusCode).toBe(200);
     expect(getRes.json().settings?.monthlyBudgetUsd).toBe(150);
     expect(getRes.json()).not.toHaveProperty('settingsVersion');
+  });
+
+  it('PUT /api/workspaces/:workspaceId/settings saves a switch-only patch despite invalid stored settings', async () => {
+    // An older workspace can hold a value a full save would reject; switching bots off must still
+    // work, without letting a member bypass the admin check.
+    const stale = {
+      provider: 'anthropic' as const,
+      model: 'claude-3-5-sonnet',
+      language: 'en' as const,
+      monthlyBudgetUsd: 1,
+      perReviewUsd: 100,
+      mainBotActive: true,
+    };
+    await store.saveSettings({ workspaceId: 'ws-A', ...stale });
+    const url = '/api/workspaces/ws-A/settings';
+    const payload = {
+      provider: stale.provider, model: stale.model, language: stale.language,
+      mainBotActive: false, base: stale,
+    };
+
+    const memberPut = await app.inject({
+      method: 'PUT', url, headers: { cookie: signedSessionCookie('token-member', config.authSecret) }, payload,
+    });
+    expect(memberPut.statusCode).toBe(403);
+
+    const adminPut = await app.inject({
+      method: 'PUT', url, headers: { cookie: signedSessionCookie('token-admin', config.authSecret) }, payload,
+    });
+    expect(adminPut.statusCode).toBe(200);
+    expect(await store.getSettings('ws-A')).toMatchObject({
+      mainBotActive: false, monthlyBudgetUsd: 1, perReviewUsd: 100, model: 'claude-3-5-sonnet',
+    });
   });
 
   it('keys routes: GET/PUT/DELETE enforce admin, 422 on validation failure, never leak plaintext/ciphertext', async () => {

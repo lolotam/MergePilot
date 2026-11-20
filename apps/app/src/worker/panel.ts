@@ -19,9 +19,10 @@ import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
 export const NO_KEY_DETAIL = 'no key';
 
 /**
- * The main bot (slot 1, the workspace settings) followed by the active extra bots, by slot, each
- * with its review skill from `skills` (by id; ADR-0034) and its own call timeout override
- * (migration 0018). A skill id missing from `skills` (deleted since) reviews on Default.
+ * The main bot (slot 1, the workspace settings) when it is active, followed by the active extra
+ * bots, by slot, each with its review skill from `skills` (by id; ADR-0034) and its own call timeout
+ * override (migration 0018). A skill id missing from `skills` (deleted since) reviews on Default.
+ * Migration 0021: a main bot switched off is not part of the panel at all.
  */
 export function panelBots(
   settings: WorkspaceSettings,
@@ -53,7 +54,7 @@ export function panelBots(
       ...skillOf(b.skillId),
       callTimeoutMs: b.callTimeoutMs ?? null,
     }));
-  return [main, ...active];
+  return settings.mainBotActive === false ? active : [main, ...active];
 }
 
 /** The skills the bots of this workspace use, by id, read once per job (ADR-0034). */
@@ -166,7 +167,8 @@ export async function runPanel(ctx: PanelContext, runs: BotRun[], noKey: PanelBo
         configHash: ctx.mainConfig.configHash,
         publisherLogin: ctx.publisherLogin,
         log: ctx.deps.log,
-        botSlot: MAIN_BOT_SLOT,
+        // The publisher's marker is the incremental base for every bot (migration 0021).
+        botSlot: ctx.publisherSlot,
         prFiles: ctx.prFiles,
         ...(ctx.job.force ? { force: true } : {}),
       })

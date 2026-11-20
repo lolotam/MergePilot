@@ -23,7 +23,7 @@ import { noteBudgetSkipped } from './budget-skip-note.js';
 import { notePanelFailed } from './panel-failed-note.js';
 import { noteNothingNew } from './nothing-new-note.js';
 import { panelTimeoutKeyOf } from './panel-timeout-key.js';
-import { closeRuns, loadBotSkills, panelBots, runPanel, startBotRuns, type StartedRuns } from './panel.js';
+import { closeRuns, loadBotSkills, NO_KEY_DETAIL, panelBots, runPanel, startBotRuns, type StartedRuns } from './panel.js';
 import { skillKeyOf } from './effective-config.js';
 import type { BotRun, PanelContext } from './panel-types.js';
 import { reviewUsesSubscriptionAdmission } from './dual-method-review.js';
@@ -34,12 +34,14 @@ import type { ProcessReviewDeps, ProcessReviewResult } from './types.js';
 /** Run detail when another job already holds an active run for this head (and bot). */
 export const DUPLICATE = 'duplicate';
 const BUDGET_REACHED = 'monthly budget reached';
+const BOTS_OFF = 'bots are off';
+const ALL_BOTS_OFF = 'all bots are off';
 
 /**
  * One review job per PR head. The shared steps run once (installation, settings, run rows, PR,
- * pause, repo config, monthly budget); then the main bot and every active extra bot of the
- * reviewer panel review in parallel (ADR-0017). The job reports the main bot's result. With no
- * active extra bot this is exactly the single-bot review.
+ * pause, repo config, monthly budget); then every active bot of the reviewer panel reviews in
+ * parallel (ADR-0017). The job reports the main bot's result when it is active, otherwise the first
+ * running bot's. Migration 0021: a master-off or all-off workspace skips before any run or PR write.
  */
 export async function processReviewJob(
   job: ReviewJob,
@@ -61,6 +63,12 @@ export async function processReviewJob(
 
   const workspaceId = installation.workspaceId;
   const settings = await deps.store.getSettings(workspaceId);
+  // The master switch is checked before any run, PR write or comment: even an explicit
+  // `@mergepilot review` cannot turn bots back on (migration 0021). The per-bot switches stay saved.
+  if (settings?.botsEnabled === false) {
+    logSkip('bots-off', `Skipping job ${job.deliveryId}: ${BOTS_OFF}`, { workspaceId });
+    return { status: 'skipped', detail: BOTS_OFF };
+  }
   if (!settings) {
     let run: ReviewRun;
     try {
@@ -96,13 +104,22 @@ export async function processReviewJob(
   const extras = await deps.store.listReviewerBots(workspaceId);
   const skills = await loadBotSkills(deps.store, workspaceId, [settings.skillId, ...extras.filter((b) => b.active).map((b) => b.skillId)]);
   const bots = panelBots(settings, extras, skills);
+  // Nothing to review: both the main bot and every extra are off. No run row and no PR write.
+  if (bots.length === 0) {
+    logSkip('all-bots-off', `Skipping job ${job.deliveryId}: ${ALL_BOTS_OFF}`, { workspaceId });
+    return { status: 'skipped', detail: ALL_BOTS_OFF };
+  }
   const panelActive = bots.length > 1;
+  // With main off, the lowest active extra is the fixed publication identity for this job, even
+  // when that extra fails and another completes (migration 0021).
+  const publisherSlot = settings.mainBotActive === false ? bots[0]!.slot : MAIN_BOT_SLOT;
   const mode = settings.panelMode ?? DEFAULT_PANEL_MODE;
   const consensusMode = panelActive && mode === 'consensus';
-  // Slot 1's marker hash holds its own skill; in consensus, where the panel selects files once with
-  // that marker, the skills of every bot (ADR-0034) and every active bot's explicit call timeout
-  // (`panelTimeoutKeyOf`) are part of it. Each bot's own override then extends only its own hash.
-  const mainSkillKey = skillKeyOf(consensusMode ? bots : bots.filter((b) => b.slot === MAIN_BOT_SLOT));
+  // The lead bot's marker hash holds its own skill; in consensus, where the panel selects files
+  // once with that marker, the skills of every bot (ADR-0034) and every active bot's explicit
+  // call timeout (`panelTimeoutKeyOf`) are part of it. With the main bot off, the lead is the first
+  // active extra, so none of the shared steps depends on the main bot's configuration.
+  const mainSkillKey = skillKeyOf(consensusMode ? bots : bots.slice(0, 1));
   const mainTimeoutKey = consensusMode ? panelTimeoutKeyOf(bots) : undefined;
   if (panelActive) {
     logger.info(
@@ -125,18 +142,24 @@ export async function processReviewJob(
     logSkip(DUPLICATE, `Skipping job ${job.deliveryId}${bot}: a run for this head is already active`, slot === MAIN_BOT_SLOT ? {} : { botSlot: slot });
   }
   const runs = started.running;
-  const main = runs.find((br) => br.bot.slot === MAIN_BOT_SLOT);
+  if (runs.length === 0 && started.noKey.length > 0) {
+    logSkip(NO_KEY_DETAIL, `Skipping job ${job.deliveryId}: ${NO_KEY_DETAIL}`, { workspaceId });
+    return { status: 'skipped', detail: NO_KEY_DETAIL };
+  }
+  const publisher = runs.find((br) => br.bot.slot === publisherSlot);
   const duplicate: ProcessReviewResult = { status: 'skipped', detail: DUPLICATE };
-  const lead = main ?? runs[0];
+  const lead = publisher ?? runs[0];
   if (!lead) return duplicate;
-  // Consensus publishes as slot 1: without its run (another job holds it), this job must not
-  // race that job's publication, so the extra bots it started are closed as duplicates.
-  if (!main && panelActive && mode === 'consensus') {
+  const jobResult = (results: Map<number, ProcessReviewResult>): ProcessReviewResult =>
+    results.get(publisherSlot) ?? duplicate;
+  // Consensus publishes as the fixed publisher slot: without its run (another job holds it), this
+  // job must not race that job's publication, so the other bots it started close as duplicates.
+  if (!publisher && panelActive && mode === 'consensus') {
     for (const br of runs) {
       br.stopHeartbeat();
       await deps.store.finishReviewRun(workspaceId, br.run.id, { status: 'skipped', costUsd: null, detail: DUPLICATE });
     }
-    logSkip(DUPLICATE, `Skipping job ${job.deliveryId}: the main bot's run for this head is active elsewhere (consensus)`);
+    logSkip(DUPLICATE, `Skipping job ${job.deliveryId}: the publisher's run for this head is active elsewhere (consensus)`);
     return duplicate;
   }
 
@@ -149,24 +172,27 @@ export async function processReviewJob(
 
     let ctx: PanelContext;
     try {
-      const shared = await sharedSteps({ ...base, settings }, runs, main, lead, logSkip, startTime, panelActive, mainSkillKey, mainTimeoutKey);
+      const shared = await sharedSteps(
+        { ...base, settings, publisherSlot }, runs, publisher, lead, logSkip, startTime, panelActive, mainSkillKey, mainTimeoutKey,
+      );
       if ('result' in shared) return shared.result;
       releaseBudget = shared.releaseBudget;
       ctx = { ...shared.ctx, mode };
     } catch (error) {
-      const results = await Promise.all(
+      const failed = await Promise.all(
         runs.map((br) =>
           failBotRun(base, br, error, [], { provider: br.bot.provider, model: br.bot.model, effort: br.bot.effort }),
         ),
       );
-      return main ? results[runs.indexOf(main)]! : duplicate;
+      const bySlot = new Map(runs.map((br, index) => [br.bot.slot, failed[index]!]));
+      return bySlot.get(publisherSlot) ?? duplicate;
     }
 
     const results = await runPanel(ctx, runs, started.noKey);
     await noteNothingNew(ctx, results);
     await noteBudgetSkipped(ctx, results);
     await notePanelFailed(ctx, results);
-    return results.get(MAIN_BOT_SLOT) ?? duplicate;
+    return jobResult(results);
   } finally {
     for (const br of runs) br.stopHeartbeat();
     releaseBudget?.();
@@ -185,9 +211,9 @@ type SharedOutcome =
  * (`mainTimeoutKey`) alongside its skill key.
  */
 async function sharedSteps(
-  shared: Pick<PanelContext, 'job' | 'deps' | 'logger' | 'workspaceId' | 'settings'>,
+  shared: Pick<PanelContext, 'job' | 'deps' | 'logger' | 'workspaceId' | 'settings' | 'publisherSlot'>,
   runs: BotRun[],
-  main: BotRun | undefined,
+  publisher: BotRun | undefined,
   lead: BotRun,
   logSkip: (reason: string, message: string, fields?: Record<string, unknown>) => void,
   startTime: number,
@@ -195,7 +221,7 @@ async function sharedSteps(
   mainSkillKey: string | undefined,
   mainTimeoutKey: string | undefined,
 ): Promise<SharedOutcome> {
-  const { settings, ...base } = shared;
+  const { settings, publisherSlot, ...base } = shared;
   const { job, deps, logger, workspaceId } = base;
   let releaseBudget: (() => void) | undefined;
   const [owner, repo] = job.repoFullName.split('/');
@@ -217,10 +243,14 @@ async function sharedSteps(
   const prBody = typeof prRecord.body === 'string' ? prRecord.body : '';
 
   // Only needed when the main bot runs with a heavy model: no extra GitHub call otherwise.
-  const changedLines = settings.heavyModel && main
+  const changedLines = settings.heavyModel && publisher && publisherSlot === MAIN_BOT_SLOT
     ? await changedLinesOf(client, { owner, repo, pull_number: job.pullNumber }, prRecord)
     : 0;
-  const mainChoice = chooseModel(settings, changedLines);
+  // With main off the publisher's provider and model lead the shared config and marker; slot 1's
+  // settings lead when main is active (migration 0021).
+  const mainChoice = publisherSlot === MAIN_BOT_SLOT
+    ? chooseModel(settings, changedLines)
+    : { provider: lead.bot.provider, model: lead.bot.model, effort: lead.bot.effort ?? null, heavy: false };
   if (mainChoice.heavy) deps.log?.(`Large PR (${changedLines} changed lines): using the heavy-duty model`);
 
   // The dashboard picks every bot's provider and model, so the repo file may leave them out; the
@@ -231,16 +261,19 @@ async function sharedSteps(
     baseSha: job.baseSha,
     defaults: { provider: mainChoice.provider, model: mainChoice.model, maxFindings: settings.maxFindings, perReviewUsd: settings.perReviewUsd },
   });
-  // Slot 1's config, priced for its model (the heavy-duty one when chosen; ADR-0016), with its own
-  // call timeout override and — in consensus mode — the panel's timeouts in the marker identity.
+  // The lead bot's config, priced for its model (the heavy-duty one when the main bot chose it;
+  // ADR-0016), with its own call timeout override and — in consensus mode — the panel's timeouts
+  // in the marker identity. With the main bot off, the lead is an extra bot.
+  const sharedFallback = publisherSlot === MAIN_BOT_SLOT ? settings.fallback ?? [] : lead.bot.fallback;
+  const sharedCallTimeoutMs = publisherSlot === MAIN_BOT_SLOT ? settings.callTimeoutMs : lead.bot.callTimeoutMs;
   const mainConfig = await buildBotConfig(
     repoConfigResult,
     mainChoice,
-    fallbackChain(settings.fallback ?? [], mainChoice),
+    fallbackChain(sharedFallback, mainChoice),
     settings,
     deps.store,
     mainSkillKey,
-    settings.callTimeoutMs,
+    sharedCallTimeoutMs,
     mainTimeoutKey,
   );
 
@@ -263,8 +296,8 @@ async function sharedSteps(
       return free;
     };
     const plans = await Promise.all(runs.map(async (br) => {
-      const own = br === main ? mainChoice : br.bot;
-      const fallbacks = fallbackChain(br === main ? settings.fallback ?? [] : br.bot.fallback, own);
+      const own = br === publisher ? mainChoice : br.bot;
+      const fallbacks = fallbackChain(br === publisher ? settings.fallback ?? [] : br.bot.fallback, own);
       const ownFree = await isFree(own.provider);
       const paidFallbacks = (await Promise.all(fallbacks.map(async ({ provider }) =>
         provider !== own.provider && !(await isFree(provider)) ? provider : null,
@@ -292,9 +325,9 @@ async function sharedSteps(
     });
     if (!releaseBudget) {
       for (const br of runs) {
-        const own = br === main ? mainChoice : br.bot;
+        const own = br === publisher ? mainChoice : br.bot;
         let reviewUrl: string | null = null;
-        if (br === main) {
+        if (br === publisher) {
           const config = mainConfig.effectiveConfig;
           const summaryMarkdown = renderReviewSummary({
             language: config.language, summary: '', summaryOnly: [], inlineCount: 0, complete: false,
@@ -304,6 +337,7 @@ async function sharedSteps(
           const publishResult = await publishReview(client, {
             owner, repo, pull_number: job.pullNumber, expectedHeadSha: job.headSha, summaryMarkdown, inline: [],
             configHash: mainConfig.configHash, language: config.language, suggestionsAsCode: false, publisherLogin,
+            botSlot: publisherSlot,
           });
           reviewUrl = 'reviewId' in publishResult && typeof publishResult.reviewId === 'number'
             ? `https://github.com/${owner}/${repo}/pull/${job.pullNumber}#pullrequestreview-${publishResult.reviewId}`
@@ -355,7 +389,7 @@ async function sharedSteps(
 
   return {
     ctx: {
-      ...base, settings, owner, repo, client, publisherLogin, prTitle, prBody, repoConfigResult,
+      ...base, settings, publisherSlot, owner, repo, client, publisherLogin, prTitle, prBody, repoConfigResult,
       mainChoice, mainConfig, judgePrices, panelActive, prFiles, baseUrl: deps.baseUrl, startTime,
     },
     releaseBudget,

@@ -13,7 +13,7 @@ import { DEFAULT_MAX_FINDINGS, MaxFindingsSelect, type MaxFindings } from './Max
 import { ModelSelect } from './ModelSelect.js';
 import { fieldClass, labelClass, ProviderSelect, useModelEfforts } from './providers.js';
 import { SeveritySelect } from './SeveritySelect.js';
-import { BotIdentityFields } from './bots/BotIdentityFields.js';
+import { MainBotIdentityFields } from './bots/MainBotIdentityFields.js';
 import { botNameError, MAIN_BOT_DEFAULT_LOGO, MAIN_BOT_DEFAULT_NAME } from './bots/BotLogo.js';
 import { SkillSelect } from './skills/SkillSelect.js';
 
@@ -244,7 +244,7 @@ export function ReviewSettingsCard({
         <div className="py-4 text-sm text-ink-400">{t('loading')}</div>
       ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-6" noValidate>
-          <BotIdentityFields
+          <MainBotIdentityFields
             idPrefix="main-bot"
             name={botName}
             onNameChange={(next) => {
@@ -253,7 +253,9 @@ export function ReviewSettingsCard({
             }}
             logo={botLogo}
             onLogoChange={setBotLogo}
-            active
+            settings={settings}
+            onSave={onSave}
+            isSaving={isSaving}
             disabled={isMember}
             nameError={errors.botName}
           />

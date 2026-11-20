@@ -56,7 +56,10 @@ export function deleteMemoryWorkspaceBots(bots: MemoryBots, workspaceId: string)
   for (const bot of listMemoryBots(bots, workspaceId)) bots.delete(key(workspaceId, bot.slot));
 }
 
-type PanelSettings = Pick<WorkspaceSettings, 'botName' | 'botLogo' | 'panelMode' | 'panelMinAgreement'>;
+type PanelSettings = Pick<
+  WorkspaceSettings,
+  'botName' | 'botLogo' | 'panelMode' | 'panelMinAgreement' | 'mainBotActive' | 'botsEnabled'
+>;
 
 /** The main bot and panel fields as stores read them back: unset fields get the defaults. */
 export function panelSettingsOrDefaults(s: PanelSettings): Required<{ [K in keyof PanelSettings]-?: NonNullable<PanelSettings[K]> }> {
@@ -65,6 +68,9 @@ export function panelSettingsOrDefaults(s: PanelSettings): Required<{ [K in keyo
     botLogo: s.botLogo ?? DEFAULT_BOT_LOGO,
     panelMode: s.panelMode ?? DEFAULT_PANEL_MODE,
     panelMinAgreement: s.panelMinAgreement ?? DEFAULT_PANEL_MIN_AGREEMENT,
+    // Migration 0021: both switches default to on for workspaces saved before they existed.
+    mainBotActive: s.mainBotActive ?? true,
+    botsEnabled: s.botsEnabled ?? true,
   };
 }
 
@@ -75,5 +81,7 @@ export function keepPanelSettings(next: PanelSettings, stored: PanelSettings | u
     botLogo: next.botLogo ?? stored?.botLogo,
     panelMode: next.panelMode ?? stored?.panelMode,
     panelMinAgreement: next.panelMinAgreement ?? stored?.panelMinAgreement,
+    mainBotActive: next.mainBotActive ?? stored?.mainBotActive,
+    botsEnabled: next.botsEnabled ?? stored?.botsEnabled,
   };
 }

@@ -11,8 +11,9 @@ export interface BotIdentityFieldsProps {
   logo: BotLogo;
   onLogoChange: (logo: BotLogo) => void;
   active: boolean;
-  /** Undefined for the main bot: its switch is shown on and locked, with a tooltip. */
-  onActiveChange?: ((active: boolean) => void) | undefined;
+  onActiveChange: (active: boolean) => void;
+  /** Accessible name; the main bot uses a more specific one. */
+  activeLabel?: string | undefined;
   /** Disables the switch only (e.g. while its save is in flight). */
   activeBusy?: boolean;
   disabled: boolean;
@@ -28,12 +29,12 @@ export function BotIdentityFields({
   onLogoChange,
   active,
   onActiveChange,
+  activeLabel,
   activeBusy = false,
   disabled,
   nameError,
 }: BotIdentityFieldsProps) {
   const { t } = useI18n();
-  const locked = onActiveChange === undefined;
   const nameId = `${idPrefix}-name`;
   return (
     <div className="flex flex-col gap-4 p-4 rounded-2xl border border-ink-200 dark:border-ink-800 bg-ink-50/50 dark:bg-ink-950/20">
@@ -56,10 +57,10 @@ export function BotIdentityFields({
         </div>
         <div className="pb-1.5">
           <BotActiveSwitch
-            checked={locked ? true : active}
-            disabled={locked || disabled || activeBusy}
+            checked={active}
+            disabled={disabled || activeBusy}
             onChange={onActiveChange}
-            title={locked ? t('botMainAlwaysOn') : undefined}
+            label={activeLabel}
           />
         </div>
       </div>

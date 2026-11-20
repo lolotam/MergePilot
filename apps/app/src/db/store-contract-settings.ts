@@ -90,4 +90,19 @@ export function defineSettingsContract(
       await cleanup?.();
     }
   });
+
+  it('reads both bot on/off switches as true by default and keeps them on an omitted write', async () => {
+    const store = await createStore();
+    try {
+      await store.saveSettings(initial);
+      expect(await store.getSettings(initial.workspaceId)).toMatchObject({ mainBotActive: true, botsEnabled: true });
+      await store.saveSettings({ ...initial, mainBotActive: false, botsEnabled: false });
+      expect(await store.getSettings(initial.workspaceId)).toMatchObject({ mainBotActive: false, botsEnabled: false });
+      // A later write that leaves both out must not reset them to true.
+      await store.saveSettings({ ...initial, monthlyBudgetUsd: 75 });
+      expect(await store.getSettings(initial.workspaceId)).toMatchObject({ mainBotActive: false, botsEnabled: false });
+    } finally {
+      await cleanup?.();
+    }
+  });
 }

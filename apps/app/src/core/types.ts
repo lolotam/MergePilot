@@ -145,6 +145,10 @@ export interface WorkspaceSettings {
    * reads return null when unset.
    */
   callTimeoutMs?: number | null | undefined;
+  /** Migration 0021: the main bot's on/off switch. Omitted writes keep the stored value. */
+  mainBotActive?: boolean | undefined;
+  /** Migration 0021: master on/off switch for every bot. Omitted writes keep the stored value. */
+  botsEnabled?: boolean | undefined;
 }
 
 /** The Jev judge of a workspace: the configured provider plus up to three explicit fallbacks. */

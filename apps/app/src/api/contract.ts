@@ -119,6 +119,10 @@ export const SettingsSchema = z.object({
    * null resets to the repository's effective timeout (or the engine default).
    */
   callTimeoutMs: CallTimeoutMsSchema.optional(),
+  /** Migration 0021: main bot on/off; omitted on PUT keeps the stored switch. */
+  mainBotActive: z.boolean().optional(),
+  /** Migration 0021: master on/off for every bot; omitted on PUT keeps the stored switch. */
+  botsEnabled: z.boolean().optional(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 export const SettingsBaseSchema = z.record(z.string(), z.unknown());

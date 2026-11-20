@@ -188,10 +188,12 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
       model,
       knownSecrets,
       publisherLogin: ctx.publisherLogin,
+      publisherSlot: ctx.publisherSlot,
       ...(deps.log ? { log: deps.log } : {}),
       judge: judgeSetup.judge,
       explore: br.bot.exploreEnabled,
-      ...(ctx.panelActive ? { botSlot: slot, prFiles: ctx.prFiles } : {}),
+      ...(slot !== MAIN_BOT_SLOT ? { botSlot: slot } : {}),
+      ...(ctx.panelActive || slot !== MAIN_BOT_SLOT ? { prFiles: ctx.prFiles } : {}),
       ...(job.force ? { force: true } : {}),
       ...(br.bot.skill ? { skill: { name: br.bot.skill.name, content: br.bot.skill.content } } : {}),
     };
@@ -225,8 +227,8 @@ export async function runBot(ctx: PanelContext, br: BotRun, consensus?: BotFiles
     const reviewResult = await executeReview({
       onReviewed,
       ...params,
-      // A lone bot shows its identity line only to name its skill (ADR-0034).
-      ...(ctx.panelActive || br.bot.skill
+      // A lone extra shows its identity too: its slot owns the review when main is off (migration 0021).
+      ...(ctx.panelActive || br.bot.skill || br.bot.slot !== MAIN_BOT_SLOT
         ? {
             identity: {
               name: br.bot.name,

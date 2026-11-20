@@ -49,6 +49,17 @@ describe('reviewer panel bots API (ADR-0017)', { timeout: 25000 }, () => {
     });
   });
 
+  it('reports the main bot switch from settings and keeps it when a PUT leaves it out', async () => {
+    expect((await putSettings({ mainBotActive: false })).statusCode).toBe(200);
+    expect((await get()).json().main.active).toBe(false);
+
+    expect((await putSettings({ monthlyBudgetUsd: 75 })).statusCode).toBe(200);
+    expect((await get()).json().main.active).toBe(false);
+
+    expect((await putSettings({ mainBotActive: true })).statusCode).toBe(200);
+    expect((await get()).json().main.active).toBe(true);
+  });
+
   it('creates, replaces, lists by slot and deletes extra bots; members only read', async () => {
     expect((await putSettings({ effort: 'high', fallback: [{ provider: 'anthropic', model: 'claude-opus-5' }] })).statusCode).toBe(200);
     await h.credentials.saveKey({ workspaceId: 'ws-1', provider: 'openrouter', apiKey: keyFor('or'), userId: 'u-admin' });

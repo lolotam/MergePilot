@@ -77,6 +77,8 @@ export interface PanelContext {
   judgePrices?: JudgePriceLookup | undefined;
   /** True when at least one extra bot is active: the panel's own behaviour applies. */
   panelActive: boolean;
+  /** The slot whose run carries the job's result and publication (migration 0021). */
+  publisherSlot: number;
   mode: PanelMode;
   /** The PR's files, listed once when the panel is active. */
   prFiles?: PullRequestFile[] | undefined;
