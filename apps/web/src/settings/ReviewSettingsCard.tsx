@@ -282,6 +282,7 @@ export function ReviewSettingsCard({
               workspaceId={workspaceId}
               label={t('providerLabel')}
               value={provider}
+              options={keyedProviders}
               disabled={isMember}
               onChange={(next) => {
                 setProvider(next);

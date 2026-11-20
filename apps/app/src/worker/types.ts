@@ -64,4 +64,6 @@ export interface ProcessReviewResult {
   detail?: string | null;
   /** The engine skipped the review for its budget (token or per-review cost limit); `detail` says why. */
   skippedForBudget?: true;
+  /** The bots reviewed but publishing the merged review failed; not a reviewer failure. */
+  publishFailed?: true;
 }
