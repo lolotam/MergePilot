@@ -20,7 +20,7 @@ function commentsClient(comments: GitHubIssueComment[]): GitHubClient {
   };
 }
 
-const note = { owner: 'o', repo: 'r', pull_number: 1, headSha: 'abcdef1234567', publisherLogin: PUBLISHER, reason: 'shared 429' };
+const note = { owner: 'o', repo: 'r', pull_number: 1, headSha: 'abcdef1234567', attemptId: 'job-1', publisherLogin: PUBLISHER, reason: 'shared 429' };
 
 describe('postPanelFailedNoteOnce', () => {
   it('posts one note with the failure, the retry command and the marker', async () => {
@@ -32,7 +32,8 @@ describe('postPanelFailedNoteOnce', () => {
     expect(body).toContain('MergePilot review of `abcdef1`: no reviewer finished');
     expect(body).toContain('The bots could not complete this review. Reason: shared 429');
     expect(body).toContain('`@mergepilot review` to run it again');
-    expect(body).toContain('<!-- mergepilot:panel-failed head=abcdef1234567 -->');
+    expect(body).toContain('<!-- mergepilot:panel-failed head=abcdef1234567 attempt=job-1 -->');
+    expect(body).not.toContain('After that');
   });
 
   it('writes the Arabic note right to left with the Arabic command', async () => {
@@ -47,19 +48,20 @@ describe('postPanelFailedNoteOnce', () => {
     expect(body).toContain('`@mergepilot مراجعة`');
   });
 
-  it('posts once per head: a later head gets its own note', async () => {
+  it('posts once per head and attempt: a retry or a later head gets its own note', async () => {
     const comments: GitHubIssueComment[] = [];
     const client = commentsClient(comments);
 
     expect(await postPanelFailedNoteOnce(client, { ...note, language: 'en' })).toBe(true);
     expect(await postPanelFailedNoteOnce(client, { ...note, language: 'en' })).toBe(false);
+    expect(await postPanelFailedNoteOnce(client, { ...note, attemptId: 'job-2', language: 'en' })).toBe(true);
     expect(await postPanelFailedNoteOnce(client, { ...note, headSha: 'head-2', language: 'en' })).toBe(true);
-    expect(comments).toHaveLength(2);
+    expect(comments).toHaveLength(3);
   });
 
   it('ignores a look-alike marker pasted by someone else', async () => {
     const comments: GitHubIssueComment[] = [
-      { id: 1, body: '<!-- mergepilot:panel-failed head=abcdef1234567 -->', user: { login: 'someone' } },
+      { id: 1, body: '<!-- mergepilot:panel-failed head=abcdef1234567 attempt=job-1 -->', user: { login: 'someone' } },
     ];
 
     expect(await postPanelFailedNoteOnce(commentsClient(comments), { ...note, language: 'en' })).toBe(true);

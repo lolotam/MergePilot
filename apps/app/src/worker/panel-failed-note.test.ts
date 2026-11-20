@@ -60,8 +60,30 @@ describe('notePanelFailed', () => {
     expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toContain('no reviewer finished');
     expect(comments[0]?.body).toContain('Reason: shared 429 from OpenAI');
-    expect(comments[0]?.body).toContain(`<!-- mergepilot:panel-failed head=${HEAD} -->`);
+    expect(comments[0]?.body).toContain(`<!-- mergepilot:panel-failed head=${HEAD} attempt=del-1 -->`);
     expect(info).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists the distinct reasons, the main bot first, and falls back when none is known', async () => {
+    const first = setup();
+    await notePanelFailed(first.ctx, new Map([[MAIN_BOT_SLOT, failed('timeout')], [2, failed('401 bad key')], [3, failed('timeout')]]));
+    expect(first.comments[0]?.body).toContain('Reason: timeout; 401 bad key');
+
+    const none = setup();
+    await notePanelFailed(none.ctx, new Map<number, ProcessReviewResult>([[MAIN_BOT_SLOT, { status: 'failed' }]]));
+    expect(none.comments[0]?.body).toContain('Reason: unknown');
+  });
+
+  it('posts no note when the bots reviewed and only publishing failed', async () => {
+    const { ctx, comments } = setup();
+    const results = new Map<number, ProcessReviewResult>([
+      [MAIN_BOT_SLOT, { status: 'failed', detail: 'GitHub 502', publishFailed: true }],
+      [2, { status: 'failed', detail: 'GitHub 502', publishFailed: true }],
+    ]);
+
+    await notePanelFailed(ctx, results);
+
+    expect(comments).toHaveLength(0);
   });
 
   it('posts no note when one bot completed', async () => {

@@ -201,7 +201,10 @@ export async function runPanel(ctx: PanelContext, runs: BotRun[], noKey: PanelBo
         if (!outcome?.pending) continue;
         const { provider, model, effort } = outcome.pending.finish;
         const choice = { provider: provider ?? br.bot.provider, model: model ?? br.bot.model, effort: effort ?? null };
-        outcome.result = await failBotRun(ctx, br, error, outcome.pending.knownSecrets, choice as Parameters<typeof failBotRun>[4]);
+        outcome.result = {
+          ...(await failBotRun(ctx, br, error, outcome.pending.knownSecrets, choice as Parameters<typeof failBotRun>[4])),
+          publishFailed: true,
+        };
       }
       return new Map(outcomes.map((o) => [o.slot, o.result]));
     }
