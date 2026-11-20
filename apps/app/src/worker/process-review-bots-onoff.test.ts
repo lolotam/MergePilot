@@ -210,6 +210,8 @@ describe('processReviewJob — the on/off switches', () => {
 
     expect(result.status).toBe('completed');
     expect(h.created).toHaveLength(1);
+    // The keyless slot 2 cannot hold the publication: the first bot that can run does.
+    expect(reviewSlot(h.created[0]!.body)).toBe('3');
     expect((await h.runs()).map((r) => [r.botSlot, r.status, r.detail])).toEqual(
       expect.arrayContaining([[2, 'skipped', 'no key'], [3, 'completed', null]]),
     );

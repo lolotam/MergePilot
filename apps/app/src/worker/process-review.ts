@@ -110,9 +110,19 @@ export async function processReviewJob(
     return { status: 'skipped', detail: ALL_BOTS_OFF };
   }
   const panelActive = bots.length > 1;
-  // With main off, the lowest active extra is the fixed publication identity for this job, even
-  // when that extra fails and another completes (migration 0021).
-  const publisherSlot = settings.mainBotActive === false ? bots[0]!.slot : MAIN_BOT_SLOT;
+  // With main off, the lowest active extra that has a key is the fixed publication identity for
+  // this job, even when it fails and another completes (migration 0021). It must be a bot that can
+  // run: its run row is the lease that keeps two concurrent jobs from both publishing.
+  let publisherSlot = MAIN_BOT_SLOT;
+  if (settings.mainBotActive === false) {
+    publisherSlot = bots[0]!.slot;
+    for (const bot of bots) {
+      if (await deps.store.getCredential(workspaceId, bot.provider)) {
+        publisherSlot = bot.slot;
+        break;
+      }
+    }
+  }
   const mode = settings.panelMode ?? DEFAULT_PANEL_MODE;
   const consensusMode = panelActive && mode === 'consensus';
   // The lead bot's marker hash holds its own skill; in consensus, where the panel selects files
@@ -154,8 +164,7 @@ export async function processReviewJob(
     results.get(publisherSlot) ?? results.get(lead.bot.slot) ?? duplicate;
   // Consensus publishes as the fixed publisher slot: without its run (another job holds it), this
   // job must not race that job's publication, so the other bots it started close as duplicates.
-  // A publisher that only lacks a key (main off) is not held by another job: the others still review.
-  if (!publisher && panelActive && mode === 'consensus' && started.duplicates.includes(publisherSlot)) {
+  if (!publisher && panelActive && mode === 'consensus') {
     for (const br of runs) {
       br.stopHeartbeat();
       await deps.store.finishReviewRun(workspaceId, br.run.id, { status: 'skipped', costUsd: null, detail: DUPLICATE });
