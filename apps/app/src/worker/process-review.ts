@@ -151,10 +151,11 @@ export async function processReviewJob(
   const lead = publisher ?? runs[0];
   if (!lead) return duplicate;
   const jobResult = (results: Map<number, ProcessReviewResult>): ProcessReviewResult =>
-    results.get(publisherSlot) ?? duplicate;
+    results.get(publisherSlot) ?? results.get(lead.bot.slot) ?? duplicate;
   // Consensus publishes as the fixed publisher slot: without its run (another job holds it), this
   // job must not race that job's publication, so the other bots it started close as duplicates.
-  if (!publisher && panelActive && mode === 'consensus') {
+  // A publisher that only lacks a key (main off) is not held by another job: the others still review.
+  if (!publisher && panelActive && mode === 'consensus' && started.duplicates.includes(publisherSlot)) {
     for (const br of runs) {
       br.stopHeartbeat();
       await deps.store.finishReviewRun(workspaceId, br.run.id, { status: 'skipped', costUsd: null, detail: DUPLICATE });
@@ -185,7 +186,7 @@ export async function processReviewJob(
         ),
       );
       const bySlot = new Map(runs.map((br, index) => [br.bot.slot, failed[index]!]));
-      return bySlot.get(publisherSlot) ?? duplicate;
+      return bySlot.get(publisherSlot) ?? bySlot.get(lead.bot.slot) ?? duplicate;
     }
 
     const results = await runPanel(ctx, runs, started.noKey);
@@ -296,8 +297,9 @@ async function sharedSteps(
       return free;
     };
     const plans = await Promise.all(runs.map(async (br) => {
-      const own = br === publisher ? mainChoice : br.bot;
-      const fallbacks = fallbackChain(br === publisher ? settings.fallback ?? [] : br.bot.fallback, own);
+      const isMain = br.bot.slot === MAIN_BOT_SLOT;
+      const own = isMain ? mainChoice : br.bot;
+      const fallbacks = fallbackChain(isMain ? settings.fallback ?? [] : br.bot.fallback, own);
       const ownFree = await isFree(own.provider);
       const paidFallbacks = (await Promise.all(fallbacks.map(async ({ provider }) =>
         provider !== own.provider && !(await isFree(provider)) ? provider : null,

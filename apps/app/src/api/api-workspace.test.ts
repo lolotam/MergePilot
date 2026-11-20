@@ -221,6 +221,24 @@ describe('dashboard api - workspace routes (settings, keys, runs, usage, redirec
     });
   });
 
+  it('PUT settings does not treat a patch that also changes the model as switch-only', async () => {
+    const stale = {
+      provider: 'anthropic' as const, model: 'claude-3-5-sonnet', language: 'en' as const,
+      monthlyBudgetUsd: 1, perReviewUsd: 100, mainBotActive: true,
+    };
+    await store.saveSettings({ workspaceId: 'ws-A', ...stale });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/workspaces/ws-A/settings',
+      headers: { cookie: signedSessionCookie('token-admin', config.authSecret) },
+      payload: { provider: stale.provider, model: 'another-model', language: stale.language, mainBotActive: false },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(await store.getSettings('ws-A')).toMatchObject({ mainBotActive: true, model: 'claude-3-5-sonnet' });
+  });
+
   it('keys routes: GET/PUT/DELETE enforce admin, 422 on validation failure, never leak plaintext/ciphertext', async () => {
     // Member hitting GET keys -> 403
     const memberGet = await app.inject({

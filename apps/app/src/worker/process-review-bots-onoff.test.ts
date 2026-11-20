@@ -199,6 +199,22 @@ describe('processReviewJob — the on/off switches', () => {
     expect(h.created[0]!.body).toContain('monthly budget reached');
   });
 
+  it('main off: a publisher extra without a key does not close the other extra, which still reviews', async () => {
+    const h = await panelSetup({
+      settings: { mainBotActive: false, panelMode: 'consensus' },
+      bots: [{ slot: 2 }, { slot: 3, provider: 'anthropic' }],
+      noKey: ['openai'],
+      findings: { 'bot3-model': [finding('Fox issue')] },
+    });
+    const result = await processReviewJob(h.job, h.deps);
+
+    expect(result.status).toBe('completed');
+    expect(h.created).toHaveLength(1);
+    expect((await h.runs()).map((r) => [r.botSlot, r.status, r.detail])).toEqual(
+      expect.arrayContaining([[2, 'skipped', 'no key'], [3, 'completed', null]]),
+    );
+  });
+
   it('master off skips an automatic review before a run, a GitHub call or a PR write', async () => {
     const h = await panelSetup({ settings: { botsEnabled: false, mainBotActive: true }, bots: [{ slot: 2, active: true }] });
     const result = await processReviewJob(h.job, h.deps);

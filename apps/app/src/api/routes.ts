@@ -158,9 +158,6 @@ export function registerDashboardApi(
           parsed.error.issues[0]?.message ?? 'Invalid settings',
         );
       }
-      // A switch patch must not be blocked by an unrelated stored value an older workspace holds.
-      // Auth still runs above; unrelated validation stays on for every other save.
-      const switchOnly = isSwitchOnlyPatch(request.body);
 
       const { base, ...submitted } = parsed.data;
       const replayable = canReplaySettingsPatch(submitted, base);
@@ -170,6 +167,10 @@ export function registerDashboardApi(
         const patch = reconcileSettingsPatch(submitted, base, previous);
         if (!patch) return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
         const merged = mergeSettings(workspaceId, previous, patch);
+        // A switch patch must not be blocked by an unrelated stored value an older workspace holds. It
+        // may carry only the switches and an unchanged provider, model and language; auth runs above.
+        const switchOnly = isSwitchOnlyPatch(request.body) && previous !== null
+          && submitted.provider === previous.provider && submitted.model === previous.model && submitted.language === previous.language;
         if (!switchOnly) {
           const problem = unavailableProviderProblem(merged, previous, subscriptionAvailability(deps))
             ?? await validateSettings(deps.store, workspaceId, merged)
