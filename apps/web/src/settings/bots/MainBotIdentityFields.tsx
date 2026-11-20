@@ -42,7 +42,7 @@ export function MainBotIdentityFields({
         onLogoChange={onLogoChange}
         active={active.checked}
         onActiveChange={() => active.toggle()}
-        activeBusy={active.busy}
+        activeBusy={active.disabled}
         activeLabel={t('botMainActiveLabel')}
         disabled={disabled}
         nameError={nameError}

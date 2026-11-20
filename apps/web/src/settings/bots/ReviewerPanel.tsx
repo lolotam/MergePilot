@@ -103,7 +103,7 @@ export function ReviewerPanel({ workspaceId, settings, isLoading, isMember, onSa
   // One source: the saved switches. Master off or no bot left on pauses reviews, while every
   // per-bot switch stays usable.
   const paused = !(settings?.botsEnabled ?? true)
-    || !((settings?.mainBotActive ?? true) || extras.some((b) => b.active));
+    || !(main.active || extras.some((b) => b.active));
 
   const handleAdd = async () => {
     if (!draft) return;
@@ -121,6 +121,7 @@ export function ReviewerPanel({ workspaceId, settings, isLoading, isMember, onSa
     <>
       <section className="flex flex-col gap-3" aria-label={t('botsTabsLabel')}>
         <BotsMasterSwitch
+          key={workspaceId}
           settings={settings}
           onSave={onSave}
           isMember={isMember}
