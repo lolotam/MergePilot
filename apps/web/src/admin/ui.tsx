@@ -151,6 +151,8 @@ export function SearchInput({
       <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 start-3.5 text-ink-400 pointer-events-none" />
       <input
         type="search"
+        // The server ignores a search term longer than 200 characters (SearchTermSchema), so the box stops at 200.
+        maxLength={200}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
