@@ -140,6 +140,19 @@ describe('platform admin API routes', () => {
     expect(rawText).not.toContain('ciphertext');
   });
 
+  it('returns 404 for a workspace owner searching platform runs', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/admin/runs?repo=acme',
+      headers: { cookie: regularCookie } });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).not.toHaveProperty('runs');
+  });
+
+  it('returns 404 for anonymous requests to platform runs', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/admin/runs?user=regular' });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).not.toHaveProperty('runs');
+  });
+
   it('GET /api/admin/runs returns recent runs across all workspaces, supports workspaceId filter', async () => {
     // All runs
     const allRes = await app.inject({

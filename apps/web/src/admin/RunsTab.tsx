@@ -19,25 +19,31 @@ export function RunsTab() {
   const { t, language } = useI18n();
   const [offset, setOffset] = useState(0);
   const [workspaceSearch, setWorkspaceSearch] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+  const [repoSearch, setRepoSearch] = useState('');
   const workspaceQuery = useDebouncedValue(workspaceSearch.trim());
-  const { data, isLoading, isError } = useAdminRunsQuery(offset, workspaceQuery);
+  const user = useDebouncedValue(userSearch.trim());
+  const repo = useDebouncedValue(repoSearch.trim());
+  const { data, isLoading, isError } = useAdminRunsQuery(offset, workspaceQuery, user, repo);
   const runs = data?.runs ?? [];
 
   const toolbar = (
-    <SearchInput
-      value={workspaceSearch}
-      onChange={(value) => {
-        setWorkspaceSearch(value);
-        setOffset(0);
-      }}
-      placeholder={t('filterWorkspace')}
-    />
+    <>
+      <SearchInput value={workspaceSearch} placeholder={t('filterWorkspace')}
+        onChange={(value) => { setWorkspaceSearch(value); setOffset(0); }} />
+      <SearchInput value={userSearch} placeholder={t('filterRunUser')}
+        onChange={(value) => { setUserSearch(value); setOffset(0); }} />
+      <SearchInput value={repoSearch} placeholder={t('filterRunRepo')}
+        onChange={(value) => { setRepoSearch(value); setOffset(0); }} />
+    </>
   );
 
   let body;
   if (isLoading) body = <StateMessage>{t('loading')}</StateMessage>;
   else if (isError) body = <StateMessage>{t('adminLoadError')}</StateMessage>;
-  else if (runs.length === 0) body = <StateMessage>{t('noRunsFound')}</StateMessage>;
+  else if (runs.length === 0) {
+    body = <StateMessage>{t(workspaceQuery || user || repo ? 'noMatchingAdminRuns' : 'noRunsFound')}</StateMessage>;
+  }
   else {
     body = (
       <table className="w-full text-start text-xs">

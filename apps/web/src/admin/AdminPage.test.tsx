@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { adminApi } from '../api/admin.js';
 import { ApiClientError } from '../api/client.js';
@@ -51,6 +51,8 @@ describe('AdminPage', () => {
     mockMe(false);
     renderWithProviders(<AdminPage />);
     expect(await screen.findByText('home page')).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Review Runs' })).toBeNull();
+    expect(adminApi.getRuns).not.toHaveBeenCalled();
     expect(adminApi.getOverview).not.toHaveBeenCalled();
   });
 
@@ -157,6 +159,71 @@ describe('AdminPage', () => {
         workspaceQuery: 'acme',
       }),
     );
+  });
+
+  it('debounces member and repository edits before querying', async () => {
+    mockMe(true);
+    const actor = userEvent.setup();
+    renderWithProviders(<AdminPage />);
+    await actor.click(screen.getByRole('tab', { name: 'Review Runs' }));
+    await screen.findByText('acme/backend');
+    const member = screen.getByPlaceholderText('Filter by member name or email...');
+    const repo = screen.getByPlaceholderText('Filter by repository...');
+    vi.mocked(adminApi.getRuns).mockClear();
+    fireEvent.change(member, { target: { value: 'first' } });
+    fireEvent.change(member, { target: { value: 'final' } });
+    fireEvent.change(repo, { target: { value: 'acme' } });
+    expect(adminApi.getRuns).not.toHaveBeenCalled();
+    await waitFor(() => expect(adminApi.getRuns).toHaveBeenLastCalledWith({
+      limit: 50, offset: 0, user: 'final', repo: 'acme',
+    }));
+    expect(vi.mocked(adminApi.getRuns).mock.calls.some(([p]) => p?.user === 'first')).toBe(false);
+  });
+
+  it('places member and repo filters in the first toolbar and combines their requests', async () => {
+    mockMe(true);
+    const actor = userEvent.setup();
+    renderWithProviders(<AdminPage />);
+    await actor.click(screen.getByRole('tab', { name: 'Review Runs' }));
+    const table = (await screen.findByText('acme/backend')).closest('table')!;
+    const toolbar = table.parentElement!.previousElementSibling as HTMLElement;
+    const fields = within(toolbar).getAllByRole('searchbox');
+    expect(fields.map((field) => field.getAttribute('placeholder'))).toEqual([
+      'Filter by workspace name...', 'Filter by member name or email...', 'Filter by repository...',
+    ]);
+    await actor.click(fields[1]!);
+    await actor.paste(' Sara ');
+    await waitFor(() => expect(adminApi.getRuns).toHaveBeenLastCalledWith({
+      limit: 50, offset: 0, user: 'Sara',
+    }));
+    vi.mocked(adminApi.getRuns).mockResolvedValue({ ...runsFixture, total: 0, runs: [] });
+    await actor.click(fields[2]!);
+    await actor.paste(' other/app ');
+    expect(await screen.findByText('No review runs match these filters.')).toBeTruthy();
+    expect(screen.queryByText('acme/backend')).toBeNull();
+    expect(adminApi.getRuns).toHaveBeenLastCalledWith({
+      limit: 50, offset: 0, user: 'Sara', repo: 'other/app',
+    });
+  });
+
+  it.each([
+    ['Filter by member name or email...', 'user'],
+    ['Filter by repository...', 'repo'],
+  ])('resets page two when editing %s', async (label, key) => {
+    mockMe(true);
+    vi.mocked(adminApi.getRuns).mockImplementation(async (params) => ({
+      ...runsFixture, total: 51, offset: params?.offset ?? 0,
+    }));
+    const actor = userEvent.setup();
+    renderWithProviders(<AdminPage />);
+    await actor.click(screen.getByRole('tab', { name: 'Review Runs' }));
+    await actor.click(await screen.findByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(adminApi.getRuns).toHaveBeenLastCalledWith({ limit: 50, offset: 50 }));
+    await actor.click(screen.getByPlaceholderText(label));
+    await actor.paste('sample');
+    await waitFor(() => expect(adminApi.getRuns).toHaveBeenLastCalledWith({
+      limit: 50, offset: 0, [key]: 'sample',
+    }));
   });
 
   it('explains a refused delete when the user solely owns shared workspaces', async () => {

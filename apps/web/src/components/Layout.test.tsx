@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { Layout } from './Layout.js';
 import { I18nProvider } from '../i18n/context.js';
 import * as hooks from '../api/hooks.js';
+import { authClient } from '../auth/client.js';
 
 vi.mock('../api/hooks.js');
 vi.mock('../auth/client.js', () => ({ authClient: { signOut: vi.fn() } }));
@@ -35,23 +37,46 @@ describe('Layout component - Leap inspired app shell', () => {
     mockMe();
   });
 
-  const renderLayout = (initialPath = '/w/ws-1', initialLanguage: 'ar' | 'en' = 'en') =>
+  const renderLayout = (
+    initialPath = '/w/ws-1',
+    initialLanguage: 'ar' | 'en' = 'en',
+    client = new QueryClient(),
+  ) =>
     render(
-      <I18nProvider initialLanguage={initialLanguage}>
-        <MemoryRouter initialEntries={[initialPath]}>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/w/:workspaceId" element={<div>Overview Content</div>} />
-              <Route path="/w/:workspaceId/repos" element={<div>Repos Content</div>} />
-              <Route path="/w/:workspaceId/runs" element={<div>Runs Content</div>} />
-              <Route path="/w/:workspaceId/team" element={<div>Team Content</div>} />
-              <Route path="/w/:workspaceId/settings" element={<div>Settings Content</div>} />
-              <Route path="/admin" element={<div>Admin Content</div>} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider client={client}>
+        <I18nProvider initialLanguage={initialLanguage}>
+          <MemoryRouter initialEntries={[initialPath]}>
+            <Routes>
+              <Route path="/login" element={<p>Login destination</p>} />
+              <Route element={<Layout />}>
+                <Route path="/w/:workspaceId" element={<div>Overview Content</div>} />
+                <Route path="/w/:workspaceId/repos" element={<div>Repos Content</div>} />
+                <Route path="/w/:workspaceId/runs" element={<div>Runs Content</div>} />
+                <Route path="/w/:workspaceId/team" element={<div>Team Content</div>} />
+                <Route path="/w/:workspaceId/settings" element={<div>Settings Content</div>} />
+                <Route path="/admin" element={<div>Admin Content</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
+
+  it('clears prior admin results and identity on sign out before the next login', async () => {
+    mockMe(true);
+    const client = new QueryClient();
+    const key = ['admin', 'runs', 0, '', 'member', 'repo'];
+    client.setQueryData(key, { total: 1, runs: [{ id: 'private-run' }] });
+    client.setQueryData(['me'], { isPlatformAdmin: true });
+    renderLayout('/admin', 'en', client);
+    expect(client.getQueryData(key)).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Signed in as' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+    expect(await screen.findByText('Login destination')).toBeTruthy();
+    expect(authClient.signOut).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData(key)).toBeUndefined();
+    expect(client.getQueryData(['me'])).toBeUndefined();
+  });
 
   it('sidebar active item marked with aria-current="page"', () => {
     renderLayout('/w/ws-1/repos');
