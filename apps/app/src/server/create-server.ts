@@ -163,7 +163,7 @@ export function createServer({
     const event = firstHeader(request.headers['x-github-event']);
     const deliveryId = firstHeader(request.headers['x-github-delivery']);
     const signature = firstHeader(request.headers['x-hub-signature-256']) || undefined;
-    const base = { event, deliveryId };
+    const base = { event, deliveryId, jobId: deliveryId };
 
     const rawBody = Buffer.isBuffer(request.body)
       ? request.body
