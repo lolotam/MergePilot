@@ -72,7 +72,6 @@ export type ReviewerBotDto = z.infer<typeof ReviewerBotSchema>;
 export const BotsResponseSchema = z.object({
   main: ReviewerBotSchema.extend({
     slot: z.literal(1),
-    active: z.literal(true),
     provider: ApiProviderSchema.nullable(),
     model: z.string().nullable(),
   }),

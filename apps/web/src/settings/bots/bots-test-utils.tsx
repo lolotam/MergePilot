@@ -104,7 +104,7 @@ export function fakeBotsServer(
           slot: 1,
           name: state.settings.botName ?? 'MergePilot',
           logo: state.settings.botLogo ?? 'pilot',
-          active: true,
+          active: state.settings.mainBotActive ?? true,
           provider: state.settings.provider,
           model: state.settings.model,
           effort: state.settings.effort ?? null,

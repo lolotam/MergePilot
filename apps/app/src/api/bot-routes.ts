@@ -50,7 +50,7 @@ export function registerBotRoutes(app: FastifyInstance, deps: DashboardApiDeps):
           slot: 1,
           name: settings?.botName ?? DEFAULT_BOT_NAME,
           logo: settings?.botLogo ?? DEFAULT_BOT_LOGO,
-          active: true,
+          active: settings?.mainBotActive ?? true,
           provider: settings?.provider ?? null,
           model: settings?.model ?? null,
           effort: settings?.effort ?? null,

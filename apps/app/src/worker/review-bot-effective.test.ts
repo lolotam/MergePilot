@@ -50,7 +50,7 @@ async function runWithModel(
     job: { deliveryId: 'del', installationId: 1, repoFullName: 'acme/repo', pullNumber: 1, headSha: 'sha', baseSha: 'base' },
     deps, logger, workspaceId: 'ws-bot', settings, owner: 'acme', repo: 'repo', client, publisherLogin: 'bot',
     prTitle: 't', prBody: 'b', repoConfigResult: { config: null, rulesFiles: [], repoPricing: null } as unknown as LoadRepoConfigResult,
-    mainChoice: { provider, model: modelId, effort: null, heavy: false }, mainConfig, panelActive: false, mode: 'separate', startTime: 0,
+    mainChoice: { provider, model: modelId, effort: null, heavy: false }, mainConfig, panelActive: false, publisherSlot: MAIN_BOT_SLOT, mode: 'separate', startTime: 0,
   };
   const br: BotRun = {
     bot: { slot: MAIN_BOT_SLOT, name: 'Main', logo: 'pilot', provider, model: modelId, effort: null, fallback: [], exploreEnabled: false },
@@ -154,6 +154,7 @@ describe('runBot effective auth (ADR-0027)', () => {
       mainChoice: { provider: 'openai', model: 'gpt-test', effort: null, heavy: false },
       mainConfig,
       panelActive: false,
+      publisherSlot: MAIN_BOT_SLOT,
       mode: 'separate',
       startTime: 0,
     };

@@ -122,12 +122,14 @@ export interface BotActiveSwitchProps {
   checked: boolean;
   onChange?: ((active: boolean) => void) | undefined;
   disabled?: boolean;
-  /** A tooltip (the main bot explains why its switch is locked on). */
+  /** Accessible name, when the switch needs a name more specific than «Bot active». */
+  label?: string | undefined;
+  /** An optional tooltip. */
   title?: string | undefined;
 }
 
 /** An on/off switch; the thumb moves to the end side in both directions. */
-export function BotActiveSwitch({ checked, onChange, disabled = false, title }: BotActiveSwitchProps) {
+export function BotActiveSwitch({ checked, onChange, disabled = false, label, title }: BotActiveSwitchProps) {
   const { t } = useI18n();
   const hintId = useId();
   return (
@@ -141,7 +143,7 @@ export function BotActiveSwitch({ checked, onChange, disabled = false, title }: 
         type="button"
         role="switch"
         aria-checked={checked}
-        aria-label={t('botActiveLabel')}
+        aria-label={label ?? t('botActiveLabel')}
         aria-describedby={title ? hintId : undefined}
         disabled={disabled}
         onClick={() => onChange?.(!checked)}

@@ -55,6 +55,8 @@ export async function getPgSettings(db: AppDb | AppTx, workspaceId: string): Pro
     panelMinAgreement: Number(row.panelMinAgreement),
     exploreEnabled: row.exploreEnabled,
     callTimeoutMs: row.callTimeoutMs ?? null,
+    mainBotActive: row.mainBotActive,
+    botsEnabled: row.botsEnabled,
     ...skillFields(row),
   };
 }
@@ -91,6 +93,7 @@ function judgeColumns(judge: JudgeSettings | null): Partial<typeof workspaceSett
  * `skillId` left undefined keeps the stored skill; any value (null = Default) clears the
  * deleted-skill note (ADR-0034).
  * `callTimeoutMs` left undefined keeps the stored override; an explicit value (null = inherit) writes it.
+ * `mainBotActive` and `botsEnabled` left undefined keep their stored switches (both default to on).
  * Throws BotNameTakenError when `botName` matches an extra bot's name, and UnknownSkillError when
  * `skillId` is not a skill of this workspace.
  */
@@ -139,6 +142,8 @@ export async function writePgSettings(tx: AppTx, settings: WorkspaceSettings, op
   if (settings.panelMinAgreement !== undefined) values.panelMinAgreement = settings.panelMinAgreement;
   if (settings.exploreEnabled !== undefined) values.exploreEnabled = settings.exploreEnabled;
   if (settings.callTimeoutMs !== undefined) values.callTimeoutMs = settings.callTimeoutMs;
+  if (settings.mainBotActive !== undefined) values.mainBotActive = settings.mainBotActive;
+  if (settings.botsEnabled !== undefined) values.botsEnabled = settings.botsEnabled;
   if (settings.skillId !== undefined) {
     // The bot-name lock before the row, like deleting a skill (pg-skills.ts), so the two cannot deadlock.
     await lockBotNames(tx, settings.workspaceId);

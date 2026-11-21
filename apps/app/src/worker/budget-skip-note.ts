@@ -1,5 +1,4 @@
 import { postBudgetSkipNoteOnce } from '@mergepilot/github';
-import { MAIN_BOT_SLOT } from '../core/types.js';
 import type { PanelContext } from './panel-types.js';
 import type { ProcessReviewResult } from './types.js';
 
@@ -12,7 +11,7 @@ import type { ProcessReviewResult } from './types.js';
 export async function noteBudgetSkipped(ctx: PanelContext, results: Map<number, ProcessReviewResult>): Promise<void> {
   const all = [...results.values()];
   if (all.length === 0 || !all.every((r) => r.status === 'skipped' && r.skippedForBudget)) return;
-  const lead = results.get(MAIN_BOT_SLOT) ?? all[0]!;
+  const lead = results.get(ctx.publisherSlot) ?? all[0]!;
   try {
     const posted = await postBudgetSkipNoteOnce(ctx.client, {
       owner: ctx.owner,

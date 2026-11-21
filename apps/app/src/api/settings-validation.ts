@@ -53,6 +53,9 @@ export function mergeSettings(
     // The main bot's call timeout override: left out keeps the stored value inside the store's
     // write; null resets it to inheritance (the repository's value or the engine default).
     ...(update.callTimeoutMs !== undefined ? { callTimeoutMs: update.callTimeoutMs } : {}),
+    // Migration 0021: left out keeps the stored switch inside the store; false turns it off.
+    ...(update.mainBotActive !== undefined ? { mainBotActive: update.mainBotActive } : {}),
+    ...(update.botsEnabled !== undefined ? { botsEnabled: update.botsEnabled } : {}),
     // ADR-0034: undefined keeps the stored skill (and its deleted-skill note); null is Default.
     ...(update.skillId !== undefined
       ? { skillId: update.skillId }

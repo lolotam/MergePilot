@@ -90,6 +90,10 @@ export const workspaceSettings = pgTable('workspace_settings', {
    * inherit the effective timeout (the repository's or the engine default), a number overrides it.
    */
   callTimeoutMs: integer('call_timeout_ms'),
+  /** Migration 0021: the main bot's on/off switch; default on keeps existing workspaces unchanged. */
+  mainBotActive: boolean('main_bot_active').notNull().default(true),
+  /** Migration 0021: master on/off switch for every bot; each bot keeps its own saved switch. */
+  botsEnabled: boolean('bots_enabled').notNull().default(true),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
     .notNull()
     .defaultNow(),

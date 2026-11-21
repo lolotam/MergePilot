@@ -64,6 +64,16 @@ export interface DashboardApiDeps {
 
 const toIso = (d: Date | string) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
 
+const SWITCH_FIELDS = new Set(['mainBotActive', 'botsEnabled']);
+const SWITCH_PATCH_FIELDS = new Set(['provider', 'model', 'language', 'mainBotActive', 'botsEnabled', 'base']);
+
+/** A body that only carries the required identity plus bot switches: unrelated settings are untouched. */
+function isSwitchOnlyPatch(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const keys = Object.keys(body);
+  return keys.some((key) => SWITCH_FIELDS.has(key)) && keys.every((key) => SWITCH_PATCH_FIELDS.has(key));
+}
+
 function redactSecrets(message: string, secrets: readonly string[]): string {
   let safe = message;
   for (const secret of secrets) {
@@ -157,13 +167,19 @@ export function registerDashboardApi(
         const patch = reconcileSettingsPatch(submitted, base, previous);
         if (!patch) return sendError(reply, 409, 'settings_conflict', 'Settings changed while saving; reload and try again');
         const merged = mergeSettings(workspaceId, previous, patch);
-        const problem = unavailableProviderProblem(merged, previous, subscriptionAvailability(deps))
-          ?? await validateSettings(deps.store, workspaceId, merged)
-          ?? await unknownSkillProblem(deps.store, workspaceId, patch.skillId);
-        if (problem) return sendError(reply, 400, problem.code, problem.message);
-        // The main bot's name must differ from every extra bot's (ADR-0017).
-        if (patch.botName !== undefined && (await botNameTakenByExtraBot(deps.store, workspaceId, patch.botName))) {
-          return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
+        // A switch patch must not be blocked by an unrelated stored value an older workspace holds. It
+        // may carry only the switches and an unchanged provider, model and language; auth runs above.
+        const switchOnly = isSwitchOnlyPatch(request.body) && previous !== null
+          && submitted.provider === previous.provider && submitted.model === previous.model && submitted.language === previous.language;
+        if (!switchOnly) {
+          const problem = unavailableProviderProblem(merged, previous, subscriptionAvailability(deps))
+            ?? await validateSettings(deps.store, workspaceId, merged)
+            ?? await unknownSkillProblem(deps.store, workspaceId, patch.skillId);
+          if (problem) return sendError(reply, 400, problem.code, problem.message);
+          // The main bot's name must differ from every extra bot's (ADR-0017).
+          if (patch.botName !== undefined && (await botNameTakenByExtraBot(deps.store, workspaceId, patch.botName))) {
+            return sendError(reply, 409, 'bot_name_taken', 'Another bot in this workspace already has this name');
+          }
         }
 
         try {
