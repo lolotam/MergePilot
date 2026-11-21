@@ -60,6 +60,8 @@ const UsersQuerySchema = PageQuerySchema.extend({ q: SearchTermSchema });
 const RunsQuerySchema = PageQuerySchema.extend({
   workspaceId: SearchTermSchema,
   workspaceQuery: SearchTermSchema,
+  user: SearchTermSchema,
+  repo: SearchTermSchema,
 });
 
 /** Bad values fall back to defaults; clampPagination then enforces 1 ≤ limit ≤ 100, offset ≥ 0. */
@@ -104,6 +106,8 @@ export function registerAdminApi(app: FastifyInstance, deps: AdminApiDeps): void
       ...page,
       workspaceId: query.workspaceId,
       workspaceQuery: query.workspaceQuery,
+      user: query.user,
+      repo: query.repo,
     });
     return reply.status(200).send(result);
   });

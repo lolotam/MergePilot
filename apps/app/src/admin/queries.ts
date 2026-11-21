@@ -4,10 +4,12 @@ import {
   countDistinct,
   desc,
   eq,
+  exists,
   gte,
   ilike,
   isNotNull,
   isNull,
+  or,
   sum,
   type SQL,
 } from 'drizzle-orm';
@@ -130,6 +132,10 @@ export async function getRuns(
     workspaceId?: string | undefined;
     /** Case-insensitive substring match on the workspace name. */
     workspaceQuery?: string | undefined;
+    /** Case-insensitive substring match on the name or email of any member of the run's workspace. */
+    user?: string | undefined;
+    /** Case-insensitive substring match on the repository full name (owner/name). */
+    repo?: string | undefined;
   },
 ): Promise<AdminRunsPage> {
   const { limit, offset } = clampPagination(options);
@@ -138,6 +144,20 @@ export async function getRuns(
   const conditions: SQL[] = [];
   if (options.workspaceId) conditions.push(eq(runs.workspaceId, options.workspaceId));
   if (options.workspaceQuery) conditions.push(ilike(org.name, containsPattern(options.workspaceQuery)));
+  if (options.user) {
+    const member = authSchema.member;
+    const user = authSchema.user;
+    const pattern = containsPattern(options.user);
+    conditions.push(exists(
+      db.select({ id: member.id }).from(member)
+        .innerJoin(user, eq(user.id, member.userId))
+        .where(and(
+          eq(member.organizationId, org.id),
+          or(ilike(user.name, pattern), ilike(user.email, pattern)),
+        )),
+    ));
+  }
+  if (options.repo) conditions.push(ilike(runs.repoFullName, containsPattern(options.repo)));
   const filter = conditions.length > 0 ? and(...conditions) : undefined;
 
   const [totalRows, rows] = await Promise.all([

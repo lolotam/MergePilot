@@ -85,6 +85,10 @@ export interface AdminPageParams {
   q?: string;
   /** Runs: case-insensitive match on workspace name (server-side). */
   workspaceQuery?: string;
+  /** Runs: case-insensitive match on a workspace member's name or email (server-side). */
+  user?: string;
+  /** Runs: case-insensitive match on the repository full name (server-side). */
+  repo?: string;
 }
 
 function withQuery(path: string, params?: AdminPageParams): string {
@@ -94,6 +98,8 @@ function withQuery(path: string, params?: AdminPageParams): string {
   if (params?.workspaceId) search.set('workspaceId', params.workspaceId);
   if (params?.q) search.set('q', params.q);
   if (params?.workspaceQuery) search.set('workspaceQuery', params.workspaceQuery);
+  if (params?.user) search.set('user', params.user);
+  if (params?.repo) search.set('repo', params.repo);
   const qs = search.toString();
   return qs ? `${path}?${qs}` : path;
 }
