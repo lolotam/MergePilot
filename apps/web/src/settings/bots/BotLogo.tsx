@@ -120,7 +120,7 @@ export function BotLogoPicker({ id, value, onChange, disabled = false }: BotLogo
 
 export interface BotActiveSwitchProps {
   checked: boolean;
-  onChange?: ((active: boolean) => void) | undefined;
+  onChange: (active: boolean) => void;
   disabled?: boolean;
   /** Accessible name, when the switch needs a name more specific than «Bot active». */
   label?: string | undefined;
@@ -156,7 +156,7 @@ export function BotActiveSwitch({ checked, onChange, disabled = false, label, ti
         disabled={disabled}
         onClick={() => {
           setShown(!shown);
-          onChange?.(!shown);
+          onChange(!shown);
         }}
         className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-60 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${
           shown ? 'bg-green-500' : 'bg-ink-300 dark:bg-ink-700'
