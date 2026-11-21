@@ -133,11 +133,13 @@ export function BotActiveSwitch({ checked, onChange, disabled = false, label, ti
   const { t } = useI18n();
   const hintId = useId();
   // The thumb slides at once on a click, not after the save answers; once the switch is free again
-  // (the save ended) it follows the saved value, so a failed save slides it back.
+  // (the save ended) it follows the saved value, so a failed save slides it back. A changed saved
+  // value always shows, even on a switch that stays disabled (a member).
   const [shown, setShown] = useState(checked);
+  useEffect(() => setShown(checked), [checked]);
   useEffect(() => {
     if (!disabled) setShown(checked);
-  }, [checked, disabled]);
+  }, [disabled]);
   return (
     <span className="inline-flex items-center gap-2" title={title}>
       {title ? (

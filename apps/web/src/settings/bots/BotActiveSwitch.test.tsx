@@ -53,4 +53,18 @@ describe('BotActiveSwitch thumb', () => {
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(toggle.firstElementChild?.classList.contains('translate-x-4')).toBe(true);
   });
+
+  it('follows a changed saved value on a switch that stays disabled', () => {
+    const view = (checked: boolean) => (
+      <I18nProvider initialLanguage="en">
+        <BotActiveSwitch checked={checked} disabled onChange={() => undefined} />
+      </I18nProvider>
+    );
+    const { rerender } = render(view(true));
+    const toggle = screen.getByRole('switch');
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    rerender(view(false));
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(toggle.firstElementChild?.classList.contains('translate-x-4')).toBe(false);
+  });
 });
