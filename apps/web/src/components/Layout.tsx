@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Outlet, Link, NavLink, useNavigate, useParams, useLocation } from 'react-router';
 import {
   LayoutDashboard,
@@ -30,6 +31,7 @@ export function Layout() {
   const { workspaceId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
@@ -63,6 +65,7 @@ export function Layout() {
     try {
       await authClient.signOut();
     } finally {
+      queryClient.clear();
       navigate('/login');
     }
   };

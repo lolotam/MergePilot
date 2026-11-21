@@ -38,15 +38,16 @@ export function useAdminWorkspacesQuery(params: AdminPageParams) {
   });
 }
 
-export function useAdminRunsQuery(offset: number, workspaceQuery: string) {
+export function useAdminRunsQuery(offset: number, workspaceQuery: string, user: string, repo: string) {
   return useQuery({
-    queryKey: ['admin', 'runs', offset, workspaceQuery],
-    queryFn: () =>
-      adminApi.getRuns({
-        limit: ADMIN_PAGE_SIZE,
-        offset,
-        ...(workspaceQuery ? { workspaceQuery } : {}),
-      }),
+    queryKey: ['admin', 'runs', offset, workspaceQuery, user, repo],
+    queryFn: () => adminApi.getRuns({
+      limit: ADMIN_PAGE_SIZE,
+      offset,
+      ...(workspaceQuery ? { workspaceQuery } : {}),
+      ...(user ? { user } : {}),
+      ...(repo ? { repo } : {}),
+    }),
     placeholderData: keepPreviousData,
   });
 }
