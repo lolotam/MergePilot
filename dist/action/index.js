@@ -144539,6 +144539,34 @@ function withRuleCriteria(system) {
 ${CRITERIA_TRUST}`;
 }
 
+var ALSO_AT_BLOCK_RE = /^[ \t]*Also at:([^\n]*(?:\n(?![ \t]*$)[^\n]*)*)/m;
+function alsoAtPlaces(body, paths) {
+  return placesInText(ALSO_AT_BLOCK_RE.exec(body)?.[1] ?? "", paths);
+}
+function placesInText(text, paths) {
+  if (!text)
+    return [];
+  const matches = [];
+  for (const path12 of paths) {
+    const escaped = path12.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const place of text.matchAll(new RegExp(`(?<![\\w./-])${escaped}:(\\d+)`, "g"))) {
+      const digits = place[1] ?? "";
+      const end = place.index + path12.length + 1 + digits.length;
+      matches.push({ path: path12, line: Number(digits), start: place.index, end });
+    }
+  }
+  matches.sort((a, b) => a.start - b.start || b.end - a.end);
+  const kept = [];
+  let lastEnd = 0;
+  for (const match3 of matches) {
+    if (match3.start < lastEnd)
+      continue;
+    kept.push(match3);
+    lastEnd = match3.end;
+  }
+  return kept.map((match3) => ({ path: match3.path, line: match3.line }));
+}
+
 var NEAR_LINES = 20;
 var MIN_CUT_TOKENS2 = 200;
 var CUT_MARKER = "[verification limit: the rest of this block was not shown]";
@@ -144697,29 +144725,6 @@ function collectFiles(input2) {
   }
   markNearChunks(input2.findings, files);
   return { files: [...files.values()], pathsByFinding };
-}
-var ALSO_AT_RE = /^[ \t]*Also at:([^\n]*(?:\n(?![ \t]*$)[^\n]*)*)/m;
-function alsoAtPlaces(body, paths) {
-  const list = ALSO_AT_RE.exec(body)?.[1] ?? "";
-  const matches = [];
-  for (const path12 of paths) {
-    const escaped = path12.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    for (const place of list.matchAll(new RegExp(`(?<![\\w./-])${escaped}:(\\d+)`, "g"))) {
-      const digits = place[1] ?? "";
-      const end = place.index + path12.length + 1 + digits.length;
-      matches.push({ path: path12, line: Number(digits), start: place.index, end });
-    }
-  }
-  matches.sort((a, b) => a.start - b.start || b.end - a.end);
-  const kept = [];
-  let lastEnd = 0;
-  for (const match3 of matches) {
-    if (match3.start < lastEnd)
-      continue;
-    kept.push(match3);
-    lastEnd = match3.end;
-  }
-  return kept.map((match3) => ({ path: match3.path, line: match3.line }));
 }
 function holdsPlace(chunk, line) {
   return chunk.ranges.some(([from, to]) => line >= from - NEAR_LINES && line <= to + NEAR_LINES);
@@ -198906,12 +198911,14 @@ function withoutBaseHunks(comparePatch, basePatch, prPatch) {
 }
 
 var REVIEW_REQUESTED_REASON = "review requested";
+var PREVIOUS_PARTIAL_REASON = "previous review was incomplete";
 var REVIEWS_PAGE_SIZE2 = 100;
 var MAX_COMPARE_FILES = 300;
 var SNAPSHOT_PATH_RE2 = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
-async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
+async function findReviewBase(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
   let page = 1;
   let lastMarker = null;
+  let sawPartial = false;
   while (true) {
     const reviews = await client.listReviewsPage({
       owner,
@@ -198923,8 +198930,11 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
     for (const review of reviews) {
       if (review.body && review.user?.login === publisherLogin) {
         const marker = parseMarker(review.body);
-        if (marker?.headSha && marker.status !== "partial" && markerBotSlot(marker) === botSlot) {
-          lastMarker = marker;
+        if (marker?.headSha && markerBotSlot(marker) === botSlot) {
+          if (marker.status === "partial")
+            sawPartial = true;
+          else
+            lastMarker = marker;
         }
       }
     }
@@ -198933,12 +198943,12 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
     }
     page++;
   }
-  return lastMarker;
+  return { marker: lastMarker, sawPartial };
 }
 async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot, baseSha, force, exclude }) {
   if (force)
     return { mode: "full", files: prFiles, reason: REVIEW_REQUESTED_REASON };
-  const lastMarker = await findLastReviewedMarker(client, {
+  const { marker: lastMarker, sawPartial } = await findReviewBase(client, {
     owner,
     repo,
     pull_number,
@@ -198949,7 +198959,7 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
     return {
       mode: "full",
       files: prFiles,
-      reason: "first review"
+      reason: sawPartial ? PREVIOUS_PARTIAL_REASON : "first review"
     };
   }
   if (configHash && lastMarker.configHash !== configHash) {

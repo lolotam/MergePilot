@@ -68,21 +68,23 @@ export function claimWords(claim: Claim): Set<string> {
 
 /** Dice coefficient of the two findings' claim words, with how many words they share. */
 export function claimSimilarity(a: Claim, b: Claim): { score: number; shared: number } {
-  const wa = claimWords(a);
-  const wb = claimWords(b);
+  return wordSetSimilarity(claimWords(a), claimWords(b));
+}
+
+export function wordSetSimilarity(wa: ReadonlySet<string>, wb: ReadonlySet<string>): { score: number; shared: number } {
   if (wa.size === 0 || wb.size === 0) return { score: 0, shared: 0 };
   let shared = 0;
   for (const word of wa) if (wb.has(word)) shared++;
   return { score: (2 * shared) / (wa.size + wb.size), shared };
 }
 
-function mostlyLatin(claim: Claim): boolean {
+export function mostlyLatin(claim: Claim): boolean {
   const letters = claimText(claim).match(/\p{L}/gu) ?? [];
   const latin = letters.filter((letter) => /\p{Script=Latin}/u.test(letter)).length;
   return letters.length > 0 && latin / letters.length >= CLAIM_MIN_LATIN_SHARE;
 }
 
-function negatedTitle(claim: Claim): boolean {
+export function negatedTitle(claim: Claim): boolean {
   const title = claim.title.toLowerCase();
   return CONTRACTED_NOT.test(title) || title.split(/[^\p{L}]+/u).some((word) => NEGATIONS.has(word));
 }

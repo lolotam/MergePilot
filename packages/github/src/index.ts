@@ -73,8 +73,10 @@ export {
 export {
   findLastReviewedHead,
   findLastReviewedMarker,
+  findReviewBase,
   hasNothingNewToReview,
   NOTHING_NEW_DETAIL,
+  PREVIOUS_PARTIAL_REASON,
   reviewScopeOf,
   selectIncrementalFiles,
   type FindLastReviewedHeadOptions,
@@ -149,6 +151,23 @@ export {
   type MergePanelResult,
   type PanelBotFindings,
 } from './consensus.js';
+export { sameClaimScore } from './claim-similarity.js';
+export {
+  FOLD_MIN_FIX_SCORE,
+  FOLD_POLARITY_FIX_SCORE,
+  FOLD_LISTED_MIN_SCORE,
+  FOLD_LISTED_MIN_SHARED,
+  FOLD_SAME_FILE_MIN_SCORE,
+  FOLD_CORROBORATED_MIN_SCORE,
+  FOLD_CORROBORATING_FIX_SCORE,
+  FOLD_CORROBORATING_FIX_SHARED,
+  FOLD_ANYWHERE_MIN_SCORE,
+  FOLD_MIN_SHARED_WORDS,
+  FOLD_PLACE_WINDOW,
+  FOLD_MAX_PLACES,
+  farFoldScore,
+  foldSignalsOf,
+} from './claim-fold.js';
 export { renderPanelSummary, type PanelBotRow, type PanelSummaryInput } from './panel-summary.js';
 export { botFindingsFates, type BotFindingsFate, type PanelClusterOutcome } from './panel-findings-fate.js';
 export * from './user-installations.js';

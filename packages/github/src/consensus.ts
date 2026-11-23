@@ -8,16 +8,18 @@ import {
   type Secret,
 } from '@mergepilot/engine';
 import { escapeInline } from './bot-identity.js';
+import { farFoldScore, foldedPlacesOf, foldSignalsOf, withFoldedPlaces } from './claim-fold.js';
 import { sameClaimScore } from './claim-similarity.js';
 import { normalizeTitle } from './dedupe.js';
 
 /**
  * Consensus mode of the reviewer panel (ADR-0017): the findings of every bot that completed are
- * merged into clusters. A cluster is findings on the same path with start lines within ±3 and
+ * merged into clusters. Nearby candidates are on the same path with start lines within ±3 and
  * either the same normalized title, the same claim by wording (`sameClaimScore`), or, when a judge
  * is supplied, a "same issue?" answer of 0.8 or more, applied in that order. The wording rule needs
  * no judge, so a judge that is off, over budget or unavailable never splits a duplicate the words
- * already show. A cluster holds at most one finding per bot: a bot never agrees with itself, so two
+ * already show. Kept findings can also fold deterministically across distant anchors (ADR-0056).
+ * A cluster holds at most one finding per bot: a bot never agrees with itself, so two
  * findings of one bot are never chained into one cluster. Each cluster keeps its most severe
  * version and the bots that found it. Clusters found by fewer than `minAgreement` bots are set
  * aside, except critical and high ones, and returned so the summary can list them: nothing is
@@ -46,6 +48,8 @@ export interface ConsensusCluster {
   kind: ClusterKind;
   /** The distinct bots that found it, by slot. */
   foundBy: Array<{ slot: number; name: string }>;
+  foldedPlaces?: Array<{ path: string; line: number }>;
+  foldedTitles?: Array<{ title: string; name: string }>;
   rejectedBy?: Array<{ slot: number; finding: Finding }> | undefined;
   revived?: boolean | undefined;
 }
@@ -81,6 +85,8 @@ interface Entry {
   rejected?: boolean;
 }
 
+type EntrySignals = ReadonlyMap<Entry, ReturnType<typeof foldSignalsOf>>;
+
 const ALWAYS_KEPT = new Set<Finding['severity']>(['critical', 'high']);
 
 export async function mergePanelFindings(input: MergePanelInput): Promise<MergePanelResult> {
@@ -92,13 +98,17 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
   const clusters = new BotClusters(entries.map((e) => e.slot));
   // Kept-to-kept deterministic matches reserve bot slots before rejected copies can consume them.
   // Within each tier, exact titles precede wording matches; the judge follows both tiers.
-  const { byTitle, byClaim, undecided } = candidatePairs(entries);
+  const { byTitle, byClaim, byFar, undecided, signals } = candidatePairs(entries);
   const hasRejected = (a: number, b: number): boolean => Boolean(entries[a]!.rejected || entries[b]!.rejected);
   const rankedClaims = byClaim.sort((x, y) => y.score - x.score);
+  const rankedFar = byFar.sort((x, y) => y.score - x.score || x.a - y.a || x.b - y.b);
   for (const tier of ['kept', 'rejected'] as const) {
     const inTier = (a: number, b: number): boolean => hasRejected(a, b) === (tier === 'rejected');
     for (const [a, b] of byTitle) if (inTier(a, b)) clusters.join(a, b);
     for (const { a, b } of rankedClaims) if (inTier(a, b)) clusters.join(a, b);
+    if (tier === 'kept') {
+      for (const { a, b } of rankedFar) clusters.join(a, b);
+    }
   }
   const semantic = input.judge
     ? await joinByJudge(entries, clusters, undecided, { ...input, judge: input.judge })
@@ -115,7 +125,7 @@ export async function mergePanelFindings(input: MergePanelInput): Promise<MergeP
   for (const group of groups.values()) {
     // A cluster holds at most one finding per bot, so its length is the number of bots that raised it.
     if (group.every((entry) => entry.rejected) && group.length < 2) continue;
-    const cluster = toCluster(group);
+    const cluster = toCluster(group, signals);
     const enough = cluster.foundBy.length >= input.minAgreement;
     (enough || ALWAYS_KEPT.has(cluster.finding.severity) ? agreed : below).push(cluster);
   }
@@ -176,21 +186,37 @@ class BotClusters {
 }
 
 type EntryPair = [number, number];
+type RankedPair = { a: number; b: number; score: number };
 
-/** Nearby pairs of different bots' findings, by what matched them. */
+/** Pairs of different bots' findings, by what matched them and whether they can go to the judge. */
 function candidatePairs(entries: readonly Entry[]): {
   byTitle: EntryPair[];
-  byClaim: Array<{ a: number; b: number; score: number }>;
+  byClaim: RankedPair[];
+  byFar: RankedPair[];
   undecided: EntryPair[];
+  signals: EntrySignals;
 } {
   const byTitle: EntryPair[] = [];
-  const byClaim: Array<{ a: number; b: number; score: number }> = [];
+  const byClaim: RankedPair[] = [];
+  const byFar: RankedPair[] = [];
   const undecided: EntryPair[] = [];
+  const knownPaths = [...new Set(entries.map(({ finding }) => finding.path))];
+  const signals = new Map(entries.filter(({ rejected }) => !rejected)
+    .map((entry) => [entry, foldSignalsOf(entry.finding, knownPaths)] as const));
   for (let a = 0; a < entries.length; a++) {
     for (let b = a + 1; b < entries.length; b++) {
-      const fa = entries[a]!.finding;
-      const fb = entries[b]!.finding;
-      if (!nearby(entries[a]!, entries[b]!)) continue;
+      const left = entries[a]!;
+      const right = entries[b]!;
+      if (left.slot === right.slot || left.kind !== right.kind) continue;
+      if (!nearby(left, right)) {
+        const sa = signals.get(left);
+        const sb = signals.get(right);
+        const score = sa && sb ? farFoldScore(sa, sb) : undefined;
+        if (score !== undefined) byFar.push({ a, b, score });
+        continue;
+      }
+      const fa = left.finding;
+      const fb = right.finding;
       if (sameTitle(fa, fb)) {
         byTitle.push([a, b]);
         continue;
@@ -200,7 +226,7 @@ function candidatePairs(entries: readonly Entry[]): {
       else byClaim.push({ a, b, score });
     }
   }
-  return { byTitle, byClaim, undecided };
+  return { byTitle, byClaim, byFar, undecided, signals };
 }
 
 /**
@@ -243,8 +269,6 @@ async function joinByJudge(
 
 function nearby(a: Entry, b: Entry): boolean {
   return (
-    a.slot !== b.slot &&
-    a.kind === b.kind &&
     a.finding.path === b.finding.path &&
     Math.abs(a.finding.line - b.finding.line) <= CONSENSUS_LINE_WINDOW
   );
@@ -255,7 +279,7 @@ function sameTitle(a: Finding, b: Finding): boolean {
   return ta.length > 0 && ta === normalizeTitle(b.title);
 }
 
-function toCluster(group: Entry[]): ConsensusCluster {
+function toCluster(group: Entry[], signals: EntrySignals): ConsensusCluster {
   const verified = group.filter((entry) => !entry.rejected);
   const revived = verified.length === 0;
   const best = [...(revived ? group : verified)].sort(
@@ -264,9 +288,19 @@ function toCluster(group: Entry[]): ConsensusCluster {
   const bots = new Map<number, string>();
   for (const e of group) bots.set(e.slot, e.name);
   const foundBy = [...bots.entries()].sort((a, b) => a[0] - b[0]).map(([slot, name]) => ({ slot, name }));
+  const otherKept = verified.filter((entry) => entry !== best);
+  const foldedPlaces = foldedPlacesOf(best.finding, signals.get(best)?.listed ?? [], otherKept.map(({ finding }) => finding));
+  const title = normalizeTitle(best.finding.title);
+  const foldedTitles = otherKept
+    .filter(({ finding }) => normalizeTitle(finding.title) !== title)
+    .sort((a, b) => a.slot - b.slot)
+    .slice(0, 3)
+    .map(({ finding, name }) => ({ title: finding.title, name }));
   return {
     finding: revived ? { ...best.finding, confidence: Math.min(best.finding.confidence, UNSHOWN_CODE_MAX_CONFIDENCE) } : best.finding,
     kind: best.kind, foundBy,
+    ...(foldedPlaces.length > 0 ? { foldedPlaces } : {}),
+    ...(foldedTitles.length > 0 ? { foldedTitles } : {}),
     ...(group.some((entry) => entry.rejected) ? { rejectedBy: group.filter((entry) => entry.rejected).map((entry) => ({ slot: entry.slot, finding: entry.finding })) } : {}),
     ...(revived ? { revived: true } : {}),
   };
@@ -300,5 +334,11 @@ export function foundByLabel(
 
 /** The cluster's finding with its "found by" label added to the body, for the inline comment. */
 export function withFoundBy(cluster: ConsensusCluster, total: number, language: 'ar' | 'en'): Finding {
-  return { ...cluster.finding, body: `${cluster.finding.body}\n\n_${foundByLabel(cluster, total, language, 'published')}_` };
+  const body = withFoldedPlaces(cluster.finding.body, cluster.foldedPlaces ?? []);
+  const foundBy = `_${foundByLabel(cluster, total, language, 'published')}_`;
+  if (!cluster.foldedTitles?.length) return { ...cluster.finding, body: `${body}\n\n${foundBy}` };
+
+  const label = language === 'ar' ? 'وردت أيضاً بصياغة' : 'Also raised as';
+  const titles = cluster.foldedTitles.map(({ title, name }) => `"${escapeInline(title)}" (${escapeInline(name)})`);
+  return { ...cluster.finding, body: `${body}\n\n${foundBy}\n\n_${label}: ${titles.join('; ')}_` };
 }
