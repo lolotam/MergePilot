@@ -84,9 +84,13 @@ export function mostlyLatin(claim: Claim): boolean {
   return letters.length > 0 && latin / letters.length >= CLAIM_MIN_LATIN_SHARE;
 }
 
+export function hasNegation(text: string): boolean {
+  const lower = text.toLowerCase();
+  return CONTRACTED_NOT.test(lower) || lower.split(/[^\p{L}]+/u).some((word) => NEGATIONS.has(word));
+}
+
 export function negatedTitle(claim: Claim): boolean {
-  const title = claim.title.toLowerCase();
-  return CONTRACTED_NOT.test(title) || title.split(/[^\p{L}]+/u).some((word) => NEGATIONS.has(word));
+  return hasNegation(claim.title);
 }
 
 /**

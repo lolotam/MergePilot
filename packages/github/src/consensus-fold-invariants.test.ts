@@ -1,7 +1,7 @@
 import type { Judge, JudgeRequest } from '@mergepilot/engine';
 import { describe, expect, it, vi } from 'vitest';
 import { distantLineReplay, foldBot, foldFinding } from './consensus-fold.fixtures.js';
-import { capConsensusClusters, mergePanelFindings, withFoundBy } from './consensus.js';
+import { capConsensusClusters, mergePanelFindings, promoteSurvivingCluster, withFoundBy } from './consensus.js';
 import { botFindingsFates } from './panel-findings-fate.js';
 
 describe('far folds in the existing consensus pipeline', () => {
@@ -96,5 +96,47 @@ describe('far folds in the existing consensus pipeline', () => {
       foldedTitles: [{ title: '*Worker*', name: '<Bot>' }],
     }, 2, 'ar').body;
     expect(body).toContain('_وردت أيضاً بصياغة: "\\*Worker\\*" (&lt;Bot&gt;)_');
+  });
+
+  it('preserves non-representative Also at locations even on files without a primary anchor', async () => {
+    const rep = foldFinding('rep', { path: 'src/a.ts', line: 10, severity: 'high' });
+    const other = foldFinding('other', {
+      path: 'src/b.ts', line: 20, severity: 'medium',
+      body: first.body + '\n\nAlso at: src/c.ts:30',
+    });
+    const { kept } = await mergePanelFindings({ bots: [foldBot(1, rep), foldBot(2, other)], minAgreement: 1 });
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.foldedPlaces).toEqual([{ path: 'src/b.ts', line: 20 }, { path: 'src/c.ts', line: 30 }]);
+  });
+
+  it('deduplicates repeated alternate titles by normalized text before capping at three', async () => {
+    const bots = [
+      foldBot(1, foldFinding('b1', { line: 10, severity: 'high', title: 'Primary lease title' })),
+      foldBot(2, foldFinding('b2', { line: 40, title: 'Repeated Alternate!' })),
+      foldBot(3, foldFinding('b3', { line: 70, title: 'repeated alternate' })),
+      foldBot(4, foldFinding('b4', { line: 100, title: 'Repeated   alternate.' })),
+      foldBot(5, foldFinding('b5', { line: 130, title: 'Distinct fifth title' })),
+    ];
+    const { kept } = await mergePanelFindings({ bots, minAgreement: 1 });
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.foldedTitles).toEqual([
+      { title: 'Repeated Alternate!', name: 'Reviewer 2' },
+      { title: 'Distinct fifth title', name: 'Reviewer 5' },
+    ]);
+  });
+
+  it('promotes a surviving distant member when the representative was already posted and keeps fates exact', async () => {
+    const posted = foldFinding('posted', { path: 'src/a.ts', line: 10, severity: 'high' });
+    const fresh = foldFinding('fresh', { path: 'src/b.ts', line: 20, severity: 'medium' });
+    const bots = [foldBot(1, posted), foldBot(2, fresh)];
+    const { kept, below, overLimit } = await mergePanelFindings({ bots, minAgreement: 1 });
+    expect(kept).toHaveLength(1);
+    const promoted = promoteSurvivingCluster(kept[0]!, new Set([fresh]));
+    expect(promoted?.finding).toBe(fresh);
+    expect(promoted?.foldedPlaces).toBeUndefined();
+    const fates = botFindingsFates(bots, { published: [promoted!], below, overLimit, alreadyPosted: [] });
+    expect(fates.map(({ slot, own, mergedIntoOther, alreadyPosted, reported }) => [slot, own, mergedIntoOther, alreadyPosted, reported]))
+      .toEqual([[1, 0, 1, 0, 1], [2, 1, 0, 0, 1]]);
+    expect(promoteSurvivingCluster(kept[0]!, new Set())).toBeNull();
   });
 });

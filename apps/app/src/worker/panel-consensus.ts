@@ -12,6 +12,7 @@ import {
   judgeBudgetLeft,
   mergeContextDisclosures,
   mergePanelFindings,
+  promoteSurvivingCluster,
   publishReview,
   renderPanelSummary,
   reviewScopeOf,
@@ -98,12 +99,15 @@ export async function publishConsensus(
   const inlineOf = new Map(
     merge.kept.filter((c) => c.kind === 'inline').map((c) => [c, withFoundBy(c, merge.total, language)] as const),
   );
+  const dedupeInputs = merge.kept
+    .filter((c) => c.kind === 'inline')
+    .flatMap((c) => [inlineOf.get(c)!, ...(c.distantMembers ?? []).map((member) => member.finding)]);
   const deduped = await deduplicateFindings(ctx.client, {
     owner: ctx.owner,
     repo: ctx.repo,
     pull_number: job.pullNumber,
     publisherLogin: ctx.publisherLogin,
-    findings: [...inlineOf.values()],
+    findings: dedupeInputs,
     judge: dedupeJudge,
     knownSecrets,
     maxUsd: dedupeJudge ? budget() : undefined,
@@ -118,8 +122,21 @@ export async function publishConsensus(
   // One published review: the findings limit is for the merged total, not each bot (ADR-0033). It
   // is applied to what survives the dedupe, so no slot goes to a finding already on the PR.
   const notYetPosted = new Set(deduped.kept);
-  const isNew = (c: ConsensusCluster): boolean => c.kind === 'summaryOnly' || notYetPosted.has(inlineOf.get(c)!);
-  const survivors = merge.kept.filter(isNew);
+  const survivors: ConsensusCluster[] = [];
+  const alreadyPosted: ConsensusCluster[] = [];
+  for (const cluster of merge.kept) {
+    if (cluster.kind === 'summaryOnly' || notYetPosted.has(inlineOf.get(cluster)!)) {
+      survivors.push(cluster);
+      continue;
+    }
+    const promoted = promoteSurvivingCluster(cluster, notYetPosted);
+    if (promoted) {
+      inlineOf.set(promoted, withFoundBy(promoted, merge.total, language));
+      survivors.push(promoted);
+    } else {
+      alreadyPosted.push(cluster);
+    }
+  }
   const capped = capConsensusClusters(survivors, ctx.mainConfig.effectiveConfig.review.maxFindings);
   const published = { ...merge, kept: capped.kept, overLimit: capped.overLimit };
   // Where each bot's table count went, so a count above what it published is explained.
@@ -127,7 +144,7 @@ export async function publishConsensus(
     published: capped.kept,
     below: merge.below,
     overLimit: capped.overLimit,
-    alreadyPosted: merge.kept.filter((c) => !isNew(c)),
+    alreadyPosted,
   });
   const inline = capped.kept.flatMap((c) => (c.kind === 'inline' ? [inlineOf.get(c)!] : []));
 

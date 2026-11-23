@@ -61,6 +61,14 @@ describe('far fold thresholds', () => {
     expect(score(a, { ...b, body: b.body + ' ملاحظات'.repeat(20) })).toBeUndefined();
   });
 
+  it('rejects far folds when suggestions have opposite polarity', () => {
+    const [a, b] = pair(8, 13);
+    expect(score(
+      { ...a, suggestion: 'Overwrite the archive manifest before retrying.' },
+      { ...b, suggestion: 'Do not overwrite the archive manifest before retrying.' },
+    )).toBeUndefined();
+  });
+
   it('requires stronger suggestion agreement for titles with opposite polarity', () => {
     const [a, b] = pair(8, 13);
     const first = { ...a, suggestion: 'archive cursor azure amber violet ivory orange ochre' };
@@ -93,6 +101,8 @@ describe('folded places', () => {
     ['Also at: a.ts:10,', 'Also at: a.ts:10, b.ts:20, c.ts:30'],
     ['Also at:', 'Also at: b.ts:20, c.ts:30'],
     ['Also at:\n  * a.ts:10\n<sub>Jev confidence: 0.85</sub>', 'Also at:\n  * a.ts:10\n  * b.ts:20\n  * c.ts:30\n<sub>Jev confidence: 0.85</sub>'],
+    ['Also at: a.ts:10\n```ts\nconst x = 1;\n```', 'Also at: a.ts:10, b.ts:20, c.ts:30\n```ts\nconst x = 1;\n```'],
+    ['Also at:\n- a.ts:10\n```ts\nconst x = 1;\n```', 'Also at:\n- a.ts:10\n- b.ts:20\n- c.ts:30\n```ts\nconst x = 1;\n```'],
   ])('appends places to the right block in %j', (body, expected) => {
     expect(withFoldedPlaces(body, extra)).toBe(expected);
   });

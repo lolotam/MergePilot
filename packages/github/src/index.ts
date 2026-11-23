@@ -144,6 +144,7 @@ export {
   capConsensusClusters,
   foundByLabel,
   mergePanelFindings,
+  promoteSurvivingCluster,
   withFoundBy,
   type ClusterKind,
   type ConsensusCluster,

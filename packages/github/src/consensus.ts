@@ -8,7 +8,7 @@ import {
   type Secret,
 } from '@mergepilot/engine';
 import { escapeInline } from './bot-identity.js';
-import { farFoldScore, foldedPlacesOf, foldSignalsOf, withFoldedPlaces } from './claim-fold.js';
+import { farFoldScore, foldedPlacesOf, foldSignalsOf, listedPlacesInBody, sameFoldPlace, withFoldedPlaces } from './claim-fold.js';
 import { sameClaimScore } from './claim-similarity.js';
 import { normalizeTitle } from './dedupe.js';
 
@@ -50,6 +50,8 @@ export interface ConsensusCluster {
   foundBy: Array<{ slot: number; name: string }>;
   foldedPlaces?: Array<{ path: string; line: number }>;
   foldedTitles?: Array<{ title: string; name: string }>;
+  /** Kept members anchored outside the representative's ±3-line window, ordered by severity then slot. */
+  distantMembers?: Array<{ slot: number; name: string; finding: Finding }> | undefined;
   rejectedBy?: Array<{ slot: number; finding: Finding }> | undefined;
   revived?: boolean | undefined;
 }
@@ -279,30 +281,80 @@ function sameTitle(a: Finding, b: Finding): boolean {
   return ta.length > 0 && ta === normalizeTitle(b.title);
 }
 
+function distinctAlternateTitles(
+  representativeTitle: string,
+  others: ReadonlyArray<{ slot: number; name: string; finding: Finding }>,
+): Array<{ title: string; name: string }> {
+  const seen = new Set([normalizeTitle(representativeTitle)]);
+  const titles: Array<{ title: string; name: string }> = [];
+  for (const { finding, name } of [...others].sort((a, b) => a.slot - b.slot)) {
+    const normalized = normalizeTitle(finding.title);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    titles.push({ title: finding.title, name });
+    if (titles.length === 3) break;
+  }
+  return titles;
+}
+
 function toCluster(group: Entry[], signals: EntrySignals): ConsensusCluster {
   const verified = group.filter((entry) => !entry.rejected);
   const revived = verified.length === 0;
-  const best = [...(revived ? group : verified)].sort(
+  const ranked = [...(revived ? group : verified)].sort(
     (a, b) => SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity] || a.slot - b.slot,
-  )[0]!;
+  );
+  const best = ranked[0]!;
   const bots = new Map<number, string>();
   for (const e of group) bots.set(e.slot, e.name);
   const foundBy = [...bots.entries()].sort((a, b) => a[0] - b[0]).map(([slot, name]) => ({ slot, name }));
-  const otherKept = verified.filter((entry) => entry !== best);
-  const foldedPlaces = foldedPlacesOf(best.finding, signals.get(best)?.listed ?? [], otherKept.map(({ finding }) => finding));
-  const title = normalizeTitle(best.finding.title);
-  const foldedTitles = otherKept
-    .filter(({ finding }) => normalizeTitle(finding.title) !== title)
-    .sort((a, b) => a.slot - b.slot)
-    .slice(0, 3)
-    .map(({ finding, name }) => ({ title: finding.title, name }));
+  const otherKept = revived ? [] : ranked.slice(1);
+  const bestListed = [...(signals.get(best)?.listed ?? []), ...listedPlacesInBody(best.finding.body)];
+  const otherPlaces = otherKept.flatMap((entry) => [
+    entry.finding,
+    ...(signals.get(entry)?.listed ?? []),
+    ...listedPlacesInBody(entry.finding.body),
+  ]);
+  const foldedPlaces = foldedPlacesOf(best.finding, bestListed, otherPlaces);
+  const foldedTitles = distinctAlternateTitles(best.finding.title, otherKept);
+  const distantMembers = otherKept
+    .filter((entry) => !sameFoldPlace(best.finding, entry.finding))
+    .map(({ slot, name, finding }) => ({ slot, name, finding }));
   return {
     finding: revived ? { ...best.finding, confidence: Math.min(best.finding.confidence, UNSHOWN_CODE_MAX_CONFIDENCE) } : best.finding,
     kind: best.kind, foundBy,
     ...(foldedPlaces.length > 0 ? { foldedPlaces } : {}),
     ...(foldedTitles.length > 0 ? { foldedTitles } : {}),
+    ...(distantMembers.length > 0 ? { distantMembers } : {}),
     ...(group.some((entry) => entry.rejected) ? { rejectedBy: group.filter((entry) => entry.rejected).map((entry) => ({ slot: entry.slot, finding: entry.finding })) } : {}),
     ...(revived ? { revived: true } : {}),
+  };
+}
+
+/**
+ * When a cluster's representative matches an earlier PR comment but a folded distant member is new,
+ * promotes the highest-severity surviving distant member so newly found locations are not dropped.
+ */
+export function promoteSurvivingCluster(
+  cluster: ConsensusCluster,
+  notYetPosted: ReadonlySet<Finding>,
+): ConsensusCluster | null {
+  const surviving = (cluster.distantMembers ?? []).filter((member) => notYetPosted.has(member.finding));
+  if (surviving.length === 0) return null;
+  const nextBest = surviving[0]!;
+  const rest = surviving.slice(1);
+  const foldedPlaces = foldedPlacesOf(
+    nextBest.finding,
+    listedPlacesInBody(nextBest.finding.body),
+    rest.flatMap((member) => [member.finding, ...listedPlacesInBody(member.finding.body)]),
+  );
+  const foldedTitles = distinctAlternateTitles(nextBest.finding.title, rest);
+  const { foldedPlaces: _fp, foldedTitles: _ft, distantMembers: _dm, ...base } = cluster;
+  return {
+    ...base,
+    finding: nextBest.finding,
+    ...(foldedPlaces.length > 0 ? { foldedPlaces } : {}),
+    ...(foldedTitles.length > 0 ? { foldedTitles } : {}),
+    ...(rest.length > 0 ? { distantMembers: rest } : {}),
   };
 }
 
