@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { alsoAtPlaces, judgeSameIssue, type Finding, type Judge, type SameIssuePair, type Secret } from '@mergepilot/engine';
+import { judgeSameIssue, type Finding, type Judge, type SameIssuePair, type Secret } from '@mergepilot/engine';
 import type { GitHubClient, GitHubReviewComment } from './client.js';
 import { commentBotSlot, MAIN_BOT_SLOT } from './marker.js';
 import { listAllReviewComments } from './review-comments.js';
@@ -46,30 +46,22 @@ const MAX_CANDIDATES_PER_FINDING = 3;
 const MAX_SEMANTIC_PAIRS = 50;
 
 const FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
-const FOLDED_FINGERPRINTS_REGEX = /<!--\s*mp:ff=([a-f0-9@,]+)\s*-->/gi;
-const ALSO_RAISED_AS_REGEX = /^_(?:Also raised as|وردت أيضاً بصياغة):[ \t]*(.+)_$/m;
-const QUOTED_TITLE_REGEX = /"((?:\\.|[^"\\])+)"/g;
+/** Matches only the renderer's trailing metadata footer after `mp:f=`, never quoted body/evidence text. */
+const FOLDED_FINGERPRINTS_FOOTER_REGEX = /\n\n<!-- mp:f=[a-f0-9]+ -->\n\n<!-- mp:ff=([a-f0-9@,]+) -->(?:\n\n<!-- mergepilot:bot=\d+ -->)?\s*$/i;
 const TITLE_REGEX = /^###\s+(.+)$/m;
 const DISCLOSED_LINE_WINDOW = 3;
 
 function parseFoldedFingerprints(body: string | null | undefined): Array<{ fingerprint: string; line: number }> {
   if (!body) return [];
+  const match = FOLDED_FINGERPRINTS_FOOTER_REGEX.exec(body);
+  if (!match?.[1]) return [];
   const entries: Array<{ fingerprint: string; line: number }> = [];
-  for (const match of body.matchAll(FOLDED_FINGERPRINTS_REGEX)) {
-    for (const token of (match[1] ?? '').split(',')) {
-      const [fp, lineText] = token.split('@');
-      const line = Number(lineText);
-      if (fp && Number.isInteger(line) && line > 0) entries.push({ fingerprint: fp.toLowerCase(), line });
-    }
+  for (const token of match[1].split(',')) {
+    const [fp, lineText] = token.split('@');
+    const line = Number(lineText);
+    if (fp && Number.isInteger(line) && line > 0) entries.push({ fingerprint: fp.toLowerCase(), line });
   }
   return entries;
-}
-
-function parseAlternateTitles(body: string | null | undefined): string[] {
-  if (!body) return [];
-  const line = ALSO_RAISED_AS_REGEX.exec(body)?.[1];
-  if (!line) return [];
-  return [...line.matchAll(QUOTED_TITLE_REGEX)].map((match) => match[1]!.replace(/\\(.)/g, '$1'));
 }
 
 /**
@@ -201,7 +193,7 @@ export async function deduplicateFindings(
     return { kept: [...findings], dropped: [] };
   }
 
-  // Map existing comments for fast matching, plus folded member identities and disclosed `Also at:` places.
+  // Map existing comments for fast matching, plus footer-recorded folded member identities.
   const commentsByPath = new Map<
     string,
     Array<{
@@ -212,8 +204,6 @@ export async function deduplicateFindings(
     }>
   >();
   const foldedLinesByFp = new Map<string, number[]>();
-  const disclosedByPath = new Map<string, Array<{ line: number; titles: string[] }>>();
-  const candidatePaths = [...new Set(findings.map((finding) => finding.path))];
 
   for (const comment of existingComments) {
     const range = commentLineRange(comment);
@@ -221,7 +211,10 @@ export async function deduplicateFindings(
     const path = comment.path;
     const fingerprint = parseFingerprintFromComment(comment.body);
     const title = parseTitleFromComment(comment.body);
-    const cleanedBody = (comment.body ?? '').replace(FINGERPRINT_REGEX, '').replace(FOLDED_FINGERPRINTS_REGEX, '').trim();
+    const cleanedBody = (comment.body ?? '')
+      .replace(FOLDED_FINGERPRINTS_FOOTER_REGEX, '')
+      .replace(FINGERPRINT_REGEX, '')
+      .trim();
 
     const list = commentsByPath.get(path) ?? [];
     list.push({ range, fingerprint, title, body: cleanedBody });
@@ -231,14 +224,6 @@ export async function deduplicateFindings(
       const lines = foldedLinesByFp.get(entry.fingerprint) ?? [];
       lines.push(entry.line);
       foldedLinesByFp.set(entry.fingerprint, lines);
-    }
-    const titles = [...(title ? [title] : []), ...parseAlternateTitles(comment.body)];
-    if (titles.length > 0 && comment.body) {
-      for (const place of alsoAtPlaces(comment.body, candidatePaths)) {
-        const disclosed = disclosedByPath.get(place.path) ?? [];
-        disclosed.push({ line: place.line, titles });
-        disclosedByPath.set(place.path, disclosed);
-      }
     }
   }
 
@@ -252,12 +237,7 @@ export async function deduplicateFindings(
     const alreadyFolded = (foldedLinesByFp.get(findingFingerprint) ?? []).some(
       (line) => Math.abs(line - finding.line) <= DISCLOSED_LINE_WINDOW,
     );
-    const alreadyDisclosed = (disclosedByPath.get(finding.path) ?? []).some(
-      (entry) =>
-        Math.abs(entry.line - finding.line) <= DISCLOSED_LINE_WINDOW &&
-        entry.titles.some((title) => areTitlesSimilar(title, finding.title)),
-    );
-    if (alreadyFolded || alreadyDisclosed) {
+    if (alreadyFolded) {
       dropped.push(finding);
       continue;
     }

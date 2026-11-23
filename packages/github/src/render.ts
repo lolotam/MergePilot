@@ -37,6 +37,13 @@ function fence(text: string, info = ''): string {
   return `${ticks}${info}\n${text}\n${ticks}`;
 }
 
+const foldedFingerprintsByFinding = new WeakMap<Finding, readonly string[]>();
+
+/** Attaches folded distant member `<fingerprint>@<line>` tokens to a finding for footer rendering. */
+export function attachFoldedFingerprints(finding: Finding, tokens: readonly string[]): void {
+  if (tokens.length > 0) foldedFingerprintsByFinding.set(finding, tokens);
+}
+
 /**
  * Renders an inline review finding comment with localized labels and GitHub markdown formatting.
  */
@@ -63,6 +70,8 @@ export function renderFindingComment(
 
   const fingerprint = computeFindingFingerprint(finding);
   sections.push(`<!-- mp:f=${fingerprint} -->`);
+  const folded = foldedFingerprintsByFinding.get(finding);
+  if (folded && folded.length > 0) sections.push(`<!-- mp:ff=${folded.join(',')} -->`);
   const botMarker = buildBotCommentMarker(botSlot);
   if (botMarker) sections.push(botMarker);
 

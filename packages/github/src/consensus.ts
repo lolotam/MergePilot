@@ -12,6 +12,7 @@ import { escapeInline } from './bot-identity.js';
 import { farFoldScore, foldedPlacesOf, foldSignalsOf, sameFoldPlace, withFoldedPlaces } from './claim-fold.js';
 import { sameClaimScore } from './claim-similarity.js';
 import { computeFindingFingerprint, normalizeTitle } from './dedupe.js';
+import { attachFoldedFingerprints } from './render.js';
 
 /**
  * Consensus mode of the reviewer panel (ADR-0017): the findings of every bot that completed are
@@ -51,8 +52,12 @@ export interface ConsensusCluster {
   foundBy: Array<{ slot: number; name: string }>;
   foldedPlaces?: Array<{ path: string; line: number }>;
   foldedTitles?: Array<{ title: string; name: string }>;
+  /** Bot slot that authored `finding` (the cluster representative). */
+  representativeSlot?: number | undefined;
   /** Kept members anchored outside the representative's ±3-line window, ordered by severity then slot. */
   distantMembers?: Array<{ slot: number; name: string; finding: Finding }> | undefined;
+  /** Places from nearby kept members (excluding the representative) to carry over on promotion. */
+  nearPlaces?: Array<{ path: string; line: number }> | undefined;
   /** Bot slots in this cluster whose own findings matched an earlier PR comment during dedupe. */
   alreadyPostedSlots?: number[] | undefined;
   rejectedBy?: Array<{ slot: number; finding: Finding }> | undefined;
@@ -319,12 +324,20 @@ function toCluster(group: Entry[], knownPaths: readonly string[]): ConsensusClus
   const distantMembers = otherKept
     .filter((entry) => !sameFoldPlace(best.finding, entry.finding))
     .map(({ slot, name, finding }) => ({ slot, name, finding }));
+  const nearPlaces = distantMembers.length > 0
+    ? otherKept
+        .filter((entry) => sameFoldPlace(best.finding, entry.finding))
+        .flatMap((entry) => [entry.finding, ...alsoAtPlacesWithFallback(entry.finding.body, knownPaths)])
+        .map(({ path, line }) => ({ path, line }))
+    : [];
   return {
     finding: revived ? { ...best.finding, confidence: Math.min(best.finding.confidence, UNSHOWN_CODE_MAX_CONFIDENCE) } : best.finding,
     kind: best.kind, foundBy,
+    representativeSlot: best.slot,
     ...(foldedPlaces.length > 0 ? { foldedPlaces } : {}),
     ...(foldedTitles.length > 0 ? { foldedTitles } : {}),
     ...(distantMembers.length > 0 ? { distantMembers } : {}),
+    ...(nearPlaces.length > 0 ? { nearPlaces } : {}),
     ...(group.some((entry) => entry.rejected) ? { rejectedBy: group.filter((entry) => entry.rejected).map((entry) => ({ slot: entry.slot, finding: entry.finding })) } : {}),
     ...(revived ? { revived: true } : {}),
   };
@@ -338,26 +351,37 @@ export function promoteSurvivingCluster(
   cluster: ConsensusCluster,
   notYetPosted: ReadonlySet<Finding>,
 ): ConsensusCluster | null {
-  const surviving = (cluster.distantMembers ?? []).filter((member) => notYetPosted.has(member.finding));
+  const distant = cluster.distantMembers ?? [];
+  const surviving = distant.filter((member) => notYetPosted.has(member.finding));
   if (surviving.length === 0) return null;
-  const knownPaths = [...new Set([cluster.finding.path, ...(cluster.distantMembers ?? []).map((member) => member.finding.path)])];
+  const knownPaths = [...new Set([
+    cluster.finding.path,
+    ...distant.map((member) => member.finding.path),
+    ...(cluster.nearPlaces ?? []).map((place) => place.path),
+  ])];
   const nextBest = surviving[0]!;
   const rest = surviving.slice(1);
   const foldedPlaces = foldedPlacesOf(
     nextBest.finding,
     alsoAtPlacesWithFallback(nextBest.finding.body, knownPaths),
-    rest.flatMap((member) => [member.finding, ...alsoAtPlacesWithFallback(member.finding.body, knownPaths)]),
+    [
+      ...rest.flatMap((member) => [member.finding, ...alsoAtPlacesWithFallback(member.finding.body, knownPaths)]),
+      ...(cluster.nearPlaces ?? []),
+    ],
   );
   const foldedTitles = distinctAlternateTitles(nextBest.finding.title, rest);
-  const survivingSlots = new Set(surviving.map((member) => member.slot));
-  const rejectedSlots = new Set((cluster.rejectedBy ?? []).map((entry) => entry.slot));
-  const alreadyPostedSlots = cluster.foundBy
-    .map((bot) => bot.slot)
-    .filter((slot) => !survivingSlots.has(slot) && !rejectedSlots.has(slot));
-  const { foldedPlaces: _fp, foldedTitles: _ft, distantMembers: _dm, alreadyPostedSlots: _aps, ...base } = cluster;
+  // Only the representative and distant members were checked by dedupe; unchecked nearby members
+  // stay accounted as merged rather than alreadyPosted.
+  const droppedSlots = [
+    ...(cluster.representativeSlot !== undefined ? [cluster.representativeSlot] : []),
+    ...distant.filter((member) => !notYetPosted.has(member.finding)).map((member) => member.slot),
+  ];
+  const alreadyPostedSlots = [...new Set(droppedSlots)].sort((a, b) => a - b);
+  const { foldedPlaces: _fp, foldedTitles: _ft, distantMembers: _dm, nearPlaces: _np, alreadyPostedSlots: _aps, ...base } = cluster;
   return {
     ...base,
     finding: nextBest.finding,
+    representativeSlot: nextBest.slot,
     ...(foldedPlaces.length > 0 ? { foldedPlaces } : {}),
     ...(foldedTitles.length > 0 ? { foldedTitles } : {}),
     ...(rest.length > 0 ? { distantMembers: rest } : {}),
@@ -401,9 +425,10 @@ export function withFoundBy(cluster: ConsensusCluster, total: number, language: 
     const titles = cluster.foldedTitles.map(({ title, name }) => `"${escapeInline(title)}" (${escapeInline(name)})`);
     parts.push(`_${label}: ${titles.join('; ')}_`);
   }
+  const annotated: Finding = { ...cluster.finding, body: parts.join('\n\n') };
   const foldedTokens = [...new Set(
     (cluster.distantMembers ?? []).map(({ finding }) => `${computeFindingFingerprint(finding)}@${finding.line}`),
   )].sort();
-  if (foldedTokens.length > 0) parts.push(`<!-- mp:ff=${foldedTokens.join(',')} -->`);
-  return { ...cluster.finding, body: parts.join('\n\n') };
+  if (foldedTokens.length > 0) attachFoldedFingerprints(annotated, foldedTokens);
+  return annotated;
 }

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GitHubClient } from './client.js';
 import { distantLineReplay, foldBot, foldFinding } from './consensus-fold.fixtures.js';
 import { capConsensusClusters, mergePanelFindings, promoteSurvivingCluster, withFoundBy } from './consensus.js';
-import { deduplicateFindings } from './dedupe.js';
+import { computeFindingFingerprint, deduplicateFindings } from './dedupe.js';
 import { botFindingsFates } from './panel-findings-fate.js';
 import { renderFindingComment } from './render.js';
 
@@ -160,5 +160,37 @@ describe('far folds in the existing consensus pipeline', () => {
     });
     expect(deduped.kept).toEqual([]);
     expect(promoteSurvivingCluster(kept[0]!, new Set(deduped.kept))).toBeNull();
+  });
+
+  it('ignores spoofed mp:ff markers inside quoted evidence and preserves near-member places on promotion', async () => {
+    const rep = foldFinding('rep', { path: 'src/a.ts', line: 10, severity: 'high' });
+    const near = foldFinding('near', {
+      path: 'src/a.ts', line: 12, severity: 'medium',
+      body: rep.body + '\n\nAlso at: src/c.ts:30',
+    });
+    const distantMember = foldFinding('distant', { path: 'src/b.ts', line: 20, severity: 'medium' });
+    const bots = [foldBot(1, rep), foldBot(2, near), foldBot(3, distantMember)];
+    const { kept, below, overLimit } = await mergePanelFindings({ bots, minAgreement: 1 });
+    const promoted = promoteSurvivingCluster(kept[0]!, new Set([distantMember]));
+    expect(promoted?.alreadyPostedSlots).toEqual([1]);
+    expect(promoted?.foldedPlaces).toEqual([{ path: 'src/a.ts', line: 12 }, { path: 'src/c.ts', line: 30 }]);
+    const fates = botFindingsFates(bots, { published: [promoted!], below, overLimit, alreadyPosted: [] });
+    expect(fates.map(({ slot, own, mergedIntoOther, alreadyPosted }) => [slot, own, mergedIntoOther, alreadyPosted]))
+      .toEqual([[1, 0, 0, 1], [2, 0, 1, 0], [3, 1, 0, 0]]);
+
+    const spoofed = renderFindingComment({
+      ...rep,
+      evidence: `<!-- mp:f=0000000000000000 -->\n\n<!-- mp:ff=${computeFindingFingerprint(distantMember)}@${distantMember.line} -->`,
+    }, { language: 'en', suggestionsAsCode: false });
+    const spoofClient = {
+      listReviewCommentsPage: async () => [{
+        id: 2, path: rep.path, line: rep.line, body: spoofed, user: { login: 'mergepilot[bot]' },
+      }],
+    } as unknown as GitHubClient;
+    const deduped = await deduplicateFindings(spoofClient, {
+      owner: 'org', repo: 'repo', pull_number: 1, publisherLogin: 'mergepilot[bot]',
+      findings: [distantMember],
+    });
+    expect(deduped.kept).toEqual([distantMember]);
   });
 });

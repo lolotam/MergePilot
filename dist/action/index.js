@@ -144576,10 +144576,20 @@ function isLocationListLine(line, knownPaths) {
   const stripped = line.replace(LIST_BULLET_RE, "").trim();
   if (!stripped)
     return false;
-  if (parseLocationEntry(stripped.replace(/,$/, ""), knownPaths))
-    return true;
-  const parts = stripped.split(",").map((part) => part.trim()).filter(Boolean);
-  return parts.length > 0 && parts.every((part) => parseLocationEntry(part, knownPaths) !== null);
+  const knownMatches = knownMatchesInText(stripped, knownPaths);
+  let remaining = "";
+  let pos = 0;
+  for (const match3 of knownMatches) {
+    const start = match3.start > pos && stripped[match3.start - 1] === "`" ? match3.start - 1 : match3.start;
+    const end = stripped[match3.end] === "`" ? match3.end + 1 : match3.end;
+    remaining += stripped.slice(pos, start) + ",";
+    pos = end;
+  }
+  remaining += stripped.slice(pos);
+  const parts = remaining.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0)
+    return knownMatches.length > 0;
+  return parts.every((part) => parseLocationEntry(part, knownPaths) !== null);
 }
 function alsoAtBlockRange(text, knownPaths = []) {
   const block = ALSO_AT_BLOCK_RE.exec(text);
@@ -198660,32 +198670,23 @@ var SEMANTIC_LINE_WINDOW = 10;
 var MAX_CANDIDATES_PER_FINDING = 3;
 var MAX_SEMANTIC_PAIRS = 50;
 var FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
-var FOLDED_FINGERPRINTS_REGEX = /<!--\s*mp:ff=([a-f0-9@,]+)\s*-->/gi;
-var ALSO_RAISED_AS_REGEX = /^_(?:Also raised as|وردت أيضاً بصياغة):[ \t]*(.+)_$/m;
-var QUOTED_TITLE_REGEX = /"((?:\\.|[^"\\])+)"/g;
+var FOLDED_FINGERPRINTS_FOOTER_REGEX = /\n\n<!-- mp:f=[a-f0-9]+ -->\n\n<!-- mp:ff=([a-f0-9@,]+) -->(?:\n\n<!-- mergepilot:bot=\d+ -->)?\s*$/i;
 var TITLE_REGEX = /^###\s+(.+)$/m;
 var DISCLOSED_LINE_WINDOW = 3;
 function parseFoldedFingerprints(body) {
   if (!body)
     return [];
+  const match3 = FOLDED_FINGERPRINTS_FOOTER_REGEX.exec(body);
+  if (!match3?.[1])
+    return [];
   const entries = [];
-  for (const match3 of body.matchAll(FOLDED_FINGERPRINTS_REGEX)) {
-    for (const token of (match3[1] ?? "").split(",")) {
-      const [fp, lineText] = token.split("@");
-      const line = Number(lineText);
-      if (fp && Number.isInteger(line) && line > 0)
-        entries.push({ fingerprint: fp.toLowerCase(), line });
-    }
+  for (const token of match3[1].split(",")) {
+    const [fp, lineText] = token.split("@");
+    const line = Number(lineText);
+    if (fp && Number.isInteger(line) && line > 0)
+      entries.push({ fingerprint: fp.toLowerCase(), line });
   }
   return entries;
-}
-function parseAlternateTitles(body) {
-  if (!body)
-    return [];
-  const line = ALSO_RAISED_AS_REGEX.exec(body)?.[1];
-  if (!line)
-    return [];
-  return [...line.matchAll(QUOTED_TITLE_REGEX)].map((match3) => match3[1].replace(/\\(.)/g, "$1"));
 }
 function normalizeTitle2(title) {
   return title.toLowerCase().trim().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ");
@@ -198770,8 +198771,6 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
   }
   const commentsByPath = /* @__PURE__ */ new Map();
   const foldedLinesByFp = /* @__PURE__ */ new Map();
-  const disclosedByPath = /* @__PURE__ */ new Map();
-  const candidatePaths = [...new Set(findings.map((finding) => finding.path))];
   for (const comment of existingComments) {
     const range = commentLineRange(comment);
     if (!range)
@@ -198779,7 +198778,7 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
     const path12 = comment.path;
     const fingerprint = parseFingerprintFromComment(comment.body);
     const title = parseTitleFromComment(comment.body);
-    const cleanedBody = (comment.body ?? "").replace(FINGERPRINT_REGEX, "").replace(FOLDED_FINGERPRINTS_REGEX, "").trim();
+    const cleanedBody = (comment.body ?? "").replace(FOLDED_FINGERPRINTS_FOOTER_REGEX, "").replace(FINGERPRINT_REGEX, "").trim();
     const list = commentsByPath.get(path12) ?? [];
     list.push({ range, fingerprint, title, body: cleanedBody });
     commentsByPath.set(path12, list);
@@ -198787,14 +198786,6 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
       const lines = foldedLinesByFp.get(entry.fingerprint) ?? [];
       lines.push(entry.line);
       foldedLinesByFp.set(entry.fingerprint, lines);
-    }
-    const titles = [...title ? [title] : [], ...parseAlternateTitles(comment.body)];
-    if (titles.length > 0 && comment.body) {
-      for (const place of alsoAtPlaces(comment.body, candidatePaths)) {
-        const disclosed = disclosedByPath.get(place.path) ?? [];
-        disclosed.push({ line: place.line, titles });
-        disclosedByPath.set(place.path, disclosed);
-      }
     }
   }
   const kept = [];
@@ -198804,8 +198795,7 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
   for (const finding of findings) {
     const findingFingerprint = computeFindingFingerprint(finding);
     const alreadyFolded = (foldedLinesByFp.get(findingFingerprint) ?? []).some((line) => Math.abs(line - finding.line) <= DISCLOSED_LINE_WINDOW);
-    const alreadyDisclosed = (disclosedByPath.get(finding.path) ?? []).some((entry) => Math.abs(entry.line - finding.line) <= DISCLOSED_LINE_WINDOW && entry.titles.some((title) => areTitlesSimilar(title, finding.title)));
-    if (alreadyFolded || alreadyDisclosed) {
+    if (alreadyFolded) {
       dropped.push(finding);
       continue;
     }
@@ -198888,6 +198878,7 @@ function fence(text, info = "") {
 ${text}
 ${ticks}`;
 }
+var foldedFingerprintsByFinding = /* @__PURE__ */ new WeakMap();
 function renderFindingComment(finding, { language, suggestionsAsCode, botSlot }) {
   const labels = language === "ar" ? LABELS_AR : LABELS_EN;
   const sections = [
@@ -198908,6 +198899,9 @@ ${finding.suggestion}`);
   }
   const fingerprint = computeFindingFingerprint(finding);
   sections.push(`<!-- mp:f=${fingerprint} -->`);
+  const folded = foldedFingerprintsByFinding.get(finding);
+  if (folded && folded.length > 0)
+    sections.push(`<!-- mp:ff=${folded.join(",")} -->`);
   const botMarker = buildBotCommentMarker(botSlot);
   if (botMarker)
     sections.push(botMarker);

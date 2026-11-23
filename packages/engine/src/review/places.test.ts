@@ -28,3 +28,12 @@ it('parses spaces, multiple dots, nested paths, and extensionless filenames with
     { path: 'docs/my doc.md', line: 8 },
   ]);
 });
+
+it('keeps wrapped continuation lines containing comma-bearing known paths alongside other entries', () => {
+  const body = 'Also at: src/entry.ts:10,\n  src/report, draft.ts:20, src/worker.ts:30';
+  expect(alsoAtPlaces(body, ['src/entry.ts', 'src/report, draft.ts', 'src/worker.ts'])).toEqual([
+    { path: 'src/entry.ts', line: 10 },
+    { path: 'src/report, draft.ts', line: 20 },
+    { path: 'src/worker.ts', line: 30 },
+  ]);
+});

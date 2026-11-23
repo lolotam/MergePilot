@@ -41,10 +41,19 @@ function isLocationListLine(line: string, knownPaths: readonly string[]): boolea
   if (NON_LIST_LINE_RE.test(line)) return false;
   const stripped = line.replace(LIST_BULLET_RE, '').trim();
   if (!stripped) return false;
-  // Whole-line match handles known paths that contain commas.
-  if (parseLocationEntry(stripped.replace(/,$/, ''), knownPaths)) return true;
-  const parts = stripped.split(',').map((part) => part.trim()).filter(Boolean);
-  return parts.length > 0 && parts.every((part) => parseLocationEntry(part, knownPaths) !== null);
+  const knownMatches = knownMatchesInText(stripped, knownPaths);
+  let remaining = '';
+  let pos = 0;
+  for (const match of knownMatches) {
+    const start = match.start > pos && stripped[match.start - 1] === '`' ? match.start - 1 : match.start;
+    const end = stripped[match.end] === '`' ? match.end + 1 : match.end;
+    remaining += stripped.slice(pos, start) + ',';
+    pos = end;
+  }
+  remaining += stripped.slice(pos);
+  const parts = remaining.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return knownMatches.length > 0;
+  return parts.every((part) => parseLocationEntry(part, knownPaths) !== null);
 }
 
 /**
