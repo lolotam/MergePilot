@@ -176,6 +176,7 @@ export async function executeReview(
       context: run.context,
       exploration: reviewResult.exploration,
       outputLimit: reviewResult.outputLimit,
+      notShownArtifacts: run.notShownArtifacts,
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),
       ...(totals.inputTokens !== undefined ? { inputTokens: totals.inputTokens } : {}),
       ...(totals.outputTokens !== undefined ? { outputTokens: totals.outputTokens } : {}),

@@ -86,6 +86,14 @@ function isGeneratedPath(filePath: string): boolean {
   return false;
 }
 
+/** Drizzle migration snapshots and OpenAPI or Swagger JSON dumps. */
+export function isGeneratedArtifactPath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
+  return /(^|\/)migrations\/meta\/\d+_snapshot\.json$/.test(normalized)
+    || /^(openapi|swagger)([.-][\w.-]+)?\.json$/i.test(basename);
+}
+
 /** Extensions of files that are never text worth showing a model (images, archives, fonts, media). */
 const BINARY_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'tif', 'tiff', 'avif', 'psd',
@@ -127,7 +135,7 @@ export function isContextPathAllowed(path: string, opts: ClassifyFileOptions): b
  * 3. excluded
  * 4. generated
  * 5. binary (no patch and changes === 0)
- * 6. truncated (no patch and changes > 0)
+ * 6. missing patch with changes (skip generated artifacts, otherwise incomplete)
  * 7. review
  */
 export function classifyFile(
@@ -155,7 +163,7 @@ export function classifyFile(
   }
 
   if (!file.patch && file.changes > 0) {
-    return 'incomplete-truncated';
+    return isGeneratedArtifactPath(file.path) ? 'skip-generated' : 'incomplete-truncated';
   }
 
   return 'review';

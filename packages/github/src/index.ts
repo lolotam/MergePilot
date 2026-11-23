@@ -37,6 +37,7 @@ export {
 export {
   rebuildMissingPatches,
   MAX_REBUILT_PATCH_LINES,
+  MAX_REBUILD_FILE_BYTES,
   type RebuildPatchesOptions,
   type RebuildPatchesResult,
 } from './rebuild-patch.js';
@@ -117,6 +118,7 @@ export {
 export { postBudgetSkipNoteOnce, type BudgetSkipNoteParams } from './budget-skip-note.js';
 export { postPanelFailedNoteOnce, type PanelFailedNoteParams } from './panel-failed-note.js';
 export * from './summary.js';
+export { blobFileText, contentsFileText } from './contents-file.js';
 export * from './fallback-reason.js';
 export * from './judge-summary.js';
 export * from './review-notes.js';

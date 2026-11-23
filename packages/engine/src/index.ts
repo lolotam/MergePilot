@@ -10,6 +10,7 @@ export * from './review/budget.js';
 export * from './budget/index.js';
 export * from './review/model.js';
 export * from './review/pipeline.js';
+export { notShownArtifactLabels } from './review/changed-files.js';
 export * from './review/prompt.js';
 export * from './review/types.js';
 export * from './review/verify.js';

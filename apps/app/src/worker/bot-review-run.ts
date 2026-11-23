@@ -1,4 +1,5 @@
 import {
+  notShownArtifactLabels,
   redactSecrets,
   runReview,
   type ContextDisclosure,
@@ -81,6 +82,7 @@ export type BotReviewRun =
       reviewResult: ReviewRunResult;
       scope: ReviewScope;
       rulesLeftOut: string[];
+      notShownArtifacts: string[];
       context?: ContextDisclosure | undefined;
       exploration?: ExplorationDisclosure | undefined;
     };
@@ -134,6 +136,7 @@ export async function selectBotFiles(
     publisherLogin: params.publisherLogin ?? DEFAULT_PUBLISHER_LOGIN,
     configHash,
     baseSha: params.baseSha,
+    ...(params.exclude ? { exclude: params.exclude } : {}),
     ...(botSlot !== undefined ? { botSlot } : {}),
     ...(params.force ? { force: true } : {}),
   });
@@ -208,6 +211,7 @@ export async function runBotReview(params: BotReviewParams): Promise<BotReviewRu
     reviewResult,
     scope,
     rulesLeftOut: inputs.rulesLeftOut,
+    notShownArtifacts: notShownArtifactLabels(filesToReview, { exclude: config.review.exclude, knownSecrets }),
     ...(context ? { context } : {}),
     ...(reviewResult.status !== 'skipped-budget' && reviewResult.exploration ? { exploration: reviewResult.exploration } : {}),
   };
@@ -249,6 +253,7 @@ export interface ReviewOnlyOutcome {
   scope?: ReviewScope | undefined;
   /** Nested rules files the review could not include (ADR-0028). */
   rulesLeftOut?: string[] | undefined;
+  notShownArtifacts?: string[] | undefined;
   /** Repository context sent and left out (ADR-0029). */
   context?: ContextDisclosure | undefined;
   exploration?: ExplorationDisclosure | undefined;
@@ -259,7 +264,14 @@ export function reviewOnlyOutcome(run: BotReviewRun, params: Pick<BotReviewParam
   if (run.kind === 'nothing-new') return { outcome: 'skipped', detail: NOTHING_NEW_DETAIL };
   const secrets = params.knownSecrets ?? [];
   const r = run.reviewResult;
-  const base = { runResult: r, scope: run.scope, rulesLeftOut: run.rulesLeftOut, context: run.context, exploration: run.exploration };
+  const base = {
+    runResult: r,
+    scope: run.scope,
+    rulesLeftOut: run.rulesLeftOut,
+    notShownArtifacts: run.notShownArtifacts,
+    context: run.context,
+    exploration: run.exploration,
+  };
   if (r.status === 'completed') {
     const totals = withJudgeUsage(r.costUsd, r.usage, params.judge?.judge.report());
     return {

@@ -5,6 +5,7 @@ import type { JudgeSummaryInput } from './judge-summary.js';
 import {
   renderContextNote,
   renderExplorationNote,
+  renderNotShownArtifacts,
   renderOutputLimitNote,
   renderRulesLeftOut,
   renderVerifyRejected,
@@ -51,6 +52,8 @@ export interface ReviewSummaryInput {
   withheld?: readonly WithheldItem[] | undefined;
   /** Nested rules files left out of the review (ADR-0028). */
   rulesLeftOut?: readonly string[] | undefined;
+  /** Changed generated artifacts whose diffs could not be built (ADR-0055). */
+  notShownArtifacts?: readonly string[] | undefined;
   /** Repository context sent and left out (ADR-0029). */
   context?: ContextDisclosure | undefined;
   /** Read-only exploration before the answer (ADR-0046). */
@@ -289,6 +292,8 @@ export function renderReviewSummary(input: ReviewSummaryInput): string {
   if (withheld) sections.push(withheld);
   const rulesLeftOut = renderRulesLeftOut(input.rulesLeftOut ?? [], isArabic);
   if (rulesLeftOut) sections.push(rulesLeftOut);
+  const artifacts = renderNotShownArtifacts(input.notShownArtifacts ?? [], isArabic);
+  if (artifacts) sections.push(artifacts);
   const contextNote = renderContextNote(input.context, isArabic);
   if (contextNote) sections.push(contextNote);
   const explorationNote = renderExplorationNote(input.exploration, isArabic);

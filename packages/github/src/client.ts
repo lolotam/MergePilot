@@ -29,6 +29,7 @@ import type {
   RemoveLabelParams,
 } from './client-types.js';
 import { directoryFilesOf, isNotFoundError } from './contents.js';
+import { blobFileText, contentsFileText } from './contents-file.js';
 import { fetchReviewThreads } from './review-threads.js';
 
 export * from './client-types.js';
@@ -140,23 +141,13 @@ export function createOctokitClient(token: string): GitHubClient {
             path: params.path,
             ref: params.ref,
           });
-          const data = response.data;
-          if (Array.isArray(data) || !data || typeof data !== 'object') {
-            return null;
-          }
-          const item = data as { type?: string; content?: string; encoding?: string };
-          if (item.type !== 'file' || typeof item.content !== 'string') {
-            return null;
-          }
-          // A file over 1 MB comes back with the encoding "none" and no content at all.
-          if (item.encoding === 'none') {
-            return null;
-          }
-          const encoding = item.encoding ?? 'base64';
-          if (encoding === 'base64') {
-            return Buffer.from(item.content, 'base64').toString('utf8');
-          }
-          return item.content;
+          return await contentsFileText(response.data, {
+            maxBytes: params.maxBytes,
+            readBlob: async (sha) => {
+              const blob = await octokit.rest.git.getBlob({ owner: params.owner, repo: params.repo, file_sha: sha });
+              return blobFileText(blob.data);
+            },
+          });
         } catch (error: unknown) {
           if (isNotFoundError(error)) return null;
           sanitizeError(error, token);

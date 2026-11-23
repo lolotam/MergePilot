@@ -1,4 +1,5 @@
 import {
+  notShownArtifactLabels,
   parseConfig,
   redactSecrets,
   runReview,
@@ -200,6 +201,7 @@ export async function reviewPullRequest(
     prFiles,
     configHash,
     baseSha,
+    exclude: config.review.exclude,
   });
 
   const filesToReview = selection.files;
@@ -292,6 +294,7 @@ export async function reviewPullRequest(
       verifyRejected: reviewResult.verifyRejected,
       withheld: reviewResult.withheld,
       rulesLeftOut: inputs.rulesLeftOut,
+      notShownArtifacts: notShownArtifactLabels(filesToReview, { exclude: config.review.exclude, knownSecrets }),
       context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut, inputs.openFindings),
       outputLimit: reviewResult.outputLimit,
       ...(totals.costUsd !== undefined ? { costUsd: totals.costUsd } : {}),

@@ -69,6 +69,8 @@ export interface GetFileContentParams {
   repo: string;
   path: string;
   ref: string;
+  /** Use the Git Blobs API when Contents omits content and the file fits this byte limit. */
+  maxBytes?: number;
 }
 
 export type CompareCommitsStatus = 'ahead' | 'behind' | 'identical' | 'diverged';

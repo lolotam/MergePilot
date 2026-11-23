@@ -1,6 +1,7 @@
 import {
   describeAnsweredBy,
   hasJudgeUse,
+  notShownArtifactLabels,
   type VerifyRejectedFinding,
 } from '@mergepilot/engine';
 import {
@@ -169,6 +170,10 @@ export async function publishConsensus(
       (rr.verifyRejected ?? []).filter((f) => !isIncorporated(f, br.bot.slot, incorporated)).map((f) => ({ ...f, bot: br.bot.name })),
     ),
     rulesLeftOut: [...new Set(completed.flatMap(({ pending }) => pending.outcome.rulesLeftOut ?? []))],
+    notShownArtifacts: notShownArtifactLabels(files.selection.files, {
+      exclude: ctx.mainConfig.effectiveConfig.review.exclude,
+      knownSecrets,
+    }),
     context: mergeContextDisclosures(completed.map(({ pending }) => pending.outcome.context)),
     explorations,
     outputLimits: completed.flatMap(({ br, rr }) => (rr.outputLimit ? [{ ...rr.outputLimit, bot: br.bot.name }] : [])),

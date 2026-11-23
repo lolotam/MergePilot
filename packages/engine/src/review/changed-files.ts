@@ -4,7 +4,8 @@
  */
 
 import type { Secret } from '../credentials/secret.js';
-import { classifyFile, type FileToClassify } from '../diff/classify-file.js';
+import { classifyFile, isGeneratedArtifactPath, type FileToClassify } from '../diff/classify-file.js';
+import { redactSecrets } from '../security/redact.js';
 import { isSensitivePath } from '../security/sensitive-path.js';
 import { manifestFileOf, type ManifestFile, type ManifestSource } from './manifest.js';
 
@@ -13,6 +14,20 @@ export interface ChangedFiles {
   incompleteReasons: string[];
   /** Every changed file but sensitive ones, skipped ones with their reason (ADR-0051). */
   manifestFiles: ManifestFile[];
+}
+
+/** Redacted labels of changed generated artifacts for which there is no patch to review. */
+export function notShownArtifactLabels(
+  files: ReadonlyArray<FileToClassify>,
+  opts: { exclude: string[]; knownSecrets: readonly Secret[] },
+): string[] {
+  const classificationOptions = { exclude: opts.exclude, isSensitivePath };
+  const secrets = [...opts.knownSecrets];
+  return files
+    // A missing patch must be the reason for the skip, even when the name matches inside dist/.
+    .filter((file) => !file.patch && file.changes > 0 && isGeneratedArtifactPath(file.path)
+      && classifyFile({ ...file, patch: '+' }, classificationOptions) === 'review')
+    .map((file) => redactSecrets(file.path, secrets).text);
 }
 
 export function classifyChangedFiles(

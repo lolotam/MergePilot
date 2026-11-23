@@ -7,7 +7,16 @@ import type { GitHubClient } from './client.js';
  * one per run and the App one per job (`guardWritesForWorkspace` wraps each job's client in a new
  * object), so it never outlives a review.
  */
+/** Maximum decoded text retained across settled `maxBytes` reads on one client. */
+export const MAX_LARGE_READ_CACHE_CHARS = 16 * 1024 * 1024;
+
+interface LargeCacheState {
+  totalChars: number;
+  entries: Map<string, { promise: Promise<string | null>; chars: number }>;
+}
+
 const readCache = new WeakMap<GitHubClient, Map<string, Promise<string | null>>>();
+const largeCacheStates = new WeakMap<GitHubClient, LargeCacheState>();
 const listCache = new WeakMap<GitHubClient, Map<string, Promise<string[] | null>>>();
 
 /**
@@ -33,9 +42,73 @@ function shared<T>(caches: WeakMap<GitHubClient, Map<string, Promise<T>>>, clien
   return request;
 }
 
-/** `client.getFileContent` at `ref`, shared per client. */
-export function readAtRef(client: GitHubClient, owner: string, repo: string, ref: string, path: string): Promise<string | null> {
-  return shared(readCache, client, `${owner}/${repo}@${ref}:${path}`, () => client.getFileContent({ owner, repo, path, ref }));
+/**
+ * Shares in-flight large-file reads and keeps settled results under a per-client character cap so
+ * multi-file patch rebuilds do not retain unbounded megabytes until the review ends.
+ */
+function sharedBounded(
+  client: GitHubClient,
+  key: string,
+  start: () => Promise<string | null>,
+  maxChars: number,
+): Promise<string | null> {
+  let cache = readCache.get(client);
+  if (!cache) {
+    cache = new Map();
+    readCache.set(client, cache);
+  }
+  let state = largeCacheStates.get(client);
+  if (!state) {
+    state = { totalChars: 0, entries: new Map() };
+    largeCacheStates.set(client, state);
+  }
+  const existing = cache.get(key);
+  if (existing) {
+    const tracked = state.entries.get(key);
+    if (tracked && tracked.promise === existing) {
+      state.entries.delete(key);
+      state.entries.set(key, tracked);
+    }
+    return existing;
+  }
+  const pending = start();
+  cache.set(key, pending);
+  pending.then(
+    (text) => {
+      if (cache.get(key) !== pending || text === null) return;
+      const chars = text.length;
+      if (chars > maxChars) {
+        cache.delete(key);
+        return;
+      }
+      state.entries.set(key, { promise: pending, chars });
+      state.totalChars += chars;
+      while (state.totalChars > maxChars) {
+        const oldest = state.entries.entries().next().value;
+        if (!oldest) break;
+        const [oldKey, oldEntry] = oldest;
+        state.entries.delete(oldKey);
+        state.totalChars -= oldEntry.chars;
+        if (cache.get(oldKey) === oldEntry.promise) cache.delete(oldKey);
+      }
+    },
+    () => {
+      if (cache.get(key) === pending) cache.delete(key);
+    },
+  );
+  return pending;
+}
+
+/** `client.getFileContent` at `ref`, shared per client and byte limit. */
+export function readAtRef(client: GitHubClient, owner: string, repo: string, ref: string, path: string, maxBytes?: number): Promise<string | null> {
+  const suffix = maxBytes !== undefined ? `#max=${maxBytes}` : '';
+  const key = JSON.stringify([owner, repo, ref, path]) + suffix;
+  const start = () => client.getFileContent({
+    owner, repo, path, ref, ...(maxBytes !== undefined ? { maxBytes } : {}),
+  });
+  return maxBytes !== undefined
+    ? sharedBounded(client, key, start, MAX_LARGE_READ_CACHE_CHARS)
+    : shared(readCache, client, key, start);
 }
 
 /**

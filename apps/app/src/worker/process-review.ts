@@ -388,7 +388,7 @@ async function sharedSteps(
         const message = `Rebuilt ${rebuilt.rebuilt.length} missing patches, failed ${rebuilt.failed.length}`;
         deps.log?.(message);
         logger.info(
-          { event: 'patches.rebuilt', rebuilt: rebuilt.rebuilt.length, failed: rebuilt.failed.map((f) => f.path) },
+          { event: 'patches.rebuilt', rebuilt: rebuilt.rebuilt.length, failed: rebuilt.failed },
           message,
         );
       }
