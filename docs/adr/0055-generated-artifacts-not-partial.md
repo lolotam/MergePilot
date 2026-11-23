@@ -1,6 +1,6 @@
 # ADR-0055 — Generated artifacts never mark a review partial
 
-**Date** 2026-11-23 · **Status** proposed · **Amends** [ADR-0045](0045-split-large-files.md) rules 1 and 5 and [ADR-0051](0051-changed-but-not-shown-files.md)
+**Date** 2026-11-23 · **Status** accepted · **Amends** [ADR-0045](0045-split-large-files.md) rules 1 and 5 and [ADR-0051](0051-changed-but-not-shown-files.md)
 
 ## Context
 
@@ -29,4 +29,4 @@ An omitted GitHub patch makes a review partial when the patch cannot be rebuilt.
 
 The 2-second timeout, 20,000-edit limit, 50,000-line rebuilt patch limit, and `review.maxFileParts` still bound coverage. Rebuilt artifact patches are subject to the same review limits as other patches.
 
-Owner ratification of the amendment to ADR-0045 rule 5 is required before merge.
+Owner ratified the amendment to ADR-0045 rule 5 on 2026-11-23.
