@@ -32,6 +32,9 @@ it.each([
   ['{}', '{\n  "a": 1,\n\t"b": 2\n}'],
   ['{}', '{\n  "a": 1 \n}'],
   ['{}', '{\n  "a": 1\n}\n\n'],
+  ['{\n  "id": 9007199254740993\n}', '{\n  "id": 9007199254740992\n}'],
+  ['{"id":9007199254740993}', '{\n  "id": 9007199254740992\n}'],
+  ['{\n  "a": 1,\n  "a": 2\n}', '{\n  "a": 2\n}'],
 ])('rejects invalid, non-object or non-round-tripping JSON (%j, %j)', (previous, next) => {
   expect(alignJsonKeyOrder(previous, next)).toBeNull();
 });

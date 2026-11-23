@@ -3,6 +3,7 @@ import type { CompareCommitsResult, GitHubClient } from './client.js';
 import { MAIN_BOT_SLOT, markerBotSlot, parseMarker, type ReviewMarker } from './marker.js';
 import { withoutBaseHunks } from './own-hunks.js';
 import type { PullRequestFile } from './pr-files.js';
+import { rebuildMissingPatches } from './rebuild-patch.js';
 import type { ReviewScope } from './summary.js';
 
 export interface FindLastReviewedHeadOptions {
@@ -194,6 +195,7 @@ export async function selectIncrementalFiles(
   const prFileMap = new Map(prFiles.map((file) => [file.path, file]));
   const basePatches = await baseBranchPatches(client, { owner, repo, since: lastMarker.headSha, baseSha }, comparison, prFileMap);
   const files: PullRequestFile[] = [];
+  const artifactRebuilds: PullRequestFile[] = [];
 
   for (const compareFile of comparison.files) {
     const prFile = prFileMap.get(compareFile.filename);
@@ -213,6 +215,10 @@ export async function selectIncrementalFiles(
       deletions: isSnapshot ? prFile.deletions : compareFile.deletions ?? prFile.deletions,
       changes: isSnapshot ? prFile.changes : compareFile.changes ?? prFile.changes,
     };
+    const previousPath = compareFile.previous_filename ?? prFile.previousPath;
+    if (previousPath !== undefined) {
+      mapped.previousPath = previousPath;
+    }
 
     if (isSnapshot) {
       // A snapshot's patch is the diff against its previous snapshot (ADR-0045, rule 5): the
@@ -224,31 +230,68 @@ export async function selectIncrementalFiles(
       const own = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own === undefined) continue;
       mapped.patch = own;
-    } else if ((compareFile.changes ?? 0) > 0 && !isGeneratedArtifactPath(compareFile.filename)) {
-      // The compare API left the patch of a changed text file out (its diff was too big for it).
-      // The pull request's own patch covers the changes from before the last reviewed commit too,
-      // so it is not shown as new: the whole pull request is reviewed instead. A binary file, a
-      // pure rename or a mode change has no patch and no line changes, and stays incremental.
-      return {
-        mode: 'full',
-        files: prFiles,
-        reason: `the new changes of ${compareFile.filename} are too large for the compare API`,
-      };
-    }
-    const previousPath = compareFile.previous_filename ?? prFile.previousPath;
-    if (previousPath !== undefined) {
-      mapped.previousPath = previousPath;
+    } else if ((compareFile.changes ?? 0) > 0) {
+      if (!isGeneratedArtifactPath(compareFile.filename)) {
+        // The compare API left the patch of a changed text file out (its diff was too big for it).
+        // The pull request's own patch covers the changes from before the last reviewed commit too,
+        // so it is not shown as new: the whole pull request is reviewed instead. A binary file, a
+        // pure rename or a mode change has no patch and no line changes, and stays incremental.
+        return {
+          mode: 'full',
+          files: prFiles,
+          reason: `the new changes of ${compareFile.filename} are too large for the compare API`,
+        };
+      }
+      // Rebuild the incremental diff for patchless generated artifacts so reviewable updates are
+      // still reviewed; if rebuilding fails, the file stays patchless and is disclosed without
+      // forcing a full review or marking the review partial.
+      artifactRebuilds.push(mapped);
     }
 
     files.push(mapped);
   }
 
+  const finalFiles = await attachIncrementalArtifactPatches(
+    client,
+    files,
+    artifactRebuilds,
+    basePatches,
+    prFileMap,
+    { owner, repo, baseSha: lastMarker.headSha, headSha },
+  );
+
   return {
     mode: 'incremental',
-    files,
+    files: finalFiles,
     sinceSha: lastMarker.headSha,
     ...(comparison.totalCommits !== undefined ? { commitCount: comparison.totalCommits } : {}),
   };
+}
+
+/** Rebuilds incremental diffs for generated artifacts whose compare patch GitHub omitted. */
+async function attachIncrementalArtifactPatches(
+  client: GitHubClient,
+  files: PullRequestFile[],
+  candidates: PullRequestFile[],
+  basePatches: ReadonlyMap<string, string>,
+  prFileMap: ReadonlyMap<string, PullRequestFile>,
+  opts: { owner: string; repo: string; baseSha: string; headSha: string },
+): Promise<PullRequestFile[]> {
+  if (candidates.length === 0) return files;
+  const rebuilt = await rebuildMissingPatches(client, candidates, { ...opts, baseIsMergeBase: true });
+  const rebuiltByPath = new Map(rebuilt.files.map((file) => [file.path, file.patch]));
+  const result: PullRequestFile[] = [];
+  for (const file of files) {
+    const patch = rebuiltByPath.get(file.path);
+    if (patch !== undefined) {
+      const own = withoutBaseHunks(patch, basePatches.get(file.path), prFileMap.get(file.path)?.patch);
+      if (own === undefined) continue;
+      result.push({ ...file, patch: own });
+    } else {
+      result.push(file);
+    }
+  }
+  return result;
 }
 
 /**
@@ -263,7 +306,10 @@ async function baseBranchPatches(
   prFileMap: ReadonlyMap<string, PullRequestFile>,
 ): Promise<Map<string, string>> {
   const patches = new Map<string, string>();
-  if (!baseSha || !comparison.files.some((f) => f.patch !== undefined && prFileMap.has(f.filename))) return patches;
+  const needsCheck = comparison.files.some(
+    (f) => prFileMap.has(f.filename) && (f.patch !== undefined || ((f.changes ?? 0) > 0 && isGeneratedArtifactPath(f.filename))),
+  );
+  if (!baseSha || !needsCheck) return patches;
   let base: CompareCommitsResult | null;
   try {
     base = await client.compareCommits({ owner, repo, base: since, head: baseSha });

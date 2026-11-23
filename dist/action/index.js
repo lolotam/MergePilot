@@ -198067,11 +198067,20 @@ function align(previous, next) {
   }
   return previous;
 }
+function isLosslessJson(raw, parsed, allowCompact) {
+  if (allowCompact && !raw.includes("\n"))
+    return JSON.stringify(parsed) === raw;
+  const indent = /\n([ \t]+)\S/.exec(raw)?.[1] ?? "  ";
+  const newline = raw.endsWith("\n") ? "\n" : "";
+  return JSON.stringify(parsed, null, indent) + newline === raw;
+}
 function alignJsonKeyOrder(previous, next) {
   try {
     const oldSnapshot = JSON.parse(previous);
     const newSnapshot = JSON.parse(next);
     if (!isObject2(oldSnapshot) || !isObject2(newSnapshot))
+      return null;
+    if (!isLosslessJson(previous, oldSnapshot, true))
       return null;
     const indent = /\n([ \t]+)\S/.exec(next)?.[1] ?? "  ";
     const newline = next.endsWith("\n") ? "\n" : "";
@@ -198083,7 +198092,9 @@ function alignJsonKeyOrder(previous, next) {
   }
 }
 
+var MAX_LARGE_READ_CACHE_CHARS = 16 * 1024 * 1024;
 var readCache = /* @__PURE__ */ new WeakMap();
+var largeCacheStates = /* @__PURE__ */ new WeakMap();
 var listCache = /* @__PURE__ */ new WeakMap();
 function shared(caches, client, key, start) {
   let cache2 = caches.get(client);
@@ -198103,16 +198114,65 @@ function shared(caches, client, key, start) {
   }
   return request3;
 }
+function sharedBounded(client, key, start, maxChars) {
+  let cache2 = readCache.get(client);
+  if (!cache2) {
+    cache2 = /* @__PURE__ */ new Map();
+    readCache.set(client, cache2);
+  }
+  let state3 = largeCacheStates.get(client);
+  if (!state3) {
+    state3 = { totalChars: 0, entries: /* @__PURE__ */ new Map() };
+    largeCacheStates.set(client, state3);
+  }
+  const existing = cache2.get(key);
+  if (existing) {
+    const tracked = state3.entries.get(key);
+    if (tracked && tracked.promise === existing) {
+      state3.entries.delete(key);
+      state3.entries.set(key, tracked);
+    }
+    return existing;
+  }
+  const pending = start();
+  cache2.set(key, pending);
+  pending.then((text) => {
+    if (cache2.get(key) !== pending || text === null)
+      return;
+    const chars = text.length;
+    if (chars > maxChars) {
+      cache2.delete(key);
+      return;
+    }
+    state3.entries.set(key, { promise: pending, chars });
+    state3.totalChars += chars;
+    while (state3.totalChars > maxChars) {
+      const oldest = state3.entries.entries().next().value;
+      if (!oldest)
+        break;
+      const [oldKey, oldEntry] = oldest;
+      state3.entries.delete(oldKey);
+      state3.totalChars -= oldEntry.chars;
+      if (cache2.get(oldKey) === oldEntry.promise)
+        cache2.delete(oldKey);
+    }
+  }, () => {
+    if (cache2.get(key) === pending)
+      cache2.delete(key);
+  });
+  return pending;
+}
 function readAtRef(client, owner, repo, ref, path12, maxBytes) {
   const suffix = maxBytes !== void 0 ? `#max=${maxBytes}` : "";
   const key = JSON.stringify([owner, repo, ref, path12]) + suffix;
-  return shared(readCache, client, key, () => client.getFileContent({
+  const start = () => client.getFileContent({
     owner,
     repo,
     path: path12,
     ref,
     ...maxBytes !== void 0 ? { maxBytes } : {}
-  }));
+  });
+  return maxBytes !== void 0 ? sharedBounded(client, key, start, MAX_LARGE_READ_CACHE_CHARS) : shared(readCache, client, key, start);
 }
 function listAtRef(client, owner, repo, ref, path12) {
   const list = client.listDirectoryFiles?.bind(client);
@@ -198186,7 +198246,7 @@ function withoutChanges(file2) {
   return { ...rest, additions: 0, deletions: 0, changes: 0 };
 }
 async function mergeBaseOf(client, candidates, opts) {
-  if (!candidates.some(needsBaseRead))
+  if (opts.baseIsMergeBase || !candidates.some(needsBaseRead))
     return opts.baseSha;
   try {
     const compared = client.compareCommits?.({
@@ -198929,6 +198989,7 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
   const prFileMap = new Map(prFiles.map((file2) => [file2.path, file2]));
   const basePatches = await baseBranchPatches(client, { owner, repo, since: lastMarker.headSha, baseSha }, comparison, prFileMap);
   const files = [];
+  const artifactRebuilds = [];
   for (const compareFile of comparison.files) {
     const prFile = prFileMap.get(compareFile.filename);
     if (!prFile) {
@@ -198946,6 +199007,10 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       deletions: isSnapshot ? prFile.deletions : compareFile.deletions ?? prFile.deletions,
       changes: isSnapshot ? prFile.changes : compareFile.changes ?? prFile.changes
     };
+    const previousPath = compareFile.previous_filename ?? prFile.previousPath;
+    if (previousPath !== void 0) {
+      mapped.previousPath = previousPath;
+    }
     if (isSnapshot) {
       if (prFile.patch !== void 0)
         mapped.patch = prFile.patch;
@@ -198954,29 +199019,49 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       if (own2 === void 0)
         continue;
       mapped.patch = own2;
-    } else if ((compareFile.changes ?? 0) > 0 && !isGeneratedArtifactPath(compareFile.filename)) {
-      return {
-        mode: "full",
-        files: prFiles,
-        reason: `the new changes of ${compareFile.filename} are too large for the compare API`
-      };
-    }
-    const previousPath = compareFile.previous_filename ?? prFile.previousPath;
-    if (previousPath !== void 0) {
-      mapped.previousPath = previousPath;
+    } else if ((compareFile.changes ?? 0) > 0) {
+      if (!isGeneratedArtifactPath(compareFile.filename)) {
+        return {
+          mode: "full",
+          files: prFiles,
+          reason: `the new changes of ${compareFile.filename} are too large for the compare API`
+        };
+      }
+      artifactRebuilds.push(mapped);
     }
     files.push(mapped);
   }
+  const finalFiles = await attachIncrementalArtifactPatches(client, files, artifactRebuilds, basePatches, prFileMap, { owner, repo, baseSha: lastMarker.headSha, headSha });
   return {
     mode: "incremental",
-    files,
+    files: finalFiles,
     sinceSha: lastMarker.headSha,
     ...comparison.totalCommits !== void 0 ? { commitCount: comparison.totalCommits } : {}
   };
 }
+async function attachIncrementalArtifactPatches(client, files, candidates, basePatches, prFileMap, opts) {
+  if (candidates.length === 0)
+    return files;
+  const rebuilt = await rebuildMissingPatches(client, candidates, { ...opts, baseIsMergeBase: true });
+  const rebuiltByPath = new Map(rebuilt.files.map((file2) => [file2.path, file2.patch]));
+  const result = [];
+  for (const file2 of files) {
+    const patch = rebuiltByPath.get(file2.path);
+    if (patch !== void 0) {
+      const own2 = withoutBaseHunks(patch, basePatches.get(file2.path), prFileMap.get(file2.path)?.patch);
+      if (own2 === void 0)
+        continue;
+      result.push({ ...file2, patch: own2 });
+    } else {
+      result.push(file2);
+    }
+  }
+  return result;
+}
 async function baseBranchPatches(client, { owner, repo, since, baseSha }, comparison, prFileMap) {
   const patches = /* @__PURE__ */ new Map();
-  if (!baseSha || !comparison.files.some((f3) => f3.patch !== void 0 && prFileMap.has(f3.filename)))
+  const needsCheck = comparison.files.some((f3) => prFileMap.has(f3.filename) && (f3.patch !== void 0 || (f3.changes ?? 0) > 0 && isGeneratedArtifactPath(f3.filename)));
+  if (!baseSha || !needsCheck)
     return patches;
   let base;
   try {

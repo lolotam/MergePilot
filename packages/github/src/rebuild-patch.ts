@@ -55,6 +55,8 @@ export interface RebuildPatchesOptions {
   headSha: string;
   /** The paths the review excludes (`review.exclude`): their content is never read. */
   exclude?: string[];
+  /** Skip resolving the merge base when `baseSha` is already known to be an ancestor of `headSha`. */
+  baseIsMergeBase?: boolean;
 }
 
 export interface RebuildPatchesResult {
@@ -160,7 +162,7 @@ async function mergeBaseOf(
   candidates: readonly PullRequestFile[],
   opts: RebuildPatchesOptions,
 ): Promise<string> {
-  if (!candidates.some(needsBaseRead)) return opts.baseSha;
+  if (opts.baseIsMergeBase || !candidates.some(needsBaseRead)) return opts.baseSha;
   try {
     const compared = client.compareCommits?.({
       owner: opts.owner,

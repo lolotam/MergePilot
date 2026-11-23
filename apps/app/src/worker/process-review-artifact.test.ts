@@ -13,7 +13,8 @@ it.each(['single-bot', 'consensus'] as const)('publishes a complete %s review wi
     filename, status: 'modified', additions: 20, deletions: 5, changes: 25,
   }]);
 
-  const result = await processReviewJob(setup.job, setup.deps);
+  const log = vi.fn();
+  const result = await processReviewJob(setup.job, { ...setup.deps, log });
 
   expect(result.status).toBe('completed');
   expect(setup.created).toHaveLength(1);
@@ -27,5 +28,7 @@ it.each(['single-bot', 'consensus'] as const)('publishes a complete %s review wi
     expect(setup.events('patches.rebuilt')).toEqual([expect.objectContaining({
       rebuilt: 0, failed: [{ path: filename, reason: 'not returned by the contents API' }],
     })]);
+    expect(log).toHaveBeenCalledWith('Rebuilt 0 missing patches, failed 1');
+    expect(log.mock.calls.flat().join('\n')).not.toContain(filename);
   }
 });

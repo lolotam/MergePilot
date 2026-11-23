@@ -17,12 +17,20 @@ function align(previous: unknown, next: unknown): unknown {
   return previous;
 }
 
+function isLosslessJson(raw: string, parsed: unknown, allowCompact: boolean): boolean {
+  if (allowCompact && !raw.includes('\n')) return JSON.stringify(parsed) === raw;
+  const indent = /\n([ \t]+)\S/.exec(raw)?.[1] ?? '  ';
+  const newline = raw.endsWith('\n') ? '\n' : '';
+  return JSON.stringify(parsed, null, indent) + newline === raw;
+}
+
 /** Re-serialize the previous snapshot in the next one's key order, or return null for a raw diff. */
 export function alignJsonKeyOrder(previous: string, next: string): string | null {
   try {
     const oldSnapshot: unknown = JSON.parse(previous);
     const newSnapshot: unknown = JSON.parse(next);
     if (!isObject(oldSnapshot) || !isObject(newSnapshot)) return null;
+    if (!isLosslessJson(previous, oldSnapshot, true)) return null;
     const indent = /\n([ \t]+)\S/.exec(next)?.[1] ?? '  ';
     const newline = next.endsWith('\n') ? '\n' : '';
     if (JSON.stringify(newSnapshot, null, indent) + newline !== next) return null;

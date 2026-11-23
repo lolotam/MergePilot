@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createOctokitClient } from './client.js';
-import { readAtRef } from './read-cache.js';
+import { MAX_LARGE_READ_CACHE_CHARS, readAtRef } from './read-cache.js';
 
 const { getBlob, getContent } = vi.hoisted(() => ({ getBlob: vi.fn(), getContent: vi.fn() }));
 vi.mock('@octokit/rest', () => ({
@@ -60,4 +60,25 @@ it('caches normal reads and each byte limit separately', async () => {
   expect(await read()).toBeNull();
   expect(getFileContent.mock.calls).toEqual([[params], [{ ...params, maxBytes: size - 1 }], [{ ...params, maxBytes: size }]]);
   expect(getBlob).toHaveBeenCalledTimes(1);
+});
+
+it('evicts oldest settled large reads once the per-client character cap is exceeded', async () => {
+  const chunk = 'x'.repeat(Math.floor(MAX_LARGE_READ_CACHE_CHARS / 2) + 1);
+  const getFileContent = vi.fn(async ({ path }: { path: string }) => `${path}:${chunk}`);
+  const client = { getFileContent } as unknown as ReturnType<typeof createOctokitClient>;
+  const read = (path: string) => readAtRef(client, params.owner, params.repo, params.ref, path, size);
+
+  expect(await read('a.json')).toBe(`a.json:${chunk}`);
+  // Still within the cap: repeated read hits the cache.
+  expect(await read('a.json')).toBe(`a.json:${chunk}`);
+  expect(getFileContent).toHaveBeenCalledTimes(1);
+
+  // Adding a second entry pushes total chars past MAX_LARGE_READ_CACHE_CHARS and evicts a.json.
+  expect(await read('b.json')).toBe(`b.json:${chunk}`);
+  expect(await read('b.json')).toBe(`b.json:${chunk}`);
+  expect(getFileContent).toHaveBeenCalledTimes(2);
+
+  // Reading a.json again refetches because it was evicted.
+  expect(await read('a.json')).toBe(`a.json:${chunk}`);
+  expect(getFileContent).toHaveBeenCalledTimes(3);
 });
