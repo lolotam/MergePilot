@@ -9,6 +9,7 @@ const publisherLogin = 'mergepilot[bot]';
 interface SelectOverrides {
   filesAtRef?: Record<string, string | null>;
   prFile?: Partial<PullRequestFile>;
+  compareFile?: Partial<{ status: string; previous_filename: string }>;
   exclude?: string[];
   baseSha?: string;
   baseComparePatch?: string;
@@ -32,7 +33,7 @@ function select(path: string, overrides: SelectOverrides = {}) {
     compareCommits: async ({ head }: { head: string }) => (
       head === overrides.baseSha && overrides.baseComparePatch !== undefined
         ? { status: 'ahead', files: [{ filename: path, status: 'modified', ...counts, patch: overrides.baseComparePatch }] }
-        : { status: 'ahead', files: [{ filename: path, status: 'modified', ...counts }] }
+        : { status: 'ahead', files: [{ filename: path, status: 'modified', ...counts, ...overrides.compareFile }] }
     ),
     ...(getFileContent ? { getFileContent } : {}),
   } satisfies Partial<GitHubClient>;
@@ -80,6 +81,18 @@ it('reads the current path at lastMarker.headSha instead of the whole-PR rename 
 it('skips incremental rebuild reads for excluded generated artifacts', async () => {
   const getFileContent = vi.fn(async () => '{\n  "version": "1.0"\n}\n');
   const result = await select('api/openapi.json', { exclude: ['api/openapi.json'], getFileContent });
+  expect(result.mode).toBe('incremental');
+  expect(result.files[0]?.patch).toBeUndefined();
+  expect(getFileContent).not.toHaveBeenCalled();
+});
+
+it('skips incremental rebuild reads when renamed out of an excluded source path', async () => {
+  const getFileContent = vi.fn(async () => '{\n  "version": "1.0"\n}\n');
+  const result = await select('api/openapi.json', {
+    compareFile: { status: 'renamed', previous_filename: 'private-gen/openapi.json' },
+    exclude: ['private-gen/**'],
+    getFileContent,
+  });
   expect(result.mode).toBe('incremental');
   expect(result.files[0]?.patch).toBeUndefined();
   expect(getFileContent).not.toHaveBeenCalled();

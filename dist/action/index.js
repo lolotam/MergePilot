@@ -198273,8 +198273,13 @@ function isCandidate(file2, exclude) {
     return false;
   if (isSensitivePath(file2.path))
     return false;
-  if (file2.previousPath !== void 0 && isSensitivePath(file2.previousPath))
-    return false;
+  if (file2.previousPath !== void 0) {
+    if (isSensitivePath(file2.previousPath))
+      return false;
+    const prevClassification = classifyFile({ path: file2.previousPath, status: file2.status, patch: "+", changes: file2.changes }, { exclude: [...exclude], isSensitivePath });
+    if (prevClassification === "skip-excluded")
+      return false;
+  }
   const classification = classifyFile({ path: file2.path, status: file2.status, patch: "+", changes: file2.changes }, { exclude: [...exclude], isSensitivePath });
   if (classification !== "review")
     return false;

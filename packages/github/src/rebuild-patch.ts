@@ -189,8 +189,15 @@ function isCandidate(file: PullRequestFile, exclude: readonly string[]): boolean
   if (file.changes <= 0) return false;
   if (!REBUILDABLE_STATUSES.has(file.status)) return false;
   if (isSensitivePath(file.path)) return false;
-  // A rename reads the file's old path: a sensitive one is never read either.
-  if (file.previousPath !== undefined && isSensitivePath(file.previousPath)) return false;
+  // A rename reads the file's old path: a sensitive or excluded one is never read either.
+  if (file.previousPath !== undefined) {
+    if (isSensitivePath(file.previousPath)) return false;
+    const prevClassification = classifyFile(
+      { path: file.previousPath, status: file.status, patch: '+', changes: file.changes },
+      { exclude: [...exclude], isSensitivePath },
+    );
+    if (prevClassification === 'skip-excluded') return false;
+  }
   // An excluded or generated file is not reviewed, so its content is never read.
   const classification = classifyFile(
     { path: file.path, status: file.status, patch: '+', changes: file.changes },
