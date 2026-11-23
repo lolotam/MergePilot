@@ -25,7 +25,7 @@ import type {
   ListReviewThreadsParams,
   RemoveLabelParams,
 } from '@mergepilot/github';
-import { directoryFilesOf, fetchReviewThreads, isNotFoundError } from '@mergepilot/github';
+import { blobFileText, contentsFileText, directoryFilesOf, fetchReviewThreads, isNotFoundError } from '@mergepilot/github';
 
 export interface OctokitLike {
   /** GraphQL, for review thread state (ADR-0030); absent on test fakes. */
@@ -122,6 +122,9 @@ export interface OctokitLike {
       }): Promise<{ data: unknown }>;
     };
     git?: {
+      getBlob?(params: { owner: string; repo: string; file_sha: string }): Promise<{
+        data: { content?: string; encoding?: string; size?: number };
+      }>;
       getTree?(params: {
         owner: string;
         repo: string;
@@ -189,19 +192,13 @@ export function wrapOctokit(octokit: OctokitLike): GitHubClient {
           path: params.path,
           ref: params.ref,
         });
-        const data = response.data;
-        if (Array.isArray(data) || !data || typeof data !== 'object') {
-          return null;
-        }
-        const item = data as { type?: string; content?: string; encoding?: string };
-        if (item.type !== 'file' || typeof item.content !== 'string') {
-          return null;
-        }
-        const encoding = item.encoding ?? 'base64';
-        if (encoding === 'base64') {
-          return Buffer.from(item.content, 'base64').toString('utf8');
-        }
-        return item.content;
+        return await contentsFileText(response.data, {
+          maxBytes: params.maxBytes,
+          readBlob: async (sha) => {
+            const blob = await octokit.rest.git?.getBlob?.({ owner: params.owner, repo: params.repo, file_sha: sha });
+            return blob ? blobFileText(blob.data) : null;
+          },
+        });
       } catch (error: unknown) {
         if (isNotFoundError(error)) return null;
         throw error;

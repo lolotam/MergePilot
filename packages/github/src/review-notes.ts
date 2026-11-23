@@ -74,6 +74,25 @@ export function renderRulesLeftOut(paths: readonly string[], isArabic: boolean):
     : `> ℹ️ Rules files not sent with the review (over \`review.maxRulesTokens\` or the directory lookup limit): ${list}`;
 }
 
+/** Disclose artifacts that changed but have no reviewable diff (ADR-0055). */
+export function renderNotShownArtifacts(paths: readonly string[], isArabic: boolean): string | undefined {
+  if (paths.length === 0) return undefined;
+  const limit = 10;
+  const labels = paths.slice(0, limit).map((path) => {
+    const label = neutralize(path).replace(/[\r\n]+/g, ' ');
+    const backticks = label.match(/`+/g) ?? [];
+    const fence = '`'.repeat(1 + Math.max(0, ...backticks.map((run) => run.length)));
+    return fence.length === 1 ? `\`${label}\`` : `${fence} ${label} ${fence}`;
+  });
+  if (paths.length > limit) {
+    labels.push(isArabic ? `+${paths.length - limit} أخرى` : `+${paths.length - limit} more`);
+  }
+  const list = labels.join(isArabic ? '، ' : ', ');
+  return isArabic
+    ? `> ℹ️ ملفات مولَّدة تغيّرت ولم تُراجع (تعذّر بناء الفرق): ${list}`
+    : `> ℹ️ Generated files changed but not reviewed (no diff could be built): ${list}`;
+}
+
 /**
  * «Repository context: N files sent, M left out»: how much code outside the diff the review saw
  * (ADR-0029); on a follow-up review also how much of the rest of the PR it saw and how many open

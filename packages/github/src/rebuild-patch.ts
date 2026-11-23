@@ -8,11 +8,15 @@
 import { classifyFile, isSensitivePath } from '@mergepilot/engine';
 import { structuredPatch } from 'diff';
 import type { GitHubClient } from './client.js';
+import { alignJsonKeyOrder } from './json-key-order.js';
 import type { PullRequestFile } from './pr-files.js';
 import { listAtRef, readAtRef } from './read-cache.js';
 
 /** The most diff lines a rebuilt patch may have; a bigger one is not used (ADR-0045). */
 export const MAX_REBUILT_PATCH_LINES = 50_000;
+
+/** The most bytes a rebuild may read through the Git Blobs API, per file revision. */
+export const MAX_REBUILD_FILE_BYTES = 5 * 1024 * 1024;
 
 /** How long a diff may run before it is given up on (milliseconds). */
 export const DIFF_TIMEOUT_MS = 2_000;
@@ -75,8 +79,8 @@ type RebuildOutcome =
 /**
  * Rebuilds the patches of the files GitHub left out. A file is a candidate when it has no patch,
  * has changes, has a text status (added, modified, renamed, copied), is not a sensitive path and
- * is not excluded or generated. The other files are returned unchanged, and a file whose patch
- * cannot be rebuilt keeps the "patch truncated" reason of the review.
+ * is not excluded or always skipped as generated. Files with an unavailable diff are left
+ * without a patch for the review classifier.
  */
 export async function rebuildMissingPatches(
   client: GitHubClient,
@@ -222,12 +226,12 @@ async function rebuildOne(
       }
       if (snapshot.kind === 'failed') {
         // The diff against the previous snapshot failed: the snapshot is never reviewed as a
-        // whole file (ADR-0045, rule 5). Its patch is dropped, so the review says it is truncated.
+        // whole file (ADR-0045, rule 5). Dropping the patch lets the review disclose the omission.
         return { path: file.path, reason: `snapshot diff failed (${snapshot.reason})`, dropPatch: true };
       }
       // Without a previous snapshot the file is rebuilt like any other added file.
       if (file.patch) return { path: file.path, unchanged: true };
-      const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path);
+      const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path, MAX_REBUILD_FILE_BYTES);
       if (head === null) return { path: file.path, reason: NOT_RETURNED };
       if (isBinary(head)) return { path: file.path, reason: BINARY };
       const patch = addedPatch(head);
@@ -235,8 +239,8 @@ async function rebuildOne(
     }
     // A rename or a copy is read at the path it had in the base commit.
     const basePath = file.previousPath ?? file.path;
-    const base = await readAtRef(client, opts.owner, opts.repo, baseRef, basePath);
-    const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path);
+    const base = await readAtRef(client, opts.owner, opts.repo, baseRef, basePath, MAX_REBUILD_FILE_BYTES);
+    const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path, MAX_REBUILD_FILE_BYTES);
     if (base === null || head === null) return { path: file.path, reason: NOT_RETURNED };
     if (isBinary(base) || isBinary(head)) return { path: file.path, reason: BINARY };
     const patch = modifiedPatch(base, head);
@@ -365,7 +369,7 @@ async function snapshotOutcome(
   // The previous snapshot was found, so the diff against it is what the review needs: a content
   // that could not be read leaves the diff unknown, and the whole file is never sent instead.
   if (contents.kind === 'unreadable') return { kind: 'failed', reason: 'read' };
-  const patch = snapshotPatch(contents.before, contents.after, previous.name);
+  const patch = snapshotPatch(alignJsonKeyOrder(contents.before, contents.after) ?? contents.before, contents.after, previous.name);
   if (patch.kind === 'same') return { kind: 'same', previous: previous.name };
   // The diff failed: the whole snapshot is never sent instead of the regions that differ.
   if (patch.kind === 'empty' || patch.kind === 'large' || patch.kind === 'costly') {
@@ -391,9 +395,9 @@ async function readSnapshotContents(
   previous: PreviousSnapshot,
 ): Promise<SnapshotContents> {
   try {
-    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
+    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path, MAX_REBUILD_FILE_BYTES);
     if (before === null) return { kind: 'unreadable' };
-    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path);
+    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file.path, MAX_REBUILD_FILE_BYTES);
     if (after === null) return { kind: 'unreadable' };
     if (isBinary(before) || isBinary(after)) return { kind: 'unreadable' };
     return { kind: 'contents', before, after };

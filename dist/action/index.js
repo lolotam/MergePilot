@@ -47700,11 +47700,11 @@ var require_ponyfill_es2018 = __commonJS({
           throw new TypeError(`${context} is not a function.`);
         }
       }
-      function isObject2(x2) {
+      function isObject3(x2) {
         return typeof x2 === "object" && x2 !== null || typeof x2 === "function";
       }
       function assertObject(x2, context) {
-        if (!isObject2(x2)) {
+        if (!isObject3(x2)) {
           throw new TypeError(`${context} is not an object.`);
         }
       }
@@ -59152,11 +59152,11 @@ var require_verify_stream = __commonJS({
     var toString = require_tostring();
     var util3 = __require("util");
     var JWS_REGEX = /^[a-zA-Z0-9\-_]+?\.[a-zA-Z0-9\-_]+?\.([a-zA-Z0-9\-_]+)?$/;
-    function isObject2(thing) {
+    function isObject3(thing) {
       return Object.prototype.toString.call(thing) === "[object Object]";
     }
     function safeJsonParse(thing) {
-      if (isObject2(thing))
+      if (isObject3(thing))
         return thing;
       try {
         return JSON.parse(thing);
@@ -122068,7 +122068,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     }
     return propValues;
   });
-  const isObject2 = isObject;
+  const isObject3 = isObject;
   const catchall = def.catchall;
   let value;
   const memo2 = globalConfig.memoizer;
@@ -122076,7 +122076,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input2 = payload.value;
-    if (!isObject2(input2)) {
+    if (!isObject3(input2)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -122212,7 +122212,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     return doc.compile();
   };
   let fastpass;
-  const isObject2 = isObject;
+  const isObject3 = isObject;
   const jit = !globalConfig.jitless;
   const allowsEval2 = allowsEval;
   const fastEnabled = jit && allowsEval2.value;
@@ -122221,7 +122221,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input2 = payload.value;
-    if (!isObject2(input2)) {
+    if (!isObject3(input2)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -141108,6 +141108,11 @@ function isGeneratedPath(filePath) {
   }
   return false;
 }
+function isGeneratedArtifactPath(filePath) {
+  const normalized = filePath.replace(/\\/g, "/");
+  const basename6 = normalized.slice(normalized.lastIndexOf("/") + 1);
+  return /(^|\/)migrations\/meta\/\d+_snapshot\.json$/.test(normalized) || /^(openapi|swagger)([.-][\w.-]+)?\.json$/i.test(basename6);
+}
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
   "png",
   "jpg",
@@ -141191,7 +141196,7 @@ function classifyFile(file2, opts) {
     return "skip-binary";
   }
   if (!file2.patch && file2.changes > 0) {
-    return "incomplete-truncated";
+    return isGeneratedArtifactPath(file2.path) ? "skip-generated" : "incomplete-truncated";
   }
   return "review";
 }
@@ -142942,6 +142947,11 @@ function isSensitivePath(path12) {
   return false;
 }
 
+function notShownArtifactLabels(files, opts) {
+  const classificationOptions = { exclude: opts.exclude, isSensitivePath };
+  const secrets = [...opts.knownSecrets];
+  return files.filter((file2) => !file2.patch && file2.changes > 0 && isGeneratedArtifactPath(file2.path) && classifyFile({ ...file2, patch: "+" }, classificationOptions) === "review").map((file2) => redactSecrets(file2.path, secrets).text);
+}
 function classifyChangedFiles(files, opts) {
   const changed = { reviewableFiles: [], incompleteReasons: [], manifestFiles: [] };
   for (const file2 of files) {
@@ -193816,8 +193826,8 @@ var stringifyIteratively = (rootValue, replacer, spaceParam) => {
   const isFunctionReplacer = typeof replacer === "function";
   const propertyList = Array.isArray(replacer) ? new Set(replacer.map(String)) : null;
   const prepareVal = (parent, key, val) => {
-    const isObject2 = val !== null && typeof val === "object";
-    const hasToJSON = isObject2 && typeof val.toJSON === "function";
+    const isObject3 = val !== null && typeof val === "object";
+    const hasToJSON = isObject3 && typeof val.toJSON === "function";
     if (hasToJSON) {
       val = val.toJSON(key);
     }
@@ -197257,6 +197267,31 @@ async function readFilesAtRef(client, { owner, repo, ref, paths }) {
   return results;
 }
 
+function blobFileText(data) {
+  if (!data || typeof data !== "object")
+    return null;
+  const blob = data;
+  if (blob.encoding !== "base64" || typeof blob.content !== "string")
+    return null;
+  return Buffer.from(blob.content, "base64").toString("utf8");
+}
+async function contentsFileText(data, opts) {
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    return null;
+  const item = data;
+  if (item.type !== "file")
+    return null;
+  if (item.encoding === "none") {
+    if (opts.maxBytes !== void 0 && typeof item.sha === "string" && typeof item.size === "number" && item.size <= opts.maxBytes) {
+      return opts.readBlob(item.sha);
+    }
+    return null;
+  }
+  if (typeof item.content !== "string")
+    return null;
+  return (item.encoding ?? "base64") === "base64" ? Buffer.from(item.content, "base64").toString("utf8") : item.content;
+}
+
 var REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
@@ -197396,22 +197431,13 @@ function createOctokitClient(token) {
             path: params.path,
             ref: params.ref
           });
-          const data = response.data;
-          if (Array.isArray(data) || !data || typeof data !== "object") {
-            return null;
-          }
-          const item = data;
-          if (item.type !== "file" || typeof item.content !== "string") {
-            return null;
-          }
-          if (item.encoding === "none") {
-            return null;
-          }
-          const encoding = item.encoding ?? "base64";
-          if (encoding === "base64") {
-            return Buffer.from(item.content, "base64").toString("utf8");
-          }
-          return item.content;
+          return await contentsFileText(response.data, {
+            maxBytes: params.maxBytes,
+            readBlob: async (sha) => {
+              const blob = await octokit.rest.git.getBlob({ owner: params.owner, repo: params.repo, file_sha: sha });
+              return blobFileText(blob.data);
+            }
+          });
         } catch (error62) {
           if (isNotFoundError(error62))
             return null;
@@ -198024,6 +198050,39 @@ function splitLines(text) {
   return result;
 }
 
+function isObject2(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function align(previous, next) {
+  if (Array.isArray(previous) && Array.isArray(next)) {
+    return previous.map((value, index) => align(value, next[index]));
+  }
+  if (isObject2(previous) && isObject2(next)) {
+    const shared2 = Object.keys(next).filter((key) => Object.hasOwn(previous, key));
+    const remaining = Object.keys(previous).filter((key) => !Object.hasOwn(next, key));
+    return Object.fromEntries([
+      ...shared2.map((key) => [key, align(previous[key], next[key])]),
+      ...remaining.map((key) => [key, previous[key]])
+    ]);
+  }
+  return previous;
+}
+function alignJsonKeyOrder(previous, next) {
+  try {
+    const oldSnapshot = JSON.parse(previous);
+    const newSnapshot = JSON.parse(next);
+    if (!isObject2(oldSnapshot) || !isObject2(newSnapshot))
+      return null;
+    const indent = /\n([ \t]+)\S/.exec(next)?.[1] ?? "  ";
+    const newline = next.endsWith("\n") ? "\n" : "";
+    if (JSON.stringify(newSnapshot, null, indent) + newline !== next)
+      return null;
+    return JSON.stringify(align(oldSnapshot, newSnapshot), null, indent) + newline;
+  } catch {
+    return null;
+  }
+}
+
 var readCache = /* @__PURE__ */ new WeakMap();
 var listCache = /* @__PURE__ */ new WeakMap();
 function shared(caches, client, key, start) {
@@ -198044,8 +198103,16 @@ function shared(caches, client, key, start) {
   }
   return request3;
 }
-function readAtRef(client, owner, repo, ref, path12) {
-  return shared(readCache, client, `${owner}/${repo}@${ref}:${path12}`, () => client.getFileContent({ owner, repo, path: path12, ref }));
+function readAtRef(client, owner, repo, ref, path12, maxBytes) {
+  const suffix = maxBytes !== void 0 ? `#max=${maxBytes}` : "";
+  const key = JSON.stringify([owner, repo, ref, path12]) + suffix;
+  return shared(readCache, client, key, () => client.getFileContent({
+    owner,
+    repo,
+    path: path12,
+    ref,
+    ...maxBytes !== void 0 ? { maxBytes } : {}
+  }));
 }
 function listAtRef(client, owner, repo, ref, path12) {
   const list = client.listDirectoryFiles?.bind(client);
@@ -198055,6 +198122,7 @@ function listAtRef(client, owner, repo, ref, path12) {
 }
 
 var MAX_REBUILT_PATCH_LINES = 5e4;
+var MAX_REBUILD_FILE_BYTES = 5 * 1024 * 1024;
 var DIFF_TIMEOUT_MS = 2e3;
 var MAX_DIFF_EDIT_LENGTH = 2e4;
 var DIFF_OPTIONS = { context: 3, timeout: DIFF_TIMEOUT_MS, maxEditLength: MAX_DIFF_EDIT_LENGTH };
@@ -198173,7 +198241,7 @@ async function rebuildOne(client, file2, opts, baseRef) {
       }
       if (file2.patch)
         return { path: file2.path, unchanged: true };
-      const head2 = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+      const head2 = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path, MAX_REBUILD_FILE_BYTES);
       if (head2 === null)
         return { path: file2.path, reason: NOT_RETURNED };
       if (isBinary(head2))
@@ -198182,8 +198250,8 @@ async function rebuildOne(client, file2, opts, baseRef) {
       return patch2 === void 0 ? { path: file2.path, reason: TOO_LARGE } : { path: file2.path, patch: patch2 };
     }
     const basePath = file2.previousPath ?? file2.path;
-    const base = await readAtRef(client, opts.owner, opts.repo, baseRef, basePath);
-    const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+    const base = await readAtRef(client, opts.owner, opts.repo, baseRef, basePath, MAX_REBUILD_FILE_BYTES);
+    const head = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path, MAX_REBUILD_FILE_BYTES);
     if (base === null || head === null)
       return { path: file2.path, reason: NOT_RETURNED };
     if (isBinary(base) || isBinary(head))
@@ -198270,7 +198338,7 @@ async function snapshotOutcome(client, file2, opts, baseRef) {
   const contents = await readSnapshotContents(client, file2, opts, previous);
   if (contents.kind === "unreadable")
     return { kind: "failed", reason: "read" };
-  const patch = snapshotPatch(contents.before, contents.after, previous.name);
+  const patch = snapshotPatch(alignJsonKeyOrder(contents.before, contents.after) ?? contents.before, contents.after, previous.name);
   if (patch.kind === "same")
     return { kind: "same", previous: previous.name };
   if (patch.kind === "empty" || patch.kind === "large" || patch.kind === "costly") {
@@ -198280,10 +198348,10 @@ async function snapshotOutcome(client, file2, opts, baseRef) {
 }
 async function readSnapshotContents(client, file2, opts, previous) {
   try {
-    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path);
+    const before = await readAtRef(client, opts.owner, opts.repo, previous.sha, previous.path, MAX_REBUILD_FILE_BYTES);
     if (before === null)
       return { kind: "unreadable" };
-    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path);
+    const after = await readAtRef(client, opts.owner, opts.repo, opts.headSha, file2.path, MAX_REBUILD_FILE_BYTES);
     if (after === null)
       return { kind: "unreadable" };
     if (isBinary(before) || isBinary(after))
@@ -198873,7 +198941,7 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       status,
       // A snapshot's counters come from the rebuilt result, not from the comparison: the
       // comparison counts the whole new file, so a snapshot that did not change would reach the
-      // engine with changes and no patch, and be reported as a truncated patch.
+      // engine with changes and no patch, and be disclosed as an unreviewed artifact.
       additions: isSnapshot ? prFile.additions : compareFile.additions ?? prFile.additions,
       deletions: isSnapshot ? prFile.deletions : compareFile.deletions ?? prFile.deletions,
       changes: isSnapshot ? prFile.changes : compareFile.changes ?? prFile.changes
@@ -198886,7 +198954,7 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
       if (own2 === void 0)
         continue;
       mapped.patch = own2;
-    } else if ((compareFile.changes ?? 0) > 0) {
+    } else if ((compareFile.changes ?? 0) > 0 && !isGeneratedArtifactPath(compareFile.filename)) {
       return {
         mode: "full",
         files: prFiles,
@@ -199222,6 +199290,22 @@ function renderRulesLeftOut(paths, isArabic) {
   const list = paths.map((p) => `\`${neutralize2(p)}\``).join(isArabic ? "\u060C " : ", ");
   return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0641\u0627\u062A \u0642\u0648\u0627\u0639\u062F \u0644\u0645 \u062A\u064F\u0631\u0633\u0644 \u0645\u0639 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 (\u062A\u062C\u0627\u0648\u0632\u062A \`review.maxRulesTokens\` \u0623\u0648 \u062D\u062F \u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u062C\u0644\u062F\u0627\u062A): ${list}` : `> \u2139\uFE0F Rules files not sent with the review (over \`review.maxRulesTokens\` or the directory lookup limit): ${list}`;
 }
+function renderNotShownArtifacts(paths, isArabic) {
+  if (paths.length === 0)
+    return void 0;
+  const limit5 = 10;
+  const labels = paths.slice(0, limit5).map((path12) => {
+    const label = neutralize2(path12).replace(/[\r\n]+/g, " ");
+    const backticks = label.match(/`+/g) ?? [];
+    const fence2 = "`".repeat(1 + Math.max(0, ...backticks.map((run2) => run2.length)));
+    return fence2.length === 1 ? `\`${label}\`` : `${fence2} ${label} ${fence2}`;
+  });
+  if (paths.length > limit5) {
+    labels.push(isArabic ? `+${paths.length - limit5} \u0623\u062E\u0631\u0649` : `+${paths.length - limit5} more`);
+  }
+  const list = labels.join(isArabic ? "\u060C " : ", ");
+  return isArabic ? `> \u2139\uFE0F \u0645\u0644\u0641\u0627\u062A \u0645\u0648\u0644\u064E\u0651\u062F\u0629 \u062A\u063A\u064A\u0651\u0631\u062A \u0648\u0644\u0645 \u062A\u064F\u0631\u0627\u062C\u0639 (\u062A\u0639\u0630\u0651\u0631 \u0628\u0646\u0627\u0621 \u0627\u0644\u0641\u0631\u0642): ${list}` : `> \u2139\uFE0F Generated files changed but not reviewed (no diff could be built): ${list}`;
+}
 function renderContextNote(context, isArabic) {
   if (!context)
     return void 0;
@@ -199505,6 +199589,9 @@ function renderReviewSummary(input2) {
   const rulesLeftOut = renderRulesLeftOut(input2.rulesLeftOut ?? [], isArabic);
   if (rulesLeftOut)
     sections.push(rulesLeftOut);
+  const artifacts = renderNotShownArtifacts(input2.notShownArtifacts ?? [], isArabic);
+  if (artifacts)
+    sections.push(artifacts);
   const contextNote = renderContextNote(input2.context, isArabic);
   if (contextNote)
     sections.push(contextNote);
@@ -200426,6 +200513,7 @@ async function reviewPullRequest(ctx) {
       verifyRejected: reviewResult.verifyRejected,
       withheld: reviewResult.withheld,
       rulesLeftOut: inputs.rulesLeftOut,
+      notShownArtifacts: notShownArtifactLabels(filesToReview, { exclude: config2.review.exclude, knownSecrets }),
       context: contextDisclosureOf(reviewResult.context, inputs.contextLeftOut, inputs.openFindings),
       outputLimit: reviewResult.outputLimit,
       ...totals.costUsd !== void 0 ? { costUsd: totals.costUsd } : {},

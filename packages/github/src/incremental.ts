@@ -1,3 +1,4 @@
+import { isGeneratedArtifactPath } from '@mergepilot/engine';
 import type { CompareCommitsResult, GitHubClient } from './client.js';
 import { MAIN_BOT_SLOT, markerBotSlot, parseMarker, type ReviewMarker } from './marker.js';
 import { withoutBaseHunks } from './own-hunks.js';
@@ -104,8 +105,8 @@ export async function findLastReviewedHead(
  * - Same head: incremental with 0 files (nothing new to review)
  * - Ahead: incremental with intersecting files between compare and prFiles, using the compare
  *   patch without the hunks proven to come from a base-branch merge (needs `baseSha`)
- * - Ahead, but a compared file has no patch (its diff was too big for the compare API): full
- *   ("the new changes of <path> are too large for the compare API")
+ * - Ahead, but a changed non-artifact file has no compare patch: full ("the new changes of
+ *   <path> are too large for the compare API"). Generated artifacts stay incremental.
  * - Compare at GitHub's 300-file cap (possibly truncated): full ("comparison too large")
  * - Compare error: full ("comparison unavailable")
  * - Diverged, behind, or 404: full ("history rewritten since last review")
@@ -207,7 +208,7 @@ export async function selectIncrementalFiles(
       status,
       // A snapshot's counters come from the rebuilt result, not from the comparison: the
       // comparison counts the whole new file, so a snapshot that did not change would reach the
-      // engine with changes and no patch, and be reported as a truncated patch.
+      // engine with changes and no patch, and be disclosed as an unreviewed artifact.
       additions: isSnapshot ? prFile.additions : compareFile.additions ?? prFile.additions,
       deletions: isSnapshot ? prFile.deletions : compareFile.deletions ?? prFile.deletions,
       changes: isSnapshot ? prFile.changes : compareFile.changes ?? prFile.changes,
@@ -223,7 +224,7 @@ export async function selectIncrementalFiles(
       const own = withoutBaseHunks(compareFile.patch, basePatches.get(compareFile.filename), prFile.patch);
       if (own === undefined) continue;
       mapped.patch = own;
-    } else if ((compareFile.changes ?? 0) > 0) {
+    } else if ((compareFile.changes ?? 0) > 0 && !isGeneratedArtifactPath(compareFile.filename)) {
       // The compare API left the patch of a changed text file out (its diff was too big for it).
       // The pull request's own patch covers the changes from before the last reviewed commit too,
       // so it is not shown as new: the whole pull request is reviewed instead. A binary file, a

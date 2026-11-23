@@ -7,6 +7,7 @@ export {
 export {
   classifyFile,
   isContextPathAllowed,
+  isGeneratedArtifactPath,
   type FileClassification,
   type FileToClassify,
   type ClassifyFileOptions,

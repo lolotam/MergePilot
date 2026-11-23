@@ -7,6 +7,7 @@ import type { ContextDisclosure, ExplorationDisclosure, OutputLimitDisclosure, W
 import {
   renderContextNote,
   renderExplorationNote,
+  renderNotShownArtifacts,
   renderOutputLimitNote,
   renderRulesLeftOut,
   renderVerifyRejected,
@@ -59,6 +60,8 @@ export interface PanelSummaryInput {
   verifyRejected?: readonly VerifyRejectedItem[] | undefined;
   /** Nested rules files left out of the review (ADR-0028). */
   rulesLeftOut?: readonly string[] | undefined;
+  /** Changed generated artifacts whose diffs could not be built (ADR-0055). */
+  notShownArtifacts?: readonly string[] | undefined;
   /** Repository context of the bots, merged (ADR-0029). */
   context?: ContextDisclosure | undefined;
   /** Each bot that explored or disclosed why it did not (ADR-0046). */
@@ -287,6 +290,8 @@ export function renderPanelSummary(input: PanelSummaryInput): string {
   if (rejected) sections.push(rejected);
   const rulesLeftOut = renderRulesLeftOut(input.rulesLeftOut ?? [], isArabic);
   if (rulesLeftOut) sections.push(rulesLeftOut);
+  const artifacts = renderNotShownArtifacts(input.notShownArtifacts ?? [], isArabic);
+  if (artifacts) sections.push(artifacts);
   const contextNote = renderContextNote(input.context, isArabic);
   if (contextNote) sections.push(contextNote);
   for (const exploration of input.explorations ?? []) {

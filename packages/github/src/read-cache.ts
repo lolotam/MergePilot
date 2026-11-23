@@ -33,9 +33,13 @@ function shared<T>(caches: WeakMap<GitHubClient, Map<string, Promise<T>>>, clien
   return request;
 }
 
-/** `client.getFileContent` at `ref`, shared per client. */
-export function readAtRef(client: GitHubClient, owner: string, repo: string, ref: string, path: string): Promise<string | null> {
-  return shared(readCache, client, `${owner}/${repo}@${ref}:${path}`, () => client.getFileContent({ owner, repo, path, ref }));
+/** `client.getFileContent` at `ref`, shared per client and byte limit. */
+export function readAtRef(client: GitHubClient, owner: string, repo: string, ref: string, path: string, maxBytes?: number): Promise<string | null> {
+  const suffix = maxBytes !== undefined ? `#max=${maxBytes}` : '';
+  const key = JSON.stringify([owner, repo, ref, path]) + suffix;
+  return shared(readCache, client, key, () => client.getFileContent({
+    owner, repo, path, ref, ...(maxBytes !== undefined ? { maxBytes } : {}),
+  }));
 }
 
 /**
