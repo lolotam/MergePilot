@@ -136,6 +136,7 @@ export async function selectBotFiles(
     publisherLogin: params.publisherLogin ?? DEFAULT_PUBLISHER_LOGIN,
     configHash,
     baseSha: params.baseSha,
+    ...(params.exclude ? { exclude: params.exclude } : {}),
     ...(botSlot !== undefined ? { botSlot } : {}),
     ...(params.force ? { force: true } : {}),
   });

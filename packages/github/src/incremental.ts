@@ -32,6 +32,8 @@ export interface SelectIncrementalFilesOptions {
   baseSha?: string | undefined;
   /** `@mergepilot review` asked for it: the whole PR is reviewed, whatever was reviewed before. */
   force?: boolean | undefined;
+  /** The paths the review excludes (`review.exclude`): incremental artifact rebuilds never read them. */
+  exclude?: string[] | undefined;
 }
 
 /** The scope reason shown when a review was asked for with `@mergepilot review`. */
@@ -126,6 +128,7 @@ export async function selectIncrementalFiles(
     botSlot,
     baseSha,
     force,
+    exclude,
   }: SelectIncrementalFilesOptions,
 ): Promise<SelectIncrementalFilesResult> {
   if (force) return { mode: 'full', files: prFiles, reason: REVIEW_REQUESTED_REASON };
@@ -244,8 +247,14 @@ export async function selectIncrementalFiles(
       }
       // Rebuild the incremental diff for patchless generated artifacts so reviewable updates are
       // still reviewed; if rebuilding fails, the file stays patchless and is disclosed without
-      // forcing a full review or marking the review partial.
-      artifactRebuilds.push(mapped);
+      // forcing a full review or marking the review partial. Only the incremental comparison's
+      // rename path applies at `lastMarker.headSha`, never the whole-PR rename path.
+      const { previousPath: _prPreviousPath, ...candidate } = mapped;
+      artifactRebuilds.push(
+        compareFile.previous_filename !== undefined
+          ? { ...candidate, previousPath: compareFile.previous_filename }
+          : candidate,
+      );
     }
 
     files.push(mapped);
@@ -257,7 +266,7 @@ export async function selectIncrementalFiles(
     artifactRebuilds,
     basePatches,
     prFileMap,
-    { owner, repo, baseSha: lastMarker.headSha, headSha },
+    { owner, repo, baseSha: lastMarker.headSha, headSha, ...(exclude ? { exclude } : {}) },
   );
 
   return {
@@ -275,7 +284,7 @@ async function attachIncrementalArtifactPatches(
   candidates: PullRequestFile[],
   basePatches: ReadonlyMap<string, string>,
   prFileMap: ReadonlyMap<string, PullRequestFile>,
-  opts: { owner: string; repo: string; baseSha: string; headSha: string },
+  opts: { owner: string; repo: string; baseSha: string; headSha: string; exclude?: string[] },
 ): Promise<PullRequestFile[]> {
   if (candidates.length === 0) return files;
   const rebuilt = await rebuildMissingPatches(client, candidates, { ...opts, baseIsMergeBase: true });
@@ -284,9 +293,16 @@ async function attachIncrementalArtifactPatches(
   for (const file of files) {
     const patch = rebuiltByPath.get(file.path);
     if (patch !== undefined) {
-      const own = withoutBaseHunks(patch, basePatches.get(file.path), prFileMap.get(file.path)?.patch);
-      if (own === undefined) continue;
-      result.push({ ...file, patch: own });
+      const prPatch = prFileMap.get(file.path)?.patch;
+      if (prPatch === undefined) {
+        // Without a whole-PR patch, `withoutBaseHunks` treats the PR diff as empty and would
+        // falsely drop genuine PR hunks whose lines also appear in the base branch; keep unfiltered.
+        result.push({ ...file, patch });
+      } else {
+        const own = withoutBaseHunks(patch, basePatches.get(file.path), prPatch);
+        if (own === undefined) continue;
+        result.push({ ...file, patch: own });
+      }
     } else {
       result.push(file);
     }
@@ -306,9 +322,12 @@ async function baseBranchPatches(
   prFileMap: ReadonlyMap<string, PullRequestFile>,
 ): Promise<Map<string, string>> {
   const patches = new Map<string, string>();
-  const needsCheck = comparison.files.some(
-    (f) => prFileMap.has(f.filename) && (f.patch !== undefined || ((f.changes ?? 0) > 0 && isGeneratedArtifactPath(f.filename))),
-  );
+  const needsCheck = comparison.files.some((f) => {
+    const prFile = prFileMap.get(f.filename);
+    if (!prFile) return false;
+    return f.patch !== undefined
+      || (prFile.patch !== undefined && (f.changes ?? 0) > 0 && isGeneratedArtifactPath(f.filename));
+  });
   if (!baseSha || !needsCheck) return patches;
   let base: CompareCommitsResult | null;
   try {

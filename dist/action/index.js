@@ -198930,7 +198930,7 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
   }
   return lastMarker;
 }
-async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot, baseSha, force }) {
+async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot, baseSha, force, exclude }) {
   if (force)
     return { mode: "full", files: prFiles, reason: REVIEW_REQUESTED_REASON };
   const lastMarker = await findLastReviewedMarker(client, {
@@ -199027,11 +199027,12 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
           reason: `the new changes of ${compareFile.filename} are too large for the compare API`
         };
       }
-      artifactRebuilds.push(mapped);
+      const { previousPath: _prPreviousPath, ...candidate } = mapped;
+      artifactRebuilds.push(compareFile.previous_filename !== void 0 ? { ...candidate, previousPath: compareFile.previous_filename } : candidate);
     }
     files.push(mapped);
   }
-  const finalFiles = await attachIncrementalArtifactPatches(client, files, artifactRebuilds, basePatches, prFileMap, { owner, repo, baseSha: lastMarker.headSha, headSha });
+  const finalFiles = await attachIncrementalArtifactPatches(client, files, artifactRebuilds, basePatches, prFileMap, { owner, repo, baseSha: lastMarker.headSha, headSha, ...exclude ? { exclude } : {} });
   return {
     mode: "incremental",
     files: finalFiles,
@@ -199048,10 +199049,15 @@ async function attachIncrementalArtifactPatches(client, files, candidates, baseP
   for (const file2 of files) {
     const patch = rebuiltByPath.get(file2.path);
     if (patch !== void 0) {
-      const own2 = withoutBaseHunks(patch, basePatches.get(file2.path), prFileMap.get(file2.path)?.patch);
-      if (own2 === void 0)
-        continue;
-      result.push({ ...file2, patch: own2 });
+      const prPatch = prFileMap.get(file2.path)?.patch;
+      if (prPatch === void 0) {
+        result.push({ ...file2, patch });
+      } else {
+        const own2 = withoutBaseHunks(patch, basePatches.get(file2.path), prPatch);
+        if (own2 === void 0)
+          continue;
+        result.push({ ...file2, patch: own2 });
+      }
     } else {
       result.push(file2);
     }
@@ -199060,7 +199066,12 @@ async function attachIncrementalArtifactPatches(client, files, candidates, baseP
 }
 async function baseBranchPatches(client, { owner, repo, since, baseSha }, comparison, prFileMap) {
   const patches = /* @__PURE__ */ new Map();
-  const needsCheck = comparison.files.some((f3) => prFileMap.has(f3.filename) && (f3.patch !== void 0 || (f3.changes ?? 0) > 0 && isGeneratedArtifactPath(f3.filename)));
+  const needsCheck = comparison.files.some((f3) => {
+    const prFile = prFileMap.get(f3.filename);
+    if (!prFile)
+      return false;
+    return f3.patch !== void 0 || prFile.patch !== void 0 && (f3.changes ?? 0) > 0 && isGeneratedArtifactPath(f3.filename);
+  });
   if (!baseSha || !needsCheck)
     return patches;
   let base;
@@ -200524,7 +200535,8 @@ async function reviewPullRequest(ctx) {
     publisherLogin,
     prFiles,
     configHash,
-    baseSha
+    baseSha,
+    exclude: config2.review.exclude
   });
   const filesToReview = selection.files;
   log?.(selection.mode === "incremental" ? `Incremental review: ${filesToReview.length} files changed since ${selection.sinceSha.slice(0, 7)}` : `Full review: ${selection.reason}`);

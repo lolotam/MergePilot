@@ -201,6 +201,7 @@ export async function reviewPullRequest(
     prFiles,
     configHash,
     baseSha,
+    exclude: config.review.exclude,
   });
 
   const filesToReview = selection.files;

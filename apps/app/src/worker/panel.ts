@@ -170,6 +170,7 @@ export async function runPanel(ctx: PanelContext, runs: BotRun[], noKey: PanelBo
         // The publisher's marker is the incremental base for every bot (migration 0021).
         botSlot: ctx.publisherSlot,
         prFiles: ctx.prFiles,
+        exclude: ctx.mainConfig.effectiveConfig.review.exclude,
         ...(ctx.job.force ? { force: true } : {}),
       })
     : undefined;
