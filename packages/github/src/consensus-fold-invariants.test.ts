@@ -1,8 +1,11 @@
 import type { Judge, JudgeRequest } from '@mergepilot/engine';
 import { describe, expect, it, vi } from 'vitest';
+import type { GitHubClient } from './client.js';
 import { distantLineReplay, foldBot, foldFinding } from './consensus-fold.fixtures.js';
 import { capConsensusClusters, mergePanelFindings, promoteSurvivingCluster, withFoundBy } from './consensus.js';
+import { deduplicateFindings } from './dedupe.js';
 import { botFindingsFates } from './panel-findings-fate.js';
+import { renderFindingComment } from './render.js';
 
 describe('far folds in the existing consensus pipeline', () => {
   const first = foldFinding('first');
@@ -125,7 +128,7 @@ describe('far folds in the existing consensus pipeline', () => {
     ]);
   });
 
-  it('promotes a surviving distant member when the representative was already posted and keeps fates exact', async () => {
+  it('promotes a surviving distant member when the representative was already posted and tracks alreadyPosted fate', async () => {
     const posted = foldFinding('posted', { path: 'src/a.ts', line: 10, severity: 'high' });
     const fresh = foldFinding('fresh', { path: 'src/b.ts', line: 20, severity: 'medium' });
     const bots = [foldBot(1, posted), foldBot(2, fresh)];
@@ -134,9 +137,28 @@ describe('far folds in the existing consensus pipeline', () => {
     const promoted = promoteSurvivingCluster(kept[0]!, new Set([fresh]));
     expect(promoted?.finding).toBe(fresh);
     expect(promoted?.foldedPlaces).toBeUndefined();
+    expect(promoted?.alreadyPostedSlots).toEqual([1]);
     const fates = botFindingsFates(bots, { published: [promoted!], below, overLimit, alreadyPosted: [] });
     expect(fates.map(({ slot, own, mergedIntoOther, alreadyPosted, reported }) => [slot, own, mergedIntoOther, alreadyPosted, reported]))
-      .toEqual([[1, 0, 1, 0, 1], [2, 1, 0, 0, 1]]);
+      .toEqual([[1, 0, 0, 1, 1], [2, 1, 0, 0, 1]]);
     expect(promoteSurvivingCluster(kept[0]!, new Set())).toBeNull();
+  });
+
+  it('prevents reposting a distant folded member already disclosed in an earlier published comment', async () => {
+    const rep = foldFinding('rep', { path: 'src/a.ts', line: 10, severity: 'high' });
+    const distantMember = foldFinding('distant', { path: 'src/b.ts', line: 20, severity: 'medium', title: 'Different title at distant file' });
+    const { kept } = await mergePanelFindings({ bots: [foldBot(1, rep), foldBot(2, distantMember)], minAgreement: 1 });
+    const publishedComment = renderFindingComment(withFoundBy(kept[0]!, 2, 'en'), { language: 'en', suggestionsAsCode: false });
+    const client = {
+      listReviewCommentsPage: async () => [{
+        id: 1, path: rep.path, line: rep.line, body: publishedComment, user: { login: 'mergepilot[bot]' },
+      }],
+    } as unknown as GitHubClient;
+    const deduped = await deduplicateFindings(client, {
+      owner: 'org', repo: 'repo', pull_number: 1, publisherLogin: 'mergepilot[bot]',
+      findings: [withFoundBy(kept[0]!, 2, 'en'), distantMember],
+    });
+    expect(deduped.kept).toEqual([]);
+    expect(promoteSurvivingCluster(kept[0]!, new Set(deduped.kept))).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { ALSO_AT_BLOCK_RE, alsoAtPlaces, placesInText, type Finding } from '@mergepilot/engine';
+import { alsoAtBlockRange, alsoAtPlaces, placesInText, type Finding } from '@mergepilot/engine';
 import { escapeInline } from './bot-identity.js';
 import { claimWords, hasNegation, mostlyLatin, negatedTitle, wordSetSimilarity } from './claim-similarity.js';
 
@@ -92,35 +92,6 @@ export function foldedPlacesOf(representative: Place, listed: readonly Place[], 
 // or Markdown block (e.g. a code fence) as part of the list. Keep those blocks intact.
 const TRAILING_SUB_BLOCK = /(?:^|(?:\r?\n[ \t]*)+)<sub>(?:(?!<\/sub>)[\s\S])*<\/sub>\s*$/;
 const LAST_BULLET = /(?:^|\n)([ \t]*[-*+][ \t]+)[^\n]*$/;
-const NON_LIST_LINE = /^[ \t]*(?:```|~~~|#|>|\|)/;
-const LINE_REF = /\S+:\d+/;
-const PATH_LINE_RE = /(?<![\w./:-])((?:[\w.@+-]+\/)*[\w@+-]+\.[\w-]+|[\w.@+-]+\/[\w.@+-]+):(\d+)(?!\d)/g;
-
-/** End offset of the location lines within an `Also at:` block, stopping before prose or Markdown fences. */
-function alsoAtListEnd(blockText: string): number {
-  const lines = blockText.split('\n');
-  let end = lines[0]!.length;
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (NON_LIST_LINE.test(line) || !LINE_REF.test(line)) break;
-    end += 1 + line.length;
-  }
-  return blockText.slice(0, end).trimEnd().length;
-}
-
-/** Extracts `path:line` places listed in a finding's `Also at:` section even for paths outside the panel's anchors. */
-export function listedPlacesInBody(body: string): Place[] {
-  const block = ALSO_AT_BLOCK_RE.exec(body);
-  if (!block) return [];
-  const list = block[0].slice(0, alsoAtListEnd(block[0]));
-  const colon = list.indexOf(':');
-  const content = colon === -1 ? '' : list.slice(colon + 1);
-  const places: Place[] = [];
-  for (const match of content.matchAll(PATH_LINE_RE)) {
-    places.push({ path: match[1]!, line: Number(match[2]) });
-  }
-  return places;
-}
 
 export function withFoldedPlaces(body: string, places: readonly Place[]): string {
   if (places.length === 0) return body;
@@ -128,19 +99,18 @@ export function withFoldedPlaces(body: string, places: readonly Place[]): string
   const trailing = TRAILING_SUB_BLOCK.exec(body);
   const text = trailing ? body.slice(0, trailing.index) : body;
   const newline = body.includes('\r\n') ? '\r\n' : '\n';
-  const block = ALSO_AT_BLOCK_RE.exec(text);
+  const range = alsoAtBlockRange(text);
   const tail = trailing?.[0] ?? '';
-  if (!block) {
+  if (!range) {
     const separator = text.trimEnd() ? newline + newline : '';
     const after = tail.startsWith('<sub>') ? newline + newline + tail : tail;
     return text.trimEnd() + separator + 'Also at: ' + labels.join(', ') + after;
   }
 
-  const list = block[0].slice(0, alsoAtListEnd(block[0]));
-  const end = block.index + list.length;
+  const list = text.slice(range.start, range.end);
   const bullet = LAST_BULLET.exec(list)?.[1];
-  const afterColon = list.slice(list.indexOf(':') + 1).trim();
+  const afterColon = text.slice(range.contentStart, range.end).trim();
   const separator = list.endsWith(',') || !afterColon ? ' ' : ', ';
   const addition = bullet ? newline + bullet + labels.join(newline + bullet) : separator + labels.join(', ');
-  return text.slice(0, end) + addition + text.slice(end) + tail;
+  return text.slice(0, range.end) + addition + text.slice(range.end) + tail;
 }

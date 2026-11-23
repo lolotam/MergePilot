@@ -28,6 +28,7 @@ describe('far fold thresholds', () => {
     expect(score(a, b)).toBeUndefined();
     expect(score(a, { ...b, body: b.body + '\n\nAlso at: a.ts:13' })).toBeCloseTo(4 / 11);
     expect(score(a, { ...b, body: b.body + '\n\nAlso at: a.ts:14' })).toBeUndefined();
+    expect(score(a, { ...b, body: b.body + '\n\nAlso at: c.ts:1\n```ts\n// a.ts:10\n```' })).toBeUndefined();
   });
 
   it('accepts a same-file claim at 200 lines apart below the cross-file threshold', () => {
@@ -103,6 +104,7 @@ describe('folded places', () => {
     ['Also at:\n  * a.ts:10\n<sub>Jev confidence: 0.85</sub>', 'Also at:\n  * a.ts:10\n  * b.ts:20\n  * c.ts:30\n<sub>Jev confidence: 0.85</sub>'],
     ['Also at: a.ts:10\n```ts\nconst x = 1;\n```', 'Also at: a.ts:10, b.ts:20, c.ts:30\n```ts\nconst x = 1;\n```'],
     ['Also at:\n- a.ts:10\n```ts\nconst x = 1;\n```', 'Also at:\n- a.ts:10\n- b.ts:20\n- c.ts:30\n```ts\nconst x = 1;\n```'],
+    ['Also at: a.ts:10\nSee src/helper.ts:20 for why this happens.', 'Also at: a.ts:10, b.ts:20, c.ts:30\nSee src/helper.ts:20 for why this happens.'],
   ])('appends places to the right block in %j', (body, expected) => {
     expect(withFoldedPlaces(body, extra)).toBe(expected);
   });

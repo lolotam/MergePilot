@@ -96,12 +96,16 @@ export async function publishConsensus(
   // Taken before the dedupe: each answered request replaces `answeredBy`, and the summary line is
   // about the merge's own same-issue question only.
   const mergeAnsweredBy = merge.semantic && merge.semantic.checked > 0 ? judge?.judge.report().answeredBy : undefined;
+  const inlineClusters = merge.kept.filter((c) => c.kind === 'inline');
   const inlineOf = new Map(
-    merge.kept.filter((c) => c.kind === 'inline').map((c) => [c, withFoundBy(c, merge.total, language)] as const),
+    inlineClusters.map((c) => [c, withFoundBy(c, merge.total, language)] as const),
   );
-  const dedupeInputs = merge.kept
-    .filter((c) => c.kind === 'inline')
-    .flatMap((c) => [inlineOf.get(c)!, ...(c.distantMembers ?? []).map((member) => member.finding)]);
+  // Check all representatives ahead of distant fallback members so fallbacks cannot consume
+  // semantic-dedupe judge slots before later representatives.
+  const dedupeInputs = [
+    ...inlineClusters.map((c) => inlineOf.get(c)!),
+    ...inlineClusters.flatMap((c) => (c.distantMembers ?? []).map((member) => member.finding)),
+  ];
   const deduped = await deduplicateFindings(ctx.client, {
     owner: ctx.owner,
     repo: ctx.repo,

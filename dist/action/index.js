@@ -144540,10 +144540,68 @@ ${CRITERIA_TRUST}`;
 }
 
 var ALSO_AT_BLOCK_RE = /^[ \t]*Also at:([^\n]*(?:\n(?![ \t]*$)[^\n]*)*)/m;
-function alsoAtPlaces(body, paths) {
-  return placesInText(ALSO_AT_BLOCK_RE.exec(body)?.[1] ?? "", paths);
+var NON_LIST_LINE_RE = /^[ \t]*(?:```|~~~|#|>|\|)/;
+var LIST_BULLET_RE = /^[ \t]*(?:[-*+][ \t]+)?/;
+var SIMPLE_PATH_RE = /^[\w.@+-]+(?:\/[\w.@+-]+)*$/;
+var DIR_SPACE_PATH_RE = /^[\w.@+-]+\/[^\n:`]+$/;
+function parseLocationEntry(raw, knownPaths) {
+  let entry = raw.trim();
+  if (!entry)
+    return null;
+  const backticked = entry.length >= 2 && entry.startsWith("`") && entry.endsWith("`");
+  if (backticked)
+    entry = entry.slice(1, -1).trim();
+  const colon = entry.lastIndexOf(":");
+  if (colon <= 0)
+    return null;
+  const digits = entry.slice(colon + 1);
+  if (!/^\d+$/.test(digits))
+    return null;
+  const path12 = entry.slice(0, colon);
+  if (!path12 || /^https?:\/\//i.test(path12))
+    return null;
+  if (knownPaths.includes(path12))
+    return { path: path12, line: Number(digits) };
+  if (backticked && !path12.includes("`") && !path12.includes(":"))
+    return { path: path12, line: Number(digits) };
+  if (SIMPLE_PATH_RE.test(path12))
+    return { path: path12, line: Number(digits) };
+  if (DIR_SPACE_PATH_RE.test(path12) && !/[.!?]\s/.test(path12))
+    return { path: path12, line: Number(digits) };
+  return null;
 }
-function placesInText(text, paths) {
+function isLocationListLine(line, knownPaths) {
+  if (NON_LIST_LINE_RE.test(line))
+    return false;
+  const stripped = line.replace(LIST_BULLET_RE, "").trim();
+  if (!stripped)
+    return false;
+  if (parseLocationEntry(stripped.replace(/,$/, ""), knownPaths))
+    return true;
+  const parts = stripped.split(",").map((part) => part.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((part) => parseLocationEntry(part, knownPaths) !== null);
+}
+function alsoAtBlockRange(text, knownPaths = []) {
+  const block = ALSO_AT_BLOCK_RE.exec(text);
+  if (!block)
+    return null;
+  const lines = block[0].split("\n");
+  let rawEnd = lines[0].length;
+  for (let i2 = 1; i2 < lines.length; i2++) {
+    const line = lines[i2];
+    if (!isLocationListLine(line, knownPaths))
+      break;
+    rawEnd += 1 + line.length;
+  }
+  const trimmedLength = block[0].slice(0, rawEnd).trimEnd().length;
+  const colon = block[0].indexOf(":");
+  return {
+    start: block.index,
+    end: block.index + trimmedLength,
+    contentStart: block.index + (colon === -1 ? trimmedLength : colon + 1)
+  };
+}
+function knownMatchesInText(text, paths) {
   if (!text)
     return [];
   const matches = [];
@@ -144564,7 +144622,16 @@ function placesInText(text, paths) {
     kept.push(match3);
     lastEnd = match3.end;
   }
-  return kept.map((match3) => ({ path: match3.path, line: match3.line }));
+  return kept;
+}
+function alsoAtPlaces(body, paths) {
+  const range = alsoAtBlockRange(body, paths);
+  if (!range)
+    return [];
+  return placesInText(body.slice(range.contentStart, range.end), paths);
+}
+function placesInText(text, paths) {
+  return knownMatchesInText(text, paths).map((match3) => ({ path: match3.path, line: match3.line }));
 }
 
 var NEAR_LINES = 20;
@@ -198593,7 +198660,33 @@ var SEMANTIC_LINE_WINDOW = 10;
 var MAX_CANDIDATES_PER_FINDING = 3;
 var MAX_SEMANTIC_PAIRS = 50;
 var FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
+var FOLDED_FINGERPRINTS_REGEX = /<!--\s*mp:ff=([a-f0-9@,]+)\s*-->/gi;
+var ALSO_RAISED_AS_REGEX = /^_(?:Also raised as|وردت أيضاً بصياغة):[ \t]*(.+)_$/m;
+var QUOTED_TITLE_REGEX = /"((?:\\.|[^"\\])+)"/g;
 var TITLE_REGEX = /^###\s+(.+)$/m;
+var DISCLOSED_LINE_WINDOW = 3;
+function parseFoldedFingerprints(body) {
+  if (!body)
+    return [];
+  const entries = [];
+  for (const match3 of body.matchAll(FOLDED_FINGERPRINTS_REGEX)) {
+    for (const token of (match3[1] ?? "").split(",")) {
+      const [fp, lineText] = token.split("@");
+      const line = Number(lineText);
+      if (fp && Number.isInteger(line) && line > 0)
+        entries.push({ fingerprint: fp.toLowerCase(), line });
+    }
+  }
+  return entries;
+}
+function parseAlternateTitles(body) {
+  if (!body)
+    return [];
+  const line = ALSO_RAISED_AS_REGEX.exec(body)?.[1];
+  if (!line)
+    return [];
+  return [...line.matchAll(QUOTED_TITLE_REGEX)].map((match3) => match3[1].replace(/\\(.)/g, "$1"));
+}
 function normalizeTitle2(title) {
   return title.toLowerCase().trim().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ");
 }
@@ -198676,6 +198769,9 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
     return { kept: [...findings], dropped: [] };
   }
   const commentsByPath = /* @__PURE__ */ new Map();
+  const foldedLinesByFp = /* @__PURE__ */ new Map();
+  const disclosedByPath = /* @__PURE__ */ new Map();
+  const candidatePaths = [...new Set(findings.map((finding) => finding.path))];
   for (const comment of existingComments) {
     const range = commentLineRange(comment);
     if (!range)
@@ -198683,22 +198779,42 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
     const path12 = comment.path;
     const fingerprint = parseFingerprintFromComment(comment.body);
     const title = parseTitleFromComment(comment.body);
+    const cleanedBody = (comment.body ?? "").replace(FINGERPRINT_REGEX, "").replace(FOLDED_FINGERPRINTS_REGEX, "").trim();
     const list = commentsByPath.get(path12) ?? [];
-    list.push({ range, fingerprint, title, body: (comment.body ?? "").replace(FINGERPRINT_REGEX, "").trim() });
+    list.push({ range, fingerprint, title, body: cleanedBody });
     commentsByPath.set(path12, list);
+    for (const entry of parseFoldedFingerprints(comment.body)) {
+      const lines = foldedLinesByFp.get(entry.fingerprint) ?? [];
+      lines.push(entry.line);
+      foldedLinesByFp.set(entry.fingerprint, lines);
+    }
+    const titles = [...title ? [title] : [], ...parseAlternateTitles(comment.body)];
+    if (titles.length > 0 && comment.body) {
+      for (const place of alsoAtPlaces(comment.body, candidatePaths)) {
+        const disclosed = disclosedByPath.get(place.path) ?? [];
+        disclosed.push({ line: place.line, titles });
+        disclosedByPath.set(place.path, disclosed);
+      }
+    }
   }
   const kept = [];
   const dropped = [];
   const pairs = [];
   const pairFinding = /* @__PURE__ */ new Map();
   for (const finding of findings) {
+    const findingFingerprint = computeFindingFingerprint(finding);
+    const alreadyFolded = (foldedLinesByFp.get(findingFingerprint) ?? []).some((line) => Math.abs(line - finding.line) <= DISCLOSED_LINE_WINDOW);
+    const alreadyDisclosed = (disclosedByPath.get(finding.path) ?? []).some((entry) => Math.abs(entry.line - finding.line) <= DISCLOSED_LINE_WINDOW && entry.titles.some((title) => areTitlesSimilar(title, finding.title)));
+    if (alreadyFolded || alreadyDisclosed) {
+      dropped.push(finding);
+      continue;
+    }
     const existing = commentsByPath.get(finding.path);
     if (!existing || existing.length === 0) {
       kept.push(finding);
       continue;
     }
     const findingRange = { start: finding.line, end: finding.line };
-    const findingFingerprint = computeFindingFingerprint(finding);
     const isDuplicate = existing.some((ex) => {
       if (!rangesOverlap(findingRange, ex.range)) {
         return false;
