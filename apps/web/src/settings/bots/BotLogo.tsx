@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { BotLogo } from '../../api/bots.js';
 import type { I18nKey } from '../../i18n/ar.js';
 import { useI18n } from '../../i18n/context.js';
@@ -120,7 +120,7 @@ export function BotLogoPicker({ id, value, onChange, disabled = false }: BotLogo
 
 export interface BotActiveSwitchProps {
   checked: boolean;
-  onChange?: ((active: boolean) => void) | undefined;
+  onChange: (active: boolean) => void;
   disabled?: boolean;
   /** Accessible name, when the switch needs a name more specific than «Bot active». */
   label?: string | undefined;
@@ -132,6 +132,14 @@ export interface BotActiveSwitchProps {
 export function BotActiveSwitch({ checked, onChange, disabled = false, label, title }: BotActiveSwitchProps) {
   const { t } = useI18n();
   const hintId = useId();
+  // The thumb slides at once on a click, not after the save answers; once the switch is free again
+  // (the save ended) it follows the saved value, so a failed save slides it back. A changed saved
+  // value always shows, even on a switch that stays disabled (a member).
+  const [shown, setShown] = useState(checked);
+  useEffect(() => setShown(checked), [checked]);
+  useEffect(() => {
+    if (!disabled) setShown(checked);
+  }, [disabled]);
   return (
     <span className="inline-flex items-center gap-2" title={title}>
       {title ? (
@@ -142,24 +150,27 @@ export function BotActiveSwitch({ checked, onChange, disabled = false, label, ti
       <button
         type="button"
         role="switch"
-        aria-checked={checked}
+        aria-checked={shown}
         aria-label={label ?? t('botActiveLabel')}
         aria-describedby={title ? hintId : undefined}
         disabled={disabled}
-        onClick={() => onChange?.(!checked)}
-        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${
-          checked ? 'bg-green-500' : 'bg-ink-300 dark:bg-ink-700'
+        onClick={() => {
+          setShown(!shown);
+          onChange(!shown);
+        }}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-60 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-500 ${
+          shown ? 'bg-green-500' : 'bg-ink-300 dark:bg-ink-700'
         }`}
       >
         <span
           aria-hidden="true"
-          className={`absolute top-0.5 start-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-            checked ? 'translate-x-4 rtl:-translate-x-4' : ''
+          className={`absolute top-0.5 start-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
+            shown ? 'translate-x-4 rtl:-translate-x-4' : ''
           }`}
         />
       </button>
       <span className="text-xs font-semibold text-ink-800 dark:text-ink-200">
-        {t(checked ? 'botStatusActive' : 'botStatusInactive')}
+        {t(shown ? 'botStatusActive' : 'botStatusInactive')}
       </span>
     </span>
   );
