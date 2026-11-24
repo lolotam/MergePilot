@@ -1,6 +1,6 @@
 # ADR-0056: Folding same-claim findings beyond the line window
 
-Status: proposed.
+Status: accepted.
 
 ## Context
 
