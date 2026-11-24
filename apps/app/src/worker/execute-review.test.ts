@@ -207,7 +207,7 @@ describe('executeReview — incremental review and deduplication', () => {
     const env = setup({ reviews: [reviewBy('mergepilot[bot]', prevSha, ' status=partial')], compareStatus: 'ahead' });
     const result = await run(env);
     expect(result.outcome).toBe('completed');
-    expect(env.createdReviews[0]?.body).toContain('Full review (first review)');
+    expect(env.createdReviews[0]?.body).toContain('Full review (previous review was incomplete)');
   });
 
   it('marks a failed review partial and discloses its exploration', async () => {

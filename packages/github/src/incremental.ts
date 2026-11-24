@@ -38,6 +38,7 @@ export interface SelectIncrementalFilesOptions {
 
 /** The scope reason shown when a review was asked for with `@mergepilot review`. */
 export const REVIEW_REQUESTED_REASON = 'review requested';
+export const PREVIOUS_PARTIAL_REASON = 'previous review was incomplete';
 
 export type SelectIncrementalFilesResult =
   | { mode: 'full'; files: PullRequestFile[]; reason: string }
@@ -55,10 +56,19 @@ const SNAPSHOT_PATH_RE = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
  */
 export async function findLastReviewedMarker(
   client: GitHubClient,
-  { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }: FindLastReviewedHeadOptions,
+  options: FindLastReviewedHeadOptions,
 ): Promise<ReviewMarker | null> {
+  return (await findReviewBase(client, options)).marker;
+}
+
+/** Finds the latest complete base and whether the same bot published any partial review. */
+export async function findReviewBase(
+  client: GitHubClient,
+  { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }: FindLastReviewedHeadOptions,
+): Promise<{ marker: ReviewMarker | null; sawPartial: boolean }> {
   let page = 1;
   let lastMarker: ReviewMarker | null = null;
+  let sawPartial = false;
 
   while (true) {
     const reviews = await client.listReviewsPage({
@@ -73,8 +83,9 @@ export async function findLastReviewedMarker(
       if (review.body && review.user?.login === publisherLogin) {
         const marker = parseMarker(review.body);
         // A partial (failed / budget-skipped) review did not cover its commits: never a base.
-        if (marker?.headSha && marker.status !== 'partial' && markerBotSlot(marker) === botSlot) {
-          lastMarker = marker;
+        if (marker?.headSha && markerBotSlot(marker) === botSlot) {
+          if (marker.status === 'partial') sawPartial = true;
+          else lastMarker = marker;
         }
       }
     }
@@ -85,7 +96,7 @@ export async function findLastReviewedMarker(
     page++;
   }
 
-  return lastMarker;
+  return { marker: lastMarker, sawPartial };
 }
 
 /**
@@ -104,6 +115,7 @@ export async function findLastReviewedHead(
  * Determines whether to run a full or incremental review based on past review markers and git commit history.
  *
  * - No previous review: full ("first review")
+ * - Only previous partial reviews: full ("previous review was incomplete")
  * - Config hash changed: full ("configuration changed since last review")
  * - Same head: incremental with 0 files (nothing new to review)
  * - Ahead: incremental with intersecting files between compare and prFiles, using the compare
@@ -133,7 +145,7 @@ export async function selectIncrementalFiles(
 ): Promise<SelectIncrementalFilesResult> {
   if (force) return { mode: 'full', files: prFiles, reason: REVIEW_REQUESTED_REASON };
 
-  const lastMarker = await findLastReviewedMarker(client, {
+  const { marker: lastMarker, sawPartial } = await findReviewBase(client, {
     owner,
     repo,
     pull_number,
@@ -145,7 +157,7 @@ export async function selectIncrementalFiles(
     return {
       mode: 'full',
       files: prFiles,
-      reason: 'first review',
+      reason: sawPartial ? PREVIOUS_PARTIAL_REASON : 'first review',
     };
   }
 

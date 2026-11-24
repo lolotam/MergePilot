@@ -144539,6 +144539,111 @@ function withRuleCriteria(system) {
 ${CRITERIA_TRUST}`;
 }
 
+var ALSO_AT_BLOCK_RE = /^[ \t]*Also at:([^\n]*(?:\n(?![ \t]*$)[^\n]*)*)/m;
+var NON_LIST_LINE_RE = /^[ \t]*(?:```|~~~|#|>|\|)/;
+var LIST_BULLET_RE = /^[ \t]*(?:[-*+][ \t]+)?/;
+var SIMPLE_PATH_RE = /^[\w.@+-]+(?:\/[\w.@+-]+)*$/;
+var DIR_SPACE_PATH_RE = /^[\w.@+-]+\/[^\n:`]+$/;
+function parseLocationEntry(raw, knownPaths) {
+  let entry = raw.trim();
+  if (!entry)
+    return null;
+  const backticked = entry.length >= 2 && entry.startsWith("`") && entry.endsWith("`");
+  if (backticked)
+    entry = entry.slice(1, -1).trim();
+  const colon = entry.lastIndexOf(":");
+  if (colon <= 0)
+    return null;
+  const digits = entry.slice(colon + 1);
+  if (!/^\d+$/.test(digits))
+    return null;
+  const path12 = entry.slice(0, colon);
+  if (!path12 || /^https?:\/\//i.test(path12))
+    return null;
+  if (knownPaths.includes(path12))
+    return { path: path12, line: Number(digits) };
+  if (backticked && !path12.includes("`") && !path12.includes(":"))
+    return { path: path12, line: Number(digits) };
+  if (SIMPLE_PATH_RE.test(path12))
+    return { path: path12, line: Number(digits) };
+  if (DIR_SPACE_PATH_RE.test(path12) && !/[.!?]\s/.test(path12))
+    return { path: path12, line: Number(digits) };
+  return null;
+}
+function isLocationListLine(line, knownPaths) {
+  if (NON_LIST_LINE_RE.test(line))
+    return false;
+  const stripped = line.replace(LIST_BULLET_RE, "").trim();
+  if (!stripped)
+    return false;
+  const knownMatches = knownMatchesInText(stripped, knownPaths);
+  let remaining = "";
+  let pos = 0;
+  for (const match3 of knownMatches) {
+    const start = match3.start > pos && stripped[match3.start - 1] === "`" ? match3.start - 1 : match3.start;
+    const end = stripped[match3.end] === "`" ? match3.end + 1 : match3.end;
+    remaining += stripped.slice(pos, start) + ",";
+    pos = end;
+  }
+  remaining += stripped.slice(pos);
+  const parts = remaining.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0)
+    return knownMatches.length > 0;
+  return parts.every((part) => parseLocationEntry(part, knownPaths) !== null);
+}
+function alsoAtBlockRange(text, knownPaths = []) {
+  const block = ALSO_AT_BLOCK_RE.exec(text);
+  if (!block)
+    return null;
+  const lines = block[0].split("\n");
+  let rawEnd = lines[0].length;
+  for (let i2 = 1; i2 < lines.length; i2++) {
+    const line = lines[i2];
+    if (!isLocationListLine(line, knownPaths))
+      break;
+    rawEnd += 1 + line.length;
+  }
+  const trimmedLength = block[0].slice(0, rawEnd).trimEnd().length;
+  const colon = block[0].indexOf(":");
+  return {
+    start: block.index,
+    end: block.index + trimmedLength,
+    contentStart: block.index + (colon === -1 ? trimmedLength : colon + 1)
+  };
+}
+function knownMatchesInText(text, paths) {
+  if (!text)
+    return [];
+  const matches = [];
+  for (const path12 of paths) {
+    const escaped = path12.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const place of text.matchAll(new RegExp(`(?<![\\w./-])${escaped}:(\\d+)`, "g"))) {
+      const digits = place[1] ?? "";
+      const end = place.index + path12.length + 1 + digits.length;
+      matches.push({ path: path12, line: Number(digits), start: place.index, end });
+    }
+  }
+  matches.sort((a, b) => a.start - b.start || b.end - a.end);
+  const kept = [];
+  let lastEnd = 0;
+  for (const match3 of matches) {
+    if (match3.start < lastEnd)
+      continue;
+    kept.push(match3);
+    lastEnd = match3.end;
+  }
+  return kept;
+}
+function alsoAtPlaces(body, paths) {
+  const range = alsoAtBlockRange(body, paths);
+  if (!range)
+    return [];
+  return placesInText(body.slice(range.contentStart, range.end), paths);
+}
+function placesInText(text, paths) {
+  return knownMatchesInText(text, paths).map((match3) => ({ path: match3.path, line: match3.line }));
+}
+
 var NEAR_LINES = 20;
 var MIN_CUT_TOKENS2 = 200;
 var CUT_MARKER = "[verification limit: the rest of this block was not shown]";
@@ -144697,29 +144802,6 @@ function collectFiles(input2) {
   }
   markNearChunks(input2.findings, files);
   return { files: [...files.values()], pathsByFinding };
-}
-var ALSO_AT_RE = /^[ \t]*Also at:([^\n]*(?:\n(?![ \t]*$)[^\n]*)*)/m;
-function alsoAtPlaces(body, paths) {
-  const list = ALSO_AT_RE.exec(body)?.[1] ?? "";
-  const matches = [];
-  for (const path12 of paths) {
-    const escaped = path12.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    for (const place of list.matchAll(new RegExp(`(?<![\\w./-])${escaped}:(\\d+)`, "g"))) {
-      const digits = place[1] ?? "";
-      const end = place.index + path12.length + 1 + digits.length;
-      matches.push({ path: path12, line: Number(digits), start: place.index, end });
-    }
-  }
-  matches.sort((a, b) => a.start - b.start || b.end - a.end);
-  const kept = [];
-  let lastEnd = 0;
-  for (const match3 of matches) {
-    if (match3.start < lastEnd)
-      continue;
-    kept.push(match3);
-    lastEnd = match3.end;
-  }
-  return kept.map((match3) => ({ path: match3.path, line: match3.line }));
 }
 function holdsPlace(chunk, line) {
   return chunk.ranges.some(([from, to]) => line >= from - NEAR_LINES && line <= to + NEAR_LINES);
@@ -198588,7 +198670,24 @@ var SEMANTIC_LINE_WINDOW = 10;
 var MAX_CANDIDATES_PER_FINDING = 3;
 var MAX_SEMANTIC_PAIRS = 50;
 var FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
+var FOLDED_FINGERPRINTS_FOOTER_REGEX = /\n\n<!-- mp:f=[a-f0-9]+ -->\n\n<!-- mp:ff=([a-f0-9@,]+) -->(?:\n\n<!-- mergepilot:bot=\d+ -->)?\s*$/i;
 var TITLE_REGEX = /^###\s+(.+)$/m;
+var DISCLOSED_LINE_WINDOW = 3;
+function parseFoldedFingerprints(body) {
+  if (!body)
+    return [];
+  const match3 = FOLDED_FINGERPRINTS_FOOTER_REGEX.exec(body);
+  if (!match3?.[1])
+    return [];
+  const entries = [];
+  for (const token of match3[1].split(",")) {
+    const [fp, lineText] = token.split("@");
+    const line = Number(lineText);
+    if (fp && Number.isInteger(line) && line > 0)
+      entries.push({ fingerprint: fp.toLowerCase(), line });
+  }
+  return entries;
+}
 function normalizeTitle2(title) {
   return title.toLowerCase().trim().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ");
 }
@@ -198671,6 +198770,7 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
     return { kept: [...findings], dropped: [] };
   }
   const commentsByPath = /* @__PURE__ */ new Map();
+  const foldedLinesByFp = /* @__PURE__ */ new Map();
   for (const comment of existingComments) {
     const range = commentLineRange(comment);
     if (!range)
@@ -198678,22 +198778,33 @@ async function deduplicateFindings(client, { owner, repo, pull_number, publisher
     const path12 = comment.path;
     const fingerprint = parseFingerprintFromComment(comment.body);
     const title = parseTitleFromComment(comment.body);
+    const cleanedBody = (comment.body ?? "").replace(FOLDED_FINGERPRINTS_FOOTER_REGEX, "").replace(FINGERPRINT_REGEX, "").trim();
     const list = commentsByPath.get(path12) ?? [];
-    list.push({ range, fingerprint, title, body: (comment.body ?? "").replace(FINGERPRINT_REGEX, "").trim() });
+    list.push({ range, fingerprint, title, body: cleanedBody });
     commentsByPath.set(path12, list);
+    for (const entry of parseFoldedFingerprints(comment.body)) {
+      const lines = foldedLinesByFp.get(entry.fingerprint) ?? [];
+      lines.push(entry.line);
+      foldedLinesByFp.set(entry.fingerprint, lines);
+    }
   }
   const kept = [];
   const dropped = [];
   const pairs = [];
   const pairFinding = /* @__PURE__ */ new Map();
   for (const finding of findings) {
+    const findingFingerprint = computeFindingFingerprint(finding);
+    const alreadyFolded = (foldedLinesByFp.get(findingFingerprint) ?? []).some((line) => Math.abs(line - finding.line) <= DISCLOSED_LINE_WINDOW);
+    if (alreadyFolded) {
+      dropped.push(finding);
+      continue;
+    }
     const existing = commentsByPath.get(finding.path);
     if (!existing || existing.length === 0) {
       kept.push(finding);
       continue;
     }
     const findingRange = { start: finding.line, end: finding.line };
-    const findingFingerprint = computeFindingFingerprint(finding);
     const isDuplicate = existing.some((ex) => {
       if (!rangesOverlap(findingRange, ex.range)) {
         return false;
@@ -198767,6 +198878,7 @@ function fence(text, info = "") {
 ${text}
 ${ticks}`;
 }
+var foldedFingerprintsByFinding = /* @__PURE__ */ new WeakMap();
 function renderFindingComment(finding, { language, suggestionsAsCode, botSlot }) {
   const labels = language === "ar" ? LABELS_AR : LABELS_EN;
   const sections = [
@@ -198787,6 +198899,9 @@ ${finding.suggestion}`);
   }
   const fingerprint = computeFindingFingerprint(finding);
   sections.push(`<!-- mp:f=${fingerprint} -->`);
+  const folded = foldedFingerprintsByFinding.get(finding);
+  if (folded && folded.length > 0)
+    sections.push(`<!-- mp:ff=${folded.join(",")} -->`);
   const botMarker = buildBotCommentMarker(botSlot);
   if (botMarker)
     sections.push(botMarker);
@@ -198906,12 +199021,14 @@ function withoutBaseHunks(comparePatch, basePatch, prPatch) {
 }
 
 var REVIEW_REQUESTED_REASON = "review requested";
+var PREVIOUS_PARTIAL_REASON = "previous review was incomplete";
 var REVIEWS_PAGE_SIZE2 = 100;
 var MAX_COMPARE_FILES = 300;
 var SNAPSHOT_PATH_RE2 = /(^|\/)migrations\/meta\/(\d+)_snapshot\.json$/;
-async function findLastReviewedMarker(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
+async function findReviewBase(client, { owner, repo, pull_number, publisherLogin, botSlot = MAIN_BOT_SLOT }) {
   let page = 1;
   let lastMarker = null;
+  let sawPartial = false;
   while (true) {
     const reviews = await client.listReviewsPage({
       owner,
@@ -198923,8 +199040,11 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
     for (const review of reviews) {
       if (review.body && review.user?.login === publisherLogin) {
         const marker = parseMarker(review.body);
-        if (marker?.headSha && marker.status !== "partial" && markerBotSlot(marker) === botSlot) {
-          lastMarker = marker;
+        if (marker?.headSha && markerBotSlot(marker) === botSlot) {
+          if (marker.status === "partial")
+            sawPartial = true;
+          else
+            lastMarker = marker;
         }
       }
     }
@@ -198933,12 +199053,12 @@ async function findLastReviewedMarker(client, { owner, repo, pull_number, publis
     }
     page++;
   }
-  return lastMarker;
+  return { marker: lastMarker, sawPartial };
 }
 async function selectIncrementalFiles(client, { owner, repo, pull_number, headSha, publisherLogin, prFiles, configHash, botSlot, baseSha, force, exclude }) {
   if (force)
     return { mode: "full", files: prFiles, reason: REVIEW_REQUESTED_REASON };
-  const lastMarker = await findLastReviewedMarker(client, {
+  const { marker: lastMarker, sawPartial } = await findReviewBase(client, {
     owner,
     repo,
     pull_number,
@@ -198949,7 +199069,7 @@ async function selectIncrementalFiles(client, { owner, repo, pull_number, headSh
     return {
       mode: "full",
       files: prFiles,
-      reason: "first review"
+      reason: sawPartial ? PREVIOUS_PARTIAL_REASON : "first review"
     };
   }
   if (configHash && lastMarker.configHash !== configHash) {

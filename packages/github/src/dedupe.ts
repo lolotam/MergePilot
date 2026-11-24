@@ -46,7 +46,23 @@ const MAX_CANDIDATES_PER_FINDING = 3;
 const MAX_SEMANTIC_PAIRS = 50;
 
 const FINGERPRINT_REGEX = /<!--\s*mp:f=([a-f0-9]+)\s*-->/i;
+/** Matches only the renderer's trailing metadata footer after `mp:f=`, never quoted body/evidence text. */
+const FOLDED_FINGERPRINTS_FOOTER_REGEX = /\n\n<!-- mp:f=[a-f0-9]+ -->\n\n<!-- mp:ff=([a-f0-9@,]+) -->(?:\n\n<!-- mergepilot:bot=\d+ -->)?\s*$/i;
 const TITLE_REGEX = /^###\s+(.+)$/m;
+const DISCLOSED_LINE_WINDOW = 3;
+
+function parseFoldedFingerprints(body: string | null | undefined): Array<{ fingerprint: string; line: number }> {
+  if (!body) return [];
+  const match = FOLDED_FINGERPRINTS_FOOTER_REGEX.exec(body);
+  if (!match?.[1]) return [];
+  const entries: Array<{ fingerprint: string; line: number }> = [];
+  for (const token of match[1].split(',')) {
+    const [fp, lineText] = token.split('@');
+    const line = Number(lineText);
+    if (fp && Number.isInteger(line) && line > 0) entries.push({ fingerprint: fp.toLowerCase(), line });
+  }
+  return entries;
+}
 
 /**
  * Normalizes finding titles for robust fingerprinting and similarity matching:
@@ -177,7 +193,7 @@ export async function deduplicateFindings(
     return { kept: [...findings], dropped: [] };
   }
 
-  // Map existing comments for fast matching
+  // Map existing comments for fast matching, plus footer-recorded folded member identities.
   const commentsByPath = new Map<
     string,
     Array<{
@@ -187,6 +203,7 @@ export async function deduplicateFindings(
       body: string;
     }>
   >();
+  const foldedLinesByFp = new Map<string, number[]>();
 
   for (const comment of existingComments) {
     const range = commentLineRange(comment);
@@ -194,10 +211,20 @@ export async function deduplicateFindings(
     const path = comment.path;
     const fingerprint = parseFingerprintFromComment(comment.body);
     const title = parseTitleFromComment(comment.body);
+    const cleanedBody = (comment.body ?? '')
+      .replace(FOLDED_FINGERPRINTS_FOOTER_REGEX, '')
+      .replace(FINGERPRINT_REGEX, '')
+      .trim();
 
     const list = commentsByPath.get(path) ?? [];
-    list.push({ range, fingerprint, title, body: (comment.body ?? '').replace(FINGERPRINT_REGEX, '').trim() });
+    list.push({ range, fingerprint, title, body: cleanedBody });
     commentsByPath.set(path, list);
+
+    for (const entry of parseFoldedFingerprints(comment.body)) {
+      const lines = foldedLinesByFp.get(entry.fingerprint) ?? [];
+      lines.push(entry.line);
+      foldedLinesByFp.set(entry.fingerprint, lines);
+    }
   }
 
   const kept: Finding[] = [];
@@ -206,6 +233,15 @@ export async function deduplicateFindings(
   const pairFinding = new Map<string, Finding>();
 
   for (const finding of findings) {
+    const findingFingerprint = computeFindingFingerprint(finding);
+    const alreadyFolded = (foldedLinesByFp.get(findingFingerprint) ?? []).some(
+      (line) => Math.abs(line - finding.line) <= DISCLOSED_LINE_WINDOW,
+    );
+    if (alreadyFolded) {
+      dropped.push(finding);
+      continue;
+    }
+
     const existing = commentsByPath.get(finding.path);
     if (!existing || existing.length === 0) {
       kept.push(finding);
@@ -213,7 +249,6 @@ export async function deduplicateFindings(
     }
 
     const findingRange: LineRange = { start: finding.line, end: finding.line };
-    const findingFingerprint = computeFindingFingerprint(finding);
 
     const isDuplicate = existing.some((ex) => {
       if (!rangesOverlap(findingRange, ex.range)) {

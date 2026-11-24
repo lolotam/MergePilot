@@ -37,11 +37,14 @@ export interface PanelClusterOutcome {
 export function botFindingsFates(bots: readonly PanelBotFindings[], outcome: PanelClusterOutcome): BotFindingsFate[] {
   return bots.map((bot) => {
     const foundByBot = (cluster: ConsensusCluster): boolean => cluster.foundBy.some((b) => b.slot === bot.slot) && !cluster.rejectedBy?.some((b) => b.slot === bot.slot);
-    const count = (clusters: readonly ConsensusCluster[]): number => clusters.filter(foundByBot).length;
+    const postedSlot = (cluster: ConsensusCluster): boolean => Boolean(cluster.alreadyPostedSlots?.includes(bot.slot));
+    const activeByBot = (cluster: ConsensusCluster): boolean => foundByBot(cluster) && !postedSlot(cluster);
+    const count = (clusters: readonly ConsensusCluster[]): number => clusters.filter(activeByBot).length;
     const ownFindings = new Set([...bot.inline, ...bot.summaryOnly]);
-    const published = outcome.published.filter(foundByBot);
+    const published = outcome.published.filter(activeByBot);
     // The cluster shows its representative finding, which is the bot's own object when it won.
     const own = published.filter((cluster) => ownFindings.has(cluster.finding)).length;
+    const promotedPosted = [...outcome.published, ...outcome.overLimit].filter((cluster) => foundByBot(cluster) && postedSlot(cluster)).length;
     const rejectedInAgreement = [...outcome.published, ...outcome.below, ...outcome.overLimit, ...outcome.alreadyPosted].filter((cluster) => cluster.rejectedBy?.some((entry) => entry.slot === bot.slot)).length;
     return {
       ...(rejectedInAgreement > 0 ? { rejectedInAgreement } : {}),
@@ -52,7 +55,7 @@ export function botFindingsFates(bots: readonly PanelBotFindings[], outcome: Pan
       mergedIntoOther: published.length - own,
       below: count(outcome.below),
       overLimit: count(outcome.overLimit),
-      alreadyPosted: count(outcome.alreadyPosted),
+      alreadyPosted: outcome.alreadyPosted.filter(foundByBot).length + promotedPosted,
     };
   });
 }

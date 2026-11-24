@@ -14,6 +14,7 @@ export { notShownArtifactLabels } from './review/changed-files.js';
 export * from './review/prompt.js';
 export * from './review/types.js';
 export * from './review/verify.js';
+export { ALSO_AT_BLOCK_RE, alsoAtBlockRange, alsoAtPlaces, alsoAtPlacesWithFallback, placesInText } from './review/places.js';
 export * from './review/split.js';
 export type { OutputLimitDisclosure } from './review/output-budget.js';
 export * from './review/batch-run.js';
